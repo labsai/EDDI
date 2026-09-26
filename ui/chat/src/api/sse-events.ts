@@ -4,7 +4,7 @@
    without mounting the widget.
    ────────────────────────────────────────────── */
 
-import type { ConversationState, ConversationOutput } from "@/types";
+import type { ConversationState, ConversationOutput, InputField } from "@/types";
 
 /** The trimmed snapshot the `done` event carries — NOT the full snapshot. */
 export interface DoneSnapshot {
@@ -37,6 +37,116 @@ export function parseErrorMessage(data: string): string {
     // not JSON — fall through to the raw payload
   }
   return data;
+}
+
+/**
+ * The `code` values the backend puts on an `error` frame for a turn it refused
+ * BEFORE consuming it — `RestAgentEngineStreaming
+ * .buildKnownConditionOrOpaqueErrorEvent`. Such a turn never ran, so the
+ * optimistic user bubble must be withdrawn and the draft handed back, exactly
+ * as for a non-streaming 409. A mid-turn failure carries no code.
+ *
+ * Pinned against the Java source by sse-events.test.ts.
+ */
+export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
+  "awaiting_approval",
+  "conversation_not_found",
+  "input_too_large",
+  "conversation_ended",
+  "agent_not_ready",
+  "agent_mismatch",
+  "quota_accounting_unavailable",
+  "quota_exceeded",
+  "processing_restricted",
+  "restriction_status_unavailable",
+]);
+
+/** The `{message, code}` of an `error` frame; `code` is null when absent. */
+export function parseErrorEvent(data: string): { message: string; code: string | null } {
+  let code: string | null = null;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed && typeof parsed.code === "string" && parsed.code.trim()) {
+      code = parsed.code;
+    }
+  } catch {
+    // not JSON — no code
+  }
+  return { message: parseErrorMessage(data), code };
+}
+
+/**
+ * The input field a turn's output asks the composer to show, or null.
+ *
+ * Read from EVERY transport — the non-streaming snapshot and the streaming
+ * `done` frame alike. It used to be read on the non-streaming path only, and
+ * streaming is the default, so a requested password field never appeared: the
+ * key went into the plain textarea, shown in clear and sent without
+ * `secretInput`.
+ */
+export function findInputField(output: unknown): InputField | null {
+  if (!Array.isArray(output)) return null;
+  for (const item of output) {
+    if (item && typeof item === "object" && (item as { type?: unknown }).type === "inputField") {
+      const field = item as {
+        subType?: string;
+        placeholder?: string;
+        label?: string;
+        defaultValue?: string;
+      };
+      return {
+        subType: field.subType || "password",
+        placeholder: field.placeholder,
+        label: field.label,
+        defaultValue: field.defaultValue,
+      };
+    }
+  }
+  return null;
+}
+
+/** An `image` output item whose URI is safe to render. */
+export interface OutputImage {
+  uri: string;
+  alt?: string;
+}
+
+/**
+ * True for an http(s) or same-origin path. A `javascript:` or `data:` URI in an
+ * output item is not rendered.
+ */
+export function isSafeUri(uri: string): boolean {
+  const trimmed = uri.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return true;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `image` items of a turn's output. The widget renders them itself —
+ * markdown images in the model's text are NOT rendered (see MessageBubble),
+ * because an image the agent designer configured is content, while an `<img>`
+ * in model output is a request to a URL the model chose.
+ */
+export function extractOutputImages(output: unknown): OutputImage[] {
+  if (!Array.isArray(output)) return [];
+  const images: OutputImage[] = [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { type?: unknown; uri?: unknown; alt?: unknown };
+    if (record.type !== "image" || typeof record.uri !== "string") continue;
+    if (!isSafeUri(record.uri)) continue;
+    images.push({
+      uri: record.uri.trim(),
+      alt: typeof record.alt === "string" ? record.alt : undefined,
+    });
+  }
+  return images;
 }
 
 /** Parse the `done` payload, tolerating an empty or malformed body. */
@@ -124,7 +234,8 @@ export function isPausedState(state: ConversationState | null): boolean {
  * so a paused or rejected turn rendered as nothing at all.
  *
  * `inputField` items are excluded — they configure the composer rather than
- * appearing in the transcript.
+ * appearing in the transcript — and so are `image` items, which are rendered
+ * from `extractOutputImages` instead.
  */
 export function extractOutputTexts(output: unknown): string[] {
   if (!Array.isArray(output)) return [];
@@ -136,8 +247,31 @@ export function extractOutputTexts(output: unknown): string[] {
       continue;
     }
     if (item && typeof item === "object") {
-      const record = item as { type?: string; text?: string };
+      const record = item as {
+        type?: string;
+        text?: string;
+        label?: string;
+        path?: string;
+      };
       if (record.type === "inputField") continue;
+      // An applicationLink is a labelled link and a button a labelled action;
+      // both used to be dropped silently. The link renders as a link. A
+      // button's `onPress` is an instruction for a client that implements it,
+      // which this widget does not, so its label is shown rather than a
+      // control that would do nothing — the mapping the OpenAI-compatible
+      // adapter uses too.
+      if (record.type === "applicationLink") {
+        const label = typeof record.label === "string" ? record.label.trim() : "";
+        const path = typeof record.path === "string" ? record.path.trim() : "";
+        if (path && isSafeUri(path)) texts.push(`[${label || path}](${path})`);
+        else if (label) texts.push(label);
+        continue;
+      }
+      if (record.type === "button") {
+        const label = typeof record.label === "string" ? record.label.trim() : "";
+        if (label) texts.push(`**${label}**`);
+        continue;
+      }
       if (typeof record.text === "string" && record.text.trim()) {
         texts.push(record.text);
       }

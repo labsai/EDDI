@@ -12,11 +12,14 @@
    "quickReplies*", "actions*" (ConversationMemoryUtilities:186-207).
    ────────────────────────────────────────────── */
 
-import { extractOutputTexts } from "./sse-events";
-import type { ChatMessage, ConversationStep } from "@/types";
+import { extractOutputImages, extractOutputTexts } from "./sse-events";
+import type { ChatMessage, ConversationOutput, ConversationStep } from "@/types";
 
 const INPUT_INITIAL = "input:initial";
 const OUTPUT_PREFIX = "output";
+
+/** MemoryKeys.SECRET_INPUT_PLACEHOLDER — what the backend shows for a secret turn. */
+export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
 
 /** Same mask the composer shows when a secret turn is sent. */
 export const SECRET_MASK = "●●●●●●●●";
@@ -38,13 +41,18 @@ function makeMessage(role: "user" | "agent", content: string): ChatMessage {
 export function stepsToMessages(
   steps: ConversationStep[] | undefined | null,
   secretTexts: ReadonlySet<string> = new Set(),
+  outputs?: ConversationOutput[] | null,
 ): ChatMessage[] {
   if (!Array.isArray(steps)) return [];
 
   const messages: ChatMessage[] = [];
-  for (const step of steps) {
+  steps.forEach((step, index) => {
     const data = step?.conversationStep;
-    if (!Array.isArray(data)) continue;
+    if (!Array.isArray(data)) return;
+    // The backend sends steps and outputs as parallel lists (both whole, or
+    // both just the last step), so the same index names the same turn.
+    const secretTurn =
+      Array.isArray(outputs) && outputs[index]?.input === SECRET_INPUT_PLACEHOLDER;
 
     for (const entry of data) {
       const key = entry?.key;
@@ -53,13 +61,16 @@ export function stepsToMessages(
       if (key === INPUT_INITIAL) {
         const text = typeof entry.value === "string" ? entry.value.trim() : "";
         if (!text) continue;
-        // `input:initial` is the RAW message, always — Conversation.java:337
-        // stores it unmasked even for a secret turn, and the masked copy
-        // (conversationOutput["input"]) is filtered off the wire entirely. So a
-        // rebuild would print the user's password in clear unless we mask it
-        // here from what the session knows was secret.
+        // `input:initial` is the RAW message, always — Conversation stores it
+        // unmasked even for a secret turn. The masked display copy is the turn
+        // output's `input` ("<secret input>"), which is what makes a secret
+        // turn recognisable after a reload. The session's own record still
+        // covers a backend that does not send that key.
         messages.push(
-          makeMessage("user", secretTexts.has(text) ? SECRET_MASK : text),
+          makeMessage(
+            "user",
+            secretTurn || secretTexts.has(text) ? SECRET_MASK : text,
+          ),
         );
         continue;
       }
@@ -71,9 +82,13 @@ export function stepsToMessages(
         for (const text of extractOutputTexts(items)) {
           messages.push(makeMessage("agent", text));
         }
+        const images = extractOutputImages(items);
+        if (images.length) {
+          messages.push({ ...makeMessage("agent", ""), images });
+        }
       }
       // actions / quickReplies are control data, not transcript content.
     }
-  }
+  });
   return messages;
 }

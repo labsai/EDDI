@@ -287,6 +287,40 @@ a:hover { opacity: 0.85; }
   margin: 0.4em 0;
 }
 
+/* Syntax highlighting (rehype-highlight emits highlight.js class names). Colours
+   come from the theme tokens so it follows dark/light like everything else. */
+.message__bubble .markdown-body .hljs-keyword,
+.message__bubble .markdown-body .hljs-built_in,
+.message__bubble .markdown-body .hljs-selector-tag,
+.message__bubble .markdown-body .hljs-literal { color: var(--chat-qr-text); }
+.message__bubble .markdown-body .hljs-string,
+.message__bubble .markdown-body .hljs-attr,
+.message__bubble .markdown-body .hljs-regexp { color: var(--chat-text-accent); }
+.message__bubble .markdown-body .hljs-comment,
+.message__bubble .markdown-body .hljs-quote { color: var(--chat-text-muted); font-style: italic; }
+.message__bubble .markdown-body .hljs-number,
+.message__bubble .markdown-body .hljs-title,
+.message__bubble .markdown-body .hljs-type { color: var(--chat-warning); }
+
+/* Display math can be wider than the bubble. */
+.message__bubble .markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* `image` output items configured by the agent designer. */
+.message__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.message__bubble .markdown-body + .message__images { margin-top: 8px; }
+.message__image {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--chat-radius-sm);
+}
+
 .message__bubble .markdown-body table {
   border-collapse: collapse;
   margin: 8px 0;
