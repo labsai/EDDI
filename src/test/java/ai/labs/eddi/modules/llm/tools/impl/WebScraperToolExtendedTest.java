@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.BodyHandlerProbe;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.http.HttpRequest;
@@ -430,6 +432,37 @@ class WebScraperToolExtendedTest {
             String result = webScraperTool.extractMetadata("https://example.com");
 
             assertTrue(result.contains("Error"));
+        }
+    }
+
+    // ==================== Response size ====================
+
+    @Nested
+    @DisplayName("response size")
+    class ResponseSize {
+
+        @Test
+        @DisplayName("the page download is bounded while reading, by the configured limit")
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void downloadIsBounded() throws Exception {
+            // The tool returns 5000 characters but used to buffer the whole page
+            // first — a URL answering with gigabytes was an OutOfMemoryError.
+            webScraperTool.maxResponseBytes = 4096;
+            mockResponse(200, "<html><body><p>hi</p></body></html>");
+
+            webScraperTool.extractWebPageText("https://example.com");
+
+            ArgumentCaptor<HttpResponse.BodyHandler> handler = ArgumentCaptor.forClass(HttpResponse.BodyHandler.class);
+            verify(mockHttpClient).send(any(HttpRequest.class), handler.capture());
+            assertTrue(BodyHandlerProbe.streamed(handler.getValue(), 4097).refused());
+            assertTrue(BodyHandlerProbe.declared(handler.getValue(), 10L * 1024 * 1024 * 1024).refused());
+            assertFalse(BodyHandlerProbe.streamed(handler.getValue(), 4096).refused());
+        }
+
+        @Test
+        @DisplayName("defaults to 5 MiB when constructed directly")
+        void defaultLimit() {
+            assertEquals(5L * 1024 * 1024, webScraperTool.maxResponseBytes);
         }
     }
 }
