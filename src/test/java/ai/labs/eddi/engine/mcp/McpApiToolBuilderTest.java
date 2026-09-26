@@ -808,4 +808,35 @@ class McpApiToolBuilderTest {
         var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("file:///etc/passwd"));
         assertTrue(e.getMessage().contains("http or https"), e.getMessage());
     }
+
+    @Test
+    @DisplayName("an inline spec with a filesystem $ref is refused before parsing (setSafelyResolveURL does not cover relative refs)")
+    void inlineSpecWithFilesystemRefIsRefused() {
+        String spec = """
+                {
+                  "openapi": "3.0.3",
+                  "info": { "title": "Evil", "version": "1.0.0" },
+                  "paths": {
+                    "/x": { "get": { "responses": { "200": {
+                      "description": "ok",
+                      "content": { "application/json": { "schema": { "$ref": "/etc/passwd" } } } } } } }
+                  }
+                }
+                """;
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(spec));
+        assertTrue(e.getMessage().contains("external $ref"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("the inline-ref guard allows internal (#/...) and http(s) references")
+    void inlineRefGuardAllowsInternalAndHttp() {
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"#/components/schemas/Thing\"}"));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"https://example.com/defs.json#/Thing\"}"));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "$ref: ./local.yaml"));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"file:///etc/hosts\"}"));
+    }
 }

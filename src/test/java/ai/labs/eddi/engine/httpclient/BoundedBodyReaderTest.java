@@ -6,12 +6,17 @@ package ai.labs.eddi.engine.httpclient;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -103,5 +108,59 @@ class BoundedBodyReaderTest {
         BoundedBodyReader.Bounded result = BoundedBodyReader.read(slow, 1_000_000, Duration.ofMillis(1), null);
         assertTrue(result.truncated(), "a body slower than the deadline must be reported truncated");
         assertTrue(result.bytes().length < 10_000, "the read must stop well before the whole body arrives");
+    }
+
+    @Test
+    @Timeout(10)
+    @DisplayName("the watchdog unblocks a body that stalls indefinitely after the headers (the A2A/tool case)")
+    void watchdogInterruptsStalledStream() throws Exception {
+        // Headers arrived, then the peer sends nothing: read() blocks forever. The
+        // in-loop deadline never fires because read() never returns — only the
+        // watchdog closing the stream can unblock it. This is exactly why the tool and
+        // A2A paths pass a scheduler rather than null.
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "test-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            InputStream stalled = new InputStream() {
+                private final CountDownLatch closed = new CountDownLatch(1);
+
+                @Override
+                public int read() throws IOException {
+                    return readBlocking();
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    return readBlocking();
+                }
+
+                private int readBlocking() throws IOException {
+                    try {
+                        closed.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    throw new IOException("stream closed by watchdog");
+                }
+
+                @Override
+                public void close() {
+                    closed.countDown();
+                }
+            };
+
+            long start = System.nanoTime();
+            BoundedBodyReader.Bounded result = BoundedBodyReader.read(stalled, 1_000_000, Duration.ofMillis(10), scheduler);
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+            assertTrue(result.truncated(), "a stalled body must come back truncated once the watchdog fires");
+            assertTrue(elapsedMs < 5_000, "the watchdog must unblock the read promptly, not hang; took " + elapsedMs + "ms");
+        } finally {
+            scheduler.shutdownNow();
+            scheduler.awaitTermination(2, TimeUnit.SECONDS);
+        }
     }
 }

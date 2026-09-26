@@ -493,12 +493,20 @@ class ApiCallExecutorConnectionHeaderTest {
         }
 
         @Test
-        @DisplayName("positive control — a request with only plain headers leaves redirect-following untouched")
+        @DisplayName("positive control — plain and literal-credential headers leave redirect-following on (the client strips them cross-origin)")
         void plainHeadersDoNotDisableRedirects() throws Exception {
-            // With ssrf-protection off and no credential in any header, the executor
-            // must not force redirects off — that path exists only to protect a
-            // credential, and firing it unconditionally would be a behaviour change.
-            executor.execute(callWithHeaders(Map.of("Accept", "application/json")), memory, templateData("alice"), SERVER);
+            // With ssrf-protection off and no RESOLVED credential (no ${vault:…} /
+            // ${connection:…} / ${caller:…}) in any header, the executor does not force
+            // redirects off — that stronger measure is reserved for resolved secrets.
+            // A literal credential written straight in the config (Authorization: Bearer
+            // x, X-Api-Key, Cookie) is NOT replayed cross-origin either, because the
+            // shared Vert.x client strips SafeHttpClient.SENSITIVE_HEADERS on every
+            // cross-origin redirect hop — see HttpClientModuleTest for that layer.
+            var headers = new LinkedHashMap<String, String>();
+            headers.put("Accept", "application/json");
+            headers.put("Authorization", "Bearer literal-token");
+            headers.put("X-Api-Key", "literal-key");
+            executor.execute(callWithHeaders(headers), memory, templateData("alice"), SERVER);
 
             verify(mockRequest, never()).setFollowRedirects(anyBoolean());
         }

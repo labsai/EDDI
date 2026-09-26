@@ -75,6 +75,45 @@ five killed. The `SafeHttpClient`-constructing tests (`PdfReaderToolTest.setUp` 
 sandbox baseline "Unable to establish loopback connection" and are verified on CI; all pure tests pass
 locally.
 
+### Follow-up (adversarial review round)
+
+- **Redirect credential leak was wider than the reference-only fix.** Vert.x's default
+  redirect handler copies every request header and removes only `Content-Length` (it does
+  NOT strip Authorization/Cookie), so with ssrf-protection off a *literal* credential
+  written in the httpcall config leaked cross-origin too — the reference-only
+  `setFollowRedirects(false)` missed it. `HttpClientModule` now installs
+  `strippingCrossOriginCredentials` on the shared client's redirect handler (composed with
+  the existing metadata veto): it removes `SafeHttpClient.SENSITIVE_HEADERS` from any hop
+  whose origin (scheme/host/effective-port) differs from the originating request,
+  regardless of where the credential came from. `SafeHttpClient.SENSITIVE_HEADERS` is now
+  public so both layers share one set. The false "Vert.x strips only the RFC three" comments
+  in `ApiCallExecutor` and the stale buffering comment in `HttpClientWrapper` are corrected;
+  the ApiCallExecutor reference-credential redirect disable stays as the stronger measure for
+  resolved secrets. New tests in `HttpClientModuleTest` (cross-origin strip, same-origin keep,
+  different-port, null-origin fail-safe, wrapper end-to-end).
+- **A2A bounded read no longer passes a null watchdog.** `A2AToolProviderManager` gained a
+  daemon `ScheduledExecutorService` and passes it to `BoundedBodyReader.read`, so a peer that
+  sends 200+headers then stalls the body cannot hang the worker (the JDK request timeout does
+  not bound `ofInputStream` body reads). Covered by a new `BoundedBodyReaderTest` case with a
+  real scheduler and a stream that blocks until closed (`@Timeout(10)`).
+- **Inline OpenAPI spec filesystem `$ref` closed.** `setSafelyResolveURL(true)` guards only
+  URL-format refs; a filesystem-relative ref (`$ref: "/etc/passwd"`, `./x.yaml`, `file:…`) in
+  inline content is resolved against the process CWD without the checker.
+  `McpApiToolBuilder.parseSpec` now scans inline content and rejects any `$ref` that is neither
+  an internal fragment (`#/…`) nor an `http(s)` URL. New `McpApiToolBuilderTest` cases.
+
+Round-2 mutation checks (revert → named test fails → restore): cross-origin strip (3 tests
+killed) and the A2A watchdog (stalled-body test times out). Both restored.
+
+### Known residuals (documented, not fixed here)
+
+- `WebSearchTool` and `WeatherTool` still use `SafeHttpClient.send(..., ofString())` unbounded;
+  their responses are small API JSON, but they are not yet on the bounded path.
+- `UrlValidationUtils` unpacks the common /96 NAT64 embedding; other RFC 6052 prefix lengths
+  (/40, /48, /56, /64) place the IPv4 at different offsets and are not unpacked.
+- `BoundedBodyReader`'s watchdog has a benign completion race (it may fire just as the read
+  finishes); it is fail-safe — the worst case is a completed body reported truncated.
+
 ### Note for the merge
 
 `engine/mcp/McpApiToolBuilder.java` is also edited on branch `fix/security-qute-engine` (template

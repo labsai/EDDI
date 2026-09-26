@@ -859,12 +859,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // never decide, because one side of it is a credential.
         var claimedHeaders = new HashMap<String, Boolean>();
         var connectionOwnedHeaders = new HashSet<String>();
-        // Whether ANY header carries a credential — a connection reference, a vault
-        // secret, or a caller token/identity. If one does, redirect-following is
-        // disabled below so a cross-origin 3xx cannot replay that credential to
-        // another host. Vert.x strips only Authorization/Cookie/Proxy-Authorization
-        // on a cross-origin hop, so a custom credential header (X-Api-Key and the
-        // like) would otherwise survive the redirect.
+        // Whether ANY header carries a RESOLVED credential — a connection reference, a
+        // vault secret, or a caller token/identity. These are the highest-value
+        // secrets (a live vault value, the end user's own token), so for them we do
+        // not merely rely on the cross-origin header stripping the shared client now
+        // applies to every redirect hop
+        // (HttpClientModule.strippingCrossOriginCredentials,
+        // which also covers a static/literal credential written in the config): we
+        // disable redirect-following outright, so the request can only ever reach the
+        // origin the caller vouched for.
         boolean headerCarriesCredential = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
@@ -930,12 +933,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setHttpHeader(headerName, headerValue);
         }
 
-        // A credential in any header must never be replayed to another origin by a
-        // redirect. When ssrf-protection is on, redirects are already disabled above;
-        // when it is off (redirects followed), disable them for this request alone so
-        // a cross-origin 3xx cannot carry a connection/vault/caller credential — which
-        // Vert.x would strip only for the three RFC-managed header names — to a host
-        // the config never named.
+        // A resolved credential in any header must never be replayed to another
+        // origin by a redirect. When ssrf-protection is on, redirects are already
+        // disabled above; when it is off (redirects followed), disable them for this
+        // request alone so a cross-origin 3xx cannot carry a connection/vault/caller
+        // credential anywhere. The shared client also strips credential headers on
+        // cross-origin hops for literal credentials; this is the stronger measure for
+        // the resolved ones.
         if (headerCarriesCredential) {
             request.setFollowRedirects(false);
         }

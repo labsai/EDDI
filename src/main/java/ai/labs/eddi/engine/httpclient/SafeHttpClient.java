@@ -72,10 +72,15 @@ public class SafeHttpClient {
      * three RFC-managed ones, this also carries the widely-used custom credential
      * header names: a redirect from a public host to another origin must not replay
      * an {@code X-Api-Key} (or the like) any more than it may replay
-     * {@code Authorization}. Vert.x strips only the RFC set, which is the gap this
-     * closes on the JDK path.
+     * {@code Authorization}.
+     * <p>
+     * Public and lower-cased so the Vert.x httpcalls client
+     * ({@code HttpClientModule}) strips the same set on its own cross-origin
+     * redirect hops — its default redirect handler copies every request header and
+     * removes only {@code Content-Length}, so without this it replayed credentials
+     * of any name across origins.
      */
-    private static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
+    public static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
             "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication");
 
     private final HttpClient httpClient;

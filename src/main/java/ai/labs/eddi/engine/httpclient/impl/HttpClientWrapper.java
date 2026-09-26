@@ -185,8 +185,9 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setMaxResponseSize(int maxLength) {
             this.maxLength = maxLength;
-            // Note: Vert.x WebClient buffers the entire response by default.
-            // Size limits are validated in handleResponse() after the response is received.
+            // Enforced while the body streams: doSend pipes the response into a
+            // CappedBufferSink that fails the transfer once it would exceed maxLength,
+            // rather than buffering the whole body and measuring it afterwards.
             return this;
         }
 

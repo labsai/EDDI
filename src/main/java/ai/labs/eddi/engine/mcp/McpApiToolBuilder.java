@@ -242,9 +242,16 @@ public final class McpApiToolBuilder {
      * {@code http://169.254.169.254/...} through to the parser's fetcher, bypassing
      * the always-on metadata guard. Other private/internal hosts are intentionally
      * still permitted so internal OpenAPI specs remain discoverable (the calling
-     * REST/MCP surface is {@code eddi-admin}/{@code eddi-editor} gated). Inline
-     * JSON/YAML content that embeds no external {@code $ref} is parsed without any
-     * network access.
+     * REST/MCP surface is {@code eddi-admin}/{@code eddi-editor} gated).
+     * <p>
+     * For inline JSON/YAML content, {@code setSafelyResolveURL(true)} alone is not
+     * enough: it guards only URL-format {@code $ref}s, while swagger-parser
+     * classifies a ref starting with {@code /}, {@code .} or {@code file:} as a
+     * RELATIVE ref and resolves it against the filesystem (base {@code null} → the
+     * process CWD) without the checker — so an inline spec with
+     * {@code $ref: "/etc/passwd"} could read a local file. Inline specs are
+     * therefore scanned up front and any {@code $ref} that is neither an internal
+     * fragment ({@code #/…}) nor an {@code http(s)} URL is rejected.
      */
     public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
@@ -256,9 +263,11 @@ public final class McpApiToolBuilder {
 
         SwaggerParseResult result;
         if (looksLikeInlineSpec(specInput)) {
-            // Inline JSON or YAML content — no network/file access for the document
-            // itself; any embedded external $ref is still resolved under the
-            // blocked-URL resolver enabled above.
+            // Inline JSON or YAML content. The document itself needs no network/file
+            // access; reject any external $ref that is not an http(s) URL, so a
+            // filesystem-relative ref (which setSafelyResolveURL does not guard)
+            // cannot read local files. Internal (#/…) and http(s) refs are allowed.
+            rejectUnsafeInlineRefs(specInput);
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
             // Remote location. Enforce an http(s) scheme so the parser's fetcher
@@ -296,6 +305,41 @@ public final class McpApiToolBuilder {
     static boolean looksLikeInlineSpec(String specInput) {
         String trimmed = specInput.trim();
         return trimmed.startsWith("{") || trimmed.startsWith("openapi") || trimmed.startsWith("swagger") || trimmed.contains("\n");
+    }
+
+    /**
+     * Matches a {@code $ref} value in JSON or YAML: {@code "$ref": "X"} /
+     * {@code $ref: X}.
+     */
+    private static final Pattern REF_VALUE_PATTERN = Pattern.compile("[\"']?\\$ref[\"']?\\s*:\\s*[\"']?([^\"'\\s,}]+)");
+
+    /**
+     * Rejects any {@code $ref} in inline spec content that is neither an internal
+     * fragment ({@code #/…}) nor an {@code http(s)} URL — i.e. a
+     * filesystem-relative or {@code file:}/{@code classpath:} ref that
+     * swagger-parser would resolve against the local filesystem without the
+     * blocked-URL checker.
+     *
+     * @throws IllegalArgumentException
+     *             if an external, non-http(s) reference is present
+     */
+    static void rejectUnsafeInlineRefs(String specContent) {
+        if (specContent == null) {
+            return;
+        }
+        Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
+        while (matcher.find()) {
+            String ref = matcher.group(1).trim();
+            if (ref.isEmpty() || ref.startsWith("#")) {
+                continue; // internal fragment reference
+            }
+            String lower = ref.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("http://") || lower.startsWith("https://")) {
+                continue; // URL ref — guarded by setSafelyResolveURL
+            }
+            throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
+                    + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
+        }
     }
 
     /**
