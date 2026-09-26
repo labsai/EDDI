@@ -144,15 +144,12 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
 
     @Override
     public boolean casRevision(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
-        // The caller did not touch runningDiscussionId, so the value it holds is the
-        // one it read — the right guard for a document that predates the revision.
-        return conditionalWrite(workspace, workspace.getRunningDiscussionId());
+        return conditionalWrite(workspace);
     }
 
     @Override
-    public boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
-            throws IResourceStore.ResourceStoreException {
-        return conditionalWrite(workspace, expectedRunning);
+    public boolean casRunningDiscussion(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
+        return conditionalWrite(workspace);
     }
 
     /**
@@ -170,34 +167,25 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
      * <p>
      * Now the revision is the one guard. Every write compares it and bumps it, so a
      * write lands only if nothing at all changed since the caller's read — which is
-     * also exactly what "the claim is still what I read" means. The run-claim value
-     * is only the fallback guard for a document written before revisions existed
-     * ({@code null} revision), and that same write stamps one.
+     * also exactly what "the claim is still what I read" means. Every workspace
+     * document carries a revision (the field exists since workspaces do and
+     * defaults to {@code "0"}), so there is no pre-revision fallback; a missing or
+     * non-numeric revision is a corrupt document and fails loudly.
      *
-     * @param legacyExpectedRunning
-     *            the persisted {@code runningDiscussionId} the caller read,
-     *            compared only on a pre-revision document
      * @return {@code false} if any concurrent write landed first (re-read before
      *         retrying), or the workspace was deleted
      */
-    private boolean conditionalWrite(GroupWorkspace workspace, String legacyExpectedRunning)
-            throws IResourceStore.ResourceStoreException {
+    private boolean conditionalWrite(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
         String expected = workspace.getRevision();
         String bumped;
-        if (expected == null) {
-            bumped = "1";
-        } else {
-            try {
-                bumped = String.valueOf(Long.parseLong(expected) + 1);
-            } catch (NumberFormatException e) {
-                // A corrupt revision must surface through the method's declared
-                // error model, not as an uncaught runtime exception the REST
-                // layer's generic handler turns into a bare 500 (CodeQL).
-                throw new IResourceStore.ResourceStoreException(
-                        "Workspace revision for group " + workspace.getGroupId() + " is not numeric: '"
-                                + expected + "'",
-                        e);
-            }
+        try {
+            bumped = String.valueOf(Long.parseLong(String.valueOf(expected)) + 1);
+        } catch (NumberFormatException e) {
+            // A corrupt revision must surface through the method's declared error
+            // model, not as an uncaught runtime exception the REST layer's generic
+            // handler turns into a bare 500 (CodeQL).
+            throw new IResourceStore.ResourceStoreException(
+                    "Workspace revision for group " + workspace.getGroupId() + " is not numeric: '" + expected + "'", e);
         }
         workspace.setRevision(bumped);
         workspace.setLastModified(Instant.now());
@@ -206,12 +194,7 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
             // Conditional on the PERSISTED value — cross-process atomicity, same as
             // GroupConversationStore.updateIfState. An in-JVM check would only
             // serialize one pod's writers against each other.
-            if (expected != null) {
-                storage.storeIfFieldEquals(resource, "revision", expected);
-            } else {
-                storage.storeIfFieldEquals(resource, "runningDiscussionId",
-                        legacyExpectedRunning != null ? legacyExpectedRunning : GroupWorkspace.NO_RUNNING_DISCUSSION);
-            }
+            storage.storeIfFieldEquals(resource, "revision", expected);
             return true;
         } catch (IResourceStore.ResourceModifiedException e) {
             workspace.setRevision(expected);

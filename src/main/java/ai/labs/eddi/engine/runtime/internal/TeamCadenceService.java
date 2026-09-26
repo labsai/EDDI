@@ -297,7 +297,6 @@ public class TeamCadenceService {
                     return false;
                 }
             }
-            String before = current.getRunningDiscussionId();
             current.setRunningDiscussionId(discussionId);
             // Stamped with the claim so reconcile can tell a long-running discussion
             // from a wedged one. Set here, next to the id it belongs to, and cleared
@@ -308,7 +307,7 @@ public class TeamCadenceService {
                 TaskItem fresh = current.getBacklog().findById(task.id());
                 current.getBacklog().updateTask(withStatus(fresh != null ? fresh : task, TaskStatus.IN_PROGRESS));
             }
-            if (workspaceStore.casRunningDiscussion(current, before)) {
+            if (workspaceStore.casRunningDiscussion(current)) {
                 return true;
             }
         }
@@ -499,7 +498,7 @@ public class TeamCadenceService {
         workspace.setClaimedAt(null);
         workspace.setPulledTaskIds(List.of());
         try {
-            if (!workspaceStore.casRunningDiscussion(workspace, settledDiscussionId)) {
+            if (!workspaceStore.casRunningDiscussion(workspace)) {
                 // H14c: the write is revision-checked, so it also loses to an
                 // unrelated write (a backlog add, a cadence edit). If the fresh
                 // document still names this discussion, nobody settled it — redo

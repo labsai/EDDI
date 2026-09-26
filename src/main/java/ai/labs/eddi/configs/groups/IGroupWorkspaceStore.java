@@ -36,13 +36,12 @@ public interface IGroupWorkspaceStore {
      * {@code runningDiscussionId} and pulled-task state) only if nothing changed
      * since the caller read it — the same revision guard as {@link #casRevision},
      * so a claim can neither drop a concurrent backlog edit nor be dropped by one
-     * (H14c). {@code expectedRunning} is the {@code runningDiscussionId} the caller
-     * read; it is compared only on a document that predates revisions. Returns
-     * {@code false} when any concurrent write landed first — the caller re-reads
-     * and decides whether the claim is still its to take.
+     * (H14c). An unchanged revision implies an unchanged claim, so the caller's
+     * read of {@code runningDiscussionId} is what the write is conditioned on.
+     * Returns {@code false} when any concurrent write landed first — the caller
+     * re-reads and decides whether the claim is still its to take.
      */
-    boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
-            throws IResourceStore.ResourceStoreException;
+    boolean casRunningDiscussion(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException;
 
     /**
      * Optimistic-concurrency write: persists {@code workspace} only if its
