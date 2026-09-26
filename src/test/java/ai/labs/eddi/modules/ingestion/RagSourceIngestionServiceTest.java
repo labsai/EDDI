@@ -661,6 +661,56 @@ class RagSourceIngestionServiceTest {
         }
 
         @Test
+        @DisplayName("the fire's caller hears how the run it started ended")
+        void theFireLearnsTheOutcome() throws Exception {
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+                    .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
+            var outcome = new AtomicReference<IngestionReport>();
+            var done = new CountDownLatch(1);
+
+            service.processScheduledFire(KB_ID, 1, SOURCE_ID, report -> {
+                outcome.set(report);
+                done.countDown();
+            });
+
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals(IngestionReport.Outcome.FAILED, outcome.get().outcome());
+        }
+
+        @Test
+        @DisplayName("a shutdown closes the runs in flight instead of leaving them to be reaped")
+        void shutdownClosesRunsInFlight() throws Exception {
+            // A worker is a virtual thread that just stops with the JVM, leaving its
+            // run RUNNING for its budget plus a quarter of an hour: 25 minutes of 409s
+            // for "Run now" after every rolling restart.
+            var source = source(null);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+            var release = new CountDownLatch(1);
+            var running = new CountDownLatch(1);
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+                running.countDown();
+                release.await(10, TimeUnit.SECONDS);
+                return IngestionReport.skipped(SOURCE_ID, "stub");
+            });
+
+            try {
+                String runId = service.runAsync(KB_ID, knowledgeBase(source), source).orElseThrow();
+                assertTrue(running.await(5, TimeUnit.SECONDS));
+
+                assertEquals(1, service.cancelInFlightRuns());
+
+                assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "the source is free again at once");
+                assertEquals(IIngestionStateStore.IngestionRun.Status.CANCELLED,
+                        stateStore.listRuns(sourceKey, 5).stream()
+                                .filter(run -> run.runId().equals(runId)).findFirst().orElseThrow().status());
+            } finally {
+                release.countDown();
+            }
+        }
+
+        @Test
         @DisplayName("a fire while a run holds the source is reported as already running, not started")
         void aFireWhileRunningIsAlreadyRunning() throws Exception {
             var source = source("0 2 * * *");

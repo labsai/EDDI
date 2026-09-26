@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -960,7 +961,7 @@ class ScheduleFireExecutorTest {
     @Test
     void fire_ragIngestion_runsTheSourceAndRecordsTheRun() throws Exception {
         var schedule = makeIngestionSchedule("rag-1", "kb-1", 2, "src-1");
-        when(ragSourceIngestionService.processScheduledFire("kb-1", 2, "src-1"))
+        when(ragSourceIngestionService.processScheduledFire(eq("kb-1"), eq(2), eq("src-1"), any()))
                 .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
                         IngestionPipeline.IngestionReport.Outcome.COMPLETED, 3, 2, 1, 0, 0, 5, 5, 0.0,
                         false, false, null, Duration.ZERO, null));
@@ -968,7 +969,7 @@ class ScheduleFireExecutorTest {
         var log = executor.fire(schedule, "instance-1", 1);
 
         assertEquals(FireStatus.COMPLETED.name(), log.status());
-        verify(ragSourceIngestionService).processScheduledFire("kb-1", 2, "src-1");
+        verify(ragSourceIngestionService).processScheduledFire(eq("kb-1"), eq(2), eq("src-1"), any());
     }
 
     @Test
@@ -976,7 +977,7 @@ class ScheduleFireExecutorTest {
         // The fire starts the run on its own worker and returns, so the lease can
         // never cancel a crawl. What the run then does is in the source's run history.
         var schedule = makeIngestionSchedule("rag-4", "kb-1", 1, "src-1");
-        when(ragSourceIngestionService.processScheduledFire(any(), any(), any()))
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any()))
                 .thenReturn(new IngestionPipeline.IngestionReport("run-7", "src-1",
                         IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
                         false, false, null, Duration.ZERO, "Run run-7 started"));
@@ -989,12 +990,36 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_ragIngestion_aRunThatFailsLaterIsLoggedAsAFailedFire() throws Exception {
+        // The fire returns once the run has started, so a crawl that failed every
+        // night read as a COMPLETED fire with nothing in the fire log to say so.
+        var schedule = makeIngestionSchedule("rag-5", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any())).thenAnswer(invocation -> {
+            Consumer<IngestionPipeline.IngestionReport> onFinished = invocation.getArgument(3);
+            onFinished.accept(new IngestionPipeline.IngestionReport("run-8", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.FAILED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, "site unreachable"));
+            return new IngestionPipeline.IngestionReport("run-8", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, "Run run-8 started");
+        });
+
+        executor.fire(schedule, "instance-1", 1);
+
+        var logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore, times(2)).logFire(logged.capture());
+        var failed = logged.getAllValues().stream()
+                .filter(log -> FireStatus.FAILED.name().equals(log.status())).findFirst().orElseThrow();
+        assertTrue(failed.errorMessage().contains("site unreachable"), failed.errorMessage());
+    }
+
+    @Test
     void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
-        // The lease is shorter than a crawl's budget, so the schedule is legitimately
-        // re-claimed while the first run is still going. Calling that FAILED
-        // increments failCount on every fire and dead-letters the schedule in days.
+        // A run can outlast the interval between fires, so the next fire legitimately
+        // finds it still going. Calling that FAILED increments failCount on every fire
+        // and dead-letters the schedule in days.
         var schedule = makeIngestionSchedule("rag-2", "kb-1", 1, "src-1");
-        when(ragSourceIngestionService.processScheduledFire(any(), any(), any()))
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any()))
                 .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
                         IngestionPipeline.IngestionReport.Outcome.ALREADY_RUNNING, 0, 0, 0, 0, 0, 0, 0, 0.0,
                         false, false, null, Duration.ZERO, "A run is already in flight for this source"));
@@ -1017,7 +1042,7 @@ class ScheduleFireExecutorTest {
 
         assertEquals(FireStatus.FAILED.name(), log.status());
         assertNotNull(log.errorMessage());
-        verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any());
+        verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any(), any());
     }
 
     private static ScheduleConfiguration makeIngestionSchedule(String id, String ragConfigId, int version,

@@ -281,6 +281,33 @@ class IngestedFileServiceTest {
         }
 
         @Test
+        @DisplayName("the overshoot check never deletes a file another instance has since written")
+        void theOvershootCheckKeepsAnotherInstancesFile() {
+            // The other instance uploaded the same name in the same window, saw a
+            // replacement, skipped its own check and told its caller "stored".
+            // Deleting by name here took its file.
+            var source = source(1, 1000L, 1_000_000L);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+            byte[] theirs = "their version".getBytes(StandardCharsets.UTF_8);
+            var racingStore = new InMemoryIngestedFileStore() {
+                @Override
+                public IIngestedFileStore.StoredFile store(String key, String fileName, String mimeType,
+                                                           byte[] content) {
+                    IIngestedFileStore.StoredFile mine = super.store(key, fileName, mimeType, content);
+                    super.store(key, fileName, mimeType, theirs);
+                    super.store(key, "other-node.txt", "text/plain", "x".getBytes(StandardCharsets.UTF_8));
+                    return mine;
+                }
+            };
+            var racing = new IngestedFileService(racingStore, extractors(), pipeline, stateStore, meterRegistry);
+
+            racing.upload(KB_ID, source, List.of(file("mine.txt", 10)));
+
+            var kept = racingStore.find(sourceKey, IngestedFileIds.forFileName("mine.txt"));
+            assertTrue(kept.isPresent(), "the other instance's file must survive");
+        }
+
+        @Test
         @DisplayName("refuses a file nothing can read, with a reason worth reading")
         void refusesAnUnreadableFile() {
             byte[] png = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};

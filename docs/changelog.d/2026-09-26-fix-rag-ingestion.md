@@ -1,4 +1,4 @@
-## 🐛 fix(rag): ingestion keeps what it should, removes what it should, and survives a hostile file (2026-09-26)
+## 🐛 fix(rag): ingestion keeps what it should, removes what it should, and bounds hostile uploads (2026-09-26)
 
 **Repo:** EDDI (`fix/rag-ingestion`)
 
@@ -24,18 +24,23 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   and stored with its own content) and is stored itself only if the target produced nothing. A
   deferring or duplicate page's links are still followed — a paginated listing no longer loses its
   later entries. Sitemap discovery now follows `<sitemapindex>` files and falls back to `/sitemap.xml`
-  when robots.txt names none or is not read (unless robots.txt disallows it). **Upgrade note:** a page
+  when robots.txt names none or is not read (unless robots.txt disallows it). **Upgrade notes:** a page
   that declared a different canonical was stored under the canonical's id before; it is now stored
   under its own URL, so such pages are re-embedded once and the old ids reconcile away over the next
-  `tombstoneAfterMissedRuns` complete runs.
-
+  `tombstoneAfterMissedRuns` complete runs. Sitemap pages are queued at depth 0, so a source that
+  stayed under `maxPages` by `maxDepth` alone can now reach the page limit — which disables deletion
+  reconciliation for that run; the crawler logs a WARN naming the sitemap when that happens.
 ### Runs
 
 - **R2 — scheduled crawls are no longer cancelled at the lease.** The fire ran the crawl on the
   scheduler's thread, which cancels a fire after its 5-minute lease while a crawl's default budget is
   10 minutes. `RagSourceIngestionService.processScheduledFire` now claims the run and starts it on its
-  own worker (new `IngestionReport.Outcome.STARTED`), as a manual run does; the outcome is in the run
-  history. `ScheduleFireExecutor` records a started run as a completed fire.
+  own worker (new `IngestionReport.Outcome.STARTED`), as a manual run does. When that run later
+  fails, the worker writes a second, `FAILED` fire-log entry for the fire (it does not raise the
+  schedule's `failCount`, so a failing crawl neither retries early nor dead-letters — documented in
+  [`scheduling.md`](../scheduling.md#fire-logging)). On a graceful shutdown the runs this instance was
+  carrying are closed as `CANCELLED` and their workers interrupted, so a rolling restart no longer
+  blocks "Run now" for the ~25 minutes until they would have been reaped.
 - **A run that loses its source stops.** The collector asks whether its run is still the active one —
   before every embedding, and every 5 s between pages. A run whose row was purged (source removed,
   knowledge base renamed, state purged) or that was reaped used to carry on writing chunks and state
@@ -46,8 +51,8 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   under the run claim. A store that cannot be read is never mistaken for a deleted knowledge base.
 - **R10 — ingestion crons honour `eddi.schedule.min-interval-seconds`.** Refused with a 400 at save
   time (`requireAllowedIntervals`), and skipped with an error by `syncSchedules` for a writer that
-  bypassed the check (ZIP import).
-
+  bypassed the check (ZIP import). An existing too-frequent schedule keeps firing until its knowledge
+  base is next saved — and that save is then refused until the cron is fixed.
 ### Removing and purging
 
 - **R3 — removing a web source removes its vectors.** `discardRemovedSources` skipped crawl sources on
@@ -60,26 +65,42 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
 - **RAG backend purge claim — refuted as worded, fixed at the root.** The API and Manager say a purge
   "does not by itself remove vectors" and the next run re-ingests, which was true for documents that
   still exist. It orphaned the rest: a document gone from the source before the purge was never found
-  again, and with its state row gone nothing reconciled it. The first complete, failure-free run after
-  a purge (a run that starts with no state) now removes every chunk of the source it did not write
-  (`IngestionPipeline.sweepOrphans`). The documented contract — chunks keep answering until the next
-  run — is unchanged.
+  again, and with its state row gone nothing reconciled it. The first run after a purge (one that
+  starts from no state) now records a marker row (`IngestionPipeline.SWEEP_MARKER`) that no crawl ever
+  sees. It is missed by every complete run like a vanished page, and once missed
+  `tombstoneAfterMissedRuns` times, a failure-free run removes every chunk of the source not written by
+  a run since the purge (`sweepOrphans`, filter `runId NOT IN` the post-purge run history). A page only
+  briefly absent after a purge thus gets the usual grace. A failure reading the state at run start now
+  skips the marker, not the run. The documented contract — chunks keep answering until rebuilt — is
+  unchanged.
 - **R4 — a failed chunk removal keeps the file.** `forgetDocument` now returns `ForgetOutcome`
   (`REMOVED` / `UNSUPPORTED` / `FAILED`). On `FAILED` the file is kept and the delete answers `503`
   (`DeleteOutcome.REMOVAL_FAILED`); deleting it anyway stranded the chunks for good.
 - **U6 — file deletes no longer pose as runs.** The maintenance claim is released with the new
   `IngestionRun.Status.MAINTENANCE`, which `listRuns` omits in all three stores. The row is kept, not
   deleted, because its generation must stay counted: deleting it let the next run reuse the
-  generation and be fenced out of its own documents (pinned by a contract test).
-
+  generation and be fenced out of its own documents (pinned by a contract test). Both stores now read
+  statuses through `Status.parse`, which maps one this build does not know to `FAILED`. **Rolling
+  upgrade:** a node built before this branch still throws on `MAINTENANCE` in `listRuns` (500) until it
+  is upgraded; ingestion is unreleased, so only snapshot deployments see it.
 ### Uploaded files
 
-- **R5 — PDF extraction is bounded.** `PdfStreamBudget` measures every compressed stream on the raw
-  bytes before PDFBox opens the file, mirroring PDFBox's Flate decoder (it skips the two-byte header
-  unchecked; double compression is measured at the level that expands most), and refuses one that
-  expands past `ExtractionLimits.maxUncompressedBytes` (64 MB). PDFBox's scratch space is capped at the
-  same figure; page programs are checked against a new `ExtractionLimits.maxDuration` (60 s) every 256
-  operators; a page laying out far more glyphs than the character cap could keep is stopped.
+- **R5 — PDF extraction is bounded, by counting what PDFBox decodes.** The first version of this fix
+  measured streams on the raw bytes only, and review showed four ways past it: spaces after the
+  `stream` keyword, non-Flate filters (ASCIIHex/ASCII85/RunLength/LZW, alone or chained), one stream
+  referenced many times from a page's `/Contents` (an OOM at `-Xmx1g` from a 61 KB file), and
+  encrypted streams. PDFBox's `MemoryUsageSetting` cannot close these: `Filter.decode` writes into a
+  buffer it sizes itself and never consults the stream cache (checked in the 3.0.8 bytecode). So
+  `PdfDecodeBudget` wraps every filter in PDFBox's `FilterFactory`, once, in one that counts its
+  output against a budget armed only on the extracting thread; the count covers every stream, chain
+  stage, repeated reference and decrypted stream, and past `ExtractionLimits.maxDecodedBytes()`
+  (2 × `maxUncompressedBytes`, 128 MB) the document is refused — also when PDFBox swallowed the
+  failure, because the flag stays set. If the filters cannot be wrapped, PDFs are refused, not read
+  unbounded. `PdfStreamBudget` stays as a cheap pre-filter: it now finds the stream start as PDFBox
+  does, decodes the declared filter chain with PDFBox's own filters, and skips image streams and image
+  codecs, which text extraction never decodes (so a large image no longer refuses a PDF). Every
+  bypass above was re-run with the reviewer's probe at `-Xmx1g`, with the pre-filter on and off: all
+  refused. The per-page deadline (60 s) and glyph cap stay; the upload-time probe now gets 10 s.
 - **R6 — an unreadable replacement retires the old text.** A stored file that cannot be read, or yields
   no text, is now a definitive failure for an upload source: the previous version's chunks are removed
   and its row tombstoned. It used to be recorded as "could not look", so the replaced document kept
@@ -92,14 +113,21 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
 - **U4 — size is checked before bytes are read, and the 60 MB body limit is scoped to the upload.** The
   REST layer passes each part's declared size and the service refuses an oversized file without
   reading it. The new `RequestBodyLimitGuard` holds every other endpoint to
-  `eddi.http.limits.default-max-body-size` (default `25M`, the pre-upload limit) on the declared
-  `Content-Length`; only `POST /ragstore/rags/{id}/sources/{sourceId}/files` keeps
-  `quarkus.http.limits.max-body-size`. Chunked requests without a length stay bounded by the global limit.
+  `eddi.http.limits.default-max-body-size` (default `25M`), raised automatically to fit an attachment
+  at `eddi.attachments.max-size-bytes` base64-encoded (4/3 + 1 MB, about 27.7 MB for the default
+  20 MiB), so inline attachments and operators raising the attachment limit are not refused. A body
+  with no `Content-Length` (chunked, or HTTP/2 data without the header) is refused with 411 on every
+  endpoint but the upload — counting bytes as they arrive is not possible from a Vert.x filter,
+  because the REST layer replaces the request's data handler; `eddi.http.limits.refuse-unsized-bodies`
+  turns that off. Refusals send `Connection: close`. The upload exemption is matched below
+  `quarkus.http.root-path`. A ZIP import is held to the same limit (as it was before 60M).
 - **U5 — concurrent uploads cannot overshoot the limits.** Each file is measured against a fresh
   listing under a per-source (striped) lock on this instance; across instances a new file that finds
-  the source over its limit once stored is deleted again. A cross-instance *replacement* can still
-  overshoot by the replaced file's size — the replaced bytes are gone.
-
+  the source over its limit once stored is deleted again — but only if the stored file still has the
+  content hash written here, so another instance's same-named upload is never deleted. Two instances
+  adding different files to a source with one slot left can both see it full and both refuse; the
+  uploader retries. Identical bytes under one name, from two instances, into a full source, in the
+  same instant, remain indistinguishable.
 ### Not in this branch
 
 - **R8** (redirect bodies in `SafeHttpClient`) belongs to `fix/outbound-http-hardening`, which closes
@@ -110,9 +138,14 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
 
 ### Residual risk, stated
 
-- `PdfStreamBudget` covers Flate, the filter that can be a bomb in practice. An LZW-compressed stream
-  is not measured; PDFBox decodes it whole. LZW's worst-case ratio is far lower, and the time budget
-  still applies.
+- The PDF decode budget counts what PDFBox writes through its filters. Memory PDFBox takes outside
+  them (object parsing, fonts it builds from decoded bytes, the page's glyph list — capped separately)
+  is not counted by it; the deadline and glyph cap bound those.
+- The budget relies on replacing entries in PDFBox's `FilterFactory` by reflection. A PDFBox upgrade
+  that renames that field makes every PDF refused (loudly, with an ERROR at first use), never read
+  unbounded; `DocumentExtractorsTest` fails in that case.
+- A body without a `Content-Length` is refused rather than counted; a client that cannot send one
+  needs `eddi.http.limits.refuse-unsized-bodies=false`, which leaves it to the global 60 MB.
 - A run in flight when its source is removed can write one more document between the purge and its
   next ownership check; `cleanUpAfterRun` removes it once the run ends.
 
@@ -123,6 +156,7 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
 [`IngestedFileService.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/files/IngestedFileService.java),
 [`PdfTextExtractor.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/extract/PdfTextExtractor.java),
 [`PdfStreamBudget.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/extract/PdfStreamBudget.java),
+[`PdfDecodeBudget.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/extract/PdfDecodeBudget.java),
 [`DocumentExtractors.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/extract/DocumentExtractors.java),
 [`RestRagIngestion.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/RestRagIngestion.java),
 [`RestRagStore.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/RestRagStore.java),

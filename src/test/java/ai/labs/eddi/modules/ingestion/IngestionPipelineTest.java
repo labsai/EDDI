@@ -902,9 +902,15 @@ class IngestionPipelineTest {
     @DisplayName("after a purge")
     class AfterAPurge {
 
+        private IngestionSource sweptAfter(int runs) {
+            var source = source();
+            source.setSettings(tombstoneAfter(runs));
+            return source;
+        }
+
         @Test
-        @DisplayName("the first complete run removes what the source no longer has")
-        void theFirstRunSweepsOrphans() {
+        @DisplayName("a page that left before the purge is swept once missed as often as any page must be")
+        void orphansAreSweptAfterTheGracePeriod() {
             // A purge forgets the documents but leaves their vectors answering. A
             // document gone from the site before the purge was then never found
             // again, and with its state row gone nothing reconciled it: its chunks
@@ -914,17 +920,71 @@ class IngestionPipelineTest {
                             + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
                     .page(SITE + "/keep", pageWith("Still here."))
                     .page(SITE + "/gone", pageWith("Will vanish."));
-            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
             stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
 
             FakeSite after = new FakeSite()
                     .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a></body></html>")
                     .page(SITE + "/keep", pageWith("Still here."));
-            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
+                    "not before the grace every other page gets");
+
+            IngestionReport report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2),
+                    Mode.INGEST);
 
             assertTrue(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
                     "a page that left the site before the purge must not stay retrievable");
             assertFalse(embeddingStore.segmentsOf(SITE + "/keep").isEmpty());
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(), "chunks written by an earlier run since the "
+                    + "purge are kept");
+            assertEquals(0, report.documentsTombstoned(), "the sweep marker is not a document");
+        }
+
+        @Test
+        @DisplayName("a page only briefly absent after a purge keeps its content")
+        void aBrieflyAbsentPageSurvives() {
+            // The sweep used to run on the first run after a purge, so a page that
+            // was down for that one run lost its chunks — where any other page gets
+            // tombstoneAfterMissedRuns runs of grace.
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .page(SITE + "/flaky", pageWith("Usually here."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            // Blank for one run — a maintenance page — which is not a failure, so the
+            // run is complete and failure-free: exactly the run the old sweep acted on.
+            FakeSite blank = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .page(SITE + "/flaky", "<html><body></body></html>");
+            pipelineFor(blank).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(),
+                    "one run without the page is not enough to remove it");
+
+            for (int i = 0; i < 3; i++) {
+                pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+            assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(), "back, and kept through the sweep");
+        }
+
+        @Test
+        @DisplayName("a store that cannot say whether the state is empty skips the sweep, not the run")
+        void aFailingStateReadDoesNotFailTheRun() {
+            stateStore = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized List<IIngestionStateStore.DocumentState> listDocuments(String sourceId,
+                                                                                           int limit) {
+                    throw new IngestionStateStoreException("database unwell", null);
+                }
+            };
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome());
+            assertEquals(1, report.documentsIngested());
         }
 
         @Test
@@ -939,7 +999,9 @@ class IngestionPipelineTest {
             FakeSite down = new FakeSite()
                     .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
                     .status(SITE + "/flaky", 503);
-            pipelineFor(down).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(down).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            }
 
             assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(),
                     "a page the server would not serve this time still has only its old chunks");

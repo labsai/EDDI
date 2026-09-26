@@ -70,9 +70,49 @@ public class PdfTextExtractor implements DocumentTextExtractor {
 
     @Override
     public String extract(byte[] content, ExtractionLimits limits) {
-        Instant deadline = Instant.now().plus(limits.maxDuration());
-        PdfStreamBudget.requireWithin(content, limits.maxUncompressedBytes(), deadline);
+        return extract(content, limits, true);
+    }
 
+    /**
+     * @param preFilter
+     *            whether to run the raw-byte scan first. Off only in tests that
+     *            show the decode budget holds on its own, for every case the scan
+     *            might miss
+     */
+    String extract(byte[] content, ExtractionLimits limits, boolean preFilter) {
+        Instant deadline = Instant.now().plus(limits.maxDuration());
+        if (preFilter) {
+            // A cheap first look at the raw bytes, refusing the obvious bomb before
+            // PDFBox allocates anything. Not the bound: the budget below is.
+            PdfStreamBudget.requireWithin(content, limits.maxUncompressedBytes(), deadline);
+        }
+
+        try (var budget = PdfDecodeBudget.open(limits.maxDecodedBytes())) {
+            String text;
+            try {
+                text = read(content, limits, deadline);
+            } catch (UnreadableDocumentException e) {
+                if (budget.exceeded()) {
+                    throw tooMuchToDecode(budget);
+                }
+                throw e;
+            }
+            // Checked on success too: PDFBox catches some failures and carries on,
+            // and a document that passed its budget is refused however it ended.
+            if (budget.exceeded()) {
+                throw tooMuchToDecode(budget);
+            }
+            return text;
+        }
+    }
+
+    private static UnreadableDocumentException tooMuchToDecode(PdfDecodeBudget.Budget budget) {
+        return new UnreadableDocumentException("This PDF expands to more than " + budget.max() / (1024 * 1024)
+                + " MB while it is read, which is more than one document may take. If the file is genuine, "
+                + "split it, or save a copy without embedded attachments.");
+    }
+
+    private String read(byte[] content, ExtractionLimits limits, Instant deadline) {
         try (PDDocument document = Loader.loadPDF(content, "", null, null,
                 MemoryUsageSetting.setupMainMemoryOnly(limits.maxUncompressedBytes()).streamCache)) {
             if (document.isEncrypted()) {

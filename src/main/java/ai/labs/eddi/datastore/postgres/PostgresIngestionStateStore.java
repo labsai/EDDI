@@ -580,7 +580,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         return new IngestionRun(
                 resultSet.getString("run_id"),
                 resultSet.getString("source_id"),
-                IngestionRun.Status.valueOf(resultSet.getString("status")),
+                IngestionRun.Status.parse(resultSet.getString("status")),
                 toInstant(resultSet.getTimestamp("started_at")),
                 toInstant(resultSet.getTimestamp("finished_at")),
                 resultSet.getInt("documents_seen"),

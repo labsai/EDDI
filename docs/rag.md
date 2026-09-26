@@ -327,7 +327,10 @@ that fires more often is refused with a 400 naming the source.
 its own worker, exactly as **Run now** does, and returns. The scheduler cancels a fire it has waited
 a lease for (five minutes by default) while a crawl's default budget is ten, so a crawl run inside the
 fire was interrupted mid-run and never reconciled a deletion. The fire log therefore records that the
-run started; what the run did is in the source's run history.
+run started; if the run later fails, a second `FAILED` entry for the same fire says so (it does not
+count towards the schedule's retries or dead-lettering — see [scheduling.md](scheduling.md#fire-logging)).
+What the run did in detail is in the source's run history. Runs in flight when an instance shuts
+down gracefully are closed as `CANCELLED` rather than left to be reaped.
 
 #### Every field
 
@@ -392,6 +395,11 @@ on the seed's host is tried instead, unless robots.txt disallows it. A sitemap i
 the sitemaps it lists; every sitemap read counts against the same cap of 20. Turn `respectRobots` off
 only for a site you own.
 
+Pages listed in a sitemap are queued at depth 0, so `maxDepth` does not narrow them: a source that
+stayed under `maxPages` by depth alone can reach the page limit once its site's sitemap is read — and
+a crawl that stops at a limit reconciles no deletions. Such a crawl logs a warning naming the sitemap;
+raise `maxPages`, or narrow the scope with `pathPrefix` or `excludePatterns`.
+
 **When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
 it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
 or reached nothing at all concludes nothing. "Reached nothing" is deliberate: an unreachable seed, a
@@ -431,12 +439,16 @@ and stops, instead of carrying on to the end of its crawl writing chunks and sta
 that has just been cleared. When it has stopped, what it wrote in the meantime is settled: a removed
 source's content is removed again, and a renamed knowledge base's state is cleared again.
 
-**A purge forgets what a source ingested, and the next complete run removes what it no longer has.**
+**A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
 Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
-finds. That first run after the purge — a run that starts from no state at all — then removes every
-chunk of the source it did not write itself: documents that had disappeared before the purge, which
-nothing would otherwise ever reconcile. It does so only when it covered the whole source and read
-every document it found; a run with a failure leaves the old chunks alone.
+finds. A document that had disappeared before the purge is never found again, and with its state gone
+nothing would reconcile it, so the first run after a purge (a run that starts from no state at all)
+leaves a marker in the state. The marker is missed by every complete run, exactly like a vanished
+page, and once it has been missed `tombstoneAfterMissedRuns` times a run removes every chunk of the
+source that no run since the purge wrote. A page only briefly absent after the purge therefore gets
+the same grace as any other: once it is back it is re-embedded and survives. The sweep runs only on a
+complete run that read every document it found; a run with a failure leaves the old chunks alone and
+the next such run sweeps.
 
 **Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
@@ -499,7 +511,9 @@ extraction a run will, stopped after the first few characters, so an encrypted P
 layer, a damaged file or one whose name claims a format its content is not (a text file renamed
 `.pdf`) is refused with the reason, rather than stored, listed as waiting to be indexed and skipped by
 every run with nothing saying why. A file over `maxFileBytes` is refused on the size the request
-declares, before its bytes are read.
+declares, before its bytes are read. The probe runs on the upload request, so it gets 10 seconds per
+file rather than a run's 60; a file that cannot show text in that time is refused. Images are never
+decoded by it, so a large image does not count against a PDF.
 
 **A replacement that cannot be read retires the version it replaced.** If a file stored before these
 checks — or one that changes under an extractor — turns out unreadable or empty when a run reads it,
@@ -546,12 +560,17 @@ into a browser — so extraction is bounded in these ways:
   that runs inside the upload request.
 - **DTDs and external entities are refused** outright, so an Office file cannot expand entities into
   gigabytes (the billion-laughs attack) or reach out to a URL while being parsed.
-- **A PDF stream may expand to at most 64 MB, and a PDF gets 60 seconds.** PDFBox decodes a compressed
-  stream whole into memory, with no limit of its own, and deflate expands about a thousandfold — so
-  every stream is measured on the raw bytes before the file is opened, the way PDFBox's own decoder
-  reads it, and one that expands past the budget is refused. A page's program is checked against the
-  deadline as it runs, and a page that lays out far more glyphs than the character cap could ever keep
-  is stopped rather than held in memory whole.
+- **A PDF may decode at most 128 MB in total, and gets 60 seconds.** PDFBox decodes a compressed stream
+  whole into memory with no limit of its own, and deflate expands about a thousandfold. So every
+  filter PDFBox uses is wrapped, while a document is read, in one that counts what it writes: the count
+  covers every stream, every stage of a filter chain, every time a stream is referenced (one stream
+  named twenty times in a page's `/Contents` is decoded twenty times at once), and encrypted streams
+  after decryption. Past twice `maxUncompressedBytes` — 128 MB — the document is refused. Before that,
+  a cheap scan of the raw bytes refuses one stream that alone expands past 64 MB, without letting
+  PDFBox allocate anything; it decodes each stream's declared filter chain (Flate, LZW, RunLength,
+  ASCIIHex, ASCII85) and passes over image streams, which text extraction never decodes. A page's
+  program is checked against the deadline as it runs, and a page that lays out far more glyphs than
+  the character cap could ever keep is stopped rather than held in memory whole.
 - **An archive naming the same part twice is refused.** A real Office file never does, and two entries
   under one name means two readers can disagree about the contents.
 
