@@ -244,6 +244,19 @@ class UpgradeExecutorDescriptorTest {
     }
 
     @Test
+    @DisplayName("workflows and extensions are not counted when the agent that would load them could not be written")
+    void extensionsNotCountedWhenTheAgentWriteIsRefused() throws Exception {
+        givenTargetAt(3);
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any())).thenReturn(Response.status(409).build());
+
+        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType())),
+                "a refused agent write must be reported, got: " + result.failures());
+        assertEquals(0, result.updated(), "neither the workflow nor the LLM is reachable from any deployed agent");
+    }
+
+    @Test
     @DisplayName("a changed workflow the operator deselected is not counted as skipped (identical)")
     void deselectedChangedWorkflowIsNotSkipped() throws Exception {
         givenTargetAt(3);
