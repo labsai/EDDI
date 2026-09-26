@@ -6,9 +6,13 @@ package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -43,6 +47,8 @@ class MigrationManagerTest {
     void setUp() {
         openMocks(this);
         MongoCollection<Document> mockCollection = mock(MongoCollection.class);
+        FindIterable<Document> noDocuments = iterableOf();
+        when(mockCollection.find()).thenReturn(noDocuments);
         when(database.getCollection(anyString())).thenReturn(mockCollection);
 
         migrationManager = new MigrationManager(database, migrationLogStore, true);
@@ -408,8 +414,10 @@ class MigrationManagerTest {
             MongoCollection<Document> conversationMemoryColl = mock(MongoCollection.class, "conversationMemoryColl");
             when(database.getCollection(anyString())).thenReturn(defaultColl);
             when(database.getCollection(COLLECTION_CONVERSATION_MEMORY)).thenReturn(conversationMemoryColl);
-            when(defaultColl.find()).thenReturn(mock(FindIterable.class));
-            when(conversationMemoryColl.find()).thenReturn(mock(FindIterable.class));
+            FindIterable<Document> noDefaults = iterableOf();
+            FindIterable<Document> noMemories = iterableOf();
+            when(defaultColl.find()).thenReturn(noDefaults);
+            when(conversationMemoryColl.find()).thenReturn(noMemories);
 
             var managerWithMemories = new MigrationManager(database, migrationLogStore, false);
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
@@ -422,6 +430,62 @@ class MigrationManagerTest {
             // Verify conversation memory collection was actually iterated
             verify(conversationMemoryColl).find();
         }
+
+        /**
+         * One document that cannot be migrated used to throw out of the sweep — every
+         * document after it stayed unmigrated — and the migration was then recorded as
+         * complete anyway, so nothing ever retried it.
+         */
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a document that cannot be migrated neither stops the sweep nor lets it be recorded as done")
+        void failedDocumentIsNotRecordedAsDone() {
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> propertySetters = mock(MongoCollection.class, "propertySetters");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_PROPERTYSETTER)).thenReturn(propertySetters);
+            FindIterable<Document> noDocuments = iterableOf();
+            when(defaultColl.find()).thenReturn(noDocuments);
+
+            // Two legacy documents; persisting the first one fails. The second must still
+            // be migrated, and the run must not be recorded as done.
+            var first = new HashMap<String, Object>();
+            first.put("value", "hello");
+            Document broken = buildPropertySetterDoc(first);
+            broken.put("_id", new ObjectId());
+            var second = new HashMap<String, Object>();
+            second.put("value", "world");
+            Document valid = buildPropertySetterDoc(second);
+            valid.put("_id", new ObjectId());
+            FindIterable<Document> twoDocuments = iterableOf(broken, valid);
+            when(propertySetters.find()).thenReturn(twoDocuments);
+            when(propertySetters.replaceOne(any(Bson.class), any(Document.class)))
+                    .thenThrow(new MongoException("write failed"))
+                    .thenReturn(null);
+
+            var manager = new MigrationManager(database, migrationLogStore, true, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            var completed = new boolean[]{false};
+            manager.startMigrationIfFirstTimeRun(() -> completed[0] = true);
+
+            assertTrue(completed[0], "startup must still be told the migration step finished");
+            verify(propertySetters, times(2)).replaceOne(any(Bson.class), any(Document.class));
+            verify(migrationLogStore, never()).createMigrationLog(any());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static FindIterable<Document> iterableOf(Document... documents) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        doAnswer(inv -> {
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            var remaining = new ArrayDeque<>(List.of(documents));
+            when(cursor.hasNext()).thenAnswer(i -> !remaining.isEmpty());
+            when(cursor.next()).thenAnswer(i -> remaining.poll());
+            return cursor;
+        }).when(iterable).iterator();
+        return iterable;
     }
 
     // ─── migrateConversationMemory ────────────────────────────────
