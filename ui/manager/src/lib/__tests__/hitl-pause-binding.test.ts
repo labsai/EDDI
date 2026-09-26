@@ -69,6 +69,11 @@ describe("isSamePause", () => {
     expect(isSamePause(shownPauseOf(toolStatus(["a"])), currentPauseOf(toolStatus(["b"])))).toBe(false);
   });
 
+  it("refuses a shown pause with neither an id nor a start instant — kind alone is not an identity", () => {
+    expect(isSamePause({ pauseType: "RULE" }, currentPauseOf(ruleStatus))).toBe(false);
+    expect(isSamePause({}, currentPauseOf(ruleStatus))).toBe(false);
+  });
+
   it("lets pause ids decide when both sides have one", () => {
     expect(
       isSamePause({ pauseId: "1" }, { ...currentPauseOf(ruleStatus), pauseId: "2" }),
@@ -130,6 +135,13 @@ describe("isPauseChanged", () => {
       ),
     ).toBe(true);
     expect(isPauseChanged(new ApiClientError(409, "Conversation is not awaiting approval (state READY)"))).toBe(false);
+    // The group approve's only wrong-state wording — #839's pause mismatch included.
+    expect(
+      isPauseChanged(
+        new ApiClientError(409, "Group conversation is not awaiting approval — it may have been resolved, cancelled, or timed out"),
+      ),
+    ).toBe(true);
+    expect(isPauseChanged(new ApiClientError(409, "Conversation is not in a resumable state (current state: READY)"))).toBe(false);
     expect(isPauseChanged(new ApiClientError(500, "changed since this decision"))).toBe(false);
     expect(isPauseChanged(new Error("x"))).toBe(false);
   });
