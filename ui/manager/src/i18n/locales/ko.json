@@ -4925,7 +4925,12 @@
       "space": "작업 공간",
       "spaceHint": "이 리소스의 작업 공간에 속한 모든 사람.",
       "published": "게시됨",
-      "publishedHint": "이 배포에 접근할 수 있는 모든 사람."
+      "publishedHint": "이 배포에 접근할 수 있는 모든 사람.",
+      "confirmTitle": "공개 범위를 {{visibility}}(으)로 변경하시겠습니까?",
+      "cascadeLabel": "참조하는 워크플로와 구성에도 적용",
+      "cascadeWarning": "소유한 참조 리소스마다 이 공개 범위가 적용되어 개별 설정을 대체합니다. 이전 설정은 보존되지 않습니다.",
+      "noCascadeWarning": "이 리소스만 변경됩니다. 이제 볼 수 있게 된 사람도 참조 대상을 열지 못할 수 있습니다.",
+      "apply": "공개 범위 변경"
     },
     "share": {
       "title": "공유",

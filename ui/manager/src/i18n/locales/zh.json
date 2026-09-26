@@ -4925,7 +4925,12 @@
       "space": "工作区",
       "spaceHint": "该资源所在工作区的所有人。",
       "published": "已发布",
-      "publishedHint": "所有能访问此部署的人。"
+      "publishedHint": "所有能访问此部署的人。",
+      "confirmTitle": "将可见性更改为{{visibility}}？",
+      "cascadeLabel": "同时应用于其引用的工作流和配置",
+      "cascadeWarning": "你拥有的每个被引用资源都会采用此可见性，替换其各自的设置。之前的设置不会保留。",
+      "noCascadeWarning": "只更改此资源。现在能看到它的人可能仍无法打开它引用的内容。",
+      "apply": "更改可见性"
     },
     "share": {
       "title": "共享",

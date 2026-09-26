@@ -4969,7 +4969,12 @@
       "space": "Espaço",
       "spaceHint": "Todos no espaço deste recurso.",
       "published": "Publicado",
-      "publishedHint": "Qualquer pessoa com acesso a esta instalação."
+      "publishedHint": "Qualquer pessoa com acesso a esta instalação.",
+      "confirmTitle": "Alterar a visibilidade para {{visibility}}?",
+      "cascadeLabel": "Aplicar também aos fluxos e configurações que referencia",
+      "cascadeWarning": "Cada recurso referenciado que lhe pertence recebe esta visibilidade, substituindo a sua própria definição. As definições anteriores não são guardadas.",
+      "noCascadeWarning": "Só este recurso muda. Quem agora o puder ver pode continuar sem conseguir abrir o que ele referencia.",
+      "apply": "Alterar visibilidade"
     },
     "share": {
       "title": "Compartilhar",

@@ -311,9 +311,59 @@ describe("ShareDialog", () => {
     await waitFor(() => expect(screen.getByTestId("visibility-published")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("visibility-published"));
+    await userEvent.click(screen.getByTestId("visibility-apply"));
 
     await waitFor(() => expect(sentVisibility).toBe("published"));
     expect(await screen.findByText("Applied to 2 resources")).toBeInTheDocument();
+    expect(screen.queryByTestId("visibility-confirm")).not.toBeInTheDocument();
+  });
+
+  it("does not change visibility on a single click — it asks first, and cancel sends nothing", async () => {
+    // The change cascades through the agent's whole config graph and replaces
+    // each resource's own setting; it used to fire on one click.
+    const puts: string[] = [];
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.put(`${SHARES}/visibility`, ({ request }) => {
+        puts.push(request.url);
+        return HttpResponse.json({ updated: [], skipped: [] });
+      }),
+    );
+    renderWithProviders(<ShareDialog {...props} />);
+    await userEvent.click(await screen.findByTestId("visibility-published"));
+
+    const confirm = screen.getByTestId("visibility-confirm");
+    expect(confirm).toHaveTextContent(/previous settings are not kept/);
+    expect(puts).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("visibility-cancel"));
+    expect(screen.queryByTestId("visibility-confirm")).not.toBeInTheDocument();
+    expect(puts).toEqual([]);
+  });
+
+  it("can keep a visibility change to this resource alone", async () => {
+    let cascade: string | null = null;
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.put(`${SHARES}/visibility`, ({ request }) => {
+        cascade = new URL(request.url).searchParams.get("cascade");
+        return HttpResponse.json({ updated: [{ id: RESOURCE_ID, name: "Test Agent" }], skipped: [] });
+      }),
+    );
+    renderWithProviders(<ShareDialog {...props} />);
+    await userEvent.click(await screen.findByTestId("visibility-private"));
+    await userEvent.click(screen.getByTestId("visibility-cascade"));
+    await userEvent.click(screen.getByTestId("visibility-apply"));
+
+    await waitFor(() => expect(cascade).toBe("false"));
+  });
+
+  it("offers nothing to confirm for the visibility already set", async () => {
+    server.use(http.get(SHARES, () => HttpResponse.json(shareInfo())));
+    renderWithProviders(<ShareDialog {...props} />);
+    // shareInfo() is "space".
+    await userEvent.click(await screen.findByTestId("visibility-space"));
+    expect(screen.queryByTestId("visibility-confirm")).not.toBeInTheDocument();
   });
 
   it("names the resources it could not touch, and counts the ones it did not name", async () => {

@@ -4969,7 +4969,12 @@
       "space": "Espace",
       "spaceHint": "Tous les membres de l'espace de cette ressource.",
       "published": "Publié",
-      "publishedHint": "Toute personne ayant accès à cette installation."
+      "publishedHint": "Toute personne ayant accès à cette installation.",
+      "confirmTitle": "Changer la visibilité en {{visibility}} ?",
+      "cascadeLabel": "L'appliquer aussi aux workflows et configurations référencés",
+      "cascadeWarning": "Chaque ressource référencée qui vous appartient reçoit cette visibilité, qui remplace son réglage propre. Les réglages précédents ne sont pas conservés.",
+      "noCascadeWarning": "Seule cette ressource change. Les personnes qui peuvent désormais la voir ne pourront peut-être pas ouvrir ce qu'elle référence.",
+      "apply": "Changer la visibilité"
     },
     "share": {
       "title": "Partager",

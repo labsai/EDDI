@@ -4925,7 +4925,12 @@
       "space": "Arbeitsbereich",
       "spaceHint": "Alle im Arbeitsbereich dieser Ressource.",
       "published": "Veröffentlicht",
-      "publishedHint": "Alle mit Zugang zu dieser Installation."
+      "publishedHint": "Alle mit Zugang zu dieser Installation.",
+      "confirmTitle": "Sichtbarkeit auf {{visibility}} ändern?",
+      "cascadeLabel": "Auch auf die referenzierten Workflows und Konfigurationen anwenden",
+      "cascadeWarning": "Jede referenzierte Ressource, die Ihnen gehört, erhält diese Sichtbarkeit und verliert ihre eigene Einstellung. Die bisherigen Einstellungen werden nicht aufbewahrt.",
+      "noCascadeWarning": "Nur diese Ressource ändert sich. Wer sie jetzt sehen kann, kann das Referenzierte eventuell trotzdem nicht öffnen.",
+      "apply": "Sichtbarkeit ändern"
     },
     "share": {
       "title": "Teilen",

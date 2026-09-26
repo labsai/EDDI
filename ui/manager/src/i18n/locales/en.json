@@ -4925,7 +4925,12 @@
       "space": "Workspace",
       "spaceHint": "Everyone in this resource's workspace.",
       "published": "Published",
-      "publishedHint": "Everyone with access to this deployment."
+      "publishedHint": "Everyone with access to this deployment.",
+      "confirmTitle": "Change visibility to {{visibility}}?",
+      "cascadeLabel": "Also apply it to the workflows and configurations this references",
+      "cascadeWarning": "Each referenced resource you own gets this visibility, replacing whatever it was set to on its own. Their previous settings are not kept.",
+      "noCascadeWarning": "Only this resource changes. Anyone who can now see it may still be unable to open what it references.",
+      "apply": "Change visibility"
     },
     "share": {
       "title": "Share",
