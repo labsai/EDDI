@@ -1801,6 +1801,12 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     @Override
+    public List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException {
+        return lifecycleOps().listGroupConversations(groupId, ownerUserId, index, limit);
+    }
+
+    @Override
     public GroupConversation followUpWithMember(String groupConversationId, String targetAgentId,
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {

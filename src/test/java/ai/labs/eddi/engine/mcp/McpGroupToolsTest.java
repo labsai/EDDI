@@ -609,6 +609,7 @@ class McpGroupToolsTest {
         ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
         verify(jsonSerialization).serialize(captor.capture());
         assertTrue(captor.getValue().isEmpty(), "a caller with no principal name owns nothing, got: " + result);
+        verify(groupConversationService, never()).listGroupConversations(any(), anyInt(), anyInt());
     }
 
     private GroupConversation ownedBy(String userId) throws Exception {
@@ -783,7 +784,8 @@ class McpGroupToolsTest {
         var theirs = new GroupConversation();
         theirs.setId("gc-theirs");
         theirs.setUserId("alice");
-        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+        // Even if the store handed back a foreign row, the exact re-check drops it.
+        when(groupConversationService.listGroupConversations("g1", "bob", 0, 20)).thenReturn(List.of(mine, theirs));
 
         toolsAsUser("bob", "eddi-viewer").list_group_conversations("g1", null, null);
 
@@ -791,6 +793,9 @@ class McpGroupToolsTest {
         verify(jsonSerialization).serialize(captor.capture());
         assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
         assertEquals("gc-mine", captor.getValue().get(0).getId());
+        // The owner restriction is in the query, so paging covers only bob's
+        // conversations — filtering a fetched page left non-admins short pages.
+        verify(groupConversationService, never()).listGroupConversations("g1", 0, 20);
     }
 
     // --- I13: standing-team backlog ---
