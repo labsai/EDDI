@@ -19,6 +19,13 @@ public interface IConversationMemoryStore {
     /**
      * Persist the full snapshot under optimistic concurrency.
      * <p>
+     * A full-document write whose snapshot is not itself {@code ENDED} is also
+     * refused while the stored conversation is {@code ENDED}: ending a conversation
+     * is a narrow state write that does not move the revision, so the revision
+     * guard alone would let a turn that was already running (a rerun, or a memory
+     * whose append baseline is unknown) replace the terminal state and resurrect
+     * the conversation. The refusal is reported like any other conflict.
+     * <p>
      * The write is guarded on {@link ConversationMemorySnapshot#getRevision()} —
      * the revision the snapshot was loaded at — and increments it. A snapshot whose
      * conversationId is {@code null} is inserted instead, at revision 1.
@@ -91,6 +98,28 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     ConversationState getConversationState(String conversationId);
+
+    /**
+     * The optimistic-concurrency revision the stored conversation currently holds —
+     * a projection read, never the whole document.
+     * <p>
+     * A queued turn uses it to learn whether the memory it was loaded with has been
+     * superseded while it waited behind an earlier turn of the same conversation: a
+     * turn built on the older snapshot would evaluate its rules, its LLM history
+     * and its property writes without the earlier turn, and its commit would
+     * re-apply the stale properties over the ones that turn wrote.
+     *
+     * @param conversationId
+     *            the conversation identifier
+     * @return the stored revision
+     *         ({@link ConversationMemorySnapshot#UNVERSIONED_REVISION} for a
+     *         document written before revisions existed), or {@code null} when the
+     *         conversation does not exist or the backend cannot answer — callers
+     *         must treat {@code null} as "unknown", not as "changed"
+     */
+    default Long getRevision(String conversationId) {
+        return null;
+    }
 
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 

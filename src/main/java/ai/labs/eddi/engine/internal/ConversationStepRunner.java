@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
@@ -30,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemory;
@@ -89,9 +91,30 @@ class ConversationStepRunner {
         this.agentTimeout = agentTimeout;
     }
 
+    /**
+     * Builds one turn's pipeline callable over a given memory: attaches the
+     * per-turn collaborators (audit collector, event sink), constructs the
+     * {@code Conversation} and wraps the call in the conversation's resolution
+     * principal.
+     * <p>
+     * A builder rather than a finished callable, because the callable is bound to
+     * the memory it was built over — the {@code Conversation} captures its longTerm
+     * baseline from it at construction — and a queued turn may have to be rebuilt
+     * over a fresher memory when it finally runs (see {@link #reloadIfSuperseded}).
+     */
+    @FunctionalInterface
+    interface TurnBuilder {
+        Callable<Void> build(IConversationMemory memory) throws Exception;
+    }
+
     IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                             Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                             Consumer<IConversationMemory> skipNotifier, ConversationService.ProcessingTurn processingTurn) {
+                                             Map<String, String> loggingContext, TurnBuilder turnBuilder,
+                                             Consumer<IConversationMemory> skipNotifier, ConversationService.ProcessingTurn processingTurn)
+            throws Exception {
+        // Built here, on the request thread, so a conversation that cannot run at all
+        // (ended, agent still deploying) is refused to the caller synchronously — the
+        // same place it was refused before the builder existed.
+        final Callable<Void> executeConversation = turnBuilder.build(conversationMemory);
         // Captured here because this method still runs on the REST request
         // thread, where SecurityIdentity resolves. Everything downstream runs on
         // pool threads with no request context, so the identity travels with the
@@ -110,16 +133,20 @@ class ConversationStepRunner {
         // IDiscardableTask wrapper below changed that — runConversationStep receives
         // the bound callable and hands it to runGuardedConversationStep, which is
         // where it was used before.
-        final Callable<Void> identityBoundExecution = conversationService.callerIdentityContext.withIdentity(
-                conversationService.callerIdentityContext.captureOrCurrent(),
-                executeConversation);
+        //
+        // The captured identity is kept (not just the bound callable) because a turn
+        // rebuilt over a reloaded memory on the pool thread needs the same binding.
+        final CallerIdentity callerIdentity = conversationService.callerIdentityContext.captureOrCurrent();
+        final UnaryOperator<Callable<Void>> bindIdentity = work -> conversationService.callerIdentityContext.withIdentity(callerIdentity,
+                work);
+        final Callable<Void> identityBoundExecution = bindIdentity.apply(executeConversation);
 
         return new IDiscardableTask() {
             @Override
             public Void call() {
                 try {
                     return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                            identityBoundExecution, skipNotifier);
+                            identityBoundExecution, memory -> bindIdentity.apply(turnBuilder.build(memory)), skipNotifier);
                 } finally {
                     // C11: the single guaranteed exit point of a turn. The completion
                     // consumer releases first on the happy path, but a watchdog timeout,
@@ -161,8 +188,14 @@ class ConversationStepRunner {
         };
     }
 
-    Void runConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                             Map<String, String> loggingContext, Callable<Void> executeConversation,
+    /**
+     * @param rebuildTurn
+     *            rebuilds the (identity-bound) turn over a reloaded memory; may be
+     *            {@code null}, in which case the turn always runs on the memory it
+     *            was submitted with
+     */
+    Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
+                             Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
                              Consumer<IConversationMemory> skipNotifier) {
         // Queued-say guard: this memory copy was loaded at REST-request time;
         // a previously queued turn may have committed a pause (or a resume may
@@ -188,14 +221,44 @@ class ConversationStepRunner {
         ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
         if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
                 || persistedState == ConversationState.ENDED) {
-            conversationMemory.setConversationState(persistedState);
+            submittedMemory.setConversationState(persistedState);
             conversationService.contextLogger.setLoggingContext(loggingContext);
             LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
                     conversationId, persistedState);
             if (skipNotifier != null) {
-                skipNotifier.accept(conversationMemory);
+                skipNotifier.accept(submittedMemory);
             }
             return null;
+        }
+
+        // Stale-snapshot guard (H13a): the memory was loaded at request time, and a
+        // turn of the same conversation queued ahead of this one may have committed
+        // since. Running on the old snapshot evaluated lastStep rules, the LLM history
+        // and this turn's property writes WITHOUT the previous turn, and the append
+        // merge then re-applied the stale conversation properties over the ones that
+        // turn wrote (last writer wins). A pause raised by such a turn was lost as
+        // well: its commit is guarded on the revision it loaded, so it missed and was
+        // discarded. Rebuild the turn over the current document instead.
+        IConversationMemory conversationMemory = submittedMemory;
+        Callable<Void> executeConversation = submittedExecution;
+        IConversationMemory reloaded = rebuildTurn != null ? reloadIfSuperseded(conversationId, submittedMemory, loggingContext) : null;
+        if (reloaded != null) {
+            try {
+                executeConversation = rebuildTurn.build(reloaded);
+                conversationMemory = reloaded;
+            } catch (Exception e) {
+                // The reloaded conversation cannot run this turn (it was ended in between,
+                // or the agent is no longer available). Report it as skipped — the input
+                // was not consumed — rather than running it on a snapshot now known to be
+                // superseded.
+                conversationService.contextLogger.setLoggingContext(loggingContext);
+                LOGGER.warnf("Skipping queued turn for conversation %s: it could not be rebuilt over the current "
+                        + "conversation (%s)", sanitize(conversationId), e.getMessage());
+                if (skipNotifier != null) {
+                    skipNotifier.accept(reloaded);
+                }
+                return null;
+            }
         }
 
         // Zombie-pause guard: the state loaded WITH the snapshot at request
@@ -252,11 +315,14 @@ class ConversationStepRunner {
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
                                 ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
-                                if (runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS) {
-                                    if (conversationMemoryStore.compareAndSetState(conversationId,
-                                            runningState, ConversationState.EXECUTION_INTERRUPTED)) {
-                                        cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-                                    }
+                                if ((runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS)
+                                        && conversationMemoryStore.compareAndSetState(conversationId,
+                                                runningState, ConversationState.EXECUTION_INTERRUPTED)) {
+                                    cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                                } else {
+                                    // The completion callback already cached this discarded
+                                    // turn's own end state; replace it with the persisted one.
+                                    refreshCachedState(conversationId);
                                 }
                                 return;
                             }
@@ -270,6 +336,7 @@ class ConversationStepRunner {
                                 conversationService.contextLogger.setLoggingContext(loggingContext);
                                 LOGGER.warnf("Discarding turn result for conversation %s: snapshot carried a stale "
                                         + "AWAITING_HUMAN state this turn did not produce", conversationId);
+                                refreshCachedState(conversationId);
                                 return;
                             }
                             // #6: copy the agent's timeout policy into the bookmark
@@ -307,6 +374,10 @@ class ConversationStepRunner {
                                     LOGGER.infof("Pause of conversation %s not persisted: a concurrent writer moved it "
                                             + "off %s or rewrote the document — discarding the pause outcome so the "
                                             + "committed write wins", conversationId, preTurnPersistedState);
+                                    // E2: the completion callback cached AWAITING_HUMAN before this
+                                    // commit ran. Left there, the state endpoint advertised a pending
+                                    // approval the store never held, and /resume then failed.
+                                    refreshCachedState(conversationId);
                                     return;
                                 }
                                 // M2: close the cancel-during-commit window. A cancel that
@@ -359,6 +430,7 @@ class ConversationStepRunner {
                             // conversation because THIS turn lost the race would trade one
                             // wrong outcome for another.
                             reportStoreConflict(loggingContext, conversationId, e);
+                            refreshCachedState(conversationId);
                         } catch (ResourceStoreException e) {
                             logConversationError(loggingContext, conversationId, e);
                         }
@@ -456,8 +528,16 @@ class ConversationStepRunner {
      */
     void reportStoreConflict(Map<String, String> loggingContext, String conversationId,
                              ConcurrentConversationModificationException e) {
-        conversationService.counterConversationStoreConflict.increment();
         conversationService.contextLogger.setLoggingContext(loggingContext);
+        if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED) {
+            // E4: the store refuses to write a running turn over a conversation that was
+            // ended meanwhile. That is the end winning, not a lost update — nothing to
+            // retry, and nothing for the conflict meter.
+            LOGGER.infof("Turn of conversation %s was not persisted: the conversation was ended while the turn was "
+                    + "running, and the end stands", sanitize(conversationId));
+            return;
+        }
+        conversationService.counterConversationStoreConflict.increment();
         LOGGER.errorf(e, "Turn of conversation %s was NOT persisted: the conversation document was written by another "
                 + "turn, resume, undo/redo or instance while this turn was running (this turn started from revision %d). "
                 + "The reply was already returned to the caller, so this turn's step is lost — the caller should retry it.",
@@ -506,6 +586,56 @@ class ConversationStepRunner {
             return;
         }
         conversationStateCache.put(conversationId, conversationState);
+    }
+
+    /**
+     * The current memory of the conversation when the stored document has moved on
+     * from the revision {@code memory} was loaded at, else {@code null} (the memory
+     * is current, or it could not be determined — the turn then runs on what it
+     * has, as it always did).
+     */
+    IConversationMemory reloadIfSuperseded(String conversationId, IConversationMemory memory, Map<String, String> loggingContext) {
+        try {
+            Long storedRevision = conversationMemoryStore.getRevision(conversationId);
+            if (storedRevision == null || storedRevision == memory.getRevision()) {
+                return null;
+            }
+            IConversationMemory reloaded = loadConversationMemory(conversationId);
+            if (reloaded == null) {
+                return null;
+            }
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            LOGGER.debugf("Queued turn of conversation %s was loaded at revision %d; the conversation is now at %d — "
+                    + "running it on the current document", sanitize(conversationId), memory.getRevision(), reloaded.getRevision());
+            return reloaded;
+        } catch (Exception e) {
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            LOGGER.warnf("Could not check whether the queued turn of conversation %s is current (%s) — running it on the "
+                    + "memory it was submitted with", sanitize(conversationId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Re-reads the persisted state into the state cache. The say path's completion
+     * callback caches the state the turn ENDED with — from inside the pipeline,
+     * before the persist — so whenever the persist is then refused or skipped, the
+     * cache holds a state the store never saw (typically AWAITING_HUMAN for a pause
+     * that was discarded, which made {@code /resume} fail against a READY
+     * conversation while the state endpoint reported a pending approval).
+     */
+    void refreshCachedState(String conversationId) {
+        try {
+            ConversationState persisted = conversationMemoryStore.getConversationState(conversationId);
+            if (persisted == null) {
+                conversationStateCache.remove(conversationId);
+            } else {
+                conversationStateCache.put(conversationId, persisted);
+            }
+        } catch (RuntimeException e) {
+            // Unknown is better served by the store than by a value known to be wrong.
+            conversationStateCache.remove(conversationId);
+        }
     }
 
     String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
