@@ -544,8 +544,37 @@ public class RestConversationStore implements IRestConversationStore {
         }
         // One vault listing for the whole sweep rather than one per conversation.
         deleteConversationSecrets(deletedConversationIds);
+        deleteOrphanedConversationSecrets();
 
         return amountOfEndedConversations;
+    }
+
+    /**
+     * How old an auto-vaulted entry must be before the sweep may treat it as
+     * orphaned: a conversation's first turn writes its entry before the
+     * conversation itself is first stored.
+     */
+    static final Duration ORPHANED_SECRET_GRACE = Duration.ofDays(1);
+
+    /**
+     * Retries what {@link #deleteConversationSecrets} could not do: vault entries
+     * of conversations that no longer exist — a vault failure during an earlier
+     * delete, a start turn that failed before its conversation was stored, a bulk
+     * erasure. Best effort, like the delete itself.
+     */
+    private void deleteOrphanedConversationSecrets() {
+        if (secretPropertyVault == null) {
+            return;
+        }
+        try {
+            int deleted = secretPropertyVault.deleteOrphanedConversationSecrets(conversationMemoryStore::conversationExists,
+                    Instant.now().minus(ORPHANED_SECRET_GRACE));
+            if (deleted > 0) {
+                log.info(format("Deleted %d orphaned vault entr%s of secret properties", deleted, deleted == 1 ? "y" : "ies"));
+            }
+        } catch (RuntimeException e) {
+            log.warn(format("Could not remove orphaned vault entries of secret properties: %s", e.getMessage()));
+        }
     }
 
     /**

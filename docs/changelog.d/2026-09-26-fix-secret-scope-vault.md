@@ -54,6 +54,14 @@ Fixes the secret-handling findings of the 2026-09-25 whole-repo review (C2, C2b,
   - `AgentSetupService.vaultApiKey` used to fall back to plaintext when the vault was configured but the write failed. It now fails the setup.
   - A plaintext `apiAuth` in `createApiAgent` is vaulted and recorded for rollback, and the spec is re-parsed so the generated headers carry the reference.
 
+- **CodeRabbit full review of `058eddc31`.**
+  - *Orphaned vault entries.* `deleteConversationSecrets` runs after the conversation is gone and is best effort, so a vault failure at that moment left the entry for good. A start turn that vaults a secret and then fails before the conversation is first stored left one too, and so does a bulk erasure. The retention sweep now also calls `SecretPropertyVault.deleteOrphanedConversationSecrets`. It deletes every auto-vaulted entry last written more than a day ago whose conversation is no longer stored. The one-day grace keeps an in-progress start turn's entry. An entry whose conversation cannot be looked up is kept. Existence is checked with the new `IConversationMemoryStore.conversationExists`, implemented by both stores. `getConversationState` also answers `null` for a document without a state, so it could not tell "gone" from "no state".
+  - *Short secrets inside stored JSON text.* A paused tool call keeps its arguments as a JSON string, so `{"pin":"4711"}` did not equal `4711` and the exact match missed it. With exact-match values in play, `SecretValueScrubber` now parses a string that holds a JSON object or array, scrubs the parsed tree and writes it back. It does this only when something was replaced. Nested serialized JSON, such as a transcript's tool-call arguments, is reached by the same walk.
+  - *Map keys.* A map key that *is* an exact-match value is replaced, like a value.
+  - *Checked template failures.* `buildRequest` now redacts a `TemplateEngineException` as well as a `RuntimeException`. The first can follow a path that already resolved a secret, and before this fix it reached the caller before those plaintexts joined its redaction set.
+  - *`${vars:}` parameter check.* The check now uses set membership of whole references, as the credential check does, instead of substring containment.
+  - Two findings were not changed. The leaves of a secret *object* are still not exact-matched: that is decision review #4, and the docs now tell callers to send a short credential as its own string entry. `conversationIdOf` also keeps its segment match: the description, which only `vault` writes, already names the conversation.
+
 ### Behaviour changes to know about
 
 - A conversation that auto-vaulted a secret before this change holds a reference to the old shared key. Apicalls now refuse it with a message saying so. The user has to enter the secret again, or start a new conversation.
@@ -65,7 +73,7 @@ Fixes the secret-handling findings of the 2026-09-25 whole-repo review (C2, C2b,
 
 ### Deferred / follow-up
 
-- GDPR erasure (`deleteConversationsByUserId`) does not yet delete the erased user's vault entries. That path belongs to `fix/gdpr-erasure` (PR #834), which can call `SecretPropertyVault.deleteConversationSecrets` with the erased conversation ids.
+- GDPR erasure (`deleteConversationsByUserId`) does not yet delete the erased user's vault entries when the erasure runs. The retention sweep's orphan reconciliation removes them on its next run, a day or more later. Deleting them at erasure time belongs to `fix/gdpr-erasure` (PR #834), which can call `SecretPropertyVault.deleteConversationSecrets` with the erased conversation ids.
 - `VaultSecretProvider.store` still resets `allowedAgents` on an existing entry. That is owned by `fix/vault-key-safety`.
 - The HITL-resume rebuild in `LlmTask` goes through the same `runTemplateEngineOnParams`, and so through the same guard, as the normal path. It is not driven by a dedicated test.
 
@@ -74,5 +82,6 @@ Fixes the secret-handling findings of the 2026-09-25 whole-repo review (C2, C2b,
 | 2026-09-26 | The conversation id is allocated by the store before the CONVERSATION_START turn, and the first write inserts under it | Per-conversation keys need the id on the init turn | Deriving the key from a separate server-side scope id; vaulting under a placeholder and re-keying after the first store |
 | 2026-09-26 | Legacy per-agent auto-vault references are refused, with a dedicated message, not grandfathered | Resolving them keeps the cross-user credential mix-up alive | Accepting the old key shape in ConfigReferenceGuard; copying the old value into a per-conversation entry |
 | 2026-09-26 | Short secret context values (4–7 chars) are exact-match scrubbed, top-level string entries only | S4: a PIN copied into a property survived; object leaves would blank unrelated data | Substring replacement; matching object leaves |
+| 2026-09-26 | Orphaned auto-vault entries are reconciled by the retention sweep: last written more than a day ago, and the conversation is not stored | Delete-time cleanup is best effort, and failed start turns and bulk erasure never call it | A durable pending-deletion queue; deleting the entry before the conversation |
 | 2026-09-26 | Success bodies: text redaction for secrets ≥ 8 chars, JSON scrubbed as a tree | Echo redaction must not corrupt the data a call fetches | Redacting every length by substring; redacting error bodies only |
 ```

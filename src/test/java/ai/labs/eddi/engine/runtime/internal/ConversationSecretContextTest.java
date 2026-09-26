@@ -235,6 +235,27 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("S4: a short secret inside a paused call's serialized arguments is replaced, not only a long one")
+    void shortValueInPendingToolCallArguments() throws Exception {
+        String pin = "4711";
+        doAnswer(invocation -> {
+            var call = new PendingToolCall();
+            call.setToolName("downstream");
+            call.setArgumentsRaw("{\"pin\":\"" + pin + "\",\"note\":\"order 14711\"}");
+            var batch = new PendingToolCallBatch();
+            batch.setCalls(List.of(call));
+            memory.setHitlPendingToolCalls(batch);
+            throw new ConversationPauseException("wf1", 1, "gated", PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(pin, true));
+
+        PendingToolCallBatch persisted = memory.getHitlPendingToolCalls();
+        assertNotNull(persisted);
+        assertEquals("{\"pin\":\"" + PLACEHOLDER + "\",\"note\":\"order 14711\"}", persisted.getCalls().getFirst().getArgumentsRaw());
+    }
+
+    @Test
     @DisplayName("a numeric leaf of a secret object is replaced where a task copied it")
     void numericSecretLeaf() throws Exception {
         doAnswer(invocation -> {

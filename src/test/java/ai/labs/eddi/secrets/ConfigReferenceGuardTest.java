@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -199,5 +200,16 @@ class ConfigReferenceGuardTest {
                 "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, Map.of()));
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
                 "Bearer ${vault:agent1.conv1.apiKey}", "header", DATA, null));
+    }
+
+    @Test
+    @DisplayName("a ${vars:} parameter reference must be one the template wrote whole, not text inside another reference")
+    void variableReferenceMatchedWhole() {
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:model}-{context.suffix}"),
+                Map.of("modelName", "${vars:model}-large"), Set.of(), "LLM", DATA, VAULTED));
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:outer${vars:model}"),
+                        Map.of("modelName", "${vars:model}"), Set.of(), "LLM", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("${vars:model}"), e.getMessage());
     }
 }

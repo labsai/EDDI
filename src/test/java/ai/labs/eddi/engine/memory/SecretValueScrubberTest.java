@@ -151,4 +151,31 @@ class SecretValueScrubberTest {
         assertEquals(List.of("<p>", "x"), map.get("list"));
         assertNull(SecretValueScrubber.scrubDeep("order 14711", List.of(), List.of("4711"), "<p>"), "no whole-value match, nothing to do");
     }
+
+    @Test
+    @DisplayName("S4: a map key that IS an exact value is replaced like a value")
+    void exactMapKey() {
+        Object cleaned = SecretValueScrubber.scrubDeep(Map.of("4711", "pin", "code-4711", "kept"), List.of(), List.of("4711"), "<p>");
+
+        assertEquals(Map.of("<p>", "pin", "code-4711", "kept"), cleaned);
+    }
+
+    @Test
+    @DisplayName("S4: an exact value inside serialized JSON text is replaced, nested serialized JSON included")
+    void exactValueInsideJsonText() {
+        Object cleaned = SecretValueScrubber.scrubDeep(Map.of("argumentsRaw", "{\"pin\":\"4711\",\"note\":\"order 14711\"}",
+                "transcript", "[{\"arguments\":\"{\\\"pin\\\":4711}\"}]"), List.of(), List.of("4711"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals("{\"pin\":\"<p>\",\"note\":\"order 14711\"}", map.get("argumentsRaw"));
+        assertEquals("[{\"arguments\":\"{\\\"pin\\\":\\\"<p>\\\"}\"}]", map.get("transcript"));
+    }
+
+    @Test
+    @DisplayName("S4: text that only looks like JSON, or JSON without the value, is left alone")
+    void jsonLookalikes() {
+        assertNull(SecretValueScrubber.scrubDeep("{not json 4711}", List.of(), List.of("4711"), "<p>"));
+        assertNull(SecretValueScrubber.scrubDeep("{\"note\":\"order 14711\"}", List.of(), List.of("4711"), "<p>"));
+    }
 }

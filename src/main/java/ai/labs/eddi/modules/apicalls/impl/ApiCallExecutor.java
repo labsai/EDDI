@@ -837,9 +837,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var resolvedSecrets = new HashSet<String>();
         try {
             return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
+            // A template failure after an earlier part of the request resolved a secret
+            // is checked, and would otherwise reach the caller's log before these
+            // plaintexts join its redaction set.
             RuntimeException safe = withoutSecrets(e, resolvedSecrets);
-            throw safe != null ? safe : e;
+            if (safe != null) {
+                throw safe;
+            }
+            throw e;
         }
     }
 

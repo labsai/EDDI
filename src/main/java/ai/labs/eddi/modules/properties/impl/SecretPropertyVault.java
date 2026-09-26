@@ -21,10 +21,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -197,19 +199,68 @@ public class SecretPropertyVault {
         if (conversationIds == null || conversationIds.isEmpty() || !secretProvider.isAvailable()) {
             return 0;
         }
+        Set<String> ids = new HashSet<>(conversationIds);
+        return deleteMatching(entry -> ids.contains(conversationIdOf(entry)),
+                "the secrets of " + conversationIds.size() + " deleted conversation(s)");
+    }
+
+    /**
+     * Delete the auto-vaulted entries whose conversation no longer exists — the
+     * reconciliation behind {@link #deleteConversationSecrets}, run by the
+     * retention sweep.
+     * <p>
+     * That call is best effort and runs after the conversation is gone, so a vault
+     * failure at that moment used to leave the entry behind for good. Two more
+     * paths never call it at all: a start turn that vaults a secret and then fails
+     * before the conversation is first stored, and an erasure that removes
+     * conversations in bulk. This sweep finds all three by what they have in common
+     * — an entry {@link #vault} wrote whose conversation is not in the store — so a
+     * missed delete is retried on the next run instead of being lost.
+     * <p>
+     * Only entries last written before {@code writtenBefore} qualify: a
+     * conversation's first turn writes its entry before the conversation is stored,
+     * and must not lose it to a sweep that runs in between. An entry without a
+     * timestamp, or whose conversation cannot be looked up, is kept.
+     *
+     * @param conversationExists
+     *            whether the conversation with this id is still stored
+     * @return the number of entries deleted
+     */
+    public int deleteOrphanedConversationSecrets(Predicate<String> conversationExists, Instant writtenBefore) {
+        if (conversationExists == null || writtenBefore == null || !secretProvider.isAvailable()) {
+            return 0;
+        }
+        return deleteMatching(entry -> {
+            String conversationId = conversationIdOf(entry);
+            Instant lastWritten = entry.lastRotatedAt() != null ? entry.lastRotatedAt() : entry.createdAt();
+            if (conversationId == null || lastWritten == null || !lastWritten.isBefore(writtenBefore)) {
+                return false;
+            }
+            try {
+                return !conversationExists.test(conversationId);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Kept vault entry of conversation '%s': its conversation could not be looked up (%s)", sanitize(conversationId),
+                        e.getMessage());
+                return false;
+            }
+        }, "orphaned conversation secrets");
+    }
+
+    /**
+     * Deletes every default-tenant entry {@code selected} accepts, found with one
+     * listing. Best effort: a failure is logged and never thrown.
+     */
+    private int deleteMatching(Predicate<SecretMetadata> selected, String what) {
         List<SecretMetadata> entries;
         try {
             entries = secretProvider.listKeys(SecretReference.DEFAULT_TENANT);
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.warnf("Could not list vault entries to remove the secrets of %d deleted conversation(s): %s", conversationIds.size(),
-                    e.getMessage());
+            LOGGER.warnf("Could not list vault entries to remove %s: %s", what, e.getMessage());
             return 0;
         }
-        Set<String> ids = new HashSet<>(conversationIds);
         int deleted = 0;
         for (SecretMetadata entry : entries) {
-            String conversationId = conversationIdOf(entry);
-            if (conversationId == null || !ids.contains(conversationId)) {
+            if (!selected.test(entry)) {
                 continue;
             }
             var ref = new SecretReference(SecretReference.DEFAULT_TENANT, entry.keyName());
@@ -220,8 +271,8 @@ public class SecretPropertyVault {
             } catch (ISecretProvider.SecretNotFoundException e) {
                 // already gone — nothing to do
             } catch (ISecretProvider.SecretProviderException e) {
-                LOGGER.warnf("Could not delete vault entry '%s' of deleted conversation '%s': %s", sanitize(entry.keyName()),
-                        sanitize(conversationId), e.getMessage());
+                LOGGER.warnf("Could not delete vault entry '%s' of conversation '%s': %s", sanitize(entry.keyName()),
+                        sanitize(conversationIdOf(entry)), e.getMessage());
             }
         }
         return deleted;

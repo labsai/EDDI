@@ -31,12 +31,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -492,6 +495,39 @@ class RestConversationStoreTest {
             restConversationStore.permanentlyDeleteEndedConversationLogs(30);
 
             verify(vault).deleteConversationSecrets(List.of("conv-old", "conv-orphan"));
+        }
+
+        @Test
+        @DisplayName("the sweep also reconciles orphaned vault entries against the conversation store, past the grace period")
+        void sweepDeletesOrphanedConversationSecrets() throws Exception {
+            var vault = mock(SecretPropertyVault.class);
+            restConversationStore.secretPropertyVault = vault;
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of());
+            when(conversationMemoryStore.conversationExists("live")).thenReturn(true);
+            Instant before = Instant.now();
+
+            restConversationStore.permanentlyDeleteEndedConversationLogs(30);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Predicate<String>> exists = ArgumentCaptor.forClass(Predicate.class);
+            var cutoff = ArgumentCaptor.forClass(Instant.class);
+            verify(vault).deleteOrphanedConversationSecrets(exists.capture(), cutoff.capture());
+            assertTrue(exists.getValue().test("live"));
+            assertFalse(exists.getValue().test("gone"));
+            assertFalse(cutoff.getValue().isBefore(before.minus(RestConversationStore.ORPHANED_SECRET_GRACE)));
+            assertFalse(cutoff.getValue().isAfter(Instant.now().minus(RestConversationStore.ORPHANED_SECRET_GRACE)),
+                    "only entries older than the grace period may be treated as orphaned");
+        }
+
+        @Test
+        @DisplayName("an orphan-reconciliation failure never fails the sweep")
+        void orphanReconciliationFailureIsSwallowed() throws Exception {
+            var vault = mock(SecretPropertyVault.class);
+            restConversationStore.secretPropertyVault = vault;
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of());
+            when(vault.deleteOrphanedConversationSecrets(any(), any())).thenThrow(new IllegalStateException("vault down"));
+
+            assertEquals(0, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
         }
 
         @Test
