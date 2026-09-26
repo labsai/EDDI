@@ -40,7 +40,7 @@ Properties support four scopes that control their lifetime:
 | `step` | Current conversation turn only | Not persisted | Temporary data needed only for this response |
 | `conversation` | Entire conversation session | Persisted in conversation memory | User preferences within a session, extracted entities |
 | `longTerm` | Across conversations | Persisted in user property store | User profile data, preferences that should survive between sessions |
-| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault under `<agentId>.<propertyName>`; the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
+| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault under `<agentId>.<conversationId>.<propertyName>`; the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
 
 ### Choosing the Right Scope
 
@@ -240,14 +240,18 @@ Conversation.postConversationLifecycleTasks()
 
 ## Secret Properties
 
-Properties with `scope=secret` are automatically handled by the SecretsVault:
+Properties with `scope=secret` are automatically handled by the SecretsVault — in a property setter and in the `preRequest` / `postResponse` property instructions of httpcalls, MCP calls and LLM tasks alike:
 
-1. The moment the property instruction runs, `PropertySetterTask` stores the plaintext in SecretsVault under `<agentId>.<name>`
-2. The raw input is scrubbed from the conversation step
-3. The property value becomes a `${vault:<agentId>.<name>}` reference with `conversation` scope
+1. The moment the property instruction runs, the plaintext is stored in SecretsVault under `<agentId>.<conversationId>.<name>` (default tenant) — **one entry per conversation**, so two users of the same agent never share, or overwrite, each other's secret
+2. Every copy of the plaintext is scrubbed from the conversation step (the raw input, a saved API response it was read from)
+3. The property value becomes a `${vault:<agentId>.<conversationId>.<name>}` reference with `conversation` scope
 4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
 
+Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueFloat`, `valueBoolean` and `convertToObject: true` are rejected under `scope: secret` when the configuration is saved; a `fromObjectPath` that yields anything but a string fails the turn. None of them is ever stored in plaintext.
+
 If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`.
+
+> **Upgrading:** a conversation that vaulted a secret under an earlier release holds a reference to the old, per-agent key (`<agentId>.<name>`), which every conversation of the agent shared. Apicalls refuse to resolve it; have the user enter the secret again, or start a new conversation. A `tenantId` conversation property no longer selects the vault tenant — a client can set it.
 
 ```json
 {
