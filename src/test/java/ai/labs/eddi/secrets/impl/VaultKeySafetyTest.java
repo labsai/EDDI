@@ -10,6 +10,7 @@ import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.inject.Instance;
@@ -24,6 +25,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -386,9 +390,14 @@ class VaultKeySafetyTest {
         @DisplayName("other sealed data is discarded while the DEKs still exist, then the DEKs go")
         void participantsDiscardBeforeTheDeksAreDeleted() throws Exception {
             var participant = mock(SealedDataRotationParticipant.class);
+            var calls = new AtomicInteger();
             when(participant.discardAll("acme")).thenAnswer(inv -> {
-                assertFalse(persistence.listDeks("acme").isEmpty(), "participants must run before the DEKs are deleted");
-                return 3;
+                // First while the DEKs still exist; then once more after they are gone,
+                // for a value sealed in between (m4).
+                boolean first = calls.getAndIncrement() == 0;
+                assertEquals(first, !persistence.listDeks("acme").isEmpty(),
+                        first ? "the first discard must run before the DEKs are deleted" : "the second one after");
+                return first ? 3 : 0;
             });
             var provider = provider(MASTER, participants(participant));
             provider.store(ref("acme", "key"), "value", null, null);
@@ -396,6 +405,8 @@ class VaultKeySafetyTest {
             assertEquals(1, provider.resetTenant("acme"));
 
             assertTrue(persistence.listDeks("acme").isEmpty());
+            // m4: and once more after the DEKs are gone, for a value sealed in between.
+            verify(participant, times(2)).discardAll("acme");
         }
 
         @Test
@@ -433,6 +444,213 @@ class VaultKeySafetyTest {
         provider.rotateKek(MASTER, NEW_MASTER);
 
         assertEquals("first", provider(NEW_MASTER).pinSystemValue("audit-hmac-key", "third"));
+    }
+
+    // ─── B1: a lost master key ───
+
+    @Nested
+    @DisplayName("lost master key")
+    class LostMasterKey {
+
+        private static final String LOST = "the-key-that-was-lost-123";
+        private static final String REPLACEMENT = "the-replacement-key-4567";
+
+        /**
+         * B1: the KEK check value refuses DEK creation under any KEK but the recorded
+         * one, which cannot tell a lost key from a stale replica. Without an explicit
+         * adoption the documented recovery — reset the tenant and store again — was
+         * refused forever, for every tenant, including ones that never existed.
+         */
+        @Test
+        @DisplayName("adopting the replacement key re-enables storing, resets the system tenant, and lists what needs a reset")
+        void adoptionRecoversFromALostKey() throws Exception {
+            var before = provider(LOST);
+            before.store(ref("t1", "key"), "one", null, null);
+            before.pinSystemValue("audit-hmac-key", "pinned-under-the-lost-key");
+
+            var after = provider(REPLACEMENT);
+            var refused = assertThrows(SecretProviderException.class, () -> after.store(ref("t2", "key"), "two", null, null));
+            assertTrue(refused.getMessage().contains("no longer the vault's master key"), refused.getMessage());
+
+            var adoption = after.adoptCurrentMasterKey();
+
+            assertEquals(List.of("t1"), adoption.tenantsNeedingReset());
+            assertTrue(adoption.systemValuesReset());
+            after.store(ref("t2", "key"), "two", null, null);
+            assertEquals("two", after.resolve(ref("t2", "key")));
+            after.resetTenant("t1");
+            after.store(ref("t1", "key"), "one-again", null, null);
+            assertEquals("one-again", provider(REPLACEMENT).resolve(ref("t1", "key")));
+            assertEquals("fresh", after.pinSystemValue("audit-hmac-key", "fresh"), "system values are re-created under the new key");
+        }
+
+        @Test
+        @DisplayName("a vault holding no DEKs adopts a different key at startup — the dev 'restarted with another key' case")
+        void emptyVaultAdoptsTheConfiguredKey() throws Exception {
+            provider(LOST);
+            assertTrue(persistence.meta.containsKey(VaultSecretProvider.KEK_CHECK_META_KEY));
+
+            var after = provider(REPLACEMENT);
+
+            after.store(ref("t1", "key"), "one", null, null);
+            assertEquals("one", after.resolve(ref("t1", "key")));
+        }
+
+        @Test
+        @DisplayName("a DEK the configured key cannot open names adopt-master-key as a recovery option")
+        void decryptFailureNamesAdoption() throws Exception {
+            provider(LOST).store(ref("t1", "key"), "one", null, null);
+
+            var failure = assertThrows(SecretProviderException.class, () -> provider(REPLACEMENT).resolve(ref("t1", "key")));
+
+            assertTrue(failure.getMessage().contains("adopt-master-key"), failure.getMessage());
+        }
+    }
+
+    // ─── m1: a later rotation after an interrupted legacy migration ───
+
+    @Nested
+    @DisplayName("rotation after an interrupted legacy-salt migration")
+    class AfterInterruptedMigration {
+
+        private static final String NEWER = "master-key-three-5555555";
+
+        @Test
+        @DisplayName("every DEK re-wrapped, salt never promoted, nodes restarted: a later rotation still succeeds")
+        void laterRotationSucceedsWhenEveryDekWasReached() throws Exception {
+            seedLegacyTenant("t1", "one");
+            seedLegacyTenant("t2", "two");
+            var provider = provider(MASTER);
+            persistence.failNextPutIfAbsentFor = "vault-kek-salt";
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+
+            var restarted = provider(NEW_MASTER);
+            restarted.store(ref("t9", "key"), "nine", null, null);
+
+            // The legacy-salt derivation of NEW_MASTER opens none of these DEKs; the
+            // pending-salt one opens all of them.
+            assertEquals(3, restarted.rotateKek(NEW_MASTER, NEWER));
+
+            var again = provider(NEWER);
+            assertEquals("one", again.resolve(ref("t1", "key")));
+            assertEquals("two", again.resolve(ref("t2", "key")));
+            assertEquals("nine", again.resolve(ref("t9", "key")));
+        }
+
+        @Test
+        @DisplayName("a DEK the migration never reached refuses a later rotation with guidance, and finishing the earlier one fixes it")
+        void unreachedDekGetsGuidance() throws Exception {
+            seedLegacyTenant("t1", "one");
+            seedLegacyTenant("t2", "two");
+            var provider = provider(MASTER);
+            persistence.failDekRewrapsAfter = 1;
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+            persistence.failDekRewrapsAfter = -1;
+
+            var restarted = provider(NEW_MASTER);
+            var refusal = assertThrows(SecretProviderException.class, () -> restarted.rotateKek(NEW_MASTER, NEWER));
+            assertTrue(refusal.getMessage().contains("previous key to the current one"), refusal.getMessage());
+
+            assertEquals(2, restarted.rotateKek(MASTER, NEW_MASTER));
+            assertEquals(2, restarted.rotateKek(NEW_MASTER, NEWER));
+            var again = provider(NEWER);
+            assertEquals("one", again.resolve(ref("t1", "key")));
+            assertEquals("two", again.resolve(ref("t2", "key")));
+        }
+
+        @Test
+        @DisplayName("salt promoted but the pending marker not deleted: a re-run completes it")
+        void promotedSaltWithLeftoverPendingIsCompletedByARerun() throws Exception {
+            seedLegacyTenant("t1", "one");
+            var provider = provider(MASTER);
+            persistence.failNextMetaDelete = new PersistenceException("delete failed");
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+            assertTrue(persistence.meta.containsKey("vault-kek-salt"));
+            assertTrue(persistence.meta.containsKey("vault-kek-salt-pending"));
+
+            assertEquals(1, provider.rotateKek(MASTER, NEW_MASTER));
+
+            assertNull(persistence.meta.get("vault-kek-salt-pending"));
+            assertEquals("one", provider(NEW_MASTER).resolve(ref("t1", "key")));
+        }
+    }
+
+    // ─── m2: a replica that stalls across the announcement ───
+
+    @Nested
+    @DisplayName("stale replica racing a KEK rotation")
+    class StaleReplicaRace {
+
+        @Test
+        @DisplayName("a first DEK inserted after the announcement is taken back before anything is sealed with it")
+        void firstDekIsTakenBack() throws Exception {
+            var rotating = provider(MASTER);
+            var stale = provider(MASTER);
+            rotating.store(ref("t1", "key"), "one", null, null);
+
+            persistence.beforeNextInsertDek = () -> rotate(rotating);
+            var failure = assertThrows(SecretProviderException.class, () -> stale.store(ref("t9", "key"), "nine", null, null));
+
+            assertTrue(failure.getMessage().contains("taken back"), failure.getMessage());
+            assertTrue(persistence.listDeks("t9").isEmpty());
+            assertTrue(persistence.listSecretsByTenant("t9").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a DEK rotation on a stale replica takes its new generation back before sweeping any secret onto it")
+        void rotateDekOnAStaleReplica() throws Exception {
+            var rotating = provider(MASTER);
+            var stale = provider(MASTER);
+            stale.store(ref("t9", "key"), "nine", null, null);
+
+            persistence.beforeNextInsertDek = () -> rotate(rotating);
+            assertThrows(SecretProviderException.class, () -> stale.rotateDek("t9"));
+
+            assertEquals(1, persistence.listDeks("t9").size());
+            assertEquals("nine", provider(NEW_MASTER).resolve(ref("t9", "key")));
+        }
+
+        private void rotate(VaultSecretProvider provider) {
+            try {
+                provider.rotateKek(MASTER, NEW_MASTER);
+            } catch (SecretProviderException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    // ─── m3: the decrypt-failure message during an unfinished rotation ───
+
+    @Test
+    @DisplayName("a DEK an unfinished rotation did not reach says to re-run the rotation, not to reset")
+    void unfinishedRotationMessage() throws Exception {
+        var provider = provider(MASTER);
+        provider.store(ref("t1", "key"), "one", null, null);
+        provider.store(ref("t2", "key"), "two", null, null);
+        persistence.failDekRewrapsAfter = 1;
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+        persistence.failDekRewrapsAfter = -1;
+
+        var failure = assertThrows(SecretProviderException.class, () -> provider(NEW_MASTER).resolve(ref("t2", "key")));
+
+        assertTrue(failure.getMessage().contains("did not finish") && failure.getMessage().contains("rotate-kek"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("Only if the previous master key is lost"), failure.getMessage());
+    }
+
+    @Test
+    @DisplayName("during an unfinished legacy-salt migration the message offers no reset at all")
+    void unfinishedLegacyMigrationMessageOffersNoReset() throws Exception {
+        seedLegacyTenant("t1", "one");
+        seedLegacyTenant("t2", "two");
+        var provider = provider(MASTER);
+        persistence.failDekRewrapsAfter = 1;
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+        persistence.failDekRewrapsAfter = -1;
+
+        var failure = assertThrows(SecretProviderException.class, () -> provider(NEW_MASTER).resolve(ref("t2", "key")));
+
+        assertTrue(failure.getMessage().contains("rotate-kek"), failure.getMessage());
+        assertFalse(failure.getMessage().contains("/reset"), failure.getMessage());
     }
 
     // ─── helpers ───

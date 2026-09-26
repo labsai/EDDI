@@ -1614,6 +1614,28 @@ class AuditLedgerServiceTest {
     }
 
     /**
+     * M1: a row whose hmac names a key the deployment never recorded is what a
+     * forged row looks like, so it is INVALID — not UNKNOWN_KEY, which reads as
+     * benign.
+     */
+    @Test
+    @DisplayName("a v5 entry naming a key id nobody recorded is INVALID")
+    void unrecordedKeyIdIsInvalid() {
+        service = createService(true, "master-key-1234567890");
+
+        service.submit(entry("id-1", "conv-a", "agent-1"));
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        AuditEntry stored = ((List<AuditEntry>) captor.getValue()).getFirst();
+
+        AuditEntry forged = stored.withEnvironment("TAMPERED").withHmac("v5:0123456789abcdef:" + "0".repeat(64));
+        assertEquals(AuditVerificationStatus.INVALID, service.verifyEntry(forged));
+    }
+
+    /**
      * L-S2: a v5 row's stored pseudonym is keyed. The unkeyed
      * {@code gdpr-erased:<sha256>} form — which anyone with a list of candidate ids
      * can recompute — is not what a v5 signature covers, so a store that wrote it

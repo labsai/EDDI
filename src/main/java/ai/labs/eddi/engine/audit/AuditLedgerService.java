@@ -1337,7 +1337,12 @@ public class AuditLedgerService {
             case MATCH -> AuditVerificationStatus.VALID;
             case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
             case MISMATCH -> AuditVerificationStatus.INVALID;
-            case UNKNOWN_KEY -> AuditVerificationStatus.UNKNOWN_KEY;
+            // The id is text in the row, so it proves nothing on its own: only an id
+            // this deployment recorded as having signed is reported as a missing key.
+            // Any other is what a forged row would say, and is treated as one.
+            case UNKNOWN_KEY -> keyring.isRecordedKeyId(AuditHmac.keyIdOf(entry.hmac()))
+                    ? AuditVerificationStatus.UNKNOWN_KEY
+                    : AuditVerificationStatus.INVALID;
         };
     }
 

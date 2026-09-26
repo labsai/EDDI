@@ -370,6 +370,20 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv) {
+        ensureSchema();
+        String sql = "DELETE FROM secret_vault_deks WHERE tenant_id = ? AND generation = ? AND iv = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.setInt(2, generation);
+            ps.setString(3, expectedIv);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete DEK generation " + generation + " for tenant " + tenantId, e);
+        }
+    }
+
+    @Override
     public Optional<EncryptedDek> findDek(String tenantId) {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_deks WHERE tenant_id = ? ORDER BY generation DESC LIMIT 1";
@@ -503,6 +517,20 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             throw new PersistenceException("Failed to write meta value: " + key, e);
         }
         return getMetaValue(key);
+    }
+
+    @Override
+    public int deleteMetaValuesWithPrefix(String prefix) {
+        ensureSchema();
+        // starts_with rather than LIKE: a prefix holding % or _ must not widen the
+        // match.
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE starts_with(key, ?)")) {
+            ps.setString(1, prefix);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete meta values with prefix: " + prefix, e);
+        }
     }
 
     @Override

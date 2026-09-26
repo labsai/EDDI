@@ -28,6 +28,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.function.UnaryOperator;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -504,6 +505,8 @@ public class VaultSecretProvider implements ISecretProvider {
                 throw new SecretProviderException("Generation " + nextGeneration + " already exists for tenant '" + sanitize(tenantId)
                         + "'. Another rotation installed it first; nothing was changed by this one.");
             }
+            // Before the sweep moves a single row onto it.
+            takeBackIfKekRetired(entity);
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("DEK rotation failed for tenant '" + sanitize(tenantId) + "'", e);
@@ -702,21 +705,30 @@ public class VaultSecretProvider implements ISecretProvider {
         }
         rotateCounter.increment();
 
-        byte[] oldKek;
+        List<byte[]> oldKeks = new ArrayList<>();
         byte[] newKek;
         byte[] newSalt;
         boolean migratingFromLegacy;
-        List<EncryptedDek> toRewrap = new ArrayList<>();
+        List<SimpleEntry<EncryptedDek, byte[]>> toRewrap = new ArrayList<>();
         int alreadyOnNewKek = 0;
         try {
             // 1. Derive old KEK with current salt (legacy or random)
-            oldKek = EnvelopeCrypto.deriveKeyFromString(oldMasterKey, saltManager.getSalt());
+            oldKeks.add(EnvelopeCrypto.deriveKeyFromString(oldMasterKey, saltManager.getSalt()));
 
             // 2. Determine new salt — migrate from legacy if needed. A pending salt an
             // interrupted rotation persisted is reused, so this run derives the same
             // new KEK that run wrapped some DEKs under.
             migratingFromLegacy = saltManager.isUsingLegacySalt();
             if (migratingFromLegacy) {
+                byte[] earlierPending = saltManager.getPendingSalt();
+                if (earlierPending != null) {
+                    // An earlier legacy migration announced the pending-salt KEK and
+                    // stopped, and the nodes adopted it at restart (reconcileKekCheck). DEKs
+                    // it re-wrapped, and DEKs created since, are under the OLD master key
+                    // with the PENDING salt — which the legacy-salt derivation above
+                    // cannot open.
+                    oldKeks.add(EnvelopeCrypto.deriveKeyFromString(oldMasterKey, earlierPending));
+                }
                 newSalt = saltManager.reservePendingSalt();
                 LOGGER.info("[VAULT] KEK rotation will also migrate from legacy salt to per-deployment random salt.");
             } else {
@@ -728,13 +740,18 @@ public class VaultSecretProvider implements ISecretProvider {
             // one. Nothing has been written yet, so a DEK that opens with neither is a
             // clean refusal.
             for (EncryptedDek encDek : persistence.listAllDeks()) {
-                if (opensWith(encDek, oldKek)) {
-                    toRewrap.add(encDek);
+                byte[] opening = openingKek(encDek, oldKeks);
+                if (opening != null) {
+                    toRewrap.add(new SimpleEntry<>(encDek, opening));
                 } else if (opensWith(encDek, newKek)) {
                     alreadyOnNewKek++;
                 } else {
                     throw new SecretProviderException("KEK rotation refused: DEK generation " + encDek.getGeneration() + " of tenant '"
-                            + sanitize(encDek.getTenantId()) + "' opens with neither the old nor the new master key. Nothing was changed.");
+                            + sanitize(encDek.getTenantId()) + "' opens with neither the old nor the new master key. Nothing was changed."
+                            + (migratingFromLegacy
+                                    ? " If an earlier KEK rotation from a previous master key never finished, this DEK is still under that "
+                                            + "previous key: first re-run rotate-kek from the previous key to the current one, then rotate again."
+                                    : ""));
                 }
             }
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
@@ -750,8 +767,8 @@ public class VaultSecretProvider implements ISecretProvider {
             persistence.setMetaValue(KEK_CHECK_META_KEY, kekCheckValue(newKek));
 
             // 5. Re-wrap.
-            for (EncryptedDek encDek : toRewrap) {
-                rewrap(encDek, oldKek, newKek);
+            for (var entry : toRewrap) {
+                rewrap(entry.getKey(), entry.getValue(), newKek);
                 rewrapped++;
             }
 
@@ -760,8 +777,9 @@ public class VaultSecretProvider implements ISecretProvider {
             for (int pass = 0; pass < KEK_CATCH_UP_PASSES; pass++) {
                 int caughtUp = 0;
                 for (EncryptedDek encDek : persistence.listAllDeks()) {
-                    if (!opensWith(encDek, newKek) && opensWith(encDek, oldKek)) {
-                        rewrap(encDek, oldKek, newKek);
+                    byte[] opening = opensWith(encDek, newKek) ? null : openingKek(encDek, oldKeks);
+                    if (opening != null) {
+                        rewrap(encDek, opening, newKek);
                         caughtUp++;
                     }
                 }
@@ -792,6 +810,15 @@ public class VaultSecretProvider implements ISecretProvider {
         LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s. Restart every replica with the new EDDI_VAULT_MASTER_KEY.", total,
                 migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
         return total;
+    }
+
+    private static byte[] openingKek(EncryptedDek encDek, List<byte[]> candidates) {
+        for (byte[] candidate : candidates) {
+            if (opensWith(encDek, candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**
@@ -846,9 +873,14 @@ public class VaultSecretProvider implements ISecretProvider {
             // generation 1 again, with the same dekId the stranded rows name, so every
             // later read opened them with the wrong key and failed GCM authentication on
             // every request instead of reporting the data as gone.
-            int discarded = discardParticipantData(tenantId);
+            int discarded = discardParticipantData(tenantId, false);
 
             persistence.deleteDek(tenantId);
+
+            // And once more after: a value sealed between the discard above and the
+            // delete (an OAuth callback landing mid-reset) names a generation-1 dekId the
+            // tenant's next DEK reuses — the stranded row this discard exists to prevent.
+            discarded += discardParticipantData(tenantId, true);
 
             LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, %d other sealed value(s) discarded, DEK removed.", sanitize(tenantId),
                     deletedCount, discarded);
@@ -866,7 +898,7 @@ public class VaultSecretProvider implements ISecretProvider {
      *             if any participant fails — before the DEKs are deleted, so the
      *             reset can be re-run rather than leaving rows stranded
      */
-    private int discardParticipantData(String tenantId) throws SecretProviderException {
+    private int discardParticipantData(String tenantId, boolean deksAlreadyDeleted) throws SecretProviderException {
         if (rotationParticipants == null || rotationParticipants.isUnsatisfied()) {
             return 0;
         }
@@ -877,8 +909,10 @@ public class VaultSecretProvider implements ISecretProvider {
             } catch (RuntimeException e) {
                 errorCounter.increment();
                 throw new SecretProviderException("Vault reset for tenant '" + sanitize(tenantId) + "' stopped: "
-                        + participant.sealedDataDescription()
-                        + " could not be discarded. The tenant's secrets are deleted but its DEKs are not, so nothing is stranded; re-run the reset.",
+                        + participant.sealedDataDescription() + " could not be discarded. "
+                        + (deksAlreadyDeleted
+                                ? "The tenant's secrets and DEKs are deleted; re-run the reset to discard what is left."
+                                : "The tenant's secrets are deleted but its DEKs are not, so nothing is stranded; re-run the reset."),
                         e);
             }
         }
@@ -921,16 +955,116 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             String stored = persistence.getMetaValue(metaKey);
             if (stored == null) {
-                stored = persistence.putMetaValueIfAbsent(metaKey, encodeSealed(seal(SYSTEM_TENANT, candidate)));
+                stored = persistence.putMetaValueIfAbsent(metaKey, encodeSealed(sealSystemValue(name, candidate)));
                 if (stored == null) {
                     throw new SecretProviderException("The secret persistence layer has no metadata store; system value '" + sanitize(name)
                             + "' cannot be kept.");
                 }
             }
-            return unseal(SYSTEM_TENANT, decodeSealed(stored));
-        } catch (PersistenceException | IllegalArgumentException e) {
+            return unsealSystemValue(name, decodeSealed(stored));
+        } catch (PersistenceException | IllegalArgumentException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("Could not pin system value '" + sanitize(name) + "'", e);
+        }
+    }
+
+    @Override
+    public Optional<String> readSystemValue(String name) throws SecretProviderException {
+        ensureAvailable();
+        try {
+            String stored = persistence.getMetaValue(SYSTEM_VALUE_META_PREFIX + name);
+            return stored == null ? Optional.empty() : Optional.of(unsealSystemValue(name, decodeSealed(stored)));
+        } catch (PersistenceException | IllegalArgumentException | EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Could not read system value '" + sanitize(name) + "'", e);
+        }
+    }
+
+    /**
+     * Seals a system value bound to its name, so a sealed value copied under
+     * another name in the metadata store fails authentication instead of reading as
+     * that name's value.
+     */
+    private SealedValue sealSystemValue(String name, String value) throws SecretProviderException {
+        ActiveDek dek = activeDek(SYSTEM_TENANT);
+        EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(value, dek.key(), systemValueAad(name));
+        return new SealedValue(result.ciphertext(), result.iv(), dek.dekId());
+    }
+
+    private String unsealSystemValue(String name, SealedValue sealed) throws SecretProviderException {
+        return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dekFor(SYSTEM_TENANT, sealed.dekId()), systemValueAad(name));
+    }
+
+    static String systemValueAad(String name) {
+        return "eddi-system-value|v1|" + name;
+    }
+
+    /**
+     * What {@link #adoptCurrentMasterKey()} did.
+     *
+     * @param tenantsNeedingReset
+     *            tenants whose DEKs this node's master key cannot open. Their
+     *            secrets are unrecoverable without the previous key; {@code POST
+     *            /{tenantId}/reset} clears each one
+     * @param systemValuesReset
+     *            whether the system tenant's DEKs and every pinned system value
+     *            were discarded — they were sealed under the lost key and are
+     *            re-created on next use (the audit ledger pins a new key)
+     */
+    public record MasterKeyAdoption(List<String> tenantsNeedingReset, boolean systemValuesReset) {
+    }
+
+    /**
+     * Makes this node's master key the vault's master key, for the case a KEK
+     * rotation cannot cover: the previous master key is <b>lost</b>.
+     * <p>
+     * The KEK check value records which KEK the vault uses, and every node refuses
+     * to wrap a new DEK under any other — that is what keeps a replica still on a
+     * retired key from stranding a tenant after a rotation. It cannot tell that
+     * case apart from an operator who lost the key and set a new one: from a node's
+     * side the two look identical. So after a lost key every DEK creation was
+     * refused, for every tenant, forever — the documented "reset the tenant and
+     * start fresh" recovery included. This is the explicit operator decision that
+     * resolves it:
+     * <ol>
+     * <li>the check value is re-announced with this node's KEK;</li>
+     * <li>if the system tenant's DEKs do not open with it, they and every pinned
+     * system value are discarded (they are re-created on next use);</li>
+     * <li>every other tenant whose DEKs do not open is reported, not touched — its
+     * secrets are gone, and resetting it is a separate, deliberate step.</li>
+     * </ol>
+     * <b>Never call this while a KEK rotation is merely unfinished</b>, or on a
+     * replica that simply has not been restarted with a rotated key: in those cases
+     * the previous key still exists, {@code rotate-kek} recovers everything, and
+     * adopting the wrong key makes every other replica refuse DEK creation instead.
+     */
+    public MasterKeyAdoption adoptCurrentMasterKey() throws SecretProviderException {
+        ensureAvailable();
+        try {
+            Set<String> unreadable = new TreeSet<>();
+            for (EncryptedDek dek : persistence.listAllDeks()) {
+                if (!opensWith(dek, kek)) {
+                    unreadable.add(dek.getTenantId());
+                }
+            }
+            persistence.setMetaValue(KEK_CHECK_META_KEY, kekCheckValue(kek));
+            this.fallbackKek = null;
+
+            boolean systemReset = unreadable.remove(SYSTEM_TENANT);
+            if (systemReset) {
+                persistence.deleteMetaValuesWithPrefix(SYSTEM_VALUE_META_PREFIX);
+                persistence.deleteDek(SYSTEM_TENANT);
+                // A pinned value sealed in the gap between the two deletes would name a
+                // generation the next DEK reuses; clear once more now the DEKs are gone.
+                persistence.deleteMetaValuesWithPrefix(SYSTEM_VALUE_META_PREFIX);
+            }
+            LOGGER.warnf("[VAULT] The configured master key was adopted as the vault's master key.%s %d tenant(s) hold DEKs it cannot open "
+                    + "and need POST /secretstore/secrets/{tenantId}/reset: %s", systemReset ? " System values were reset." : "", unreadable.size(),
+                    sanitize(String.valueOf(unreadable)));
+            return new MasterKeyAdoption(List.copyOf(unreadable), systemReset);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Adopting the master key failed", e);
         }
     }
 
@@ -1049,6 +1183,27 @@ public class VaultSecretProvider implements ISecretProvider {
                         : "Unable to determine how many secrets are stored for this tenant.";
 
         String safeTenantId = sanitize(tenantId);
+        boolean pendingMigration = false;
+        boolean checkIsOurs = false;
+        try {
+            pendingMigration = saltManager.getPendingSalt() != null;
+            String check = persistence.getMetaValue(KEK_CHECK_META_KEY);
+            checkIsOurs = check != null && kekCheckOpens(check, kek);
+        } catch (PersistenceException | IllegalStateException e) {
+            // Fall through to the general message.
+        }
+        if (pendingMigration || checkIsOurs) {
+            // This node's key IS the vault's key, so this DEK was simply not reached by a
+            // KEK rotation. One re-run recovers it; a reset would destroy it.
+            throw new SecretProviderException("Cannot decrypt the Data Encryption Key (DEK) for tenant '" + safeTenantId + "': it is still "
+                    + "wrapped under a previous master key, while this node's EDDI_VAULT_MASTER_KEY is the vault's current one. A KEK rotation "
+                    + "did not finish. Re-run POST /secretstore/secrets/admin/rotate-kek with the previous and the current master key — nothing "
+                    + "is lost. " + (pendingMigration
+                            ? ""
+                            : "Only if the previous master key is lost for good: " + secretInfo + " POST /secretstore/secrets/" + safeTenantId
+                                    + "/reset clears this tenant."),
+                    cause);
+        }
         throw new SecretProviderException(
                 "Cannot decrypt the Data Encryption Key (DEK) for tenant '" + safeTenantId + "'. "
                         + "This means the EDDI_VAULT_MASTER_KEY has changed since the DEK was created. "
@@ -1058,7 +1213,9 @@ public class VaultSecretProvider implements ISecretProvider {
                         + "(2) If you have both old and new keys, use POST /secretstore/secrets/admin/rotate-kek "
                         + "to migrate all encrypted data to the new key. "
                         + "(3) To start fresh (deletes all secrets for this tenant), use "
-                        + "POST /secretstore/secrets/" + safeTenantId + "/reset to clear the vault for this tenant.",
+                        + "POST /secretstore/secrets/" + safeTenantId + "/reset to clear the vault for this tenant. "
+                        + "(4) If the previous master key is lost for good, POST /secretstore/secrets/admin/adopt-master-key?confirm=true "
+                        + "makes the current key the vault's key, so new DEKs can be created again.",
                 cause);
     }
 
@@ -1080,6 +1237,7 @@ public class VaultSecretProvider implements ISecretProvider {
                 encResult.iv(), Instant.now());
 
         if (persistence.insertDek(dek)) {
+            takeBackIfKekRetired(dek);
             LOGGER.infof("Generated new DEK for tenant: %s", sanitize(tenantId));
             return new ActiveDek(newDek, dek.dekId());
         }
@@ -1146,6 +1304,40 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     /**
+     * Checks the KEK again <em>after</em> a DEK was inserted, and takes the DEK
+     * back if a KEK rotation announced a new KEK in between.
+     * <p>
+     * {@link #ensureKekCurrent} before the insert leaves a window: a node on the
+     * old master key reads the old check value, stalls (a GC pause, a slow
+     * database) past the rotation's catch-up sweeps, and then inserts a DEK wrapped
+     * under the retired KEK, which becomes unreadable once every node restarts with
+     * the new one. Reading the check after the insert closes it: if the check still
+     * matches, the insert happened before the announcement, and the rotation's
+     * catch-up sweep — which lists DEKs after announcing — sees it and re-wraps it.
+     * If it does not match, the DEK is deleted before anything is sealed with it.
+     */
+    private void takeBackIfKekRetired(EncryptedDek inserted) throws SecretProviderException {
+        String check;
+        try {
+            check = persistence.getMetaValue(KEK_CHECK_META_KEY);
+        } catch (PersistenceException e) {
+            check = null;
+        }
+        if (check == null || kekCheckOpens(check, kek)) {
+            return;
+        }
+        try {
+            persistence.deleteDekIfWrappedWith(inserted.getTenantId(), inserted.getGeneration(), inserted.getIv());
+        } catch (PersistenceException e) {
+            LOGGER.errorf(e, "[VAULT] Could not take back DEK generation %d of tenant '%s', wrapped under a retired KEK",
+                    inserted.getGeneration(), sanitize(inserted.getTenantId()));
+        }
+        errorCounter.increment();
+        throw new SecretProviderException("A KEK rotation ran while this node was creating a DEK for tenant '" + sanitize(inserted.getTenantId())
+                + "'. The DEK was taken back before anything was sealed with it. Restart this node with the new master key.");
+    }
+
+    /**
      * Records the KEK check value on a deployment that has none, and reports a
      * master key that does not match the one recorded. Best-effort: a problem here
      * is logged, never fatal — the DEK paths report the same problem with the
@@ -1172,18 +1364,32 @@ public class VaultSecretProvider implements ISecretProvider {
             }
             byte[] fallback = fallbackKek;
             if (fallback != null && kekCheckOpens(check, fallback)) {
-                // An interrupted legacy-salt rotation announced the new KEK and then
-                // stopped. That KEK is the vault's KEK now, so it is the one new DEKs
-                // must be wrapped with; the salt-derived one stays as the fallback for
-                // DEKs the rotation did not reach.
+                // An interrupted legacy-salt rotation announced the new KEK — this node's
+                // master key with the PENDING salt — and then stopped. That KEK is the
+                // vault's KEK now, so new DEKs must be wrapped with it. The DEKs the
+                // rotation did not reach are still under the PREVIOUS master key, which
+                // this node does not have; they fail with a message that says to re-run
+                // the rotation. The legacy-salt derivation kept as the fallback opens
+                // nothing that exists in that scenario; it is kept only so a DEK some
+                // replica wrapped under it before restarting still opens.
                 this.fallbackKek = this.kek;
                 this.kek = fallback;
                 LOGGER.warn("[VAULT] Using the KEK of an unfinished KEK rotation. Re-run POST /secretstore/secrets/admin/rotate-kek with the "
                         + "same old and new master keys to complete it.");
                 return;
             }
+            if (persistence.listAllDeks().isEmpty()) {
+                // No DEK exists anywhere, so no key the check could be protecting: nothing
+                // is stranded by adopting this node's key. This is the "started once with
+                // key X, restarted with key Y before storing anything" dev case.
+                persistence.setMetaValue(KEK_CHECK_META_KEY, kekCheckValue(kek));
+                LOGGER.warn("[VAULT] The vault holds no DEKs; adopted the configured EDDI_VAULT_MASTER_KEY as its master key.");
+                return;
+            }
             LOGGER.error("[VAULT] The configured EDDI_VAULT_MASTER_KEY is not the vault's current master key (a KEK rotation has run since "
-                    + "it was set, or it was mistyped). New DEKs will not be created on this node until it is restarted with the current key.");
+                    + "it was set, or it was mistyped). New DEKs will not be created on this node until it is restarted with the current key. "
+                    + "If the previous master key is lost for good, POST /secretstore/secrets/admin/adopt-master-key?confirm=true adopts this "
+                    + "one — see the Secrets Vault guide, 'Lost master key'.");
         } catch (PersistenceException e) {
             LOGGER.warn("[VAULT] Could not check the master key against the vault's KEK check value: " + e.getMessage());
         }

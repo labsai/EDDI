@@ -23,6 +23,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The audit ledger's signing keys: the one new entries are signed with, and
@@ -56,9 +60,15 @@ import java.util.Optional;
  * {@link AuditHmac#V5_PREFIX}), and is checked with exactly that key. The
  * verification set is the signing key plus every other key this deployment can
  * derive: the configured one, the pinned one, the one from the current master
- * key, and any retired keys listed in {@code eddi.audit.hmac-previous-keys}. An
- * entry naming a key outside that set is reported as signed with an unknown key
- * — never as tampered.
+ * key, and any retired keys listed in {@code eddi.audit.hmac-previous-keys}.
+ * <p>
+ * <b>What an unknown key means.</b> The key id is text in the row, so anyone
+ * who can write to the ledger can put any id there. An id is therefore reported
+ * as {@code UNKNOWN_KEY} — "signed by a key this deployment used and no longer
+ * holds" — only when the id is <em>recorded</em>: every key this keyring pins
+ * or signs with is recorded in the vault as a sealed system value, which cannot
+ * be forged without the vault's keys. An id that is neither held nor recorded
+ * is {@code INVALID}, exactly like any other row that does not verify.
  */
 @ApplicationScoped
 public class AuditKeyring {
@@ -67,6 +77,12 @@ public class AuditKeyring {
 
     /** Name the master-derived key is pinned under in the vault. */
     static final String PINNED_KEY_NAME = "audit-hmac-key";
+
+    /** Prefix of the system values recording each key id that has signed. */
+    static final String KEY_ID_RECORD_PREFIX = "audit-key-id:";
+
+    private static final long MIN_PIN_RETRY_MILLIS = 30_000L;
+    private static final long MAX_PIN_RETRY_MILLIS = 600_000L;
 
     private final Optional<String> masterKey;
     private final Optional<String> configuredKey;
@@ -79,7 +95,18 @@ public class AuditKeyring {
     private volatile SigningKey pinned;
     private volatile SigningKey signing;
     private volatile List<SigningKey> verification = List.of();
-    private boolean initialized;
+    private volatile boolean initialized;
+
+    /** Key ids known to be recorded in the vault — a positive cache only. */
+    private final Set<String> recordedKeyIds = ConcurrentHashMap.newKeySet();
+
+    /**
+     * When the next pin attempt may run, in {@link System#currentTimeMillis()}.
+     * Zero until the first attempt fails.
+     */
+    private final AtomicLong nextPinAttempt = new AtomicLong();
+    private volatile long pinRetryMillis = MIN_PIN_RETRY_MILLIS;
+    private final AtomicBoolean pinInProgress = new AtomicBoolean();
 
     @Inject
     public AuditKeyring(@ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKey,
@@ -108,18 +135,25 @@ public class AuditKeyring {
      * runs once.
      */
     @PostConstruct
-    synchronized void initialize() {
+    void initialize() {
+        // Volatile fast path: this is reached for every audit entry signed, and must
+        // not take a lock once the keys exist.
         if (initialized) {
             return;
         }
-        masterDerived = masterKey.map(key -> AuditHmac.signingKey(AuditHmac.deriveHmacKey(key))).orElse(null);
-        configured = configuredKey.map(key -> AuditHmac.signingKey(AuditHmac.deriveHmacKey(key))).orElse(null);
-        for (String previous : previousKeys) {
-            retired.add(AuditHmac.signingKey(AuditHmac.deriveHmacKey(previous)));
+        synchronized (this) {
+            if (initialized) {
+                return;
+            }
+            masterDerived = masterKey.map(key -> AuditHmac.signingKey(AuditHmac.deriveHmacKey(key))).orElse(null);
+            configured = configuredKey.map(key -> AuditHmac.signingKey(AuditHmac.deriveHmacKey(key))).orElse(null);
+            for (String previous : previousKeys) {
+                retired.add(AuditHmac.signingKey(AuditHmac.deriveHmacKey(previous)));
+            }
+            signing = configured != null ? configured : masterDerived;
+            rebuildVerificationSet();
+            initialized = true;
         }
-        signing = configured != null ? configured : masterDerived;
-        rebuildVerificationSet();
-        initialized = true;
         if (configured != null) {
             LOGGER.infof("Audit Ledger: signing with the independent audit key (eddi.audit.hmac-key, key id %s).", configured.id());
         }
@@ -129,25 +163,40 @@ public class AuditKeyring {
      * Pins the master-derived key in the vault, or adopts the one pinned earlier.
      * <p>
      * Runs after the vault's own startup observer, which is what makes the vault's
-     * availability settled here. Best-effort: when the vault is unavailable, or the
-     * pin cannot be read, the ledger keeps signing with the master-derived key —
-     * the entries it signs name that key, so they stay verifiable for as long as
-     * the master key does not change.
+     * availability settled here. A failure is not final: {@link #signingKey()}
+     * retries with backoff, so a transient database error at boot does not leave
+     * the node signing with a master-derived key until its next restart.
      */
     void onStartup(@Observes
     @Priority(Interceptor.Priority.APPLICATION + 100) StartupEvent event) {
         pinWithVault();
     }
 
-    void pinWithVault() {
+    /**
+     * Whether a pin is still owed: there is a key to pin and a vault to pin it in.
+     */
+    private boolean pinOutstanding() {
+        return pinned == null && masterDerived != null && secretProvider != null && !secretProvider.isUnsatisfied();
+    }
+
+    /**
+     * One pin attempt, unless another is running or the backoff has not elapsed.
+     *
+     * @return whether the key is pinned when this returns
+     */
+    boolean pinWithVault() {
         initialize();
-        if (masterDerived == null || secretProvider == null || secretProvider.isUnsatisfied()) {
-            return;
+        if (!pinOutstanding()) {
+            return pinned != null;
+        }
+        if (System.currentTimeMillis() < nextPinAttempt.get() || !pinInProgress.compareAndSet(false, true)) {
+            return false;
         }
         try {
             ISecretProvider provider = secretProvider.get();
             if (!provider.isAvailable()) {
-                return;
+                scheduleRetry();
+                return false;
             }
             String stored = provider.pinSystemValue(PINNED_KEY_NAME, Base64.getEncoder().encodeToString(masterDerived.hmacKey()));
             SigningKey pinnedKey = AuditHmac.signingKey(Base64.getDecoder().decode(stored));
@@ -158,14 +207,81 @@ public class AuditKeyring {
                 }
                 rebuildVerificationSet();
             }
+            recordKeyIds(provider);
+            pinRetryMillis = MIN_PIN_RETRY_MILLIS;
             if (!pinnedKey.id().equals(masterDerived.id())) {
                 LOGGER.infof("Audit Ledger: using the audit key pinned in the vault (key id %s); the vault master key has been rotated since "
                         + "it was pinned, and the ledger's key deliberately has not.", pinnedKey.id());
             }
+            return true;
         } catch (Exception e) {
-            LOGGER.warnf("Audit Ledger: could not pin the audit key in the vault (%s). Signing with the key derived from the current "
-                    + "master key, id %s; entries signed now name it, so they stay verifiable while that master key is in use.",
-                    e.getMessage(), masterDerived.id());
+            scheduleRetry();
+            LOGGER.warnf("Audit Ledger: could not pin the audit key in the vault (%s). Entries are signed with the key derived from the "
+                    + "current master key, id %s, until a retry succeeds (next in %ds).", e.getMessage(), masterDerived.id(), pinRetryMillis / 1000);
+            return false;
+        } finally {
+            pinInProgress.set(false);
+        }
+    }
+
+    private void scheduleRetry() {
+        nextPinAttempt.set(System.currentTimeMillis() + pinRetryMillis);
+        pinRetryMillis = Math.min(pinRetryMillis * 2, MAX_PIN_RETRY_MILLIS);
+    }
+
+    /** Test seam: retry without waiting. */
+    void resetPinBackoffForTesting() {
+        nextPinAttempt.set(0);
+        pinRetryMillis = 0;
+    }
+
+    /**
+     * Records every key this keyring signs with, or signed with before the pin, as
+     * a sealed system value — the proof {@link #isRecordedKeyId} needs.
+     * Best-effort: an unrecorded key only means its rows would report INVALID
+     * rather than UNKNOWN_KEY if the key were ever lost.
+     */
+    private void recordKeyIds(ISecretProvider provider) {
+        for (SigningKey key : new SigningKey[]{signing, pinned, masterDerived, configured}) {
+            if (key == null || recordedKeyIds.contains(key.id())) {
+                continue;
+            }
+            try {
+                provider.pinSystemValue(KEY_ID_RECORD_PREFIX + key.id(), key.id());
+                recordedKeyIds.add(key.id());
+            } catch (Exception e) {
+                LOGGER.debugf("Audit Ledger: could not record key id %s: %s", key.id(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Whether {@code keyId} is a key this deployment recorded as having signed.
+     * Consulted only for a v5 entry naming a key the deployment does not hold; see
+     * the class comment for why an unrecorded id is reported as INVALID.
+     */
+    public boolean isRecordedKeyId(String keyId) {
+        if (keyId == null) {
+            return false;
+        }
+        if (recordedKeyIds.contains(keyId)) {
+            return true;
+        }
+        if (secretProvider == null || secretProvider.isUnsatisfied()) {
+            return false;
+        }
+        try {
+            ISecretProvider provider = secretProvider.get();
+            // The value must be the id itself. System values are sealed bound to their
+            // name, so a copied or hand-written row cannot produce it.
+            boolean recorded = provider.isAvailable() && provider.readSystemValue(KEY_ID_RECORD_PREFIX + keyId).filter(keyId::equals).isPresent();
+            if (recorded) {
+                recordedKeyIds.add(keyId);
+            }
+            return recorded;
+        } catch (Exception e) {
+            LOGGER.debugf("Audit Ledger: could not look up key id %s: %s", keyId, e.getMessage());
+            return false;
         }
     }
 
@@ -182,9 +298,15 @@ public class AuditKeyring {
         verification = List.copyOf(byId.values());
     }
 
-    /** The key new entries are signed with, or null when signing is disabled. */
+    /**
+     * The key new entries are signed with, or null when signing is disabled. Also
+     * where a failed pin is retried, with backoff, off the lock.
+     */
     public SigningKey signingKey() {
         initialize();
+        if (pinned == null && pinOutstanding()) {
+            pinWithVault();
+        }
         return signing;
     }
 

@@ -19,10 +19,12 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +44,7 @@ class AuditKeyringTest {
      */
     private final Map<String, String> pinned = new HashMap<>();
     private Instance<ISecretProvider> vault;
+    private ISecretProvider provider;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -52,6 +55,8 @@ class AuditKeyringTest {
             pinned.putIfAbsent(inv.getArgument(0), inv.getArgument(1));
             return pinned.get(inv.<String>getArgument(0));
         });
+        when(provider.readSystemValue(anyString())).thenAnswer(inv -> Optional.ofNullable(pinned.get(inv.<String>getArgument(0))));
+        this.provider = provider;
         vault = mock(Instance.class);
         when(vault.isUnsatisfied()).thenReturn(false);
         when(vault.get()).thenReturn(provider);
@@ -143,5 +148,44 @@ class AuditKeyringTest {
         for (var key : keyring.verificationKeys()) {
             assertEquals(AuditHmac.keyedPseudonymFor("alice", key.pseudonymKey()), pseudonyms.get(key.id()));
         }
+    }
+
+    /**
+     * M1: the key id is text in the row, so an unknown id alone proves nothing.
+     * Only ids the keyring recorded in the vault count as "a key we used and lost".
+     */
+    @Test
+    @DisplayName("only key ids recorded in the vault are recognised; a made-up id is not")
+    void recordedKeyIds() {
+        var keyring = keyring(MASTER, null, null, vault);
+        String signingId = keyring.signingKey().id();
+
+        assertTrue(pinned.containsKey(AuditKeyring.KEY_ID_RECORD_PREFIX + signingId), "the signing key is recorded when pinned");
+        var elsewhere = keyring(NEW_MASTER, null, null, vault);
+        assertTrue(elsewhere.isRecordedKeyId(signingId), "another node reads the record from the vault");
+        assertFalse(elsewhere.isRecordedKeyId("0123456789abcdef"), "an id nobody recorded is not a lost key");
+        assertFalse(AuditKeyring.fromMasterKey(MASTER).isRecordedKeyId(signingId), "without a vault nothing counts as recorded");
+    }
+
+    /** m6: a pin that failed at boot is retried while entries are signed. */
+    @Test
+    @DisplayName("a failed pin is retried lazily from signingKey()")
+    void failedPinIsRetried() throws Exception {
+        var keyring = new AuditKeyring(Optional.of(MASTER), Optional.empty(), Optional.empty(), vault);
+        keyring.initialize();
+        // doX().when() form: re-stubbing with when(provider.pinSystemValue(...)) would
+        // invoke the existing answer with null arguments.
+        doThrow(new ISecretProvider.SecretProviderException("db down")).doAnswer(inv -> {
+            pinned.putIfAbsent(inv.getArgument(0), inv.getArgument(1));
+            return pinned.get(inv.<String>getArgument(0));
+        }).when(provider).pinSystemValue(anyString(), anyString());
+
+        assertFalse(keyring.pinWithVault());
+        assertTrue(pinned.isEmpty());
+
+        keyring.resetPinBackoffForTesting();
+        keyring.signingKey();
+
+        assertTrue(pinned.containsKey(AuditKeyring.PINNED_KEY_NAME), "the next signing call must retry the pin");
     }
 }

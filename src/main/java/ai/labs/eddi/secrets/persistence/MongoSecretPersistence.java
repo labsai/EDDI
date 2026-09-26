@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
@@ -278,8 +279,14 @@ public class MongoSecretPersistence implements ISecretPersistence {
             return Filters.or(eq(FIELD_ALLOWED_AGENTS, null), Filters.size(FIELD_ALLOWED_AGENTS, 0),
                     eq(FIELD_ALLOWED_AGENTS, SecretMetadata.WILDCARD_AGENT));
         }
+        // $setEquals, not $all + $size: a stored list may carry a duplicate (store()
+        // persists what it is given), and ["a","a","b"] is the same grant as ["a","b"].
+        // Counting elements made such a row unmatchable, so every conditional edit of
+        // it
+        // answered 409 — even one echoing the grant back exactly.
         var distinct = List.copyOf(new LinkedHashSet<>(expected));
-        return and(Filters.all(FIELD_ALLOWED_AGENTS, distinct), Filters.size(FIELD_ALLOWED_AGENTS, distinct.size()));
+        return Filters.expr(new Document("$setEquals",
+                List.of(new Document("$ifNull", List.of("$" + FIELD_ALLOWED_AGENTS, List.of())), distinct)));
     }
 
     @Override
@@ -344,6 +351,15 @@ public class MongoSecretPersistence implements ISecretPersistence {
             return deksCollection.updateOne(filter, update).getMatchedCount() == 1;
         } catch (MongoException e) {
             throw new PersistenceException("Failed to re-wrap DEK generation " + dek.getGeneration() + " for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
+    public boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv) {
+        try {
+            return deksCollection.deleteOne(and(dekKey(tenantId, generation), eq(FIELD_IV, expectedIv))).getDeletedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to delete DEK generation " + generation + " for tenant " + tenantId, e);
         }
     }
 
@@ -467,6 +483,15 @@ public class MongoSecretPersistence implements ISecretPersistence {
             return writeException.getError().getCategory() == ErrorCategory.DUPLICATE_KEY;
         }
         return ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY;
+    }
+
+    @Override
+    public int deleteMetaValuesWithPrefix(String prefix) {
+        try {
+            return (int) metaCollection.deleteMany(Filters.regex("key", "^" + Pattern.quote(prefix))).getDeletedCount();
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to delete meta values with prefix: " + prefix, e);
+        }
     }
 
     @Override

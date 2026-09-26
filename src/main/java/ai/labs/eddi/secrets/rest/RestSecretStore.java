@@ -479,6 +479,39 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
+    public Response adoptMasterKey(boolean confirm) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        if (!confirm) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "confirm=true is required",
+                            "action", "Only adopt the configured master key if the previous one is lost for good. During an unfinished KEK "
+                                    + "rotation, re-run POST /secretstore/secrets/admin/rotate-kek instead — it recovers everything."))
+                    .build();
+        }
+        if (!(secretProvider instanceof VaultSecretProvider vaultProvider)) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Adopting a master key is only supported by VaultSecretProvider")).build();
+        }
+        try {
+            var adoption = vaultProvider.adoptCurrentMasterKey();
+            secretResolver.invalidateAll();
+            return Response.ok(Map.of("tenantsNeedingReset", adoption.tenantsNeedingReset(), "systemValuesReset", adoption.systemValuesReset(),
+                    "message", "The configured master key is now the vault's master key and new secrets can be stored. "
+                            + (adoption.tenantsNeedingReset().isEmpty()
+                                    ? "No tenant holds unreadable DEKs."
+                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset — "
+                                            + "their secrets were sealed under the lost key.")))
+                    .build();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to adopt the master key", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Adopting the master key failed")).build();
+        }
+    }
+
+    @Override
     public Response resetTenant(String tenantId) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())

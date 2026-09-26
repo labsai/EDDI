@@ -213,6 +213,16 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv) {
+        EncryptedDek stored = deks.get(dekKey(tenantId, generation));
+        if (stored == null || !Objects.equals(stored.getIv(), expectedIv)) {
+            return false;
+        }
+        deks.remove(dekKey(tenantId, generation));
+        return true;
+    }
+
+    @Override
     public Optional<EncryptedDek> findDek(String tenantId) {
         findDekCalls++;
         return listDeks(tenantId).stream().reduce((first, second) -> second);
@@ -250,14 +260,36 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         meta.put(key, value);
     }
 
+    /** When set, the next {@link #putMetaValueIfAbsent} for this key throws. */
+    String failNextPutIfAbsentFor;
+
     @Override
     public String putMetaValueIfAbsent(String key, String value) {
+        if (key.equals(failNextPutIfAbsentFor)) {
+            failNextPutIfAbsentFor = null;
+            throw new PersistenceException("simulated failure writing " + key);
+        }
         meta.putIfAbsent(key, value);
         return meta.get(key);
     }
 
+    /** When set, the next {@link #deleteMetaValue} call throws it. */
+    RuntimeException failNextMetaDelete;
+
     @Override
     public void deleteMetaValue(String key) {
+        RuntimeException failure = failNextMetaDelete;
+        failNextMetaDelete = null;
+        if (failure != null) {
+            throw failure;
+        }
         meta.remove(key);
+    }
+
+    @Override
+    public int deleteMetaValuesWithPrefix(String prefix) {
+        int before = meta.size();
+        meta.keySet().removeIf(key -> key.startsWith(prefix));
+        return before - meta.size();
     }
 }

@@ -543,6 +543,26 @@ class PostgresSecretPersistenceUnitTest {
         verify(preparedStatement).setString(5, "[\"a\",\"b\"]");
     }
 
+    @Test
+    void deleteDekIfWrappedWith_isGuardedOnTheIv() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.deleteDekIfWrappedWith("tenant-1", 2, "theIv"));
+
+        verify(preparedStatement).setString(3, "theIv");
+    }
+
+    @Test
+    void deleteMetaValuesWithPrefix_usesStartsWithNotLike() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(2);
+
+        assertEquals(2, persistence.deleteMetaValuesWithPrefix("system-value:"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(q -> q.contains("starts_with(key, ?)")), sql.getAllValues().toString());
+    }
+
     // ─── setMetaValue ───
 
     @Test
