@@ -45,8 +45,8 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
-  useUpdateAgent,
 } from "@/hooks/use-agents";
+import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
@@ -276,9 +276,15 @@ export function AgentDetailPage() {
     );
   }
 
-  const handleVersionChange = useCallback((v: number) => {
-    setVersion(v);
-  }, []);
+  const handleVersionChange = useCallback(
+    (v: number) => {
+      // Choosing the latest version means "follow the latest", not "pin this
+      // number": pinned, the page stayed on it after the next inline save
+      // created a newer one, and every section went on editing the old one.
+      setVersion(v === versions?.[0]?.version ? undefined : v);
+    },
+    [versions],
+  );
 
   if (isLoading && !agent) {
     return (
@@ -1086,7 +1092,7 @@ function A2ASection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [skillInput, setSkillInput] = useState("");
   const [localDesc, setLocalDesc] = useState(agent.description ?? "");
   const [showCard, setShowCard] = useState(false);

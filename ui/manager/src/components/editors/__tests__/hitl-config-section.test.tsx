@@ -3,8 +3,8 @@ import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-agents", () => ({
-  useUpdateAgent: () => ({ mutate: mockMutate, isPending: false }),
+vi.mock("@/hooks/use-agent-section-save", () => ({
+  useAgentSectionSave: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
 import { HitlConfigSection } from "@/components/editors/agent-config-sections";
