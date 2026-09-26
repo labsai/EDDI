@@ -3858,18 +3858,8 @@ export const secretsHandlers = [
     HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
 
-  // Rotate secret
-  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
-    const tenantId = params.tenantId as string;
-    const keyName = params.keyName as string;
-    const ref = tenantId === "default"
-      ? `\${vault:${keyName}}`
-      : `\${vault:${tenantId}/${keyName}}`;
-    return HttpResponse.json(
-      { reference: ref, tenantId, keyName },
-      { status: 200 },
-    );
-  }),
+  // No rotate handler: EDDI has no rotate endpoint. A rotation is a PUT of the
+  // new value with the current grant (see `rotateSecret`), answered above.
 ];
 
 // ─── Audit Trail Handlers ────────────────────────────────────────────────────

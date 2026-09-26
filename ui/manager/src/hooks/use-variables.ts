@@ -25,13 +25,36 @@ export function useVariables() {
   });
 }
 
-/** Create or update a variable. Invalidates list on success. */
+/** Raised by a `createOnly` upsert whose key is already taken. */
+export class VariableExistsError extends Error {
+  constructor(readonly key: string) {
+    super(`A variable named "${key}" already exists`);
+    this.name = "VariableExistsError";
+  }
+}
+
+/**
+ * Create or update a variable. Invalidates list on success.
+ *
+ * `createOnly` is for the "Add Variable" form. The endpoint is an upsert, so
+ * without it an existing key was silently replaced — value, description and
+ * export flag — from a dialog that says "Add". The key is checked against a
+ * fresh read rather than the cached list; the backend has no create-only
+ * precondition, so a concurrent writer can still win.
+ */
 export function useUpsertVariable() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { key: string; variable: GlobalVariable }) =>
-      upsertVariable(args.key, args.variable),
-    onSuccess: () => {
+    mutationFn: async (args: { key: string; variable: GlobalVariable; createOnly?: boolean }) => {
+      if (args.createOnly) {
+        const existing = await listVariables();
+        if (existing.some((v) => v.key === args.key)) {
+          throw new VariableExistsError(args.key);
+        }
+      }
+      return upsertVariable(args.key, args.variable);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: variableKeys.list });
     },
   });
