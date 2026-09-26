@@ -92,6 +92,20 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
     /**
+     * Requests a fire-and-forget batch may expand into when its config sets no
+     * {@code maxBatchSize}. The target array usually comes from an upstream
+     * response or LLM output, so without a cap one turn could fan out into as many
+     * outbound requests as that data has elements.
+     */
+    static final int DEFAULT_MAX_BATCH_SIZE = 100;
+
+    /**
+     * Hard ceiling for {@code maxBatchSize}: a config may lower the default or
+     * raise it up to this, never beyond.
+     */
+    static final int MAX_BATCH_SIZE_CEILING = 1_000;
+
+    /**
      * Response headers that are credentials, and are dropped before the header map
      * reaches conversation memory, the template data or an LLM tool result.
      * <p>
@@ -578,6 +592,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // run after this one.
             List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                     batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            int maxBatchSize = resolveMaxBatchSize(batchRequest);
+            if (batchIterationList.size() > maxBatchSize) {
+                // Refused as a whole, before anything is built or sent: a truncated batch
+                // would report success while quietly dropping the tail.
+                throw new IllegalArgumentException("Batch of http call '" + callName + "' would send " + batchIterationList.size()
+                        + " requests, more than its limit of " + maxBatchSize + ". Narrow 'pathToTargetArray' or "
+                        + "'templateFilterExpression', or raise 'preRequest.batchRequests.maxBatchSize' (at most "
+                        + MAX_BATCH_SIZE_CEILING + ").");
+            }
             // Each request is kept as the BuiltRequest it came back as, not just its
             // IRequest: the plaintexts the build resolved are what the log line below has
             // to be redacted by, and only the build knows them.
@@ -607,6 +630,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties), callName);
         }
+    }
+
+    /**
+     * The batch size limit in force: {@link #DEFAULT_MAX_BATCH_SIZE} when the
+     * config sets none (or a non-positive value), otherwise the configured value
+     * clamped to {@link #MAX_BATCH_SIZE_CEILING}.
+     */
+    static int resolveMaxBatchSize(BatchRequestBuildingInstruction batchRequest) {
+        Integer configured = batchRequest.getMaxBatchSize();
+        if (configured == null || configured <= 0) {
+            return DEFAULT_MAX_BATCH_SIZE;
+        }
+        return Math.min(configured, MAX_BATCH_SIZE_CEILING);
     }
 
     private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {
