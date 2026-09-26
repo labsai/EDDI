@@ -127,7 +127,15 @@ interface ChatConfig {
 
 ## 📦 Embedding
 
-The chat UI can be embedded in any HTML page via iframe:
+The chat UI can be embedded in any HTML page via iframe — **once EDDI is told which pages may do it.** By default `/chat` answers with `Content-Security-Policy: frame-ancestors 'none'`, and the browser refuses to render it in anyone's iframe. List the embedding origins, space-separated:
+
+```properties
+# application.properties, or EDDI_CHAT_FRAME_ANCESTORS in the environment
+# (Helm: eddi.chat.frameAncestors)
+eddi.chat.frame-ancestors=https://www.example.com https://*.example.org
+```
+
+Only `/chat` takes this setting; the Manager and the API always refuse to be framed.
 
 ```html
 <iframe

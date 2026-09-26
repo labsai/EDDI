@@ -38,6 +38,13 @@ public class AuthStartupGuard {
 
     private static final Logger LOGGER = Logger.getLogger(AuthStartupGuard.class);
 
+    /**
+     * The claim quarkus-oidc reads roles from when
+     * {@code quarkus.oidc.roles.role-claim-path} is unset (the MicroProfile JWT
+     * {@code groups} claim), independent of any EDDI setting.
+     */
+    static final String QUARKUS_OIDC_DEFAULT_ROLES_CLAIM = "groups";
+
     @ConfigProperty(name = "quarkus.oidc.tenant-enabled", defaultValue = "false")
     boolean oidcEnabled;
 
@@ -130,10 +137,18 @@ public class AuthStartupGuard {
                 ? "groups"
                 : workspacesGroupsClaim.trim();
         if (configured == null) {
-            return Optional.of("[SECURITY] quarkus.oidc.roles.role-claim-path is NOT set. quarkus-oidc will read roles from "
-                    + "its default '" + groupsClaim + "' claim, which is the same claim EDDI resolves workspaces from — so every "
-                    + "user who belongs to a Keycloak group will have their roles replaced by their group paths and every "
-                    + "@RolesAllowed endpoint will answer 403 with an empty body. Set "
+            // quarkus-oidc's default is the MP-JWT 'groups' claim whatever EDDI's
+            // workspaces claim is called. The message used to print the
+            // workspaces claim as that default, so with eddi.workspaces.groups-claim
+            // set to anything else it told the operator quarkus-oidc read a claim
+            // it never reads.
+            String collision = QUARKUS_OIDC_DEFAULT_ROLES_CLAIM.equals(groupsClaim)
+                    ? ", which is also the claim EDDI resolves workspaces from (eddi.workspaces.groups-claim)"
+                    : "";
+            return Optional.of("[SECURITY] quarkus.oidc.roles.role-claim-path is NOT set. quarkus-oidc then reads roles from "
+                    + "its default '" + QUARKUS_OIDC_DEFAULT_ROLES_CLAIM + "' claim whenever a token carries one" + collision
+                    + " — so every user who belongs to a Keycloak group will have their roles replaced by their group paths "
+                    + "and every @RolesAllowed endpoint will answer 403 with an empty body. Set "
                     + "QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH=realm_access/roles (Keycloak) or the equivalent path for your "
                     + "identity provider.");
         }
