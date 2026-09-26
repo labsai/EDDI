@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
@@ -72,7 +74,7 @@ class PrePostUtilsJsonInjectionTest {
         IMemoryItemConverter memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory);
+        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -204,7 +206,7 @@ class PrePostUtilsJsonInjectionTest {
         when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
 
         var realPrePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
-                new TemplatingEngine(countingEngine), dataFactory);
+                new TemplatingEngine(countingEngine), dataFactory, mock(SecretPropertyVault.class));
 
         var texts = List.of("say \"hi\"", "line one\nline two", "back\\slash", "eddiRow0000");
         List<Map<String, String>> items = texts.stream().map(text -> Map.of("text", text)).toList();

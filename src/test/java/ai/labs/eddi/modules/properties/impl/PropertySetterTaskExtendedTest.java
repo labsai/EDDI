@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -57,7 +58,7 @@ class PropertySetterTaskExtendedTest {
         secretProvider = mock(ISecretProvider.class);
         task = new PropertySetterTask(expressionProvider, memoryItemConverter,
                 templatingEngine, dataFactory, resourceClientLibrary,
-                new ObjectMapper(), secretProvider);
+                new ObjectMapper(), new SecretPropertyVault(secretProvider, mock(SecretResolver.class), dataFactory));
     }
 
     @Nested
@@ -204,6 +205,8 @@ class PropertySetterTaskExtendedTest {
             env.instruction.setOverride(true);
 
             when(env.memory.getAgentId()).thenReturn("agent123");
+
+            when(env.memory.getConversationId()).thenReturn("conv123");
             when(env.conversationProperties.containsKey("tenantId")).thenReturn(false);
             var mockInputData = mock(IData.class);
             when(mockInputData.getResult()).thenReturn("my-secret-key");
@@ -224,6 +227,8 @@ class PropertySetterTaskExtendedTest {
             env.instruction.setOverride(true);
 
             when(env.memory.getAgentId()).thenReturn("agent123");
+
+            when(env.memory.getConversationId()).thenReturn("conv123");
             when(env.conversationProperties.containsKey("tenantId")).thenReturn(false);
             var mockInputData = mock(IData.class);
             when(mockInputData.getResult()).thenReturn("my-secret-key");
@@ -539,6 +544,7 @@ class PropertySetterTaskExtendedTest {
         var conversationProperties = mock(IConversationProperties.class);
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
         when(memory.getAgentId()).thenReturn("agent123");
+        when(memory.getConversationId()).thenReturn("conv123");
 
         var templateDataObjects = new HashMap<String, Object>();
         when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);

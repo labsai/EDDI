@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.OutputValue;
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,16 +67,18 @@ public class PrePostUtils {
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
+    private final SecretPropertyVault secretPropertyVault;
 
     private static final Logger LOGGER = Logger.getLogger(PrePostUtils.class);
 
     @Inject
     public PrePostUtils(IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
-            IDataFactory dataFactory) {
+            IDataFactory dataFactory, SecretPropertyVault secretPropertyVault) {
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
+        this.secretPropertyVault = secretPropertyVault;
     }
 
     public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects,
@@ -131,7 +134,15 @@ public class PrePostUtils {
                             propertyValue = "";
                         }
 
-                        if (propertyValue instanceof String s) {
+                        if (scope == Property.Scope.secret) {
+                            // scope:secret is honoured here too: this path used to store the
+                            // value as a plaintext property like any other scope. A value that
+                            // cannot be vaulted (not a string) is refused, never stored.
+                            if (!"".equals(propertyValue)) {
+                                memory.getConversationProperties().put(propertyName,
+                                        secretPropertyVault.vault(memory, propertyName, propertyValue));
+                            }
+                        } else if (propertyValue instanceof String s) {
                             memory.getConversationProperties().put(propertyName, new Property(propertyName, s, scope));
                         } else if (propertyValue instanceof Map<?, ?>) {
                             @SuppressWarnings("unchecked")

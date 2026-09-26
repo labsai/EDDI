@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,7 +59,7 @@ class PropertySetterTaskTest {
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter,
                 templatingEngine, dataFactory, resourceClientLibrary,
-                new ObjectMapper(), secretProvider);
+                new ObjectMapper(), new SecretPropertyVault(secretProvider, mock(SecretResolver.class), dataFactory));
     }
 
     @Test
@@ -863,6 +864,7 @@ class PropertySetterTaskTest {
             var conversationProperties = mock(IConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(memory.getAgentId()).thenReturn("agent123");
+            when(memory.getConversationId()).thenReturn("conv123");
 
             // No input data matching the secret, so scrubbing is skipped
             when(currentStep.getLatestData("input:initial")).thenReturn(null);
@@ -921,6 +923,7 @@ class PropertySetterTaskTest {
             var conversationProperties = mock(IConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(memory.getAgentId()).thenReturn("agent456");
+            when(memory.getConversationId()).thenReturn("conv123");
 
             // The user typed the secret, so the plaintext is also sitting in the raw
             // input data of this turn — the second place the old fail-open path leaked it.

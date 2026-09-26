@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -89,7 +90,8 @@ class PropertySetterTaskSecretScrubTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter, templatingEngine,
-                new DataFactory(), resourceClientLibrary, new ObjectMapper(), secretProvider);
+                new DataFactory(), resourceClientLibrary, new ObjectMapper(),
+                new SecretPropertyVault(secretProvider, mock(SecretResolver.class), new DataFactory()));
     }
 
     /**
@@ -198,7 +200,7 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.apiKey}", stored.getValueString());
+        assertEquals("${vault:agent-1.aabbccddeeff112233445566.apiKey}", stored.getValueString());
         // Scope alone says nothing: a secret instruction stores its reference as a
         // plain conversation property, exactly like a template that copied user input
         // into one. The marker is the only thing that separates the two, and
@@ -217,7 +219,7 @@ class PropertySetterTaskSecretScrubTest {
         var instruction = new PropertyInstruction();
         instruction.setName("apiKey");
         // The value a user could type, written by an instruction with no secret scope.
-        instruction.setValueString("${vault:agent-1.apiKey}");
+        instruction.setValueString("${vault:agent-1.aabbccddeeff112233445566.apiKey}");
         instruction.setScope(Scope.conversation);
         instruction.setOverride(true);
         var setOnActions = new SetOnActions();
@@ -230,8 +232,9 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, propertySetter);
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "byte-identical to what autoVaultSecret writes");
-        assertNull(stored.getAutoVaulted(), "nothing but autoVaultSecret may mark a property");
+        assertEquals("${vault:agent-1.aabbccddeeff112233445566.apiKey}", stored.getValueString(),
+                "byte-identical to what SecretPropertyVault writes");
+        assertNull(stored.getAutoVaulted(), "nothing but SecretPropertyVault may mark a property");
     }
 
     @Test
