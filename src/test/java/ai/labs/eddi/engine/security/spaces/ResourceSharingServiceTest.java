@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -209,6 +210,41 @@ class ResourceSharingServiceTest {
     void nonOwnerCannotShare() {
         assertThrows(ForbiddenException.class,
                 () -> service.share(BORROWED_CHILD, Subjects.user("carol"), AccessLevel.VIEW, false));
+    }
+
+    /**
+     * A {@code PUT} that moves the descriptor from v1 to v2 between the read and
+     * the write leaves the grant in the history row of v1 - the live descriptor
+     * never carries it. That used to be reported as applied.
+     */
+    @Test
+    @DisplayName("a share whose descriptor moved on while it was written is reported as skipped, not applied")
+    void shareOverAConcurrentVersionBumpIsSkipped() throws Exception {
+        var written = new AtomicBoolean();
+        doAnswer(i -> {
+            written.set(true);
+            return null;
+        }).when(store).setDescriptor(eq(AGENT), anyInt(), any());
+        when(store.getCurrentResourceId(AGENT)).thenAnswer(i -> resourceId(AGENT, written.get() ? 2 : 1));
+
+        var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, false);
+
+        assertTrue(result.skippedIds().contains(AGENT));
+        assertFalse(result.updatedIds().contains(AGENT));
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
     }
 
     @Test

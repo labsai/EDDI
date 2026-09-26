@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
 
+import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -452,7 +453,7 @@ class MongoResourceStorageTest {
     }
 
     @Test
-    @DisplayName("storeHistoryAndRemove — archives, then deletes, both majority-acknowledged")
+    @DisplayName("storeHistoryAndRemove — tombstones, then deletes the expected version, both majority-acknowledged")
     void storeHistoryAndRemove() throws Exception {
         when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
         var resource = storage.newResource(VALID_ID, 1, "test");
@@ -462,12 +463,86 @@ class MongoResourceStorageTest {
         MongoCollection<Document> durableHistory = mock(MongoCollection.class);
         when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
         when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(1));
 
-        storage.storeHistoryAndRemove(history, VALID_ID);
+        storage.storeHistoryAndRemove(history, VALID_ID, 1);
 
         InOrder inOrder = inOrder(durableHistory, durableCurrent);
-        inOrder.verify(durableHistory).insertOne(any(Document.class));
-        inOrder.verify(durableCurrent).deleteOne(any(Document.class));
+        // An upsert, not insert-if-absent: an update may already have archived v1
+        // without the flag, and a delete that goes through must still leave it.
+        inOrder.verify(durableHistory).replaceOne(any(Bson.class), any(Document.class), any(ReplaceOptions.class));
+        ArgumentCaptor<Bson> deleteFilter = ArgumentCaptor.forClass(Bson.class);
+        inOrder.verify(durableCurrent).deleteOne(deleteFilter.capture());
+        var rendered = deleteFilter.getValue().toBsonDocument();
+        assertTrue(rendered.toJson().contains("\"_version\": 1"), "the delete must be version-checked: " + rendered.toJson());
+        verify(durableHistory, never()).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a resource an update moved on is refused and its tombstone taken back")
+    void storeHistoryAndRemoveRefusesAMovedResource() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 1, "test");
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+        // still live — at v2
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1));
+
+        // v1 is ordinary history of a live resource again, not a tombstone.
+        verify(durableHistory).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a resource a concurrent delete already removed is deleted, as asked")
+    void storeHistoryAndRemoveOfAnAlreadyRemovedResource() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 1, "test");
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(0L);
+
+        storage.storeHistoryAndRemove(history, VALID_ID, 1);
+
+        verify(durableHistory, never()).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("replaceHistory — rewrites the addressed history row and reports whether it existed")
+    void replaceHistory() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var history = storage.newHistoryResourceFor(storage.newResource(VALID_ID, 1, "test"), false);
+        var matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L, 0L);
+        when(historyCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(matched);
+
+        assertTrue(storage.replaceHistory(history));
+        assertFalse(storage.replaceHistory(history));
+        verify(historyCollection, never()).insertOne(any(Document.class));
+    }
+
+    @Test
+    @DisplayName("an id that cannot be an ObjectId names nothing here — not an IllegalArgumentException")
+    void foreignIdsAreNotFound() {
+        String uuid = "11111111-2222-3333-4444-555555555555";
+        clearInvocations(currentCollection, historyCollection);
+
+        assertEquals(-1, storage.getCurrentVersion(uuid));
+        assertNull(storage.read(uuid, 1));
+        assertNull(storage.readHistory(uuid, 1));
+        assertNull(storage.readHistoryLatest(uuid));
+        verifyNoInteractions(currentCollection, historyCollection);
     }
 
     // ==================== findResourceIdsContaining ====================

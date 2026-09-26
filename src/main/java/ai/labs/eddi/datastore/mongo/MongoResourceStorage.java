@@ -16,6 +16,7 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReplaceOptions;
+import com.mongodb.client.model.Updates;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -194,8 +195,25 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         currentCollection.insertOne(resource.getMongoDocument());
     }
 
+    /**
+     * Whether {@code id} can name a document in this backend at all.
+     * <p>
+     * Ids arrive from outside too - an archive exported by a PostgreSQL deployment
+     * carries UUIDs - and {@code new ObjectId(uuid)} throws
+     * {@link IllegalArgumentException}, which turned "is there a local copy of
+     * this?" during an import preview or merge into a 500 or a 400. An id that
+     * cannot be an ObjectId names nothing here, so every lookup answers "not found"
+     * for it, as the PostgreSQL backend already does for a non-UUID.
+     */
+    private static boolean isStorableId(String id) {
+        return id != null && ObjectId.isValid(id);
+    }
+
     @Override
     public IResource<T> read(String id, Integer version) {
+        if (!isStorableId(id)) {
+            return null;
+        }
         Document query = new Document(ID_FIELD, new ObjectId(id));
         query.put(VERSION_FIELD, version);
 
@@ -269,13 +287,48 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     /**
+     * Tombstone first, then a delete conditioned on the version.
+     * <p>
+     * The tombstone is an upsert, not the insert-if-absent archiving uses: an
+     * update racing this delete may already have archived the same version
+     * <em>without</em> the deleted flag, and a delete that then succeeds must still
+     * leave the flag behind. If the conditional delete matches nothing because the
+     * resource moved on, the flag is taken off again — that version is ordinary
+     * history of a live resource — and the caller gets a conflict.
+     *
      * @see #storeHistoryAndUpdate(IHistoryResource, IResource, int) for why this is
      *      not a session transaction
      */
     @Override
-    public void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
-        durableInsertHistory(checkInternalHistoryResource(history));
-        currentCollection.withWriteConcern(WriteConcern.MAJORITY).deleteOne(new Document(ID_FIELD, new ObjectId(id)));
+    public void storeHistoryAndRemove(IHistoryResource<T> history, String id, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        HistoryResource historyResource = checkInternalHistoryResource(history);
+        Bson historyRow = Filters.eq(ID_FIELD, historyResource.getMongoDocument().get(ID_FIELD));
+        var durableHistory = historyCollection.withWriteConcern(WriteConcern.MAJORITY);
+        durableHistory.replaceOne(historyRow, historyResource.getMongoDocument(), new ReplaceOptions().upsert(true));
+
+        var result = currentCollection.withWriteConcern(WriteConcern.MAJORITY).deleteOne(
+                Filters.and(
+                        Filters.eq(ID_FIELD, new ObjectId(id)),
+                        Filters.eq(VERSION_FIELD, expectedCurrentVersion)));
+        if (result.getDeletedCount() > 0) {
+            return;
+        }
+        if (currentCollection.countDocuments(Filters.eq(ID_FIELD, new ObjectId(id))) == 0) {
+            // Already gone — a concurrent delete of the same version won. Deleted, as
+            // asked.
+            return;
+        }
+        durableHistory.updateOne(historyRow, Updates.unset(DELETED_FIELD));
+        throw new IResourceStore.ResourceModifiedException(
+                String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+    }
+
+    @Override
+    public boolean replaceHistory(IHistoryResource<T> history) {
+        HistoryResource historyResource = checkInternalHistoryResource(history);
+        Document row = historyResource.getMongoDocument();
+        return historyCollection.replaceOne(Filters.eq(ID_FIELD, row.get(ID_FIELD)), row).getMatchedCount() > 0;
     }
 
     private void durableInsertHistory(HistoryResource historyResource) {
@@ -319,6 +372,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public IHistoryResource<T> readHistory(String id, Integer version) {
+        if (!isStorableId(id)) {
+            return null;
+        }
         Document objectId = new Document(ID_FIELD, new ObjectId(id));
         objectId.put(VERSION_FIELD, version);
 
@@ -332,6 +388,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     /** @see #historyRowsOf(String) for why this is a nested-field match. */
     @Override
     public IHistoryResource<T> readHistoryLatest(String id) {
+        if (!isStorableId(id)) {
+            return null;
+        }
         Document query = historyRowsOf(id);
 
         if (historyCollection.countDocuments(query) == 0) {
@@ -363,6 +422,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public Integer getCurrentVersion(String id) {
+        if (!isStorableId(id)) {
+            return -1;
+        }
         Document query = new Document(ID_FIELD, new ObjectId(id));
         Document one = currentCollection.find(query).first();
         if (one == null) {

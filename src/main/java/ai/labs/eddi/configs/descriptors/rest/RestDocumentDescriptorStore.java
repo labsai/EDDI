@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.jboss.logging.Logger;
 
@@ -20,6 +21,9 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -116,6 +120,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         }
 
         try {
+            version = patchTargetVersion(id, version);
             DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
             DocumentDescriptor patch = patchInstruction.getDocument();
 
@@ -150,5 +155,38 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * The descriptor version a patch addressed at {@code version} must write.
+     * <p>
+     * A name is metadata of the resource, so a patch belongs on the current
+     * descriptor. Addressing an older version used to rewrite that history row -
+     * or, before the store wrote history rows at all, nothing - and answer 204
+     * either way, so a rename from a stale tab silently went nowhere. It is a 409
+     * now. Descriptor versions drift from resource versions (a merge import bumps
+     * one before the other), so the version of the resource the current descriptor
+     * points at is accepted as naming the current descriptor too; that is the
+     * number every client holds.
+     */
+    private Integer patchTargetVersion(String id, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        IResourceStore.IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+        if (version == null || current == null || current.getVersion() == null || current.getVersion().equals(version)) {
+            return version;
+        }
+        DocumentDescriptor currentDescriptor = documentDescriptorStore.readDescriptor(id, current.getVersion());
+        IResourceStore.IResourceId live = currentDescriptor == null || currentDescriptor.getResource() == null
+                ? null
+                : RestUtilities.extractResourceId(currentDescriptor.getResource());
+        if (live != null && live.getVersion() != null && live.getVersion().equals(version)) {
+            return current.getVersion();
+        }
+        String message = "Version " + version + " of '" + id + "' is not its current version; patch the current version ("
+                + (live != null && live.getVersion() != null ? live.getVersion() : current.getVersion()) + ").";
+        throw new WebApplicationException(message, Response.status(Response.Status.CONFLICT)
+                .entity(message)
+                .type(MediaType.TEXT_PLAIN)
+                .build());
     }
 }
