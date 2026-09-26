@@ -412,4 +412,86 @@ class ApiCallExecutorConfigReferenceTest {
         verify(prePostUtils).createMemoryEntry(any(), record.capture(), eq("downstreamRequest"), any());
         assertFalse(String.valueOf(record.getValue()).contains(SECRET), "stored: " + record.getValue());
     }
+
+    /**
+     * S2 — a server that rejects (or simply reflects) a credential echoes it. The
+     * executor knows every plaintext it substituted, so none of them may reach
+     * conversation memory, template data or the tool result through the response.
+     */
+    @Nested
+    @DisplayName("S2 — a response echoing a substituted secret")
+    class EchoedSecret {
+
+        private IResponse respond(int code, String body) throws Exception {
+            IResponse echo = mock(IResponse.class);
+            when(echo.getHttpCode()).thenReturn(code);
+            when(echo.getHttpCodeMessage()).thenReturn(code == 200 ? "OK" : "Unauthorized: " + SECRET);
+            when(echo.getContentAsString()).thenReturn(body);
+            var headers = new HashMap<String, String>();
+            headers.put("Content-Type", "text/plain");
+            headers.put("X-Echo", "key=" + SECRET);
+            when(echo.getHttpHeader()).thenReturn(headers);
+            when(request.send()).thenReturn(echo);
+            when(request.toMap()).thenReturn(storedRequestRecord("{}", Map.of("X-Api-Key", SECRET)));
+            return echo;
+        }
+
+        private ApiCall savingCall() {
+            ApiCall call = call(Map.of("X-Api-Key", "${vault:api-key}"), "{}");
+            call.setSaveResponse(true);
+            call.setResponseHeaderObjectName("responseHeaders");
+            return call;
+        }
+
+        @Test
+        @DisplayName("an error body quoting the key is redacted in memory, template data and the tool result")
+        void errorBodyRedacted() throws Exception {
+            respond(401, "{\"error\":\"invalid api key " + SECRET + "\"}");
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(SECRET), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("responseError")).contains(SECRET), "template data: " + templateData.get("responseError"));
+            ArgumentCaptor<Object> stored = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(any(), stored.capture(), anyString(), any());
+            for (Object value : stored.getAllValues()) {
+                assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
+            }
+            assertTrue(String.valueOf(templateData.get("responseError")).contains("invalid api key"), "the failure reason survives");
+        }
+
+        @Test
+        @DisplayName("a success body and a response header reflecting the key are redacted too")
+        void successBodyRedacted() throws Exception {
+            respond(200, "you sent " + SECRET);
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(SECRET), "tool result: " + result);
+            assertFalse(String.valueOf(templateData.get("response")).contains(SECRET));
+            assertFalse(String.valueOf(templateData.get("responseHeaders")).contains(SECRET));
+            ArgumentCaptor<Object> stored = ArgumentCaptor.forClass(Object.class);
+            verify(prePostUtils, atLeastOnce()).createMemoryEntry(any(), stored.capture(), anyString(), any());
+            for (Object value : stored.getAllValues()) {
+                assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("S5 — a path that fails URI parsing does not quote the resolved secret in the error")
+    void invalidUriDoesNotLeakThePathSecret() throws Exception {
+        ApiCall call = call(Map.of(), null);
+        call.getRequest().setPath("/hooks/${vault:api-key}/bad path");
+
+        var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, data("hi"), SERVER));
+
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            assertFalse(String.valueOf(t.getMessage()).contains(SECRET), "leaked through " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        assertTrue(failure.getMessage().contains("URISyntaxException") || failure.getMessage().contains("Illegal character"), failure.getMessage());
+        verify(request, never()).send();
+    }
 }
