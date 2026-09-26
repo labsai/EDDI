@@ -111,8 +111,11 @@ public interface IRestScheduleStore {
     @POST
     @Path("/{scheduleId}/dismiss")
     @Operation(description = "Reset a dead-lettered schedule to PENDING without immediate retry, re-armed at its next "
-            + "regular fire (a one-shot with nothing left to fire is disabled). 409 if the schedule is not dead-lettered.")
-    @APIResponse(responseCode = "200", description = "Dismissed and re-armed.")
+            + "regular fire (a one-shot with nothing left to fire is disabled). The enabled flag is not changed: a schedule "
+            + "that was disabled stays disabled and does not fire until POST /{scheduleId}/enable. 409 if the schedule is "
+            + "not dead-lettered.")
+    @APIResponse(responseCode = "200",
+                 description = "Dismissed: back to PENDING at its next regular fire. A disabled schedule stays disabled.")
     @APIResponse(responseCode = "404", description = "No schedule with this id.")
     @APIResponse(responseCode = "409",
                  description = "The schedule is not dead-lettered (it recovered, was requeued or is running) — nothing was changed.")

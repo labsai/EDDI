@@ -386,6 +386,14 @@ public interface IScheduleStore {
      * fire) disables the schedule instead. {@code lastFired} is left alone —
      * nothing fired.
      * <p>
+     * With a non-null {@code nextFire} the {@code enabled} flag is left exactly as
+     * it is. Dead-lettering never clears it, so a schedule that simply ran out of
+     * retries is still enabled and the poller picks it up at {@code nextFire}. A
+     * dead-lettered row that is disabled got that way on purpose — an operator's
+     * {@code /disable}, or the agent being undeployed — and dismissing the failure
+     * must not quietly override that. {@code /enable} is the re-arm for such a row;
+     * it also clears the failure state.
+     * <p>
      * The write is conditional on the row being DEAD_LETTERED at the moment it
      * lands. This used to be an unfenced {@code markCompleted}, which matched the
      * row in any state: dismissing a schedule that had meanwhile been requeued and

@@ -1420,6 +1420,9 @@ class PostgresScheduleStoreUnitTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("AND fire_id=?"), "the last attempt must be fenced too: " + sql.getValue());
         verify(preparedStatement).setString(3, "sched-1_fire-a");
+        // dismissDeadLetter leaves enabled untouched on the premise that running out
+        // of retries never disables a schedule; this pins that premise.
+        assertFalse(sql.getValue().contains("enabled"), "dead-lettering must not disable the schedule: " + sql.getValue());
     }
 
     /**
@@ -1449,6 +1452,22 @@ class PostgresScheduleStoreUnitTest {
                 "an unconditional reset would clear a live claim and double-fire the schedule: " + sql.getValue());
         assertFalse(sql.getValue().contains("last_fired"), "nothing fired: " + sql.getValue());
         verify(preparedStatement).setString(3, "sched-1");
+    }
+
+    /**
+     * Dead-lettering never clears {@code enabled}, so a row that is disabled was
+     * disabled on purpose (operator or undeploy). Dismissing the failure must leave
+     * that alone rather than silently re-enabling the schedule.
+     */
+    @Test
+    void dismissDeadLetter_withNextFire_leavesEnabledUntouched() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("enabled"), "dismissal must not override an operator's enable/disable: " + sql.getValue());
     }
 
     @Test

@@ -988,6 +988,23 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("dismissDeadLetter — a recurring schedule's enabled flag is left as the operator set it")
+    void dismissDeadLetterLeavesEnabledUntouched() throws Exception {
+        // Dead-lettering never clears enabled, so a disabled dead-lettered row was
+        // disabled on purpose (operator or undeploy); dismissal must not re-enable it.
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertFalse(renderedUpdate.contains("\"enabled\""), "dismissal must not override an operator's enable/disable: " + renderedUpdate);
+    }
+
+    @Test
     @DisplayName("dismissDeadLetter — a one-shot with nothing left to fire is disabled")
     void dismissDeadLetterOneShotDisables() throws Exception {
         UpdateResult matched = mock(UpdateResult.class);
@@ -1062,6 +1079,14 @@ class MongoScheduleStoreTest {
     void markDeadLettered() throws Exception {
         when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
         assertDoesNotThrow(() -> store.markDeadLettered("sched-1"));
+
+        // dismissDeadLetter leaves enabled untouched on the premise that running out
+        // of retries never disables a schedule; this pins that premise.
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertTrue(renderedUpdate.contains("\"fireStatus\": \"DEAD_LETTERED\""), renderedUpdate);
+        assertFalse(renderedUpdate.contains("\"enabled\""), "dead-lettering must not disable the schedule: " + renderedUpdate);
     }
 
     // ==================== requeueDeadLetter ====================
