@@ -119,6 +119,22 @@ public interface IConnectionGrantStore {
     List<ConnectionGrant> findByPrincipal(String tenantId, String principal);
 
     /**
+     * Every grant a principal holds in <em>any</em> tenant, for the GDPR Art. 15/20
+     * export. Token ciphertext is included in the objects; the exporter copies out
+     * metadata only and must never serialise these.
+     */
+    List<ConnectionGrant> findAllByPrincipal(String principal);
+
+    /**
+     * Deletes every grant a principal holds, in every tenant, for GDPR Art. 17
+     * erasure. A grant holds a live refresh token for the user's account at a third
+     * party, so leaving it behind kept a working credential for an erased identity.
+     *
+     * @return how many grants were deleted
+     */
+    int deleteAllByPrincipal(String principal);
+
+    /**
      * Every grant in a tenant, for DEK rotation.
      * <p>
      * Deliberately not exposed over REST: this returns token ciphertext for the

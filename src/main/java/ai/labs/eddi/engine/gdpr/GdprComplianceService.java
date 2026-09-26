@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.connections.grants.ConnectionGrant;
+import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
@@ -77,6 +79,11 @@ public class GdprComplianceService {
     private final IScheduleStore scheduleStore;
     private final ICache<String, UserConversation> userConversationCache;
     /**
+     * Null in the older test seams, and unresolvable where no backend provides it.
+     */
+    private final Instance<IConnectionGrantStore> connectionGrantStoreInstance;
+    private final Iterable<UserErasureParticipant> erasureParticipants;
+    /**
      * Art. 18 restriction flags, short-TTL — <strong>off unless a deployment
      * switches it on</strong>. {@code isProcessingRestricted} is called at
      * conversation start and on every {@code say}/{@code sayStreaming}, so an
@@ -109,9 +116,41 @@ public class GdprComplianceService {
             Instance<GroupConversationStore> groupConversationStoreInstance,
             Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
             IScheduleStore scheduleStore,
+            Instance<IConnectionGrantStore> connectionGrantStoreInstance,
+            Instance<UserErasureParticipant> erasureParticipants,
             ICacheFactory cacheFactory,
             @ConfigProperty(name = RESTRICTION_CACHE_TTL_PROPERTY,
                             defaultValue = RESTRICTION_CACHE_TTL_DEFAULT) long restrictionCacheTtlSeconds) {
+        this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore, auditLedgerService,
+                attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, connectionGrantStoreInstance,
+                (Iterable<UserErasureParticipant>) erasureParticipants, cacheFactory, restrictionCacheTtlSeconds);
+    }
+
+    /**
+     * Test seam with the collaborators the erasure cascade gained later: the grant
+     * store (null when absent) and the in-flight-work participants as a plain
+     * iterable, so a test needs no CDI {@code Instance} for them.
+     */
+    GdprComplianceService(IUserMemoryStore userMemoryStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IUserConversationStore userConversationStore,
+            IDatabaseLogs databaseLogs,
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStore> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
+            IScheduleStore scheduleStore,
+            Instance<IConnectionGrantStore> connectionGrantStoreInstance,
+            Iterable<UserErasureParticipant> erasureParticipants,
+            ICacheFactory cacheFactory,
+            long restrictionCacheTtlSeconds) {
+        this.connectionGrantStoreInstance = connectionGrantStoreInstance;
+        this.erasureParticipants = erasureParticipants == null ? List.of() : erasureParticipants;
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
@@ -133,6 +172,31 @@ public class GdprComplianceService {
             LOGGER.infof("[GDPR] Art. 18 restriction caching is off (%s=%d); every check reads the store.",
                     RESTRICTION_CACHE_TTL_PROPERTY, restrictionCacheTtlSeconds);
         }
+    }
+
+    /**
+     * Test seam for the shape before connection grants and erasure participants —
+     * neither is present.
+     */
+    GdprComplianceService(IUserMemoryStore userMemoryStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IUserConversationStore userConversationStore,
+            IDatabaseLogs databaseLogs,
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStore> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
+            IScheduleStore scheduleStore,
+            ICacheFactory cacheFactory,
+            long restrictionCacheTtlSeconds) {
+        this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore, auditLedgerService,
+                attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, List.of(), cacheFactory,
+                restrictionCacheTtlSeconds);
     }
 
     /**
@@ -239,6 +303,8 @@ public class GdprComplianceService {
      * <p>
      * Order of operations:
      * <ol>
+     * <li>Signal the user's in-flight turns and group discussions on this node to
+     * stop (see {@link UserErasureParticipant})</li>
      * <li>Delete all persistent user memories</li>
      * <li>Delete all binary attachments for user conversations</li>
      * <li>Delete all HITL tool execution journal entries for user
@@ -251,6 +317,8 @@ public class GdprComplianceService {
      * <li>Delete all group conversation transcripts</li>
      * <li>Delete all shared artifacts owned by the user</li>
      * <li>Delete all schedules owned by the user</li>
+     * <li>Delete all OAuth connection grants of the user</li>
+     * <li>Re-sweep user memories written while the cascade ran</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Pseudonymize audit ledger entries</li>
      * </ol>
@@ -272,6 +340,24 @@ public class GdprComplianceService {
         // failure must be visible in the response, or an admin files an Art. 17
         // request as fulfilled while the data is still there.
         var failedSteps = new ArrayList<String>();
+
+        // 0. Stop the user's in-flight work on this node BEFORE deleting anything. A
+        // turn still running wrote its longTerm properties back to user memory at
+        // teardown, and a running group discussion wrote its document on every phase,
+        // so the data this cascade removed came back seconds after it reported success.
+        // Work on another replica is covered by the stores refusing to recreate a
+        // deleted conversation or discussion, and by the memory re-sweep at the end.
+        int inFlightWorkStopped = 0;
+        for (UserErasureParticipant participant : erasureParticipants) {
+            try {
+                inFlightWorkStopped += participant.stopInFlightWork(userId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, participant.erasureStepName(), e, pseudonym);
+            }
+        }
+        if (inFlightWorkStopped > 0) {
+            LOGGER.infof("[GDPR] Signalled %d in-flight turns/discussions to stop [%s]", inFlightWorkStopped, pseudonym);
+        }
 
         // 1. Delete user memories
         long memoriesDeleted = 0;
@@ -478,6 +564,34 @@ public class GdprComplianceService {
             recordFailure(failedSteps, "schedules", e, pseudonym);
         }
 
+        // 5e. Delete OAuth connection grants. Each holds a live refresh token for the
+        // user's account at a third party; left behind, it stayed a working credential
+        // for an erased identity. Every tenant: a principal is not tenant-scoped here,
+        // any more than the conversations above are.
+        long connectionGrantsDeleted = 0;
+        try {
+            var grantStore = connectionGrantStore();
+            if (grantStore != null) {
+                connectionGrantsDeleted = grantStore.deleteAllByPrincipal(userId);
+                if (connectionGrantsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d connection grants [%s]", connectionGrantsDeleted, pseudonym);
+                }
+            }
+        } catch (Exception e) {
+            recordFailure(failedSteps, "connectionGrants", e, pseudonym);
+        }
+
+        // 5f. Re-sweep user memories. Step 0 only signals: a turn already inside a
+        // tool call (UserMemoryTool writes during the turn) or a turn on another
+        // replica can still land a write between step 1 and here. Idempotent and
+        // cheap, so it always runs; its count is not added to memoriesDeleted, which
+        // reports what the user had when the erasure started.
+        try {
+            userMemoryStore.deleteAllForUser(userId);
+        } catch (Exception e) {
+            recordFailure(failedSteps, "userMemoriesResweep", e, pseudonym);
+        }
+
         // 6. Pseudonymize database logs (not deleted — operational data)
         long logsPseudonymized = 0;
         try {
@@ -502,22 +616,22 @@ public class GdprComplianceService {
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, failedSteps, Instant.now());
+                schedulesDeleted, connectionGrantsDeleted, failedSteps, Instant.now());
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
                     + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
-                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
+                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, connectionGrants=%d, logs=%d, audit=%d",
                     pseudonym, memoriesDeleted, conversationsDeleted, checkpointsDeleted,
                     mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
-                    logsPseudonymized, auditPseudonymized);
+                    connectionGrantsDeleted, logsPseudonymized, auditPseudonymized);
         } else {
             LOGGER.errorf("[GDPR] Erasure cascade INCOMPLETE [%s] — failed steps: %s. "
                     + "memories=%d, conversations=%d, checkpoints=%d, mappings=%d, "
-                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, logs=%d, audit=%d",
+                    + "groupConversations=%d, sharedArtifacts=%d, schedules=%d, connectionGrants=%d, logs=%d, audit=%d",
                     pseudonym, result.failedSteps(), memoriesDeleted, conversationsDeleted, checkpointsDeleted,
                     mappingsDeleted, groupConversationsDeleted, sharedArtifactsDeleted, schedulesDeleted,
-                    logsPseudonymized, auditPseudonymized);
+                    connectionGrantsDeleted, logsPseudonymized, auditPseudonymized);
         }
 
         // Write compliance event to immutable audit ledger
@@ -531,6 +645,8 @@ public class GdprComplianceService {
         auditDetails.put("groupConversationsDeleted", groupConversationsDeleted);
         auditDetails.put("sharedArtifactsDeleted", sharedArtifactsDeleted);
         auditDetails.put("schedulesDeleted", schedulesDeleted);
+        auditDetails.put("connectionGrantsDeleted", connectionGrantsDeleted);
+        auditDetails.put("inFlightWorkStopped", inFlightWorkStopped);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
         auditDetails.put("complete", result.complete());
@@ -538,6 +654,11 @@ public class GdprComplianceService {
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /** The grant store, or null where this deployment has none. */
+    private IConnectionGrantStore connectionGrantStore() {
+        return connectionGrantStoreInstance != null && connectionGrantStoreInstance.isResolvable() ? connectionGrantStoreInstance.get() : null;
     }
 
     /**
@@ -701,6 +822,22 @@ public class GdprComplianceService {
             LOGGER.errorf(e, "[GDPR] Failed to export attachment metadata [%s]", pseudonym);
         }
 
+        // 6. Linked OAuth accounts — metadata only. The entity carries token
+        // ciphertext, so the fields are copied out one by one rather than serialised.
+        var connectionGrants = new ArrayList<UserDataExport.ConnectionGrantExportEntry>();
+        try {
+            var grantStore = connectionGrantStore();
+            if (grantStore != null) {
+                for (ConnectionGrant grant : grantStore.findAllByPrincipal(userId)) {
+                    connectionGrants.add(new UserDataExport.ConnectionGrantExportEntry(grant.getTenantId(), grant.getConnectionName(),
+                            grant.statusName(), grant.getScopes() == null ? List.of() : List.copyOf(grant.getScopes()),
+                            grant.getCreatedAt(), grant.getUpdatedAt(), grant.getLastRefreshAt(), grant.getExpiresAt()));
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to export connection grants [%s]", pseudonym);
+        }
+
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
                 + "conversations=%d of %d, truncated=%s, failedConversations=%d, managedConversations=%d, "
                 + "auditEntries=%d, attachments=%d",
@@ -721,11 +858,12 @@ public class GdprComplianceService {
                 "conversationsFailed", failedConversationIds.size(),
                 "managedConversationsExported", managedConversations.size(),
                 "auditEntriesExported", auditExportEntries.size(),
-                "attachmentsExported", attachmentEntries.size()));
+                "attachmentsExported", attachmentEntries.size(),
+                "connectionGrantsExported", connectionGrants.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
-                totalConversations, conversationsTruncated, failedConversationIds);
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

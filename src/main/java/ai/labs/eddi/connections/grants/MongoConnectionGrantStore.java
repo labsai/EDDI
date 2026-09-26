@@ -65,6 +65,8 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
                 new IndexOptions().name("idx_grant_tenant_connection_principal").unique(true).background(true));
         this.grants.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_TENANT), Indexes.ascending(FIELD_PRINCIPAL)),
                 new IndexOptions().name("idx_grant_tenant_principal").background(true));
+        // Principal alone, for GDPR export and erasure, which are not tenant-scoped.
+        this.grants.createIndex(Indexes.ascending(FIELD_PRINCIPAL), new IndexOptions().name("idx_grant_principal").background(true));
     }
 
     private static Bson key(String tenantId, String connectionName, String principal) {
@@ -194,6 +196,20 @@ public class MongoConnectionGrantStore implements IConnectionGrantStore {
             results.add(toGrant(document));
         }
         return results;
+    }
+
+    @Override
+    public List<ConnectionGrant> findAllByPrincipal(String principal) {
+        var results = new ArrayList<ConnectionGrant>();
+        for (Document document : grants.find(Filters.eq(FIELD_PRINCIPAL, principal))) {
+            results.add(toGrant(document));
+        }
+        return results;
+    }
+
+    @Override
+    public int deleteAllByPrincipal(String principal) {
+        return (int) grants.deleteMany(Filters.eq(FIELD_PRINCIPAL, principal)).getDeletedCount();
     }
 
     @Override

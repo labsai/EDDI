@@ -72,6 +72,11 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_cg_tenant_principal ON connection_grants (tenant_id, principal)";
 
+    /**
+     * Principal alone, for GDPR export and erasure, which are not tenant-scoped.
+     */
+    private static final String CREATE_PRINCIPAL_INDEX = "CREATE INDEX IF NOT EXISTS idx_cg_principal ON connection_grants (principal)";
+
     private static final String SELECT_COLUMNS = """
             id, tenant_id, connection_name, principal, encrypted_access_token, access_token_iv,
             encrypted_refresh_token, refresh_token_iv, dek_id, expires_at, scopes, status,
@@ -102,6 +107,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(CREATE_INDEX);
+            statement.execute(CREATE_PRINCIPAL_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the connection_grants schema");
@@ -323,6 +329,36 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             return results;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to list connection grants", e);
+        }
+    }
+
+    @Override
+    public List<ConnectionGrant> findAllByPrincipal(String principal) {
+        createSchema();
+        String sql = "SELECT " + SELECT_COLUMNS + " FROM connection_grants WHERE principal = ?";
+        var results = new ArrayList<ConnectionGrant>();
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, principal);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    results.add(toGrant(rows));
+                }
+            }
+            return results;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to list connection grants", e);
+        }
+    }
+
+    @Override
+    public int deleteAllByPrincipal(String principal) {
+        createSchema();
+        String sql = "DELETE FROM connection_grants WHERE principal = ?";
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, principal);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete connection grants", e);
         }
     }
 

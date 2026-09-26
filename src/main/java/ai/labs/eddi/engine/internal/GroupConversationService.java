@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -96,7 +97,7 @@ import java.util.concurrent.atomic.DoubleAdder;
  * @author ginccc
  */
 @ApplicationScoped
-public class GroupConversationService implements IGroupConversationService {
+public class GroupConversationService implements IGroupConversationService, UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
@@ -2303,6 +2304,40 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens = new ConcurrentHashMap<>();
+
+    @Override
+    public String erasureStepName() {
+        return "runningGroupDiscussions";
+    }
+
+    /**
+     * GDPR erasure: cancels, immediately, every discussion running on this node for
+     * {@code userId}. Deleting a running discussion's document did not stop it —
+     * its next phase wrote the document back — so the cascade signals first. A
+     * discussion on another node is not reachable from here; it is stopped by
+     * {@code GroupConversationStore.update} refusing to recreate the deleted
+     * document, which fails that discussion's next write.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (String groupConversationId : List.copyOf(activeTokens.keySet())) {
+            try {
+                GroupConversation gc = conversationStore.read(groupConversationId);
+                if (userId.equals(gc.getUserId()) && hitlCoordinator.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_IMMEDIATE)) {
+                    signalled++;
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // finished and removed between the snapshot of ids and this read
+            } catch (IResourceStore.ResourceStoreException e) {
+                throw new IllegalStateException("Could not read running group discussion " + groupConversationId, e);
+            }
+        }
+        return signalled;
+    }
 
     @Override
     public boolean cancelDiscussion(String conversationId, ControlSignal mode)

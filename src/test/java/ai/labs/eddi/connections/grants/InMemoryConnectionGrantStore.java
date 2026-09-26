@@ -162,6 +162,24 @@ public class InMemoryConnectionGrantStore implements IConnectionGrantStore {
     }
 
     @Override
+    public synchronized List<ConnectionGrant> findAllByPrincipal(String principal) {
+        var results = new ArrayList<ConnectionGrant>();
+        for (ConnectionGrant grant : grants.values()) {
+            if (principal.equals(grant.getPrincipal())) {
+                results.add(copy(grant));
+            }
+        }
+        return results;
+    }
+
+    @Override
+    public synchronized int deleteAllByPrincipal(String principal) {
+        var toRemove = grants.entrySet().stream().filter(e -> principal.equals(e.getValue().getPrincipal())).map(Map.Entry::getKey).toList();
+        toRemove.forEach(grants::remove);
+        return toRemove.size();
+    }
+
+    @Override
     public synchronized List<ConnectionGrant> findByTenant(String tenantId) {
         var results = new ArrayList<ConnectionGrant>();
         for (ConnectionGrant grant : grants.values()) {

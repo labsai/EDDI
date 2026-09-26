@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 /**
@@ -46,6 +47,7 @@ public class UserMemoryTool {
     private static final String ON_CAP_EVICT_OLDEST = "evict_oldest";
     /** GDPR bookkeeping keys are never evicted (mirrors the retention sweep). */
     private static final String GDPR_KEY_PREFIX = IUserMemoryStore.RESERVED_KEY_PREFIX;
+    private static final String TURN_DISCARDED_REFUSAL = "⚠️ This turn has been cancelled; nothing was stored or changed.";
     private static final String RESERVED_KEY_REFUSAL = "⚠️ Keys starting with '%s' are reserved for GDPR bookkeeping and cannot be "
             + "written or forgotten by an agent.";
 
@@ -56,10 +58,25 @@ public class UserMemoryTool {
     private final List<String> groupIds;
     private final AgentConfiguration.UserMemoryConfig config;
     private final AgentConfiguration.Guardrails guardrails;
+    private final BooleanSupplier turnDiscarded;
     private int writesThisTurn = 0;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config) {
+        this(store, userId, agentId, conversationId, groupIds, config, () -> false);
+    }
+
+    /**
+     * @param turnDiscarded
+     *            whether the turn this tool serves has been cancelled — by the
+     *            user, or by a GDPR erasure of the user. Checked before every
+     *            write: this tool writes straight to the store mid-turn, so a turn
+     *            told to stop would otherwise still recreate memories the erasure
+     *            had just deleted while its tool loop wound down.
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded) {
+        this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
         this.userId = userId;
         this.agentId = agentId;
@@ -114,6 +131,10 @@ public class UserMemoryTool {
             vis = (visibility != null && !visibility.isBlank()) ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
         } catch (IllegalArgumentException e) {
             vis = Visibility.self;
+        }
+
+        if (turnDiscarded.getAsBoolean()) {
+            return TURN_DISCARDED_REFUSAL;
         }
 
         try {
@@ -202,6 +223,9 @@ public class UserMemoryTool {
             }
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
+            }
+            if (turnDiscarded.getAsBoolean()) {
+                return TURN_DISCARDED_REFUSAL;
             }
 
             store.deleteEntry(target.id());
