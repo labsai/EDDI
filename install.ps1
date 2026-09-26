@@ -204,6 +204,8 @@ $KcAdminRotated = $false
 $GrafanaRotated = $false
 # True when this run generated KEYCLOAK_ADMIN_PASSWORD rather than finding one.
 $KcAdminPasswordGenerated = $false
+# True when this run generated GRAFANA_ADMIN_PASSWORD rather than finding one.
+$GrafanaPasswordGenerated = $false
 
 # -- Helpers ------------------------------------------------
 
@@ -578,8 +580,9 @@ function Resolve-StackCredential {
             $script:KcAdminPasswordGenerated = $true
         }
     }
-    if ($WithMonitoring) {
-        if (-not $script:GrafanaAdminSecret) { $script:GrafanaAdminSecret = Get-StackPassword }
+    if ($WithMonitoring -and -not $script:GrafanaAdminSecret) {
+        $script:GrafanaAdminSecret = Get-StackPassword
+        $script:GrafanaPasswordGenerated = $true
     }
     # Written single-quoted into .env, where compose reads the value literally.
     foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminSecret)) {
@@ -1265,6 +1268,64 @@ function Update-LegacyGrafanaLogin {
     }
 }
 
+# $true when Grafana accepts admin:<Secret> on /api/user.
+function Test-GrafanaLogin([string]$GrafanaBase, [string]$Secret) {
+    $auth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("admin:$Secret")) }
+    try {
+        Invoke-RestMethod -Uri "$GrafanaBase/api/user" -Headers $auth -TimeoutSec 10 -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it creates its database,
+# so an existing grafana-data volume keeps whatever admin password it already
+# had. Confirms that the value .env now points at is one Grafana accepts,
+# instead of printing a login that does not work:
+#   - admin/admin accepted: Update-LegacyGrafanaLogin moves it to
+#     GRAFANA_ADMIN_PASSWORD.
+#   - GRAFANA_ADMIN_PASSWORD accepted: nothing to do.
+#   - neither, and this run GENERATED the password: .env holds a value nothing
+#     answers to, so stop before Write-Success advertises it. The stack stays
+#     up; the fix is to put the real password in .env and re-run.
+#   - neither, but the password came from .env or the environment: the
+#     operator chose it and may have changed it in Grafana since -- warn only.
+# EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
+# that never answers is reported as unverified, not as a wrong password.
+function Confirm-GrafanaLogin {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
+    if (-not $PSCmdlet.ShouldProcess("Grafana", "Confirm the admin login in .env")) { return }
+    $gBase = "http://localhost:$GrafanaPort"
+    $up = $false
+    for ($waited = 0; $waited -le 60; $waited += 2) {
+        try {
+            Invoke-RestMethod -Uri "$gBase/api/health" -TimeoutSec 5 -ErrorAction Stop | Out-Null
+            $up = $true
+            break
+        } catch {
+            Start-Sleep -Seconds 2
+        }
+    }
+    if (-not $up) {
+        Write-Warn "Grafana did not answer on $gBase within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in $EddiDir\.env."
+        return
+    }
+    $script:GrafanaRotated = $false
+    Update-LegacyGrafanaLogin
+    if ($script:GrafanaRotated -or (Test-GrafanaLogin $gBase "admin")) {
+        # Rotated, or still on admin/admin with the change refused (already warned).
+        return
+    }
+    if (Test-GrafanaLogin $gBase $GrafanaAdminSecret) { return }
+    if ($GrafanaPasswordGenerated) {
+        Write-Fail "GRAFANA_ADMIN_PASSWORD in $EddiDir\.env was just generated, but this Grafana accepts neither it nor admin/admin -- its grafana-data volume predates it and has its own admin password. EDDI is running. Replace the value in $EddiDir\.env with your Grafana admin password (GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>') and re-run the installer."
+    }
+    Write-Warn "Grafana does not accept GRAFANA_ADMIN_PASSWORD from $EddiDir\.env -- if you changed the admin password in Grafana, update .env to match."
+}
+
 # -- Success banner ---------------------------------------
 
 function Write-Success {
@@ -1640,7 +1701,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     Start-Eddi
     Wait-ForReady
     Set-FirstLoginPassword
-    Update-LegacyGrafanaLogin
+    Confirm-GrafanaLogin
     Write-Success
     Install-CliWrapper
     $elapsed = [math]::Round(((Get-Date) - $startTime).TotalSeconds)

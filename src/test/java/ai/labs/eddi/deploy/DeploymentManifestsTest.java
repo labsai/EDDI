@@ -3788,6 +3788,227 @@ class DeploymentManifestsTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Installers — the monitoring admin credential
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("installers — Grafana admin credential")
+    class InstallerGrafanaCredential {
+
+        private static final Path INSTALL_SH = Path.of("install.sh");
+        private static final Path INSTALL_PS1 = Path.of("install.ps1");
+
+        /**
+         * docker-compose.monitoring.yml refuses to start without
+         * GRAFANA_ADMIN_PASSWORD, so the value an install generates has to be in .env
+         * before Compose reads it. Both installers write .env in the step that
+         * downloads the compose files, and that step has to come after the one that
+         * resolves the passwords — or a fresh {@code --with-monitoring} install hands
+         * Compose a .env with no password in it and the overlay aborts. Pinned by
+         * position, since nothing else would notice a reordering until an install
+         * failed on a user's machine.
+         */
+        @Test
+        @DisplayName("both installers resolve the admin passwords before writing .env and starting Compose")
+        void passwordsAreResolvedBeforeEnvIsWritten() throws IOException {
+            String sh = read(INSTALL_SH);
+            String shMain = functionBody(sh, "main() {");
+            assertInOrder(INSTALL_SH, shMain, "resolve_stack_passwords", "resolve_compose_files", "start_eddi");
+            assertTrue(functionBody(sh, "resolve_compose_files() {").contains("cat > \"$EDDI_DIR/.env\""),
+                    INSTALL_SH + ": .env is no longer written in resolve_compose_files, so the ordering above "
+                            + "no longer proves the generated passwords reach it before start_eddi");
+
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String psMain = ps1.substring(ps1.indexOf("    Step-Database\n"));
+            assertInOrder(INSTALL_PS1, psMain, "Resolve-StackCredential", "Get-ComposeFiles", "Start-Eddi");
+            assertTrue(functionBody(ps1, "function Get-ComposeFiles {").contains("Set-Content -Path $envPath"),
+                    INSTALL_PS1 + ": .env is no longer written in Get-ComposeFiles, so the ordering above no "
+                            + "longer proves the generated passwords reach it before Start-Eddi");
+        }
+
+        /**
+         * Grafana reads GF_SECURITY_ADMIN_PASSWORD only when it creates its database,
+         * so a grafana-data volume that predates the generated password keeps its own.
+         * The installer used to probe admin/admin, return quietly when that was
+         * refused, and print a success banner pointing at a password nothing answers
+         * to. It now confirms the credential before the banner, and stops when the
+         * value it just generated is refused.
+         */
+        @Test
+        @DisplayName("install.ps1 confirms Grafana accepts the generated password before reporting success")
+        void powerShellConfirmsTheGrafanaLoginBeforeSuccess() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String psMain = ps1.substring(ps1.indexOf("    Step-Database\n"));
+            assertInOrder(INSTALL_PS1, psMain, "Wait-ForReady", "Confirm-GrafanaLogin", "Write-Success");
+
+            String confirm = functionBody(ps1, "function Confirm-GrafanaLogin {");
+            assertTrue(confirm.contains("/api/health"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin no longer waits for Grafana. EDDI's readiness says "
+                            + "nothing about Grafana's, and a Grafana still starting refuses every login");
+            assertTrue(confirm.contains("Test-GrafanaLogin $gBase $GrafanaAdminSecret"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin no longer checks that Grafana accepts "
+                            + "GRAFANA_ADMIN_PASSWORD");
+            int generated = confirm.indexOf("if ($GrafanaPasswordGenerated) {");
+            assertTrue(generated >= 0 && confirm.indexOf("Write-Fail", generated) > generated,
+                    INSTALL_PS1 + ": a generated GRAFANA_ADMIN_PASSWORD that Grafana refuses must stop the "
+                            + "install (Write-Fail) before Write-Success advertises it");
+            assertTrue(functionBody(ps1, "function Resolve-StackCredential {").contains("$script:GrafanaPasswordGenerated = $true"),
+                    INSTALL_PS1 + ": Resolve-StackCredential no longer records that it generated the Grafana "
+                            + "password, so Confirm-GrafanaLogin cannot tell a fresh value from the operator's");
+        }
+
+        /**
+         * The same decision in install.sh, run for real: its two Grafana functions are
+         * lifted out of the installer and driven against a stand-in {@code curl} that
+         * plays a Grafana accepting exactly one admin password.
+         */
+        @Test
+        @DisplayName("install.sh fails on a generated Grafana password nothing accepts, and only then")
+        void shellConfirmsTheGrafanaLogin() throws Exception {
+            String generated = "Gen3ratedPassw0rdGen3ratedPassw0";
+
+            GrafanaRun fresh = runGrafanaConfirm(generated, generated, true);
+            assertEquals(0, fresh.exitCode(), INSTALL_SH + " refused a Grafana that accepts GRAFANA_ADMIN_PASSWORD. " + fresh);
+
+            GrafanaRun legacy = runGrafanaConfirm("admin", generated, true);
+            assertEquals(0, legacy.exitCode(), INSTALL_SH + " failed on a legacy admin/admin Grafana instead of rotating it. " + legacy);
+            assertEquals(generated, legacy.acceptedAfter(),
+                    INSTALL_SH + " left a legacy admin/admin Grafana on admin/admin; .env points at the generated "
+                            + "password. " + legacy);
+
+            GrafanaRun foreign = runGrafanaConfirm("OperatorChosenPassword", generated, true);
+            assertNotEquals(0, foreign.exitCode(),
+                    INSTALL_SH + " carried on to the success banner although Grafana accepts neither admin/admin "
+                            + "nor the password it just generated and wrote to .env. " + foreign);
+            assertTrue(foreign.output().contains("GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'"),
+                    INSTALL_SH + " stopped without telling the operator which line to put in .env. " + foreign);
+
+            GrafanaRun stored = runGrafanaConfirm("OperatorChosenPassword", "StoredInEnvPassword", false);
+            assertEquals(0, stored.exitCode(),
+                    INSTALL_SH + " failed a re-run because Grafana refuses the password .env already held. The "
+                            + "operator chose that one and may have changed it in Grafana since; that is a "
+                            + "warning, not a reason to stop. " + stored);
+            assertTrue(stored.output().contains("does not accept GRAFANA_ADMIN_PASSWORD"),
+                    INSTALL_SH + " said nothing about a GRAFANA_ADMIN_PASSWORD Grafana refuses. " + stored);
+
+            for (GrafanaRun run : List.of(fresh, legacy, foreign, stored)) {
+                assertFalse(run.curlArguments().contains(generated) || run.curlArguments().contains("StoredInEnvPassword"),
+                        INSTALL_SH + " put the Grafana admin password on curl's command line, where the process "
+                                + "table shows it. " + run);
+            }
+        }
+
+        private record GrafanaRun(int exitCode, String output, String acceptedAfter, String curlArguments) {
+            @Override
+            public String toString() {
+                return "Exit status " + exitCode + "; Grafana accepts afterwards: " + acceptedAfter
+                        + "; curl argv:\n" + curlArguments + "\noutput:\n" + output;
+            }
+        }
+
+        private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated)
+                throws IOException, InterruptedException {
+            Path bash = locateBash();
+            assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
+            String jsonTool = locateOnPath("jq") != null ? "jq" : locateOnPath("python3") != null ? "python3" : null;
+            assumeTrue(jsonTool != null, "neither jq nor python3 is available; CI's ubuntu-latest runner has both");
+
+            String installer = read(INSTALL_SH);
+            Path directory = Files.createDirectories(Path.of("target", "grafana-stub"));
+            Path state = directory.resolve("accepted");
+            Path argv = directory.resolve("curl-argv.log");
+            Files.writeString(state, grafanaAccepts, StandardCharsets.UTF_8);
+            Files.deleteIfExists(argv);
+
+            Path curl = directory.resolve("curl");
+            Files.writeString(curl, """
+                    #!/usr/bin/env bash
+                    # A Grafana that accepts admin:<contents of $GRAFANA_STUB_STATE>.
+                    echo "$*" >> "$GRAFANA_STUB_ARGV"
+                    args=("$@"); url="${args[${#args[@]}-1]}"; auth=""
+                    for ((i = 0; i < ${#args[@]}; i++)); do
+                      case "${args[i]}" in
+                        -H) case "${args[i+1]}" in "Authorization: Basic "*) auth="${args[i+1]#Authorization: Basic }" ;; esac ;;
+                        -K) auth=$(sed -n 's/.*Basic \\([^"]*\\)".*/\\1/p') ;;
+                      esac
+                    done
+                    accepted=$(printf 'admin:%s' "$(cat "$GRAFANA_STUB_STATE")" | base64 | tr -d '\\n')
+                    case "$url" in
+                      */api/health) exit 0 ;;
+                      */api/user) if [[ "$auth" == "$accepted" ]]; then printf 200; else printf 401; fi ;;
+                      */api/user/password)
+                        body=$(cat)
+                        if [[ "$auth" == "$accepted" ]]; then
+                          printf '%s' "$body" | sed -n 's/.*"newPassword": *"\\([^"]*\\)".*/\\1/p' > "$GRAFANA_STUB_STATE"
+                          printf 200
+                        else
+                          printf 401
+                        fi ;;
+                      *) exit 7 ;;
+                    esac
+                    """, StandardCharsets.US_ASCII);
+            curl.toFile().setExecutable(true, false);
+
+            Path harness = directory.resolve("harness.sh");
+            Files.writeString(harness, "set -euo pipefail\n"
+                    + "info() { echo \"INFO $1\"; }\nwarn() { echo \"WARN $1\"; }\nfail() { echo -e \"FAIL $1\"; exit 1; }\n"
+                    + functionBody(installer, "grafana_login_status() {") + "\n"
+                    + functionBody(installer, "confirm_grafana_login() {") + "\n"
+                    + "EDDI_DIR=/eddi-stub GRAFANA_PORT=3000\n"
+                    + "GRAFANA_ADMIN_PASSWORD='" + envPassword + "'\n"
+                    + "GRAFANA_PASSWORD_GENERATED=" + generated + "\n"
+                    + "confirm_grafana_login " + jsonTool + "\n", StandardCharsets.UTF_8);
+
+            String command = "cd \"" + slashed(directory) + "\" && PATH=\"$PWD:$PATH\" bash harness.sh";
+            ProcessBuilder builder = new ProcessBuilder(bash.toString(), "-c", command);
+            builder.redirectErrorStream(true);
+            builder.environment().put("GRAFANA_STUB_STATE", slashed(state));
+            builder.environment().put("GRAFANA_STUB_ARGV", slashed(argv));
+            Process process = builder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!process.waitFor(2, TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                throw new AssertionError("the install.sh Grafana harness did not finish; it printed:\n" + output);
+            }
+            return new GrafanaRun(process.exitValue(), output, Files.readString(state, StandardCharsets.UTF_8).strip(),
+                    Files.exists(argv) ? Files.readString(argv, StandardCharsets.UTF_8) : "");
+        }
+
+        /**
+         * The text of the function whose declaration line is {@code header}, through
+         * its closing brace at column 0 — both installers close top-level functions
+         * that way.
+         */
+        private static String functionBody(String script, String header) {
+            int start = script.indexOf("\n" + header);
+            assertTrue(start >= 0, "no function declared as `" + header + "`");
+            int end = script.indexOf("\n}\n", start + 1);
+            assertTrue(end > start, "function `" + header + "` has no closing brace at column 0");
+            return script.substring(start + 1, end + 3);
+        }
+
+        private static void assertInOrder(Path script, String text, String... steps) {
+            int previous = -1;
+            for (String step : steps) {
+                int index = text.indexOf("\n  " + step);
+                if (index < 0) {
+                    index = text.indexOf("\n    " + step);
+                }
+                if (index < 0 && text.startsWith("    " + step)) {
+                    index = 0;
+                }
+                assertTrue(index >= 0, script + ": the main flow no longer calls " + step);
+                assertTrue(index > previous, script + ": the main flow calls " + step + " out of order; expected "
+                        + String.join(" -> ", steps));
+                previous = index;
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
