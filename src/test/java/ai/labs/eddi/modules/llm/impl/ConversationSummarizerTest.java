@@ -351,4 +351,23 @@ class ConversationSummarizerTest {
         summarizer.updateIfNeeded(hugeFirst, config, null);
         assertEquals(1, ConversationSummarizer.readSummaryThroughStep(hugeFirst));
     }
+    /**
+     * A window with nothing to summarize is stepped over (no LLM call), so a
+     * bounded batch cannot get stuck re-reading it on every turn.
+     */
+    @Test
+    void updateIfNeeded_blankWindow_advancesWithoutCallingTheLlm() {
+        var memory = createMockMemory(10);
+        for (var output : memory.getConversationOutputs().subList(0, 3)) {
+            output.remove("input");
+            output.remove("output");
+        }
+        var config = createConfig(7);
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verifyNoInteractions(summarizationService);
+        assertEquals(3, ConversationSummarizer.readSummaryThroughStep(memory));
+        assertNull(ConversationSummarizer.readSummary(memory));
+    }
 }

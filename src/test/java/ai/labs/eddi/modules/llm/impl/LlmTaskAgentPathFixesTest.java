@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -52,6 +53,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -279,6 +281,20 @@ class LlmTaskAgentPathFixesTest {
                     argThat(p -> "strong-model".equals(p.get("modelName")) && "anthropic-key".equals(p.get("apiKey"))
                             && "You are helpful.".equals(p.get("systemMessage"))));
             verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any());
+        }
+
+        @Test
+        @DisplayName("a second pause during the resume keeps the step index, so the next resume stays on the step's model")
+        void rePauseKeepsStepIndex() throws Exception {
+            pauseAt(1);
+            var secondBatch = new PendingToolCallBatch();
+            when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
+                    .thenThrow(new ToolApprovalRequiredException("approve tool B", secondBatch));
+
+            assertThrows(ToolApprovalRequiredException.class, () -> llmTask.execute(memory, new LlmConfiguration(List.of(cascadeTask()))));
+
+            assertEquals(1, secondBatch.getCascadeStepIndex(),
+                    "the loop builds the re-pause batch from scratch; without the copy the second resume ran on the base model");
         }
 
         @Test

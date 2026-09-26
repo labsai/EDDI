@@ -201,8 +201,20 @@ class PromptSnippetServiceTest {
                     .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
 
             assertTrue(service.getAll().isEmpty(), "nothing loaded yet, nothing to fall back to");
+            // Within the failure back-off the store is left alone ...
+            assertTrue(service.getAll().isEmpty());
+            verify(descriptorStore, times(1)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+            // ... and once it has passed, the failure was not cached: the store is read
+            // again.
+            expireFailureBackoff();
             assertEquals("Never share PII.", service.getAll().get("safety"),
-                    "the failure was not cached, so the very next call reads the store again");
+                    "the failure was not cached as an empty map for the TTL");
+        }
+
+        private void expireFailureBackoff() throws Exception {
+            var field = PromptSnippetService.class.getDeclaredField("lastFailureAtMs");
+            field.setAccessible(true);
+            field.set(service, System.currentTimeMillis() - PromptSnippetService.FAILURE_BACKOFF_MS - 1);
         }
 
         /**
@@ -222,7 +234,9 @@ class PromptSnippetServiceTest {
             assertEquals("Never share PII.", service.getAll().get("safety"));
             service.invalidateCache();
             assertEquals("Never share PII.", service.getAll().get("safety"), "a checked store failure keeps the last set");
+            expireFailureBackoff();
             assertEquals("Never share PII.", service.getAll().get("safety"), "so does an unchecked one");
+            verify(descriptorStore, times(3)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
         }
     }
 

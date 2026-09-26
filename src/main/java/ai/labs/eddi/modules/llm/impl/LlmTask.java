@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -1130,8 +1131,20 @@ public class LlmTask implements ILifecycleTask {
         var resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
                 "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
-        var result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
-                toolHitlEnabled, jsonPolicy);
+        AgentOrchestrator.ExecutionResult result;
+        try {
+            result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
+                    toolHitlEnabled, jsonPolicy);
+        } catch (ToolApprovalRequiredException rePause) {
+            // The continuation hit another gated call and paused again. The loop
+            // builds that batch from scratch, and it knows nothing about cascades, so
+            // carry the step over: without it the SECOND resume of an escalated step
+            // would run on the base model again (M-L1, multi-pause path).
+            if (rePause.getBatch() != null && rePause.getBatch().getCascadeStepIndex() == null) {
+                rePause.getBatch().setCascadeStepIndex(batch.getCascadeStepIndex());
+            }
+            throw rePause;
+        }
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();

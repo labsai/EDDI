@@ -116,6 +116,27 @@ public class RetryConfiguration {
     public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig,
                                          String actionDescription)
             throws LifecycleException {
+        return executeWithRetry(action, retryConfig, actionDescription, new long[1]);
+    }
+
+    /**
+     * As {@link #executeWithRetry(Callable, RetryConfiguration, String)}, but
+     * drawing the backoff from a budget shared across several calls.
+     * <p>
+     * The tool loop retries each model request on its own (so a retry can never
+     * re-execute a tool that already ran), and a turn makes many requests. With a
+     * fresh {@value #MAX_TOTAL_BACKOFF_MS} ms budget per request, a ten-iteration
+     * turn could sleep ten minutes. Passing one holder for the whole loop keeps the
+     * documented ceiling: at most {@value #MAX_TOTAL_BACKOFF_MS} ms of backoff per
+     * turn.
+     *
+     * @param sharedBackoffMs
+     *            a one-element holder of the backoff already spent by earlier
+     *            calls; updated with what this call sleeps
+     */
+    public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
+                                         long[] sharedBackoffMs)
+            throws LifecycleException {
 
         if (retryConfig == null) {
             retryConfig = new RetryConfiguration();
@@ -130,7 +151,7 @@ public class RetryConfiguration {
         // Never negative: a negative backoffDelayMs would otherwise reach
         // Thread.sleep() and throw IllegalArgumentException.
         long currentBackoff = Math.max(0L, Math.min(backoffDelay, maxBackoffDelay));
-        long totalBackoff = 0L;
+        long totalBackoff = sharedBackoffMs[0];
         Exception lastException = null;
 
         while (attempt < maxAttempts) {
@@ -179,6 +200,7 @@ public class RetryConfiguration {
                             throw new LifecycleException("Retry interrupted", ie);
                         }
                         totalBackoff += sleepFor;
+                        sharedBackoffMs[0] = totalBackoff;
 
                         currentBackoff = Math.min((long) (currentBackoff * backoffMultiplier), maxBackoffDelay);
                     } else {

@@ -217,8 +217,9 @@ class CascadingModelExecutorToolReplayTest {
     @DisplayName("a tool pause inside a cascade step records the step index on the batch (M-L1)")
     void pauseRecordsStepIndex() throws Exception {
         var batch = new PendingToolCallBatch();
+        batch.setTraceSoFar(new ArrayList<>(List.of(Map.of("type", "tool_call", "tool", "askApproval"))));
         when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
-                .thenReturn(stepResult("ok", List.of(), 0.0))
+                .thenReturn(stepResult("ok", placedOrderExchange(), 0.0))
                 .thenThrow(new ToolApprovalRequiredException("needs approval", batch));
 
         var thrown = assertThrows(ToolApprovalRequiredException.class, () -> executor().execute(twoStepCascade(), messages(), "sys", Map.of(),
@@ -226,6 +227,77 @@ class CascadingModelExecutorToolReplayTest {
 
         assertSame(batch, thrown.getBatch());
         assertEquals(1, batch.getCascadeStepIndex());
+        assertEquals(List.of("placeOrder", "askApproval"), batch.getTraceSoFar().stream().map(e -> e.get("tool")).toList(),
+                "the resumed turn's trace must include the escalated step's tools, ahead of the pausing step's");
+    }
+
+    /**
+     * M2: a carried exchange crosses providers. Ollama/Gemini bindings can hand
+     * over tool calls with null ids, which OpenAI/Anthropic reject with a 400.
+     * Failing there used to stop the escalation for good; the step is now retried
+     * once from the conversation alone.
+     */
+    @Test
+    @DisplayName("a step that rejects the carried exchange (cross-provider 400) is retried once without it")
+    void rejectedCarriedExchangeIsRetriedWithoutIt() throws Exception {
+        var nullIdRequest = ToolExecutionRequest.builder().name("placeOrder").arguments("{}").build();
+        List<ChatMessage> ollamaExchange = List.of(AiMessage.from(nullIdRequest), ToolExecutionResultMessage.from(null, "placeOrder", "placed"));
+        var cascade = twoStepCascade();
+        cascade.getSteps().get(0).setType("ollama");
+        List<List<ChatMessage>> seen = new ArrayList<>();
+        int[] calls = {0};
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+            List<ChatMessage> sent = inv.getArgument(2);
+            seen.add(List.copyOf(sent));
+            if (calls[0]++ == 0) {
+                return stepResult("ok", ollamaExchange, 0.0);
+            }
+            // The OpenAI step: a tool call without an id is a 400, a client error.
+            boolean nullId = sent.stream().anyMatch(m -> m instanceof AiMessage ai && ai.hasToolExecutionRequests()
+                    && ai.toolExecutionRequests().stream().anyMatch(r -> r.id() == null));
+            if (nullId) {
+                throw new IllegalArgumentException("400 Bad Request: messages[1].tool_calls[0].id is required");
+            }
+            return stepResult(LONG_ANSWER, List.of(), 0.0);
+        });
+
+        var result = executor().execute(cascade, messages(), "sys", Map.of(), agentTask(), memory, orchestrator, Map.of(), false, false, false);
+
+        assertEquals(1, result.stepUsed(), "the escalation must still reach the strong model");
+        assertEquals(3, seen.size());
+        assertEquals(List.of(UserMessage.from("order a pizza")), seen.get(2), "the retry starts from the conversation alone");
+        assertTrue(result.trace().stream().anyMatch(e -> e.containsKey("carriedToolExchangeRejected")), result.trace().toString());
+    }
+
+    @Test
+    @DisplayName("a transient failure with a carried exchange is not retried without it")
+    void transientFailureIsNotTreatedAsRejection() {
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(new RuntimeException("503 service unavailable"), placedOrderExchange()));
+        assertFalse(CascadingModelExecutor.rejectedCarriedExchange(new IllegalArgumentException("400"), List.of()));
+        assertTrue(CascadingModelExecutor.rejectedCarriedExchange(new IllegalArgumentException("400"), placedOrderExchange()));
+    }
+
+    /**
+     * m5: a step that times out after running tools still spent that money. The
+     * ceiling now sees it (tracked cost delta around the step), so the next step
+     * does not start on a budget that is already gone.
+     */
+    @Test
+    @DisplayName("tool spend of a timed-out step counts toward maxCostPerRun")
+    void timedOutStepToolSpendCounts() throws Exception {
+        var cascade = twoStepCascade();
+        cascade.getSteps().get(0).setTimeoutMs(200L);
+        cascade.setMaxCostPerRun(0.01);
+        when(orchestrator.conversationToolCost(any())).thenReturn(0.0, 0.05);
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+            Thread.sleep(5_000);
+            return stepResult("late", List.of(), 0.0);
+        });
+
+        assertThrows(LifecycleException.class, () -> executor().execute(cascade, messages(), "sys", Map.of(), agentTask(), memory, orchestrator,
+                Map.of(), false, false, false));
+
+        capturedStepMessages(1);
     }
 
     @Test

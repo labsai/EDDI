@@ -1134,11 +1134,17 @@ A clamped value is reported once in a WARN.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
-than restarting the turn. Tools that already ran are never executed again by a retry.
+than restarting the turn. Tools that already ran are never executed again by a retry. The
+60-second backoff ceiling still applies to the **whole turn**: every model request of one tool
+loop draws from the same budget, so a long tool loop cannot sleep for a minute per request. (A
+HITL resume continues the turn with a fresh budget.)
 
 When `convertToObject` requests the provider's native JSON mode and the call still fails after
 its retries, the engine falls back to a plain request only if the failure could mean "JSON mode
-is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice.
+is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice. A
+self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
+rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
+on that task (see the provider matrix below) so the format is never sent.
 
 ### Rolling Conversation Summary
 

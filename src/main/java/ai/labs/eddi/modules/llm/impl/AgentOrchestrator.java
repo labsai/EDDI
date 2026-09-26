@@ -826,7 +826,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /** @see ToolLoopRunner#conversationToolCost */
-    private double conversationToolCost(String conversationId) {
+    @Override
+    public double conversationToolCost(String conversationId) {
         return toolLoopRunner.conversationToolCost(conversationId);
     }
 
