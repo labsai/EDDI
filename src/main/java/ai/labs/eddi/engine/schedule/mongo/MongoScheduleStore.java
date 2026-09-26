@@ -476,7 +476,16 @@ public class MongoScheduleStore implements IScheduleStore {
 
             Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
 
-            return readSchedulesWithFilter(filter, pollBatchSize);
+            // Most overdue first, _id breaking ties. With more due rows than one poll
+            // batch, an unsorted limit hands back whichever rows the storage engine
+            // meets first — the same subset every poll — so the rest wait for that
+            // subset to drain regardless of how long they have been due. The
+            // (enabled, nextFire, fireStatus) index serves this sort.
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
+                result.add(fromDocument(doc));
+            }
+            return result;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
@@ -619,6 +628,38 @@ public class MongoScheduleStore implements IScheduleStore {
             throw e;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to requeue: " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        try {
+            long nowMs = epochMillis(Instant.now());
+            Bson filter = and(eq(ID, scheduleId), eq(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()));
+            var updates = new ArrayList<Bson>();
+            updates.add(set(FIRE_STATUS, FireStatus.PENDING.name()));
+            updates.add(set(FAIL_COUNT, 0));
+            updates.add(set(CLAIMED_BY, null));
+            updates.add(set(CLAIMED_AT, null));
+            updates.add(set(FIRE_ID, null));
+            updates.add(set(NEXT_RETRY_AT, null));
+            updates.add(set(UPDATED_AT, nowMs));
+            if (nextFire != null) {
+                updates.add(set(NEXT_FIRE, epochMillis(nextFire)));
+            } else {
+                updates.add(set(ENABLED, false));
+                updates.add(set(NEXT_FIRE, null));
+            }
+            UpdateResult result = scheduleCollection.updateOne(filter, combine(updates));
+            if (result.getMatchedCount() == 0) {
+                throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
+            }
+            LOGGER.infof("Dismissed dead-lettered schedule %s", sanitize(scheduleId));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to dismiss dead letter: " + scheduleId, e);
         }
     }
 

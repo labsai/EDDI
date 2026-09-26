@@ -1016,6 +1016,21 @@ class PostgresScheduleStoreUnitTest {
                         Instant.now().minus(30, ChronoUnit.MINUTES), 3));
     }
 
+    @Test
+    void findDueSchedules_ordersMostOverdueFirst() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        sut.findDueSchedules(Instant.now(), Instant.now().minus(30, ChronoUnit.MINUTES), 3);
+
+        // An unordered LIMIT returns an arbitrary subset once more rows are due than
+        // one poll batch holds; the oldest due fire must be served first.
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String normalized = sql.getValue().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("ORDER BY next_fire ASC, id ASC LIMIT ?"), normalized);
+    }
+
     // ─── readAllSchedules ───────────────────────────────────────
 
     @Test
@@ -1417,6 +1432,39 @@ class PostgresScheduleStoreUnitTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
         assertFalse(sql.getValue().contains("fire_id=?"), "an unfenced write must not add a predicate it cannot bind: " + sql.getValue());
+    }
+
+    @Test
+    void dismissDeadLetter_isConditionalOnDeadLetteredState() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("fire_status='DEAD_LETTERED'"),
+                "an unconditional reset would clear a live claim and double-fire the schedule: " + sql.getValue());
+        assertFalse(sql.getValue().contains("last_fired"), "nothing fired: " + sql.getValue());
+        verify(preparedStatement).setString(3, "sched-1");
+    }
+
+    @Test
+    void dismissDeadLetter_withoutNextFire_disables() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("enabled=false"), sql.getValue());
+        verify(preparedStatement).setString(2, "sched-1");
+    }
+
+    @Test
+    void dismissDeadLetter_notDeadLettered_throwsNotFound() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> sut.dismissDeadLetter("sched-1", Instant.now()));
     }
 
     private void setupResultSetForSchedule() throws Exception {

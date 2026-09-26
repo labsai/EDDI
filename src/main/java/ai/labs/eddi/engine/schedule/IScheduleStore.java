@@ -272,10 +272,10 @@ public interface IScheduleStore {
      * the write applies to whatever claim the row currently holds.
      * <p>
      * Only for callers that hold no claim at all and are not reporting the outcome
-     * of a fire — {@code RestScheduleStore.dismissDeadLetter} is the one: it clears
-     * a DEAD_LETTERED row, where by definition no fire is running. Every caller
-     * that DID fire must pass its {@code fireId}; see
-     * {@link #markCompleted(String, String, Instant)}.
+     * of a fire. Every caller that DID fire must pass its {@code fireId}; see
+     * {@link #markCompleted(String, String, Instant)}. Clearing a dead letter is
+     * NOT such a caller any more — an unfenced write matches whatever state the row
+     * is in, including a live claim; use {@link #dismissDeadLetter}.
      */
     String UNFENCED = null;
 
@@ -378,6 +378,25 @@ public interface IScheduleStore {
      * Re-queue a dead-lettered schedule for another attempt.
      */
     void requeueDeadLetter(String scheduleId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
+    /**
+     * Clear a dead-lettered schedule WITHOUT retrying it: back to PENDING with
+     * {@code failCount} reset, the claim fields cleared and the next regular fire
+     * at {@code nextFire}. A null {@code nextFire} (a one-shot with nothing left to
+     * fire) disables the schedule instead. {@code lastFired} is left alone —
+     * nothing fired.
+     * <p>
+     * The write is conditional on the row being DEAD_LETTERED at the moment it
+     * lands. This used to be an unfenced {@code markCompleted}, which matched the
+     * row in any state: dismissing a schedule that had meanwhile been requeued and
+     * claimed reset the live claim to PENDING, and the next poll fired it a second
+     * time while the first fire was still running.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if no schedule with this id is currently DEAD_LETTERED
+     */
+    void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     // --- Fire Log ---
 

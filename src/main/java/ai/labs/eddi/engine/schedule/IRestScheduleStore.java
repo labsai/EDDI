@@ -107,6 +107,7 @@ public interface IRestScheduleStore {
 
     @POST
     @Path("/{scheduleId}/dismiss")
-    @Operation(description = "Reset a dead-lettered schedule to PENDING without immediate retry.")
+    @Operation(description = "Reset a dead-lettered schedule to PENDING without immediate retry, re-armed at its next "
+            + "regular fire (a one-shot with nothing left to fire is disabled). 409 if the schedule is not dead-lettered.")
     Response dismissDeadLetter(@PathParam("scheduleId") String scheduleId);
 }

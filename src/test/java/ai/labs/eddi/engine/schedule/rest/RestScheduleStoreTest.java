@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
@@ -678,6 +679,75 @@ class RestScheduleStoreTest {
 
         assertEquals(200, response.getStatus());
         verify(scheduleStore).updateSchedule(eq("v1"), any());
+    }
+
+    // --- PUT keeps the system fields a client did not send (UI High 5) ---
+
+    /**
+     * The Manager's schedule editor sends only the fields it knows. Metadata is
+     * what selects a schedule's fire path, so an edit that dropped it turned a
+     * dream, team-cadence or ingestion schedule into a chat schedule that messaged
+     * the agent instead. Deserialized from JSON on purpose: "absent" for the
+     * primitive allowSelfScheduling only exists at the JSON boundary.
+     */
+    @Test
+    void updateSchedule_bodyOmittingSystemFields_keepsTheStoredOnes() throws Exception {
+        asEditor("editor-1");
+        var stored = dreamSchedule("k1", "editor-1");
+        stored.setTenantId("tenant-a");
+        stored.setAllowSelfScheduling(true);
+        when(scheduleStore.readSchedule("k1")).thenReturn(stored);
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"dream-k1","agentId":"agent-1","triggerType":"CRON","cronExpression":"0 4 * * *",
+                 "userId":"editor-1","message":"hello","enabled":true}
+                """, ScheduleConfiguration.class);
+
+        Response response = rest.updateSchedule("k1", body);
+
+        assertEquals(200, response.getStatus());
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("k1"), written.capture());
+        assertEquals(Map.of("dreamType", "dream_consolidation"), written.getValue().getMetadata(),
+                "the fire path must survive an edit that did not echo the metadata");
+        assertEquals("tenant-a", written.getValue().getTenantId());
+        assertTrue(written.getValue().isAllowSelfScheduling(), "an omitted allowSelfScheduling must not reset to false");
+        assertEquals("0 4 * * *", written.getValue().getCronExpression(), "the edit itself still applies");
+    }
+
+    @Test
+    void updateSchedule_bodyNamingSystemFields_setsThem() throws Exception {
+        asEditor("editor-1");
+        var stored = dreamSchedule("k2", "editor-1");
+        stored.setTenantId("tenant-a");
+        stored.setAllowSelfScheduling(true);
+        when(scheduleStore.readSchedule("k2")).thenReturn(stored);
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"dream-k2","agentId":"agent-1","triggerType":"CRON","cronExpression":"0 4 * * *",
+                 "userId":"editor-1","message":"hello","enabled":true,
+                 "metadata":{},"tenantId":"tenant-b","allowSelfScheduling":false}
+                """, ScheduleConfiguration.class);
+
+        Response response = rest.updateSchedule("k2", body);
+
+        assertEquals(200, response.getStatus());
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("k2"), written.capture());
+        assertEquals(Map.of(), written.getValue().getMetadata(), "an explicit (empty) metadata is an edit, not an omission");
+        assertEquals("tenant-b", written.getValue().getTenantId());
+        assertFalse(written.getValue().isAllowSelfScheduling());
+    }
+
+    @Test
+    void allowSelfSchedulingProvidedMarker_neverReachesJson() throws Exception {
+        var schedule = new ScheduleConfiguration();
+        schedule.setAllowSelfScheduling(true);
+
+        String json = new ObjectMapper().writeValueAsString(schedule);
+
+        assertTrue(json.contains("\"allowSelfScheduling\":true"), json);
+        assertFalse(json.contains("Provided") || json.contains("hasAllowSelfScheduling"), json);
     }
 
     @Test

@@ -831,12 +831,19 @@ class MongoScheduleStoreTest {
     // ==================== findDueSchedules ====================
 
     @Test
-    @DisplayName("findDueSchedules — returns due schedules")
+    @DisplayName("findDueSchedules — returns due schedules, most overdue first")
     void findDueSchedules() throws Exception {
-        setupScheduleIteration();
+        setupSchedulePageIteration();
 
         List<ScheduleConfiguration> result = store.findDueSchedules(Instant.now(), Instant.now().minusSeconds(60), 3);
         assertEquals(1, result.size());
+
+        // An unsorted limit returns the same arbitrary subset every poll once more
+        // rows are due than one batch holds; the oldest due fire must come first.
+        FindIterable<Document> iterable = scheduleCollection.find(new Document());
+        ArgumentCaptor<Document> sort = ArgumentCaptor.forClass(Document.class);
+        verify(iterable).sort(sort.capture());
+        assertEquals(new Document("nextFire", 1).append("_id", 1), sort.getValue());
     }
 
     // ==================== tryClaim ====================
@@ -924,6 +931,51 @@ class MongoScheduleStoreTest {
         verify(scheduleCollection).updateOne(filter.capture(), any(Bson.class));
         assertFalse(filter.getValue().toString().contains("fireId"),
                 "an unfenced write must not filter on a fireId it was not given: " + filter.getValue());
+    }
+
+    // ==================== dismissDeadLetter ====================
+
+    @Test
+    @DisplayName("dismissDeadLetter — conditional on DEAD_LETTERED, so it can never reset a live claim")
+    void dismissDeadLetterIsStateConditional() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(filter.capture(), update.capture());
+        String renderedFilter = filter.getValue().toBsonDocument().toJson();
+        assertTrue(renderedFilter.contains("\"fireStatus\": \"DEAD_LETTERED\""), renderedFilter);
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertTrue(renderedUpdate.contains("\"fireStatus\": \"PENDING\""), renderedUpdate);
+        assertFalse(renderedUpdate.contains("lastFired"), "nothing fired, so lastFired must not move: " + renderedUpdate);
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a row that is not dead-lettered is reported, not silently skipped")
+    void dismissDeadLetterNotDeadLettered() throws Exception {
+        UpdateResult none = mock(UpdateResult.class);
+        when(none.getMatchedCount()).thenReturn(0L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(none);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.dismissDeadLetter("sched-1", Instant.now()));
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a one-shot with nothing left to fire is disabled")
+    void dismissDeadLetterOneShotDisables() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", null);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        assertTrue(update.getValue().toBsonDocument().toJson().contains("\"enabled\": false"));
     }
 
     // ==================== markFailed ====================
