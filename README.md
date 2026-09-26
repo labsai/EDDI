@@ -512,11 +512,13 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 ```bash
 # Linux / macOS
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 
 # Windows (PowerShell)
-.\mvnw.cmd compile quarkus:dev
+.\mvnw.cmd compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
+
+`-Djvm.args` hands the forked dev JVM the same `--add-modules=jdk.incubator.vector` flag the container image sets. Only `jlama` (in-process) agents need it — without it Jlama silently falls back to scalar tensor operations and answers far too slowly — so you may drop it if you never run one. `mise run dev` passes it for you.
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
 
@@ -547,7 +549,7 @@ Dev mode also enables:
 
 | Command                                                       | What It Does                                                                |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | **Start dev mode** with live reload (port 7070). The flag is for `jlama` agents — see above |
 | `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
@@ -559,8 +561,8 @@ Dev mode also enables:
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
 | `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
 | `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
-| `./mvnw quarkus:dev -Dsuspend`                                | Start dev mode and **wait for debugger** on port 5005                       |
-| `./mvnw quarkus:dev -Ddebug=false`                            | Start dev mode **without** the debug agent                                  |
+| `./mvnw quarkus:dev -Dsuspend '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode and **wait for debugger** on port 5005 |
+| `./mvnw quarkus:dev -Ddebug=false '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode **without** the debug agent |
 
 <details>
 <summary><strong>Code coverage</strong></summary>

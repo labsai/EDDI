@@ -27,6 +27,14 @@ env:
   PREFLIGHT_SHA256: "43a8c5046c800442e58a37f583a9523d79421e81aec3a741c53c9fcffc82955b"
   GITLEAKS_VERSION: "8.30.1"
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  # One Node for every job, the same one pom.xml's node.version vendors for the
+  # UI build and mise.toml pins (BuildQualityGatesTest keeps the three equal).
+  # It used to be a floating `22`, so CI tested on whatever 22.x the runner
+  # resolved that day while the jar was built with a different one.
+  # NODE_SHA256_LINUX_X64 is the linux-x64 .tar.gz line of
+  # https://nodejs.org/dist/v<NODE_VERSION>/SHASUMS256.txt — update both together.
+  NODE_VERSION: "22.23.2"
+  NODE_SHA256_LINUX_X64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a"
 
 jobs:
   # ─── Job 0: Detect Changes ──────────────────────────────────────
@@ -96,8 +104,8 @@ jobs:
             # push and on tags they still gate on `code`, so nothing is published
             # untested — and a change to only the test-read files below runs Build &
             # Test and nothing that builds or publishes an image.
-            # BuildQualityGatesTest keeps this equal to `code` minus 'ui/**', plus
-            # the last four entries.
+            # BuildQualityGatesTest keeps this equal to `code` minus 'ui/**', plus the
+            # test-only entries at the end.
             backend:
               - 'src/**'
               - 'pom.xml'
@@ -143,6 +151,9 @@ jobs:
               # not that contract, so without this entry a PR that changes only
               # dependabot.yml skips the one test that owns it.
               - '.github/dependabot.yml'
+              # BuildQualityGatesTest asks git whether nested .claude/ directories
+              # are still ignored, and only a change here can make them stop being.
+              - '.gitignore'
             # The installers are the README's headline `curl | bash` path and were
             # in NO filter at all, so a PR touching only them skipped the whole
             # pipeline — and a skipped required check still satisfies branch
@@ -257,16 +268,60 @@ jobs:
   changelog-discipline:
     name: Changelog Discipline
     runs-on: ubuntu-latest
-    # The collation branch is the one place an entry is SUPPOSED to appear in
-    # docs/changelog.md — that is the job's entire output.
-    if: github.event_name == 'pull_request' && github.head_ref != 'chore/collate-changelog'
+    # Runs on every pull request, the collation PR included. It used to be
+    # skipped outright for any head branch NAMED chore/collate-changelog, so a
+    # branch could opt out of the guard by picking that name — from a fork too.
+    # The collation PR now gets a check of its own instead (see below).
+    if: github.event_name == 'pull_request'
+    env:
+      # The collation branch is the one place an entry is SUPPOSED to appear in
+      # docs/changelog.md — that is the nightly job's entire output. It counts
+      # only when it is this repository's own branch; a fork cannot claim it.
+      IS_COLLATION: ${{ github.head_ref == 'chore/collate-changelog' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
 
+      # ChangelogFragmentTest mirrors most of what the collator enforces, but it
+      # runs only when the Java suite does, and it had drifted: a fragment it
+      # passed could still stop collate-changelog.py — on main, at 02:00, on
+      # somebody else's merge. Running the collator's own validation here makes
+      # the nightly job's verdict a PR check. It changes nothing on disk.
+      - name: Validate pending fragments the way the nightly job will
+        run: python3 scripts/collate-changelog.py --check
+
+      # The one exemption from the guard below, and all it may carry: the
+      # collator's own output. Anything else on that branch is graded like any
+      # other PR would be — by failing here.
+      - name: Collation PR touches only the changelog
+        if: env.IS_COLLATION == 'true'
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE"
+          OTHER=$(git diff --name-only "origin/${BASE}...HEAD" \
+            | grep -vE '^docs/(changelog\.md|changelog\.d/[^/]+|changelog/[^/]+\.md|SUMMARY\.md)$' || true)
+          if [ -n "$OTHER" ]; then
+            {
+              echo "### ❌ The collation branch changes files the collator never writes"
+              echo ""
+              echo "chore/collate-changelog is exempt from the in-place check only because it"
+              echo "carries nothing but the output of scripts/collate-changelog.py and"
+              echo "scripts/rotate-changelog.py. This PR also changes:"
+              echo ""
+              echo '```'
+              printf '%s\n' "$OTHER" | head -20
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "### ✅ Collation PR changes only the changelog" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check for entries added in place
+        if: env.IS_COLLATION != 'true'
         env:
           BASE: ${{ github.base_ref }}
         run: |
@@ -280,21 +335,83 @@ jobs:
           # decides what runs, not what is allowed.
           DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md)
 
-          # '## …(YYYY-MM-DD' is an entry heading; '| YYYY-MM-DD |' is a row in
-          # the Decision Log or Regression Notes table. Both are fixed insertion
-          # points in a shared file.
+          # What counts, on each side of the diff:
+          #   - any '## ' heading, dated or not: scripts/changelog_common.py splits
+          #     the live file at every one of them, and an undated heading just
+          #     inherits the date of the entry above it. Counting only dated
+          #     headings let an entry through by leaving the date off.
+          #   - a setext heading: a text line underlined with '---' or '==='.
+          #     Counted as a pair of lines carrying the same sign. A '---' under a
+          #     blank line, a list item, a table row, a fence or another rule is a
+          #     thematic break (the separator every entry ends with), not a
+          #     heading, so those are excluded.
+          #   - a '| YYYY-MM-DD |' row of the Decision Log or Regression Notes.
+          # Headings and rows are fixed insertion points in a shared file.
           #
-          # The date pattern must match scripts/changelog_common.py's DATE, or
-          # the collator and this guard disagree about what an entry is. Two
-          # details carry that:
-          #   - NO closing ')': fourteen entries in the changelog are headed
-          #     '(2026-07-02, session 2)' or '(2026-04-08 cont.)'. Requiring it
-          #     let exactly that house style through the guard while the
-          #     collator still treated it as a dated entry.
-          #   - A real month and day, so '(2026-99-99)' is not an entry here
-          #     either.
-          DATE_RE='\([0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])'
-          count() { printf '%s\n' "$DIFF" | grep -cE "$1" || true; }
+          # Lines inside a fenced code block are examples, not structure. The
+          # collator skips them (changelog_common.fence_mask), so this does too:
+          # it follows ``` / ~~~ fences through the lines that exist on the side
+          # being counted (that side's lines plus context), starting each hunk
+          # outside a fence. A fence opened above a hunk's first context line is
+          # not visible here; git's default three lines of context make that rare.
+          # No regex intervals in here: ubuntu-latest's awk is mawk.
+          #
+          # shapes SIGN            prints "<headings> <setext pairs> <rows>"
+          # shapes SIGN list       prints the matching lines instead
+          shapes() {
+            printf '%s\n' "$DIFF" | awk -v sign="$1" -v list="${2:-}" '
+              /^@@/ { started = 1; fence = ""; above = ""; aboveSign = ""; next }
+              !started { next }
+              {
+                s = substr($0, 1, 1)
+                line = substr($0, 2)
+                if (s != sign && s != " ") next
+
+                t = line
+                sub(/^[ \t]+/, "", t)
+                run = ""
+                if (match(t, /^(```+|~~~+)/)) {
+                  run = substr(t, 1, RLENGTH)
+                  rest = substr(t, RLENGTH + 1)
+                }
+                if (fence != "") {
+                  if (run != "" && substr(run, 1, 1) == substr(fence, 1, 1) &&
+                      length(run) >= length(fence) && rest ~ /^[ \t]*$/) {
+                    fence = ""
+                  }
+                  above = ""; aboveSign = ""
+                  next
+                }
+                if (run != "") {
+                  fence = run
+                  above = ""; aboveSign = ""
+                  next
+                }
+
+                if (s == sign) {
+                  if (line ~ /^ ? ? ?##([ \t]|$)/) {
+                    headings++
+                    if (list) print $0
+                  } else if (aboveSign == sign &&
+                      line ~ /^ ? ? ?(=+|-+)[ \t]*$/ &&
+                      above !~ /^[ \t]*$/ &&
+                      above !~ /^    / &&
+                      above !~ /^ ? ? ?(#|>|\|)/ &&
+                      above !~ /^ ? ? ?[-*+]([ \t]|$)/ &&
+                      above !~ /^ ? ? ?[0-9]+[.)]([ \t]|$)/ &&
+                      above !~ /^ ? ? ?([-*_=][ \t]*)+$/) {
+                    setext++
+                    if (list) print sign above " / " $0
+                  } else if (line ~ /^\| *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *\|/) {
+                    rows++
+                    if (list) print $0
+                  }
+                }
+                above = line
+                aboveSign = s
+              }
+              END { if (!list) print headings + 0, setext + 0, rows + 0 }'
+          }
 
           # Added MINUS removed, per shape. An edit to an existing heading or
           # row shows up as one '+' and one '-', so it nets to zero and is
@@ -302,16 +419,18 @@ jobs:
           # Counting '+' alone failed a typo fix in a past entry and then told
           # the author to "move it into a new file", advice that made no sense
           # for a correction.
-          ENTRIES_NET=$(( $(count "^\+## .*${DATE_RE}") - $(count "^-## .*${DATE_RE}") ))
-          ROWS_NET=$(( $(count '^\+\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|') - $(count '^-\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|') ))
+          read -r ADDED_H ADDED_S ADDED_R <<< "$(shapes +)"
+          read -r REMOVED_H REMOVED_S REMOVED_R <<< "$(shapes -)"
+          ENTRIES_NET=$(( ADDED_H - REMOVED_H ))
+          SETEXT_NET=$(( ADDED_S - REMOVED_S ))
+          ROWS_NET=$(( ADDED_R - REMOVED_R ))
 
-          if [ "$ENTRIES_NET" -le 0 ] && [ "$ROWS_NET" -le 0 ]; then
+          if [ "$ENTRIES_NET" -le 0 ] && [ "$SETEXT_NET" -le 0 ] && [ "$ROWS_NET" -le 0 ]; then
             echo "### ✅ No changelog entries added in place" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          ENTRIES=$(printf '%s\n' "$DIFF" | grep -E "^\+## .*${DATE_RE}" || true)
-          ROWS=$(printf '%s\n' "$DIFF" | grep -E '^\+\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|' || true)
+          ADDED=$(shapes + list)
 
           {
             echo "### ❌ Changelog entry added directly to docs/changelog.md"
@@ -325,7 +444,7 @@ jobs:
             echo "insertion points, so every branch that writes there conflicts with every other one."
             echo ""
             echo '```diff'
-            printf '%s\n%s\n' "$ENTRIES" "$ROWS" | grep -v '^$' | head -20
+            printf '%s\n' "$ADDED" | head -20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
@@ -1035,10 +1154,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
@@ -1087,10 +1206,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
@@ -1128,16 +1247,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             ui/chat/package-lock.json
 
       - name: Install
         run: npm ci
+
+      # Same base rules as the Manager's lint (ui/chat/eslint.config.js). Until
+      # this step existed ui/chat had no ESLint at all.
+      - name: Lint
+        run: npm run lint
 
       - name: Type check
         run: npm run typecheck
@@ -1310,10 +1434,10 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Generate CycloneDX SBOM (Maven)
         run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
@@ -1473,14 +1597,50 @@ jobs:
       # frontend-maven-plugin vendors its own Node, but its `npm ci` reads and writes
       # the same ~/.npm cache this restores; without it every run downloaded both
       # dependency trees cold.
-      - name: Set up Node 22 (npm cache for the UI build)
+      - name: Set up Node ${{ env.NODE_VERSION }} (npm cache for the UI build)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
             ui/manager/package-lock.json
             ui/chat/package-lock.json
+
+      # frontend-maven-plugin 1.15.1 downloads Node from nodejs.org and verifies
+      # nothing — no checksum, no signature — and it reuses any archive it finds
+      # in the local Maven repository, which setup-java restores from the Actions
+      # cache. So the archive is put there here, at the exact path the plugin
+      # resolves (RepositoryCacheResolver: com.github.eirslett:node:<version>,
+      # classifier linux-x64, extension tar.gz), and checked against the pinned
+      # hash. The plugin then finds it and downloads nothing. A cached copy that
+      # does not match is thrown away and fetched again, and the fresh download
+      # has to match too.
+      - name: Verify the Node archive the UI build unpacks
+        run: |
+          set -euo pipefail
+          POM_NODE=$(sed -n 's:.*<node.version>v\{0,1\}\([^<]*\)</node.version>.*:\1:p' pom.xml)
+          if [ "$POM_NODE" != "$NODE_VERSION" ]; then
+            echo "::error::pom.xml node.version is '${POM_NODE}' but ci.yml NODE_VERSION is '${NODE_VERSION}'. Move both, and NODE_SHA256_LINUX_X64 with them."
+            exit 1
+          fi
+          if [ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]; then
+            echo "::error::this step pins the linux-x64 archive, but the runner is $(uname -s)-$(uname -m); the plugin would download an unverified one"
+            exit 1
+          fi
+          DIR="$HOME/.m2/repository/com/github/eirslett/node/${NODE_VERSION}"
+          ARCHIVE="${DIR}/node-${NODE_VERSION}-linux-x64.tar.gz"
+          mkdir -p "$DIR"
+          if [ -f "$ARCHIVE" ] && ! echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}" | sha256sum -c --status -; then
+            echo "::warning::the cached ${ARCHIVE} does not match the pinned checksum; fetching it again"
+            rm -f "$ARCHIVE"
+          fi
+          if [ ! -f "$ARCHIVE" ]; then
+            curl -fsSL --retry 3 -o "${ARCHIVE}.part" \
+              "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz"
+            echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}.part" | sha256sum -c -
+            mv "${ARCHIVE}.part" "$ARCHIVE"
+          fi
+          echo "Node ${NODE_VERSION} archive verified at ${ARCHIVE}"
 
       - name: Build application
         # No -DskipUi: this is the build that ships, so it runs npm ci + npm run build
@@ -1599,10 +1759,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Download the OpenAPI document
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1736,10 +1896,10 @@ jobs:
           done
           echo "### Shipped shells verified ($(wc -l < deps.uniq) dependencies)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: ui/manager/package-lock.json
 
@@ -1851,10 +2011,10 @@ jobs:
           gunzip -c eddi-ci.tar.gz | docker load
           rm eddi-ci.tar.gz
 
-      - name: Set up Node 22
+      - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: ui/manager/package-lock.json
 
@@ -1961,8 +2121,15 @@ jobs:
     #   build-image       the image this job publishes — it builds nothing itself
     #   openapi-snapshot  the Manager's API snapshot against this build's document
     #   e2e-fullstack     the Manager driven against THAT image, on both stores
+    #   e2e-auth          the same image behind Keycloak — the only job that
+    #                     sends a real token, so the only one that proves a
+    #                     role decides anything. Missing here, a push whose one
+    #                     failure was authorization still built and published
+    #   e2e-gate          the E2E jobs' own verdict, the check branch protection
+    #                     names — so a job added to the gate cannot be forgotten
+    #                     here
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged
@@ -2792,6 +2959,18 @@ jobs:
               ]
             }')
 
-          curl -sf -X POST "$SLACK_WEBHOOK" \
-            -H 'Content-type: application/json' \
-            -d "$PAYLOAD"
+          # Best effort. This job reports on the others; it is not a gate, and a
+          # webhook that refuses the post (revoked, rate-limited, a Slack outage)
+          # used to fail it with curl's exit 22 — so every failing run showed a
+          # second red job that said nothing about the code, and a green release
+          # could show one too. A delivery failure is now a warning in the run
+          # summary. Failing PRs from this repository still notify, as before:
+          # the policy above ("only failures and releases") covers them on purpose.
+          RESPONSE="${RUNNER_TEMP:-/tmp}/slack-response.txt"
+          if ! curl -sS --fail-with-body --max-time 30 --retry 2 -o "$RESPONSE" \
+              -X POST "$SLACK_WEBHOOK" \
+              -H 'Content-type: application/json' \
+              -d "$PAYLOAD"; then
+            echo "::warning::Slack did not accept the build notification: $(head -c 200 "$RESPONSE" 2>/dev/null)"
+            echo "### ⚠️ Slack notification not delivered — see the warning above" >> "$GITHUB_STEP_SUMMARY"
+          fi

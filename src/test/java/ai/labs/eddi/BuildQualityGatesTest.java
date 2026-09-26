@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -876,12 +878,13 @@ class BuildQualityGatesTest {
         assertTrue(expected.remove("ui/**"),
                 "the `code` filter no longer lists ui/**, but the frontends ship inside the image. Found: " + expected);
         expected.addAll(
-                List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**", ".github/dependabot.yml"));
+                List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**", ".github/dependabot.yml",
+                        ".gitignore"));
         List<String> backend = ciFilterPatterns("backend");
 
         assertEquals(expected.stream().sorted().toList(), backend.stream().sorted().toList(),
                 "the `backend` filter in " + CI_WORKFLOW + " must be the `code` filter without ui/** and with"
-                        + " ui/**/*.md, README.md, AGENTS.md, .githooks/** and .github/dependabot.yml (only tests read"
+                        + " ui/**/*.md, README.md, AGENTS.md, .githooks/**, .github/dependabot.yml and .gitignore (only tests read"
                         + " those). Build & Test gates on it for"
                         + " pull requests, so a path that is in `code` but not here skips the Java suite on every PR"
                         + " that touches only that path.");
@@ -1424,5 +1427,211 @@ class BuildQualityGatesTest {
                         + " in pom.xml, so they are on the classpath only for as long as some other artifact keeps"
                         + " dragging them in — an unrelated dependency bump then breaks the compile. Declared: "
                         + declared);
+    }
+
+    /**
+     * {@code docker} publishes, signs and attests the image, so every job whose
+     * failure should stop that has to be one of its {@code needs}. The auth tier
+     * ({@code e2e-auth}, the only job that sends a real token) was missing, so a
+     * push whose one failure was authorization still shipped. Graded against
+     * {@code e2e-gate}'s own list rather than a copy here: whatever the E2E gate
+     * requires, docker requires too, and it requires the gate itself.
+     */
+    @Test
+    @DisplayName("docker waits on the E2E gate and on every job the gate grades")
+    void dockerNeedsEveryE2eJob() throws Exception {
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(jobs.containsKey("e2e-gate") && jobs.containsKey("docker"),
+                CI_WORKFLOW + " no longer declares both e2e-gate and docker, so this assertion grades nothing");
+
+        List<String> dockerNeeds = ciJobNeeds(jobs.get("docker"));
+        List<String> gateNeeds = ciJobNeeds(jobs.get("e2e-gate"));
+        assertTrue(gateNeeds.contains("e2e-auth"), "e2e-gate no longer grades e2e-auth: " + gateNeeds);
+
+        List<String> missing = new ArrayList<>(gateNeeds);
+        missing.add("e2e-gate");
+        missing.removeAll(dockerNeeds);
+        assertEquals(List.of(), missing,
+                "docker in " + CI_WORKFLOW + " must need these, or an image whose E2E tier failed is still pushed,"
+                        + " tagged, signed and attested");
+    }
+
+    /**
+     * One Node version, written three times: {@code pom.xml}'s {@code node.version}
+     * (what the shipped UI is built with), ci.yml's {@code NODE_VERSION} (every
+     * {@code setup-node}), and {@code mise.toml}. CI used a floating {@code 22}
+     * while the jar was built with a pinned 22.x.
+     * <p>
+     * And the archive frontend-maven-plugin unpacks for the shipped build is
+     * checked against a pinned SHA-256 first, because the plugin verifies nothing
+     * itself.
+     */
+    @Test
+    @DisplayName("Node is pinned to one version everywhere, and the shipped build verifies its archive")
+    void nodeVersionIsPinnedOnceAndVerified() throws Exception {
+        String ci = read(CI_WORKFLOW);
+        Matcher ciVersion = Pattern.compile("(?m)^  NODE_VERSION: \"([^\"]+)\"$").matcher(ci);
+        assertTrue(ciVersion.find(), CI_WORKFLOW + " declares no workflow-level NODE_VERSION");
+
+        Matcher pomVersion = Pattern.compile("<node\\.version>v?([^<]+)</node\\.version>").matcher(read(POM));
+        assertTrue(pomVersion.find(), POM + " declares no node.version");
+        Matcher miseVersion = Pattern.compile("(?m)^node = \"([^\"]+)\"$").matcher(read(Path.of("mise.toml")));
+        assertTrue(miseVersion.find(), "mise.toml pins no node version");
+
+        assertEquals(pomVersion.group(1), ciVersion.group(1), "ci.yml NODE_VERSION must equal pom.xml node.version");
+        assertEquals(pomVersion.group(1), miseVersion.group(1), "mise.toml's node must equal pom.xml node.version");
+
+        // Any workflow, not just ci.yml. `env.NODE_VERSION` resolves only inside the
+        // workflow that declares it — an undeclared one is an empty string, which
+        // setup-node treats as "no version" — so a workflow that uses it must also
+        // declare it, at the pom's value.
+        Pattern declared = Pattern.compile("(?m)^\\s+NODE_VERSION: \"([^\"]+)\"$");
+        List<String> floating = new ArrayList<>();
+        try (Stream<Path> workflows = Files.list(WORKFLOWS)) {
+            for (Path workflow : workflows.filter(p -> p.toString().endsWith(".yml")).toList()) {
+                String body = read(workflow);
+                Matcher declaration = declared.matcher(body);
+                String version = declaration.find() ? declaration.group(1) : null;
+                for (String line : body.lines().toList()) {
+                    if (!line.strip().startsWith("node-version:")) {
+                        continue;
+                    }
+                    if (!line.contains("${{ env.NODE_VERSION }}")) {
+                        floating.add(workflow.getFileName() + ": " + line.strip());
+                    } else if (!pomVersion.group(1).equals(version)) {
+                        floating.add(workflow.getFileName() + " uses env.NODE_VERSION but declares "
+                                + (version == null ? "none" : "\"" + version + "\""));
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), floating, "every setup-node must use ${{ env.NODE_VERSION }}, declared in the same"
+                + " workflow as \"" + pomVersion.group(1) + "\" (pom.xml node.version)");
+
+        assertTrue(Pattern.compile("(?m)^  NODE_SHA256_LINUX_X64: \"[0-9a-f]{64}\"$").matcher(ci).find(),
+                CI_WORKFLOW + " must pin NODE_SHA256_LINUX_X64 to the archive's SHA-256");
+        String buildImage = ciJobBlocks().get("build-image");
+        int verify = buildImage.indexOf("sha256sum -c");
+        int build = buildImage.indexOf("./mvnw clean package");
+        assertTrue(verify > 0 && build > verify,
+                "build-image must verify the Node archive (sha256sum -c) before the Maven build that unpacks it");
+        assertTrue(buildImage.contains(".m2/repository/com/github/eirslett/node/${NODE_VERSION}")
+                && buildImage.contains("node-${NODE_VERSION}-linux-x64.tar.gz"),
+                "build-image must place the archive where frontend-maven-plugin's RepositoryCacheResolver looks");
+    }
+
+    /**
+     * {@code !.claude/} without a leading slash matched a {@code .claude/}
+     * directory at any depth, while the {@code .claude/*} re-exclusion (slash in
+     * the middle) was root-only — so a nested {@code ui/chat/.claude/} came back
+     * into git with its {@code settings.local.json}. Asked of git itself, since
+     * gitignore precedence is exactly the thing that is easy to reason about
+     * wrongly.
+     */
+    @Test
+    @DisplayName("nested .claude directories stay ignored; the tracked skills do not")
+    void nestedClaudeDirectoriesStayIgnored() throws Exception {
+        Boolean nested = gitIgnores("ui/chat/.claude/settings.local.json");
+        Assumptions.assumeTrue(nested != null, "git is not available on PATH, or this is not a git checkout");
+
+        assertTrue(nested, "ui/chat/.claude/settings.local.json must be ignored");
+        assertTrue(gitIgnores("src/.claude/worktrees/x/pom.xml"), "a nested .claude/ anywhere must be ignored");
+        assertTrue(gitIgnores(".claude/settings.local.json"), "the root .claude/ is ignored apart from skills/");
+        assertFalse(gitIgnores(".claude/skills/ship-pr/SKILL.md"), "the root .claude/skills/ is tracked");
+        assertFalse(gitIgnores("ui/manager/.claude/skills/eddi-ui/SKILL.md"), "the Manager's skills are tracked");
+        assertFalse(gitIgnores("ui/manager/.claude/launch.json"), "the Manager's launch.json is tracked");
+        assertTrue(gitIgnores("ui/manager/.claude/settings.local.json"), "the Manager's local settings are ignored");
+        assertTrue(gitIgnores("ui/manager/.claude/worktrees/x/pom.xml"),
+                "a worktree Claude Code creates under ui/manager/.claude must be ignored");
+    }
+
+    /**
+     * {@code git check-ignore --no-index} for one path: whether the ignore rules
+     * exclude it regardless of whether it is tracked, or {@code null} when git
+     * cannot be run.
+     */
+    private static Boolean gitIgnores(String path) throws Exception {
+        ProcessBuilder builder = new ProcessBuilder("git", "check-ignore", "-q", "--no-index", "--", path);
+        builder.directory(Path.of("").toAbsolutePath().toFile());
+        builder.redirectErrorStream(true);
+        Process process;
+        try {
+            process = builder.start();
+        } catch (IOException e) {
+            return null;
+        }
+        process.getInputStream().readAllBytes();
+        if (!process.waitFor(60, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            return null;
+        }
+        // 0 = ignored, 1 = not ignored, anything else = git could not answer
+        return switch (process.exitValue()) {
+            case 0 -> true;
+            case 1 -> false;
+            default -> null;
+        };
+    }
+
+    /**
+     * The vitest family must move together (exact peer pins), and a group with no
+     * {@code applies-to} covers version updates only — so each npm ecosystem that
+     * groups vitest for version updates needs a security-update group for it too,
+     * ahead of the catch-all security group, since a package lands in the first
+     * group that matches.
+     */
+    @Test
+    @DisplayName("each npm ecosystem that groups vitest does so for security updates too")
+    void vitestIsGroupedForSecurityUpdates() throws Exception {
+        JsonNode updates = new YAMLMapper().readTree(DEPENDABOT.toFile()).path("updates");
+        int graded = 0;
+        for (JsonNode update : updates) {
+            JsonNode groups = update.path("groups");
+            if (!"npm".equals(update.path("package-ecosystem").asText()) || !groups.has("vitest")) {
+                continue;
+            }
+            graded++;
+            String directory = update.path("directory").asText();
+            String vitestSecurity = null;
+            String catchAll = null;
+            for (Map.Entry<String, JsonNode> group : groups.properties()) {
+                if (!"security-updates".equals(group.getValue().path("applies-to").asText())) {
+                    continue;
+                }
+                List<String> patterns = new ArrayList<>();
+                group.getValue().path("patterns").forEach(p -> patterns.add(p.asText()));
+                if (vitestSecurity == null && patterns.contains("vitest") && patterns.contains("@vitest/*")) {
+                    vitestSecurity = group.getKey();
+                }
+                if (catchAll == null && patterns.contains("*")) {
+                    catchAll = group.getKey();
+                }
+            }
+            assertNotNull(vitestSecurity, directory + ": no security-update group holds vitest and @vitest/*");
+            List<String> order = new ArrayList<>();
+            groups.fieldNames().forEachRemaining(order::add);
+            assertTrue(catchAll == null || order.indexOf(vitestSecurity) < order.indexOf(catchAll),
+                    directory + ": " + vitestSecurity + " must be declared before " + catchAll
+                            + ", or the catch-all claims vitest first");
+        }
+        assertTrue(graded >= 2, "expected ui/manager and ui/chat to group vitest; graded " + graded);
+    }
+
+    /**
+     * The Slack job reports on the others and gates nothing. {@code curl -sf}
+     * failed it on any webhook refusal (exit 22), adding a second red job to every
+     * failing run.
+     */
+    @Test
+    @DisplayName("a Slack webhook refusal does not fail the notification job")
+    void slackNotificationIsBestEffort() throws Exception {
+        String notify = ciJobBlocks().get("notify-slack");
+        assertNotNull(notify, CI_WORKFLOW + " has no notify-slack job");
+        List<String> curls = notify.lines().map(String::strip).filter(l -> l.contains("curl ")).toList();
+        assertFalse(curls.isEmpty(), "notify-slack no longer posts with curl, so this grades nothing");
+        for (String curl : curls) {
+            assertTrue(curl.startsWith("if ! curl "),
+                    "every curl in notify-slack must be guarded so a delivery failure warns instead of failing: " + curl);
+        }
     }
 }

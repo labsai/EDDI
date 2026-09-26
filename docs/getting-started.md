@@ -190,7 +190,7 @@ Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 On a terminal, under project root folder, run the following command:
 
 ```shell
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
