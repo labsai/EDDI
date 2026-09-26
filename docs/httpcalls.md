@@ -70,7 +70,9 @@ than degrading quietly:
   targets the exact `scheme://host:port` the caller addressed, or this
   deployment's own address. The caller's origin is read from the inbound request;
   the deployment's own address comes from deployment configuration alone —
-  `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` — never
+  `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` (or the
+  `quarkus.http.host` address, when the listener binds one specific non-loopback
+  address and `127.0.0.1` is therefore not this process) — never
   from an agent config or a request header. So a config naming a third-party host
   cannot exfiltrate a user's token, and no allow-list is needed for this to be safe
   by default. With `quarkus.http.port=0` (a random port) and no

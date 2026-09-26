@@ -220,6 +220,37 @@ class AgentCardServiceTest {
 
             assertNull(service.getDefaultAgentCard());
         }
+
+        /**
+         * A1: with no A2A-enabled agent the first-match shortcut never stops, so each
+         * anonymous GET scanned every candidate. The scan result — empty included — is
+         * now reused for a short window.
+         */
+        @Test
+        void repeatedAnonymousRequestsWithNoA2AAgent_scanTheStoreOnce() throws Exception {
+            var descriptors = new ArrayList<DocumentDescriptor>();
+            for (int i = 0; i < 100; i++) {
+                var descriptor = new DocumentDescriptor();
+                descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/agent" + i + "?version=1"));
+                descriptors.add(descriptor);
+            }
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(descriptors);
+            when(restAgentStore.getCurrentResourceId(anyString())).thenReturn(null);
+
+            for (int i = 0; i < 50; i++) {
+                assertNull(service.getDefaultAgentCard());
+            }
+
+            verify(documentDescriptorStore, times(1)).readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(),
+                    anyBoolean());
+            verify(restAgentStore, times(100)).getCurrentResourceId(anyString());
+
+            service.invalidateRoster();
+            assertNull(service.getDefaultAgentCard());
+            verify(documentDescriptorStore, times(2)).readDescriptors(eq("ai.labs.agent"), anyString(), anyInt(), anyInt(),
+                    anyBoolean());
+        }
     }
 
     // --- getAgentCard ---
