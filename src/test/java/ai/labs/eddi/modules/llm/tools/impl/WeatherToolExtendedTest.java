@@ -346,7 +346,10 @@ class WeatherToolExtendedTest {
     @DisplayName("the OpenWeatherMap key is never handed to the model or the log")
     class KeyConfinement {
 
-        private static final String KEY = "owm-secret-key-123";
+        /**
+         * Low-entropy on purpose: a realistic-looking fake key trips Secret Scanning.
+         */
+        private static final String KEY = "owm-aaaa-aaaa-1111";
 
         @BeforeEach
         void setKey() throws Exception {
