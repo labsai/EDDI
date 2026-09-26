@@ -96,6 +96,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * happens exactly once.
      */
     private final AtomicBoolean readinessDeferred = new AtomicBoolean();
+    /**
+     * Set when startup parked the document-level migrations behind a pending rename
+     * migration, and taken by the first sweep that sees it complete — which runs
+     * them before it deploys anything or grants readiness. Without this, a
+     * migration-log read that failed transiently at boot skipped them until the
+     * next restart while the sweep went on to deploy agents and report ready.
+     */
+    private final AtomicBoolean documentMigrationsDeferred = new AtomicBoolean();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -147,11 +155,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         // or its log could not be read) let each one scan empty collections, find
         // nothing to do and record itself as COMPLETE — so it never ran again, and
         // the documents the rename later moved into place were never migrated. Park
-        // them instead; they are unflagged, so the next startup runs them.
+        // them instead; they are unflagged, and the first deployment sweep that sees
+        // the rename complete runs them before it deploys anything.
         if (v6RenameMigration.isPending()) {
-            LOGGER.error("Skipping the V6 Qute, channel connector and workspace access-index migrations: the V6 rename "
+            documentMigrationsDeferred.set(true);
+            LOGGER.error("Deferring the V6 Qute, channel connector and workspace access-index migrations: the V6 rename "
                     + "migration has not completed, and they would run against collections it has not populated yet. "
-                    + "They run on the next startup after the rename migration succeeds.");
+                    + "They run as soon as the deployment sweep sees the rename migration complete.");
         } else {
             runDocumentMigrations();
         }
@@ -244,6 +254,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 LOGGER.debug("Deployment sweep still parked: the V6 rename migration has not completed.");
             }
             return;
+        }
+        if (documentMigrationsDeferred.compareAndSet(true, false)) {
+            // Before the sweep deploys agents and before readiness is granted below:
+            // the same order the startup path uses.
+            LOGGER.info("The V6 rename migration has completed — running the deferred document-level migrations.");
+            runDocumentMigrations();
         }
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()

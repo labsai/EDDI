@@ -385,8 +385,11 @@ the conversation reaches that many steps **and is idle** (`READY`, `ERROR` or
 
 - The old conversation is ended, not trimmed; its full history stays readable.
 - `conversation`-scoped properties are copied into the new conversation (anything its
-  own start turn set wins). `longTerm` properties need no copying — they live in user
-  memory.
+  own start turn set wins), provided the old conversation belongs to the schedule's
+  current `userId` — state written for another user is never handed on. `longTerm`
+  properties need no copying — they live in user memory.
+- If ending the old conversation fails, the fire keeps using it and a later idle fire
+  tries the rollover again, so no conversation is left open beside its replacement.
 - The model's **conversation history does not carry over**: the new conversation's LLM
   context starts empty. An agent that needs facts across a rollover should keep them in
   properties.
@@ -396,6 +399,12 @@ the conversation reaches that many steps **and is idle** (`READY`, `ERROR` or
 
 The setting applies to every persistent schedule, including those already past the limit
 when it is enabled: each rolls over on its first idle fire after that.
+
+Independent of the setting, a persistent schedule only replaces its conversation when
+that conversation is provably gone (the store reports it missing, or it belongs to another
+agent) or has `ENDED`. A store that cannot be read fails the fire instead, and the retry
+runs against the same conversation — a brief outage does not cost the schedule its
+history.
 
 ### Observability
 

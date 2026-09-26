@@ -767,6 +767,7 @@ public class Conversation implements IConversation {
                     continue;
                 }
                 boolean writeOwed = pending.contains(propertyEntry.getKey());
+                adoptBaselineGroupIds(propertyEntry.getKey(), property);
                 if (!writeOwed && property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
                     // Unchanged since the turn started AND nothing owed — already
                     // persisted, skip the write.
@@ -777,6 +778,12 @@ public class Conversation implements IConversation {
                 UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis,
                         fallbackGroupIds(longTermBaseline.get(propertyEntry.getKey())));
                 store.upsert(entry);
+                if (entry.groupIds() != null && !entry.groupIds().isEmpty()) {
+                    // Keep the groups the entry was written with on the live property, so
+                    // a later turn — without group context, or resumed from a pause —
+                    // does not write it back with none.
+                    property.setGroupIds(entry.groupIds());
+                }
                 pending.remove(propertyEntry.getKey());
             }
             // Every live longTerm property has been considered, so a leftover marker
@@ -810,11 +817,34 @@ public class Conversation implements IConversation {
         }
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
         properties.forEach((key, property) -> {
-            if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
-                pending.add(key);
+            if (property != null && property.getScope() == Scope.longTerm) {
+                // Before the property is snapshotted with this turn's memory: a paused
+                // turn's resume must still know the groups it replaced.
+                adoptBaselineGroupIds(key, property);
+                if (!property.equals(longTermBaseline.get(key))) {
+                    pending.add(key);
+                }
             }
         });
         conversationMemory.setPendingLongTermWrites(pending);
+    }
+
+    /**
+     * Carries the groups of the property a key held when the turn started onto a
+     * replacement that has none. A property instruction creates a new
+     * {@link Property} without groups; left like that, it compared unequal to its
+     * baseline on {@code groupIds} alone (a needless upsert that refreshes
+     * {@code updatedAt} every turn) and, once it became the baseline itself, a
+     * later turn without group context wrote it back shared with no group.
+     */
+    private void adoptBaselineGroupIds(String key, Property property) {
+        if (property.getGroupIds() != null && !property.getGroupIds().isEmpty()) {
+            return;
+        }
+        Property baseline = longTermBaseline.get(key);
+        if (baseline != null && baseline != property && baseline.getGroupIds() != null && !baseline.getGroupIds().isEmpty()) {
+            property.setGroupIds(List.copyOf(baseline.getGroupIds()));
+        }
     }
 
     /**
