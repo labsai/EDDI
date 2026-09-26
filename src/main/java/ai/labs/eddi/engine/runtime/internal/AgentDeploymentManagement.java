@@ -142,22 +142,18 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("V6 rename migration failed — will retry on next startup", e);
         }
-        try {
-            v6QuteMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("V6 Qute migration failed — will retry on next startup", e);
-        }
-        try {
-            channelConnectorMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("Channel connector migration failed — will retry on next startup", e);
-        }
-        try {
-            // Last of the migrations: it re-derives the access index from whatever the
-            // earlier ones left behind, so running it before them would index stale state.
-            workspaceAccessIndexMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
+        // E3: the document-level migrations read the v6 collections the rename
+        // migration creates. Running them while it is still pending (it failed above,
+        // or its log could not be read) let each one scan empty collections, find
+        // nothing to do and record itself as COMPLETE — so it never ran again, and
+        // the documents the rename later moved into place were never migrated. Park
+        // them instead; they are unflagged, so the next startup runs them.
+        if (v6RenameMigration.isPending()) {
+            LOGGER.error("Skipping the V6 Qute, channel connector and workspace access-index migrations: the V6 rename "
+                    + "migration has not completed, and they would run against collections it has not populated yet. "
+                    + "They run on the next startup after the rename migration succeeds.");
+        } else {
+            runDocumentMigrations();
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
@@ -185,6 +181,26 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         });
 
         LOGGER.info("Finished deployment of agents.");
+    }
+
+    private void runDocumentMigrations() {
+        try {
+            v6QuteMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("V6 Qute migration failed — will retry on next startup", e);
+        }
+        try {
+            channelConnectorMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Channel connector migration failed — will retry on next startup", e);
+        }
+        try {
+            // Last of the migrations: it re-derives the access index from whatever the
+            // earlier ones left behind, so running it before them would index stale state.
+            workspaceAccessIndexMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
+        }
     }
 
     /**

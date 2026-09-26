@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.OngoingStubbing;
 
 import java.io.IOException;
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -76,6 +77,11 @@ class MongoDeploymentStorageTest {
         assertEquals("agent-1", filterCaptor.getValue().get("agentId"));
         assertEquals(1, filterCaptor.getValue().get("agentVersion"));
         assertEquals("deployed", docCaptor.getValue().get("deploymentStatus"));
+        // E6: every write is stamped, so the dedupe can tell the live duplicate from a
+        // stale one — and the stamp must stay out of the filter, or the upsert would
+        // never match an existing row again.
+        assertInstanceOf(Date.class, docCaptor.getValue().get("lastModified"), "each write must stamp lastModified");
+        assertFalse(filterCaptor.getValue().containsKey("lastModified"), "lastModified must not be part of the upsert filter");
     }
 
     @Test
@@ -393,7 +399,7 @@ class MongoDeploymentStorageTest {
      * </p>
      */
     @Test
-    @DisplayName("the dedupe pipeline sorts by _id before grouping, so every node keeps the same row")
+    @DisplayName("the dedupe pipeline sorts by lastModified then _id before grouping, so every node keeps the live row")
     void dedupePipelineSortsBeforeGrouping() {
         MongoDatabase database = mock(MongoDatabase.class);
         MongoCollection<Document> duplicated = mock(MongoCollection.class);
@@ -414,8 +420,9 @@ class MongoDeploymentStorageTest {
         assertTrue(sortStage >= 0, "the dedupe pipeline must sort before it groups, got: " + stages);
         assertTrue(groupStage >= 0, "the dedupe pipeline must group, got: " + stages);
         assertTrue(sortStage < groupStage, "the $sort must precede the $group or $push order is undefined, got: " + stages);
-        assertEquals(new Document("_id", 1), stages.get(sortStage).get("$sort"),
-                "sorting must be ascending by _id — an ObjectId's leading bytes are the insert timestamp, so that is insertion order");
+        assertEquals(new Document("lastModified", 1).append("_id", -1), stages.get(sortStage).get("$sort"),
+                "the survivor (last element) must be the most recently written row, and among rows written before "
+                        + "lastModified existed the LOWEST _id — the one replaceOne has been rewriting (E6)");
     }
 
     /**

@@ -24,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,12 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     private static final String FIELD_ENVIRONMENT = "environment";
     private static final String FIELD_AGENT_ID = "agentId";
     private static final String FIELD_AGENT_VERSION = "agentVersion";
+    /**
+     * When {@link #setDeploymentInfo} last wrote the row. The one piece of evidence
+     * {@link #removeDuplicateDeploymentRows()} has for which duplicate is live —
+     * see there. Not part of {@code DeploymentInfo}; the reader ignores it.
+     */
+    private static final String FIELD_LAST_MODIFIED = "lastModified";
     /**
      * Aggregation-only field names used by
      * {@link #removeDuplicateDeploymentRows()}.
@@ -319,25 +326,37 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * Keeps one row per (environment, agentId, agentVersion) and removes the rest.
      *
      * <p>
-     * The survivor is the newest row: duplicates differ only in
-     * {@code deploymentStatus}, so the last-written one is what reflects the
-     * operator's last deploy/undeploy. Guessing is unavoidable here — the rows
-     * carry no timestamp of their own — but any single row is a consistent answer
-     * where two are not.
+     * The survivor has to be the LIVE row — the one the operator's last
+     * deploy/undeploy was written to. Duplicates differ only in
+     * {@code deploymentStatus}, so keeping any other one reverts that decision.
      * </p>
      *
      * <p>
-     * "Newest" is established by the leading {@code $sort} on {@code _id}, and that
-     * stage is load-bearing rather than cosmetic. {@code $push} preserves the order
-     * the documents reach {@code $group} in, and without a sort that is the storage
-     * engine's natural order, which is not insertion order and is not stable
-     * between nodes. Two nodes deduplicating the same collection during a rolling
-     * restart could therefore each keep a DIFFERENT element and, between them,
-     * delete every row for a key — an agent that was deployed silently never
-     * redeployed by {@code checkDeployments} again. Rows are inserted without an
-     * explicit {@code _id}, so Mongo assigns an ObjectId whose leading bytes are
-     * the insert timestamp: ascending {@code _id} is insertion order, and every
-     * node computes the same survivor.
+     * <b>Which row is live (E6).</b> This used to keep the row with the highest
+     * {@code _id}, i.e. the most recently <em>inserted</em>. But {@code replaceOne}
+     * rewrites the first row its filter matches, and for rows that tie on the
+     * filter that is the one found first on the {@code agentId} index — the OLDEST.
+     * So every deploy/undeploy after the duplicate appeared landed on the oldest
+     * row, and the dedupe then deleted exactly that row and kept a stale one: an
+     * undeployed agent came back, or a deployed one vanished. Two keys now decide,
+     * in the order the {@code $sort} applies them:
+     * </p>
+     * <ol>
+     * <li>{@value #FIELD_LAST_MODIFIED}, stamped by every
+     * {@link #setDeploymentInfo} since this release — the newest write wins, and a
+     * stamped row always beats an unstamped one (a missing field sorts first
+     * ascending);</li>
+     * <li>among unstamped rows, the LOWEST {@code _id} — the row {@code replaceOne}
+     * has been rewriting ({@code _id} sorts descending, so it comes last).</li>
+     * </ol>
+     *
+     * <p>
+     * The {@code $sort} stays load-bearing. {@code $push} preserves the order the
+     * documents reach {@code $group} in, and without a sort that is the storage
+     * engine's natural order, which is not stable between nodes. Two nodes
+     * deduplicating the same collection during a rolling restart could therefore
+     * each keep a DIFFERENT element and, between them, delete every row for a key.
+     * With a total order every node computes the same survivor.
      * </p>
      *
      * @return how many rows were removed
@@ -348,7 +367,7 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
                 // rename migration and is not a duplicate of the other rows that lack it.
                 new Document("$match", new Document(FIELD_AGENT_ID, new Document("$exists", true))
                         .append(FIELD_AGENT_VERSION, new Document("$exists", true))),
-                new Document("$sort", new Document("_id", 1)),
+                new Document("$sort", new Document(FIELD_LAST_MODIFIED, 1).append("_id", -1)),
                 new Document("$group", new Document("_id",
                         new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)
                                 .append(FIELD_AGENT_VERSION, "$" + FIELD_AGENT_VERSION))
@@ -393,6 +412,8 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         Document filter = createFilter(environment, agentId, agentVersion);
         Document newDeploymentInfo = new Document(filter);
         newDeploymentInfo.put(FIELD_DEPLOYMENT_STATUS, deploymentStatus.toString());
+        // Evidence for removeDuplicateDeploymentRows of which duplicate is live (E6).
+        newDeploymentInfo.put(FIELD_LAST_MODIFIED, new Date());
 
         deploymentsCollection.replaceOne(filter, newDeploymentInfo, new ReplaceOptions().upsert(true));
     }
