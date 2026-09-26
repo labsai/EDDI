@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -474,6 +475,32 @@ class ApiCallExecutorConnectionHeaderTest {
             assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-custom-id"),
                     "a case difference between what the connection wrote and what the transport reports must not reopen the leak: "
                             + preview.headers());
+        }
+    }
+
+    @Nested
+    @DisplayName("A credential in a header disables redirect-following (ssrf-protection off)")
+    class RedirectFollowingWithCredentials {
+
+        @Test
+        @DisplayName("a connection-owned header disables redirect-following so the credential cannot be replayed cross-origin")
+        void connectionCredentialDisablesRedirects() throws Exception {
+            givenConnectionResolvesToJiraCredential();
+
+            executor.execute(callWithHeaders(Map.of("Authorization", JIRA_REF)), memory, templateData("alice"), SERVER);
+
+            verify(mockRequest).setFollowRedirects(false);
+        }
+
+        @Test
+        @DisplayName("positive control — a request with only plain headers leaves redirect-following untouched")
+        void plainHeadersDoNotDisableRedirects() throws Exception {
+            // With ssrf-protection off and no credential in any header, the executor
+            // must not force redirects off — that path exists only to protect a
+            // credential, and firing it unconditionally would be a behaviour change.
+            executor.execute(callWithHeaders(Map.of("Accept", "application/json")), memory, templateData("alice"), SERVER);
+
+            verify(mockRequest, never()).setFollowRedirects(anyBoolean());
         }
     }
 

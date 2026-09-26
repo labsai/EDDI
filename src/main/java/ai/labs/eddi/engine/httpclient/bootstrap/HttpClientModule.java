@@ -13,7 +13,6 @@ import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.ext.web.client.WebClient;
-import io.vertx.ext.web.client.WebClientSession;
 import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
@@ -70,10 +69,20 @@ public class HttpClientModule {
         options.setDecompressionSupported(true);
 
         // What WebClient.create(vertx, options) does, with the HttpClient kept in hand.
+        //
+        // Deliberately a plain WebClient and NOT a WebClientSession. A session keeps
+        // a single, application-scoped cookie store, and this client is the one and
+        // only client behind every agent's httpcalls — so a Set-Cookie returned to
+        // one user's call was stored and then replayed on the next user's call to the
+        // same host, leaking a session credential across users. A plain WebClient
+        // holds no cookie jar, so nothing is carried between calls. httpcalls already
+        // strips Set-Cookie from what it records (ApiCallExecutor); this removes the
+        // live jar that was the actual replay vector. If a future feature needs
+        // cookies, scope a WebClientSession per conversation/principal rather than
+        // sharing one here.
         WebClient webClient = WebClient.wrap(guardedHttpClient(vertx, options), options);
-        WebClientSession webClientSession = WebClientSession.create(webClient);
 
-        return new VertxHttpClient(vertx, webClientSession, webClient);
+        return new VertxHttpClient(vertx, webClient, webClient);
     }
 
     /**
@@ -136,7 +145,9 @@ public class HttpClientModule {
         if (client.getWebClient() != null) {
             client.getWebClient().close();
         }
-        if (client.getUnderlyingClient() != null) {
+        // The web client and the underlying client are the same instance now (no
+        // session wrapper), so close it once.
+        if (client.getUnderlyingClient() != null && client.getUnderlyingClient() != client.getWebClient()) {
             client.getUnderlyingClient().close();
         }
     }

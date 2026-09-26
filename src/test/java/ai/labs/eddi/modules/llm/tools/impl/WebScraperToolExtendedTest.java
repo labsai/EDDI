@@ -13,10 +13,11 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -34,12 +35,9 @@ class WebScraperToolExtendedTest {
         webScraperTool = new WebScraperTool(mockHttpClient, new HtmlToMarkdownConverter());
     }
 
-    @SuppressWarnings("unchecked")
     private void mockResponse(int statusCode, String body) throws IOException, InterruptedException {
-        HttpResponse<String> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(statusCode);
-        when(response.body()).thenReturn(body);
-        when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+        when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+                .thenReturn(new SafeHttpClient.BoundedResponse(statusCode, body.getBytes(StandardCharsets.UTF_8), false));
     }
 
     // ==================== extractWebPageText ====================
@@ -179,7 +177,7 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException from HTTP client")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Connection refused"));
 
             String result = webScraperTool.extractWebPageText("https://example.com");
@@ -424,7 +422,7 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException during metadata fetch")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Network error"));
 
             String result = webScraperTool.extractMetadata("https://example.com");

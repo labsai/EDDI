@@ -226,32 +226,51 @@ public final class McpApiToolBuilder {
     /**
      * Parse an OpenAPI spec from a JSON/YAML string or URL.
      * <p>
-     * <b>Security:</b> when the input is a location (not inline content), it is
-     * required to be an {@code http}/{@code https} URL via
-     * {@link UrlValidationUtils#isValidHttpUrl(String)} before being fetched. This
-     * prevents the underlying swagger-parser {@code readLocation} from reading
-     * local files (e.g. {@code file:///etc/passwd}) or using other non-http schemes
-     * (classpath:, jar:, ftp:). Private/internal hosts are intentionally still
-     * permitted so internal OpenAPI specs remain discoverable (the calling REST/MCP
-     * surface is {@code eddi-admin}/{@code eddi-editor} gated). Inline JSON/YAML
-     * content is parsed directly without any network access.
+     * <b>Security:</b> reference resolution ({@code setResolve(true)}) runs with
+     * {@code setSafelyResolveURL(true)}, so any {@code $ref} the parser follows —
+     * whether the input is a URL or inline content that embeds external references
+     * — goes through swagger-parser's blocked-URL resolver
+     * (private/link-local/cloud targets refused) and cannot read local files or use
+     * non-http schemes. On its own that guards the {@code $ref} hops; the spec
+     * location itself is guarded separately below.
+     * <p>
+     * When the input is a location (not inline content) it must be an
+     * {@code http}/{@code https} URL via
+     * {@link UrlValidationUtils#isValidHttpUrl(String)}, and it is additionally run
+     * through {@link UrlValidationUtils#rejectCloudMetadataTarget(String)} before
+     * being fetched — {@code isValidHttpUrl} alone would let
+     * {@code http://169.254.169.254/...} through to the parser's fetcher, bypassing
+     * the always-on metadata guard. Other private/internal hosts are intentionally
+     * still permitted so internal OpenAPI specs remain discoverable (the calling
+     * REST/MCP surface is {@code eddi-admin}/{@code eddi-editor} gated). Inline
+     * JSON/YAML content that embeds no external {@code $ref} is parsed without any
+     * network access.
      */
     public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
+        // Route every $ref the parser fetches through the blocked-URL resolver:
+        // without this, resolution fetches http(s) refs and reads filesystem refs
+        // (relative to the process CWD) on the first request, unguarded.
+        parseOptions.setSafelyResolveURL(true);
 
         SwaggerParseResult result;
         if (looksLikeInlineSpec(specInput)) {
-            // Inline JSON or YAML content — no network/file access.
+            // Inline JSON or YAML content — no network/file access for the document
+            // itself; any embedded external $ref is still resolved under the
+            // blocked-URL resolver enabled above.
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
             // Remote location. Enforce an http(s) scheme so the parser's fetcher
             // cannot read local files (file://), classpath/jar resources, or use
-            // other non-http schemes. Internal/private hosts stay allowed.
+            // other non-http schemes. Internal/private hosts stay allowed, but never
+            // the cloud instance-metadata service (always-on, regardless of the
+            // ssrf-protection toggle).
             String location = specInput.trim();
             if (!UrlValidationUtils.isValidHttpUrl(location)) {
                 throw new IllegalArgumentException("OpenAPI spec location must be an http or https URL");
             }
+            UrlValidationUtils.rejectCloudMetadataTarget(location);
             result = new OpenAPIV3Parser().readLocation(location, null, parseOptions);
         }
 
@@ -324,11 +343,10 @@ public final class McpApiToolBuilder {
         // context and conversation memory (persisted), and nothing on that path
         // redacts them — RequestRedactor is request-only by construction and
         // SecretRedactionFilter runs on the display copy. Set-Cookie is the case
-        // that matters: HttpClientModule builds a cookie-aware, application-scoped
-        // WebClientSession, so that value is a live session credential EDDI is
-        // actively replaying, and copying it into prompt-injectable context is
-        // exactly what HttpOnly exists to prevent. A plain GET that answers with a
-        // body has nothing to gain from it, so it does not get it.
+        // that matters: it is a session credential, and copying it into
+        // prompt-injectable context is exactly what HttpOnly exists to prevent. A
+        // plain GET that answers with a body has nothing to gain from it, so it does
+        // not get it.
         if (returnsDataInHeaders(operation)) {
             httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
         }

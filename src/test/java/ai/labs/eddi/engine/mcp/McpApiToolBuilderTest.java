@@ -793,4 +793,19 @@ class McpApiToolBuilderTest {
         assertTrue(description.contains("test"), description);
         assertTrue(description.contains("Default: production"), description);
     }
+
+    @Test
+    @DisplayName("a spec location on the cloud metadata service is refused before any fetch")
+    void specLocationOnMetadataServiceIsRefused() {
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> McpApiToolBuilder.parseSpec("http://169.254.169.254/latest/meta-data/openapi.json"));
+        assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a non-http spec location is still refused (no file:// or classpath fetch)")
+    void specLocationMustBeHttp() {
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("file:///etc/passwd"));
+        assertTrue(e.getMessage().contains("http or https"), e.getMessage());
+    }
 }

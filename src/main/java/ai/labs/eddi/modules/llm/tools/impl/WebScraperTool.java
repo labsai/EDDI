@@ -10,6 +10,7 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -19,7 +20,7 @@ import org.jsoup.select.Elements;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
@@ -34,13 +35,25 @@ public class WebScraperTool {
     /** Cap on what a single extraction hands back to the model. */
     private static final int MAX_EXTRACTED_CHARACTERS = 5000;
 
+    /** Backstop response cap used when no configuration is supplied (5 MiB). */
+    static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
+
     private final SafeHttpClient httpClient;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
+    private final long maxResponseBytes;
 
     @Inject
-    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
+    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter,
+            @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes",
+                            defaultValue = "5242880") long maxResponseBytes) {
         this.httpClient = httpClient;
         this.htmlToMarkdownConverter = htmlToMarkdownConverter;
+        this.maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES;
+    }
+
+    /** Convenience constructor for tests and callers with no configured cap. */
+    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
+        this(httpClient, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES);
     }
 
     @Tool("Extracts the readable content of a web page URL as Markdown, with navigation, scripts and other page chrome removed.")
@@ -222,13 +235,16 @@ public class WebScraperTool {
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // Bounded read: an LLM-chosen URL must not be able to stream an unbounded
+        // body into memory. The body is capped as it arrives rather than pulled in
+        // full and measured afterwards.
+        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, maxResponseBytes);
 
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);
         }
 
-        return response.body();
+        return new String(response.body(), StandardCharsets.UTF_8);
     }
 
 }
