@@ -39,6 +39,16 @@ const CHAT_MIN = 280;
 const CHAT_MAX = 600;
 const CHAT_DEFAULT = 384;
 
+/** The resource id a step's config URI names, or "" when it names none. */
+function resourceIdOf(uri: string | undefined): string {
+  if (!uri) return "";
+  try {
+    return parseResourceUri(uri).id;
+  } catch {
+    return "";
+  }
+}
+
 // ==================== Component ====================
 
 export function AgentStudioPage() {
@@ -103,6 +113,18 @@ export function AgentStudioPage() {
    * than this (an edit made elsewhere) wins, and this is dropped.
    */
   const [savedContext, setSavedContext] = useState<CascadeContext | null>(null);
+  /**
+   * The newest version each stage's resource was saved at from this page, by
+   * resource id. Lives here for the same reason: a save that failed after the
+   * resource hop wrote a version the pipeline does not show, and a panel
+   * remounted on returning to the stage would otherwise address the old one.
+   */
+  const [savedResourceVersions, setSavedResourceVersions] = useState<Record<string, number>>({});
+  const handleResourceVersionSaved = useCallback((resourceId: string, version: number) => {
+    setSavedResourceVersions((prev) =>
+      (prev[resourceId] ?? 0) >= version ? prev : { ...prev, [resourceId]: version },
+    );
+  }, []);
   const liveSavedContext =
     savedContext &&
     savedContext.agentId === agentId &&
@@ -227,6 +249,7 @@ export function AgentStudioPage() {
   }
 
   const selectedStep = selectedStageIndex !== null ? workflowSteps[selectedStageIndex] : null;
+  const selectedResourceId = resourceIdOf(selectedStep?.config?.uri);
 
   return (
     // `relative`: same contract as AppLayout — a fixed-height shell that scrolls
@@ -309,7 +332,7 @@ export function AgentStudioPage() {
           <div className="hidden lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
             {selectedStep && workflowId ? (
               <StudioEditorPanel
-                key={`${selectedStageIndex}-${selectedStep.config?.uri}`}
+                key={`${selectedStageIndex}-${selectedResourceId}`}
                 workflowStep={selectedStep}
                 agentId={agentId}
                 agentVersion={agentVersion}
@@ -317,6 +340,8 @@ export function AgentStudioPage() {
                 workflowVersion={workflowVersion}
                 agentWorkflowVersion={agentWorkflowVersion}
                 onCascadeContextChange={setSavedContext}
+                savedResourceVersion={savedResourceVersions[selectedResourceId]}
+                onResourceVersionSaved={handleResourceVersionSaved}
               />
             ) : (
               <StudioEditorEmpty />
@@ -343,7 +368,7 @@ export function AgentStudioPage() {
               <div className="flex-1 overflow-hidden flex flex-col">
                 {selectedStep && workflowId ? (
                   <StudioEditorPanel
-                    key={`mobile-${selectedStageIndex}-${selectedStep.config?.uri}`}
+                    key={`mobile-${selectedStageIndex}-${selectedResourceId}`}
                     workflowStep={selectedStep}
                     agentId={agentId}
                     agentVersion={agentVersion}
@@ -351,6 +376,8 @@ export function AgentStudioPage() {
                     workflowVersion={workflowVersion}
                     agentWorkflowVersion={agentWorkflowVersion}
                     onCascadeContextChange={setSavedContext}
+                    savedResourceVersion={savedResourceVersions[selectedResourceId]}
+                    onResourceVersionSaved={handleResourceVersionSaved}
                   />
                 ) : (
                   <StudioEditorEmpty />

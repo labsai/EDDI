@@ -5,10 +5,11 @@ import {
 } from "./resources";
 import {
   getWorkflow,
+  getWorkflowCurrentVersion,
   updateWorkflow,
   type WorkflowConfiguration,
 } from "./workflows";
-import { getAgent, updateAgent, type Agent } from "./agents";
+import { getAgent, getAgentCurrentVersion, updateAgent, type Agent } from "./agents";
 import { parseVersionFromLocation, requireVersionFromLocation } from "./location-version";
 
 export interface CascadeContext {
@@ -91,11 +92,27 @@ export class CascadeSaveError extends Error {
  * successful save, which Save & Deploy then deployed.
  */
 export class CascadeReferenceError extends Error {
-  constructor(message: string) {
+  /**
+   * What was wrong, for a translated message (`describeSaveError`). The English
+   * `message` stays for logs and for any caller that does not translate.
+   */
+  readonly code: CascadeReferenceCode;
+  readonly params: Record<string, string | number>;
+
+  constructor(code: CascadeReferenceCode, params: Record<string, string | number>, message: string) {
     super(message);
     this.name = "CascadeReferenceError";
+    this.code = code;
+    this.params = params;
   }
 }
+
+export type CascadeReferenceCode =
+  | "workflowMissingResource"
+  | "agentWorkflowMismatch"
+  | "agentMissingWorkflow"
+  | "workflowChanged"
+  | "agentChanged";
 
 /** The versions a failed cascade left behind, or `null` for any other error. */
 export function cascadePartialResult(err: unknown): CascadePartialResult | null {
@@ -191,11 +208,42 @@ async function loadParents(
   resourceId: string,
   context: CascadeContext,
 ): Promise<LoadedParents> {
-  const workflow = await getWorkflow(context.workflowId, context.workflowVersion);
-  const agent = await getAgent(context.agentId, context.agentVersion);
+  const [workflow, agent, workflowCurrent, agentCurrent] = await Promise.all([
+    getWorkflow(context.workflowId, context.workflowVersion),
+    getAgent(context.agentId, context.agentVersion),
+    currentOrUnknown(getWorkflowCurrentVersion(context.workflowId)),
+    currentOrUnknown(getAgentCurrentVersion(context.agentId)),
+  ]);
+
+  /*
+   * A parent this page addresses may have been superseded elsewhere (another
+   * tab, another user). Its PUT would 409 — but only AFTER the hops below it had
+   * written, leaving an orphaned resource (and workflow) version per attempt,
+   * and a retry would do the same again. Refuse before anything is written.
+   * Only a current version strictly NEWER than ours counts: an unanswered or
+   * unexpected answer is no evidence, and the PUT still guards the rest.
+   */
+  if (workflowCurrent !== null && workflowCurrent > context.workflowVersion) {
+    throw new CascadeReferenceError(
+      "workflowChanged",
+      { workflowId: context.workflowId, version: context.workflowVersion, current: workflowCurrent },
+      `Workflow ${context.workflowId} changed elsewhere (now version ${workflowCurrent}, this page has ` +
+        `version ${context.workflowVersion}) — reload it. Nothing was saved.`,
+    );
+  }
+  if (agentCurrent !== null && agentCurrent > context.agentVersion) {
+    throw new CascadeReferenceError(
+      "agentChanged",
+      { agentId: context.agentId, version: context.agentVersion, current: agentCurrent },
+      `Agent ${context.agentId} changed elsewhere (now version ${agentCurrent}, this page has ` +
+        `version ${context.agentVersion}) — reload it. Nothing was saved.`,
+    );
+  }
 
   if (!workflow.workflowSteps.some((step) => referencesResource(step.config?.uri, rt, resourceId))) {
     throw new CascadeReferenceError(
+      "workflowMissingResource",
+      { workflowId: context.workflowId, version: context.workflowVersion, resource: `${rt.plural}/${resourceId}` },
       `Workflow ${context.workflowId} (version ${context.workflowVersion}) does not reference ` +
         `${rt.plural}/${resourceId}, so saving it here would not change the agent. Nothing was saved.`,
     );
@@ -207,12 +255,20 @@ async function loadParents(
     .filter((ref) => ref?.id === context.workflowId);
   if (!workflowRefs.some((ref) => ref?.version === expected)) {
     const found = workflowRefs
-      .map((ref) => (ref?.version != null ? `version ${ref.version}` : "no version"))
+      .map((ref) => (ref?.version != null ? String(ref.version) : "?"))
       .join(", ");
     throw new CascadeReferenceError(
+      found ? "agentWorkflowMismatch" : "agentMissingWorkflow",
+      {
+        agentId: context.agentId,
+        version: context.agentVersion,
+        workflowId: context.workflowId,
+        found,
+        expected,
+      },
       found
         ? `Agent ${context.agentId} (version ${context.agentVersion}) references workflow ` +
-            `${context.workflowId} at ${found}, not version ${expected}. ` +
+            `${context.workflowId} at version ${found}, not version ${expected}. ` +
             `The agent changed since this page was opened — reload it. Nothing was saved.`
         : `Agent ${context.agentId} (version ${context.agentVersion}) does not reference workflow ` +
             `${context.workflowId}. Nothing was saved.`,
@@ -272,6 +328,20 @@ async function writeParents(
         agentWorkflowVersion: agentWorkflowVersion(context),
       },
     });
+  }
+}
+
+/**
+ * A `/currentversion` answer, or `null` when there is none to trust — a failed
+ * read (an older backend, a network blip) must not block a save the PUTs would
+ * guard anyway.
+ */
+async function currentOrUnknown(read: Promise<number>): Promise<number | null> {
+  try {
+    const value = await read;
+    return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+  } catch {
+    return null;
   }
 }
 

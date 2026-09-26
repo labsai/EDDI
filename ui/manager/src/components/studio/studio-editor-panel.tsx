@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { describeSaveError } from "@/lib/save-error";
 import { parseResourceUri } from "@/lib/api/agents";
 import { getResourceType, type ResourceTypeConfig } from "@/lib/api/resources";
 import {
@@ -54,6 +54,16 @@ interface StudioEditorPanelProps {
    * and left an orphaned resource version behind.
    */
   onCascadeContextChange?: (next: CascadeContext) => void;
+  /**
+   * The newest version of this stage's resource that a save from this page has
+   * created — including one written by a save that then failed at the workflow
+   * hop, which the workflow step's URI does not show. The panel never starts
+   * below it, so returning to the stage after such a failure does not address
+   * the superseded version.
+   */
+  savedResourceVersion?: number;
+  /** Called with every resource version a save creates (see `savedResourceVersion`). */
+  onResourceVersionSaved?: (resourceId: string, version: number) => void;
 }
 
 // ==================== Component ====================
@@ -66,6 +76,8 @@ export function StudioEditorPanel({
   workflowVersion,
   agentWorkflowVersion,
   onCascadeContextChange,
+  savedResourceVersion,
+  onResourceVersionSaved,
 }: StudioEditorPanelProps) {
   const { t } = useTranslation();
 
@@ -75,20 +87,23 @@ export function StudioEditorPanel({
   const uri = workflowStep.config?.uri ?? "";
 
   // Parse resource ID and version from the URI
-  const { resourceId, resourceVersion } = useMemo(() => {
-    if (!uri) return { resourceId: "", resourceVersion: 1 };
+  const { resourceId, uriVersion } = useMemo(() => {
+    if (!uri) return { resourceId: "", uriVersion: 1 };
     try {
       const parsed = parseResourceUri(uri);
-      return { resourceId: parsed.id, resourceVersion: parsed.version };
+      return { resourceId: parsed.id, uriVersion: parsed.version };
     } catch {
-      return { resourceId: "", resourceVersion: 1 };
+      return { resourceId: "", uriVersion: 1 };
     }
   }, [uri]);
+  const resourceVersion = Math.max(uriVersion, savedResourceVersion ?? 0);
 
   // Version state (starts from URI but can be changed via version picker)
   const [currentVersion, setCurrentVersion] = useState(resourceVersion);
 
-  // Sync version when the selected step changes (different URI)
+  // Follow the step when its version moves — a save, or a refetched pipeline.
+  // The page keys this panel by stage and resource id, not by URI, so a save no
+  // longer remounts it (which discarded anything typed meanwhile).
   useEffect(() => {
     setCurrentVersion(resourceVersion);
   }, [resourceVersion]);
@@ -155,6 +170,7 @@ export function StudioEditorPanel({
               toast.success(t("editor.saved", "Saved successfully"));
               setSaveSuccess(true);
               setCurrentVersion(result.newResourceVersion);
+              onResourceVersionSaved?.(resourceId, result.newResourceVersion);
               // The next save — of this stage or any other — builds on these.
               onCascadeContextChange?.(nextCascadeContext(cascadeContext, result));
             },
@@ -164,11 +180,12 @@ export function StudioEditorPanel({
               const partial = cascadePartialResult(err);
               if (partial?.newResourceVersion !== undefined) {
                 setCurrentVersion(partial.newResourceVersion);
+                onResourceVersionSaved?.(resourceId, partial.newResourceVersion);
               }
               if (partial?.retryContext) {
                 onCascadeContextChange?.(partial.retryContext);
               }
-              toast.error(getErrorMessage(err));
+              toast.error(describeSaveError(err, t));
             },
           },
         );
@@ -176,7 +193,7 @@ export function StudioEditorPanel({
         toast.error(t("editor.invalidJson", "Invalid JSON"));
       }
     },
-    [resourceId, currentVersion, cascadeSave, cascadeContext, onCascadeContextChange, t],
+    [resourceId, currentVersion, cascadeSave, cascadeContext, onCascadeContextChange, onResourceVersionSaved, t],
   );
 
   // ---- No URI / unsupported type ----

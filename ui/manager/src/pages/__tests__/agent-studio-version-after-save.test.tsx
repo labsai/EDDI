@@ -20,24 +20,35 @@ import { renderPage, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { AgentStudioPage } from "@/pages/agent-studio";
 
+// Counts editor mounts: a remount is what discards anything typed meanwhile.
+const editorMounts = vi.hoisted(() => ({ count: 0 }));
+
 // The editor chrome is not under test — a button that saves what was loaded.
-vi.mock("@/components/editors/config-editor-layout", () => ({
-  ConfigEditorLayout: (props: {
-    resourceId: string;
-    currentVersion: number;
-    data: string;
-    onSave: (json: string) => void;
-  }) => (
-    <button
-      type="button"
-      data-testid={`mock-save-${props.resourceId}`}
-      data-version={props.currentVersion}
-      onClick={() => props.onSave(props.data)}
-    >
-      save
-    </button>
-  ),
-}));
+vi.mock("@/components/editors/config-editor-layout", async () => {
+  const { useEffect } = await vi.importActual<typeof import("react")>("react");
+  return {
+    ConfigEditorLayout: (props: {
+      resourceId: string;
+      currentVersion: number;
+      data: string;
+      onSave: (json: string) => void;
+    }) => {
+      useEffect(() => {
+        editorMounts.count += 1;
+      }, []);
+      return (
+        <button
+          type="button"
+          data-testid={`mock-save-${props.resourceId}`}
+          data-version={props.currentVersion}
+          onClick={() => props.onSave(props.data)}
+        >
+          save
+        </button>
+      );
+    },
+  };
+});
 
 // Keep the right-hand chat out of the way; it has nothing to do with saving.
 vi.mock("@/components/chat/chat-panel", () => ({ ChatPanel: () => null }));
@@ -130,6 +141,7 @@ async function saveStage(user: ReturnType<typeof userEvent.setup>, stage: number
 describe("Agent Studio — saving more than one stage", () => {
   beforeEach(() => {
     installBackend();
+    editorMounts.count = 0;
   });
 
   it("saves a second stage on top of the first save instead of 409ing on the workflow", async () => {
@@ -194,5 +206,43 @@ describe("Agent Studio — saving more than one stage", () => {
     const finalWorkflow = workflow.docs[workflow.current]!;
     expect(finalWorkflow.workflowSteps[0]!.config.uri).toBe(`${RULES}?version=3`);
     expect(agent.docs[2]!.workflows).toEqual([`${WF}?version=${workflow.current}`]);
+  });
+
+  it("does not remount the editor when a save moves the stage to a new version", async () => {
+    renderPage("/manage/studio/agent1", <AgentStudioPage />, "/manage/studio/:agentId");
+    const user = userEvent.setup();
+
+    await saveStage(user, 0, "beh1");
+    await waitFor(() => expect(agent.current).toBe(2));
+    // Wait for the refetched pipeline to carry the new step URI.
+    await waitFor(() =>
+      expect(screen.getAllByTestId("mock-save-beh1")[0]!.getAttribute("data-version")).toBe("2"),
+    );
+    await new Promise((r) => setTimeout(r, 100));
+
+    // The desktop and the mobile panel each mounted once, and only once.
+    expect(editorMounts.count).toBeLessThanOrEqual(2);
+  });
+
+  it("returning to a stage after a workflow-hop failure retries from the version it wrote", async () => {
+    failOnce.add("workflow");
+    renderPage("/manage/studio/agent1", <AgentStudioPage />, "/manage/studio/:agentId");
+    const user = userEvent.setup();
+
+    await saveStage(user, 0, "beh1");
+    await waitFor(() => expect(resources.beh1!.current).toBe(2));
+    expect(agent.current).toBe(1);
+
+    // Away and back: the pipeline still says beh1 v1, the panel remounts.
+    await user.click(screen.getAllByTestId("stage-1")[0]!);
+    await screen.findAllByTestId("mock-save-llm1");
+    await user.click(screen.getAllByTestId("stage-0")[0]!);
+    await waitFor(() =>
+      expect(screen.getAllByTestId("mock-save-beh1")[0]!.getAttribute("data-version")).toBe("2"),
+    );
+
+    await user.click(screen.getAllByTestId("mock-save-beh1")[0]!);
+    await waitFor(() => expect(agent.current).toBe(2));
+    expect(conflicts).toEqual([]);
   });
 });

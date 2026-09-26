@@ -42,10 +42,12 @@ import {
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
 import {
+  CascadeReferenceError,
   cascadePartialResult,
   cascadeVersionUpdate,
   nextCascadeContext,
 } from "@/lib/api/cascade-save";
+import { describeSaveError } from "@/lib/save-error";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
@@ -281,7 +283,7 @@ export function ResourceDetailPage() {
               },
               onError: (err) => {
                 adoptPartialCascade(err);
-                toast.error(getErrorMessage(err));
+                toast.error(describeSaveError(err, t));
               },
             }
           );
@@ -347,7 +349,8 @@ export function ResourceDetailPage() {
               });
             } catch (err) {
               adoptPartialCascade(err);
-              throw err;
+              // Save & Deploy shows the error's message as it stands.
+              throw err instanceof CascadeReferenceError ? new Error(describeSaveError(err, t)) : err;
             }
             setCurrentVersion(result.newResourceVersion);
             // Update cascade context so next Save & Test uses correct versions
@@ -359,7 +362,7 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy, adoptPartialCascade]
+    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy, adoptPartialCascade, t]
   );
 
   const handleCascadeConfirm = useCallback(
