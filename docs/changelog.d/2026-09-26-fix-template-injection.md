@@ -38,7 +38,11 @@ variables), `{snippets.*}`, `{properties.*}`, or `{#for i in 2000000000}` and
   system prompt that the parent *model* writes, which a chat user can steer, as a
   live template that `LlmTask` renders on every turn. The tool now wraps it in
   `TemplateEscaping.unparsedBlock`, so the rendered prompt is byte-identical and
-  inert.
+  inert. `unparsedBlock` now keeps leading pipes in front of the block: Qute reads
+  every `|` right after the opening brace as part of the opener, so a prompt that
+  began with `|` produced a block the single-pipe terminator never closed and the
+  render failed (PR review). `TemplateEscapingTest` pins the round trip, including
+  a seeded 5,000-string sweep over braces, pipes and text.
 - **C4c — prompt snippets were one global namespace.**
   - The problem: every render used `PromptSnippetService.getAll()`, which merged
     every workspace's snippets, with the last one listed winning a name.
@@ -88,7 +92,11 @@ variables), `{snippets.*}`, `{properties.*}`, or `{#for i in 2000000000}` and
   depend on the LLM module) after it writes a grant, revoke, visibility change
   or transfer. `PromptSnippetService` observes the event and clears its snippet
   caches on that node. Other nodes converge within the 5-minute TTL. A failing
-  observer is logged and never undoes the sharing write.
+  observer is logged and never undoes the sharing write. A load that is already
+  reading the stores when an invalidation lands does not publish its result: loads
+  capture a cache generation first and publish under the lock the invalidation
+  holds while it bumps the generation and clears, so a pre-change view cannot be
+  put back for the rest of the TTL (PR review).
 - **Per-entry flag, not a key convention.** `output:<type>:context` collides with
   an output-set action literally named `context`, and the quick-reply key suffix
   is chosen by the client. The flag is `verbatim` with default `false`, so a
