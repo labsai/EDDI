@@ -21,14 +21,31 @@ A conversation's context map is shared by two writers: the client (`InputData.co
 
 ### Not changed / follow-ups
 
-- Conversations persisted before this fix may still hold client-written `context:groupId`/`context:delegationDepth` on earlier steps, which the all-steps fallbacks read. Not migrated.
+- Conversations persisted before this fix may still hold a client-written `context:delegationDepth` on earlier steps, which `resolveDelegationDepth` reads as a maximum — it can only make the depth limit stricter, so it was left as is. (`context:groupId` on earlier steps is now verified — see the follow-up entry below.)
 - Schedule-fired turns build their own context (no client keys) and were left alone.
 
 ### Tests
 
 `ReservedContextKeysTest` (new), `ConverseWithAgentToolOwnershipTest` (new), `DynamicAgentCrossTurnStateTest` (new), additions to `ConversationServiceTest`, `RestAgentEngineTest`, `DynamicAgentToolsTest` (teardown origin, create stamps origin), `RecruitAgentToolTest`, `ResourceAccessGuardTest`, `ContextualToolsProviderGroupIdTest`; existing converse/teardown/setup tests updated to the new constructors and overload.
 
+## 🔒 fix(engine): reserved-context-keys review follow-ups — create→continue, delegation USE gate, marker-checked cleanup (2026-09-26)
+
+**Repo:** EDDI (`fix/reserved-context-keys`)
+
+Independent pre-push review of the entry above; every finding addressed:
+
+1. **create_sub_agent → converse_with_agent follow-up refused (regression from C6).** `create_sub_agent(..., initialMessage)` returns the conversation id it opened, and the natural follow-up named it — which the C6 check refused. The provider now builds one `delegatedConversationIds` set and hands it to both tools; `CreateSubAgentTool` records its initial-message conversation (engine-started, same user). Test: `DynamicAgentCrossTurnStateTest.createThenContinue`.
+2. **converse_with_agent could start a conversation with any agent.** A new delegation goes through the engine-internal start, which has no USE gate. `ConverseWithAgentTool` now takes the same `(agentId, principal)` check as recruitment and refuses a new conversation the user may not use; continuations are exempt (they were started through this check), and so are agents this conversation or its discussion created (engine-built for this user, possibly without a descriptor). Tests: `ConverseWithAgentToolOwnershipTest` (3 new), `DynamicAgentCrossTurnStateTest.createdAgentsAreExemptFromTheDelegationUseCheck`.
+3. **End-of-discussion cleanup trusted the created list alone.** [`GroupLifecycleOps.cleanupEphemeralAgents`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupLifecycleOps.java) now reads each agent's `dynamicOrigin`: marker names this discussion → policy applies in full; marker names another → left alone; no marker or unreadable → **undeploy only, never delete**. Tests: three new cases in `GroupLifecycleOpsTest`.
+4. **Pre-fix poisoned conversations kept another team's group access.** `ContextualToolsProvider.resolveGroupIds` trusts an *earlier* step's `groupId` only when that step's `groupConversationId` names a discussion that is running, has this conversation as a member, and belongs to that group (`LiveDiscussionRegistry.getForMember`). The current step's value is still trusted (it can only be orchestrator-written now). Tests: four new cases in `ContextualToolsProviderGroupIdTest`.
+5. **Admins refused by the request-free USE check.** `CallerIdentity` now records `admin` (the `eddi-admin` role on the capturing request; `isAdminActingAs(principal)` requires the same user id), and `ResourceAccessGuard.principalMayUse(id, principal, principalIsAdmin)` admits it. `AgentOrchestrator` reads the turn's bound caller when it builds the dynamic tools. Tests: `CallerIdentityContextTest.capturesTheAdminRole`, `ResourceAccessGuardTest$PrincipalMayUse.adminIsAdmitted`.
+6. **Recruit leaked deployment state.** The USE check now runs before the deployment check. Test: `RecruitAgentToolTest.recruit_offLimitsAgent_doesNotRevealWhetherItIsDeployed`.
+7. **MCP trigger strip untested.** Test: `McpConversationToolsExtendedTest.chatManaged_triggerInitialContext_reservedKeysNeverReachTheConversation`.
+8. **Nits.** `ConversationServiceTest` asserts `ConversationNotFoundException` exactly; `CreateSubAgentTool`'s origin field renamed `callerConversationId` (no longer shadowed by the local); `ReservedContextKeys` logs the first drop per entry point and key set at WARN, repeats within the hour at DEBUG (bounded, expiring set); the source-scan test now walks `engine/internal/groups` and `modules/llm`, matches `.put(` and `Map.of(` across line breaks, and its Javadoc states exactly what it does not cover (constant- or computed-keyed writes, writers elsewhere).
+
+Compatibility: `CallerIdentity` gained a trailing `admin` component; the 3- and 4-arg constructors remain (non-admin). Ephemeral cleanup no longer deletes unmarked agents — a discussion that created sub-agents before this change leaves them undeployed rather than deleted.
+
 ```decision-log
 | 2026-09-26 | Strip engine-reserved context keys at the external entry points and keep the internal `startConversation`/agent-id `say` trusting | Clients could set `dynamicAgentConfig`/`dynamicCreatedAgentIds`/`groupId` and act as the group orchestrator (C3a–c) | A trusted side channel on `InputData` (touches every internal caller and the stored step format); filtering inside `Conversation` (cannot tell who wrote the map) |
-| 2026-09-26 | `teardown_agent` requires a `dynamicOrigin` marker on the target agent in addition to the created-ids list | The list alone decided and could be forged; deletion is permanent | Trusting the list once the context channel is closed (one leak away from deleting a person's agent) |
+| 2026-09-26 | `teardown_agent` and end-of-discussion cleanup require a `dynamicOrigin` marker on the target agent in addition to the created-ids list | The list alone decided and could be forged; deletion is permanent | Trusting the list once the context channel is closed (one leak away from deleting a person's agent) |
 ```

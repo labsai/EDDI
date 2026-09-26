@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -81,8 +82,21 @@ class ContextualToolsProvider implements ToolSourceProvider {
             Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
                     .<String, Boolean>build().asMap());
 
+    /**
+     * Verifies an earlier step's {@code groupId} before it is trusted — see
+     * {@link #resolveGroupIds(IConversationMemory, LiveDiscussionRegistry)}. May be
+     * null, in which case only the current step's value counts.
+     */
+    private final LiveDiscussionRegistry liveDiscussionRegistry;
+
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
+        this(userMemoryStore, attachmentStore, attachmentTextExtractor, null);
+    }
+
+    ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
+            AttachmentTextExtractor attachmentTextExtractor, LiveDiscussionRegistry liveDiscussionRegistry) {
+        this.liveDiscussionRegistry = liveDiscussionRegistry;
         this.userMemoryStore = userMemoryStore;
         this.attachmentStore = attachmentStore;
         this.attachmentTextExtractor = attachmentTextExtractor;
@@ -200,7 +214,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (config == null || userMemoryStore == null)
             return;
 
-        List<String> groupIds = resolveGroupIds(memory);
+        List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
@@ -244,8 +258,21 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * orchestrator knows; the context key it writes is reserved
      * ({@code ReservedContextKeys}) and stripped from client input, so it is the
      * one source trusted here.
+     * <p>
+     * <b>An earlier step's value is verified (review #4).</b> The current step's
+     * {@code context:groupId} was written this turn and can only have come from the
+     * orchestrator. An earlier step's may predate the strip: a conversation where a
+     * client forged {@code groupId} before the fix still carries it, and trusting
+     * it would keep that client in another team's group memory indefinitely. So a
+     * fallback value counts only when the same step's {@code groupConversationId}
+     * names a discussion that is running now, that this conversation is a member
+     * of, and that belongs to that group. Anything else is self-scope.
      */
     static List<String> resolveGroupIds(IConversationMemory memory) {
+        return resolveGroupIds(memory, null);
+    }
+
+    static List<String> resolveGroupIds(IConversationMemory memory, LiveDiscussionRegistry registry) {
         String contextKey = "context:" + ReservedContextKeys.GROUP_ID;
 
         var currentStep = memory.getCurrentStep();
@@ -257,16 +284,29 @@ class ContextualToolsProvider implements ToolSourceProvider {
         }
 
         var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    String value = contextValueAsString(entry);
-                    if (value != null) {
-                        return List.of(value);
-                    }
-                }
+        if (registry == null || allSteps == null) {
+            return List.of();
+        }
+        List<IData<Object>> priorGroupIds = allSteps.getAllLatestData(contextKey);
+        List<IData<Object>> priorDiscussions = allSteps.getAllLatestData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
+        if (priorGroupIds == null || priorDiscussions == null || priorGroupIds.size() != priorDiscussions.size()) {
+            return List.of();
+        }
+        // Latest first: both lists are per step, in step order.
+        for (int i = priorGroupIds.size() - 1; i >= 0; i--) {
+            String groupId = contextValueAsString(priorGroupIds.get(i));
+            if (groupId == null) {
+                continue;
             }
+            String discussionId = contextValueAsString(priorDiscussions.get(i));
+            boolean verified = registry.getForMember(discussionId, memory.getConversationId())
+                    .filter(gc -> groupId.equals(gc.getGroupId()))
+                    .isPresent();
+            if (!verified) {
+                LOGGER.debugf("[MEMORY] Ignoring an earlier step's groupId for conversation '%s': not a verified member of a running discussion",
+                        sanitize(memory.getConversationId()));
+            }
+            return verified ? List.of(groupId) : List.of();
         }
         return List.of();
     }

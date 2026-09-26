@@ -303,12 +303,21 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         String callerConversationId = memory.getConversationId();
         String userId = memory.getUserId();
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
+        // C6: the conversations this conversation started with other agents, from
+        // every earlier turn — the only ids converse_with_agent's conversationId may
+        // name. Shared with create_sub_agent, whose initial message starts one too and
+        // hands its id to the model for the follow-up. Stored back by reference below
+        // so this turn's additions persist.
+        Set<String> delegatedConversationIds = ConcurrentHashMap.newKeySet();
+        delegatedConversationIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS));
+        boolean delegationTrackingUsed = false;
 
         boolean anyDynamicToolAdded = false;
         if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId, delegatedConversationIds));
+            delegationTrackingUsed = true;
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
@@ -318,16 +327,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // consult no guardrails at all — allowDelegation was never read and
             // nothing bounded delegation depth or target.
             int delegationDepth = resolveDelegationDepth(memory);
-            // C6: the conversations this conversation started through the tool, from
-            // every earlier turn — the only ids a supplied conversationId may name.
-            // Stored back by reference so this turn's new ones persist.
-            Set<String> delegatedConversationIds = ConcurrentHashMap.newKeySet();
-            delegatedConversationIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS));
-            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegatedConversationIds));
-            var step = memory.getCurrentStep();
-            if (step != null) {
-                step.storeData(new Data<>(KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS, delegatedConversationIds));
-            }
+            // Review #2: a new delegation starts a conversation with a model-chosen
+            // agent as this user, through the engine-internal start that runs no USE
+            // gate — so the gate runs here. An agent this conversation (or its
+            // discussion) created is exempt: the engine built it for this user, and a
+            // setup-created agent may carry no descriptor to check.
+            BiPredicate<String, String> delegationUseCheck = useCheck == null
+                    ? null
+                    : (agentId, principal) -> sharedCreatedIds.contains(agentId) || useCheck.test(agentId, principal);
+            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegatedConversationIds,
+                    delegationUseCheck));
+            delegationTrackingUsed = true;
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
@@ -396,6 +406,9 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // up; assume the same here rather than half-guarding one of two reads of the
         // same value in the same method.
         var currentStep = memory.getCurrentStep();
+        if (delegationTrackingUsed && currentStep != null) {
+            currentStep.storeData(new Data<>(KEY_DYNAMIC_DELEGATED_CONVERSATION_IDS, delegatedConversationIds));
+        }
         if (anyDynamicToolAdded && currentStep != null) {
             currentStep.storeData(new Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
             currentStep.storeData(new Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));

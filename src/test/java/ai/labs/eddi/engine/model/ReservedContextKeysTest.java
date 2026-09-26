@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -94,28 +95,43 @@ class ReservedContextKeysTest {
     }
 
     /**
-     * The list is only as good as its coverage: a context key the group
-     * orchestrator writes for a member turn, but that is missing here, is a key a
-     * client can forge. Scans the two writers for literal {@code put("key", new
-     * Context(...))} calls and requires each key (bar the per-attachment ones,
-     * which are client-facing by design) to be reserved.
+     * The list is only as good as its coverage: a context key the engine writes
+     * into a conversation it starts, but that is missing here, is a key a client
+     * can forge.
+     * <p>
+     * <b>What this scan does and does not cover.</b> It reads every source file
+     * under the group orchestrator ({@code engine/internal/groups}) and the LLM
+     * module ({@code modules/llm}, where the dynamic-agent tools live) and finds
+     * context entries keyed by a string <em>literal</em> — {@code .put("key", new
+     * Context(...))} and {@code Map.of("key", new Context(...))}, across line
+     * breaks. A write keyed by a {@code ReservedContextKeys} constant is reserved
+     * by construction and needs no scan; a write keyed by any other constant or
+     * computed name (the per-attachment {@code attachment_N} keys, which are
+     * client-facing by design) is not detected. Writers elsewhere in the engine are
+     * not scanned either.
      */
     @Test
-    @DisplayName("every context key the group orchestrator writes is reserved")
-    void everyOrchestratorWrittenKeyIsReserved() throws IOException {
-        Pattern put = Pattern.compile("\\.put\\(\"([A-Za-z_]+)\",\\s*new Context\\(");
+    @DisplayName("every literal context key the group orchestrator or the LLM tools write is reserved")
+    void everyEngineWrittenLiteralKeyIsReserved() throws IOException {
+        Pattern write = Pattern.compile("(?:\\.put|Map\\.of)\\(\\s*\"([A-Za-z_]+)\",\\s*new Context\\(");
         Set<String> written = new TreeSet<>();
-        for (String source : List.of("src/main/java/ai/labs/eddi/engine/internal/groups/MemberTurnExecutor.java",
-                "src/main/java/ai/labs/eddi/engine/internal/groups/GroupLifecycleOps.java")) {
-            Matcher matcher = put.matcher(Files.readString(Path.of(source)));
-            while (matcher.find()) {
-                written.add(matcher.group(1));
+        for (String root : List.of("src/main/java/ai/labs/eddi/engine/internal/groups", "src/main/java/ai/labs/eddi/modules/llm")) {
+            List<Path> sources;
+            try (Stream<Path> walk = Files.walk(Path.of(root))) {
+                sources = walk.filter(path -> path.toString().endsWith(".java")).toList();
+            }
+            for (Path source : sources) {
+                Matcher matcher = write.matcher(Files.readString(source));
+                while (matcher.find()) {
+                    written.add(matcher.group(1));
+                }
             }
         }
-        assertFalse(written.isEmpty(), "the scan found no writes — the pattern no longer matches the source");
+        assertTrue(written.containsAll(Set.of("groupId", "groupConversationId", "dynamicAgentConfig", "dynamicCreatedAgentIds")),
+                "the scan no longer finds the orchestrator's known writes — the pattern has drifted from the source: " + written);
 
         Set<String> unreserved = new TreeSet<>(written);
         unreserved.removeAll(ReservedContextKeys.ALL);
-        assertTrue(unreserved.isEmpty(), "context keys written by the group orchestrator but not reserved: " + unreserved);
+        assertTrue(unreserved.isEmpty(), "context keys written by the engine but not reserved: " + unreserved);
     }
 }

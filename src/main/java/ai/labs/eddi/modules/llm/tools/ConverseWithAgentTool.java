@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -90,6 +91,13 @@ public class ConverseWithAgentTool {
      */
     private final Set<String> startedConversationIds;
 
+    /**
+     * {@code (agentId, principal) -> may that principal use that agent}, asked
+     * before a NEW conversation is started (review #2). {@code null} skips it
+     * (direct construction; CDI always supplies one through the provider).
+     */
+    private final BiPredicate<String, String> useCheck;
+
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
         this(conversationService, userId, permissiveDefault(), 0);
     }
@@ -133,6 +141,20 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             Set<String> startedConversationIds) {
+        this(conversationService, userId, config, currentDepth, startedConversationIds, null);
+    }
+
+    /**
+     * @param useCheck
+     *            {@code (agentId, principal) -> boolean}: whether this user may use
+     *            the agent a new conversation would be started with. Without it the
+     *            model could open a conversation with any deployed agent in any
+     *            workspace — the gate REST, MCP and {@code /v1} starts all apply.
+     *            {@code null} skips the check.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            Set<String> startedConversationIds, BiPredicate<String, String> useCheck) {
+        this.useCheck = useCheck;
         this.conversationService = conversationService;
         this.userId = userId;
         this.config = config != null ? config : permissiveDefault();
@@ -185,6 +207,14 @@ public class ConverseWithAgentTool {
                     return ("⚠️ Conversation '%s' was not started by you through this tool, so it cannot be continued. "
                             + "Omit conversationId to start a new conversation with agent '%s'.").formatted(conversationId, agentId);
                 }
+            }
+
+            // --- Guardrail: the user may use the target (review #2) ---
+            // Only for a new conversation: one being continued was started by this
+            // tool, which passed this same check to start it.
+            if (!continuing && useCheck != null && !useCheck.test(agentId, userId)) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the user has no access to it", sanitize(agentId));
+                return "⚠️ Agent '%s' is not available to this user, so it cannot be consulted.".formatted(agentId);
             }
 
             // --- Guardrail: delegation depth (finding F18) ---

@@ -23,6 +23,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -284,6 +286,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * Read when the dynamic-agent tools are built, on the turn's own thread, to
+     * learn whether the principal the USE check asks about is an administrator
+     * (M-A1 / review #5). Field-injected for the same reason as the fields above.
+     */
+    @Inject
+    volatile CallerIdentityContext callerIdentityContext;
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -1191,7 +1201,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * field-injected and still null when this class's constructor runs.
      */
     private ContextualToolsProvider contextualToolsProvider() {
-        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor);
+        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor, liveDiscussionRegistry);
     }
 
     // Kept as declared delegators (not inlined) — each has two call sites in
@@ -1219,9 +1229,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
         var guard = resourceAccessGuard;
+        var identityContext = callerIdentityContext;
+        // Captured now, on the turn's thread where the caller is bound: the tools may
+        // run on another executor. Admin-ness is only ever taken from the principal's
+        // own identity — isAdminActingAs compares the user id too.
+        CallerIdentity caller = identityContext != null ? identityContext.current() : null;
         return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
                 agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore,
-                guard != null ? guard::principalMayUse : null);
+                guard != null
+                        ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
+                                caller != null && caller.isAdminActingAs(principal))
+                        : null);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

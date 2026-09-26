@@ -247,6 +247,15 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("review #5: an administrator acting as themselves is admitted, as on the request path")
+        void adminIsAdmitted() throws Exception {
+            var guard = guardReturning(ownedBy("alice"));
+
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "admin-1", true));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "admin-1", false));
+        }
+
+        @Test
         @DisplayName("an unreadable descriptor is a no")
         void storeFailureIsNo() throws Exception {
             var store = mock(IDocumentDescriptorStore.class);

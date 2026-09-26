@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -68,20 +71,75 @@ class ContextualToolsProviderGroupIdTest {
         assertEquals(List.of("group-7"), ContextualToolsProvider.resolveGroupIds(memory));
     }
 
-    @Test
-    void groupIdFromAnEarlierStep_isResolved() {
-        // A resumed turn re-enters without the original context map, so the value
-        // only exists on an earlier step.
+    private static final String DISCUSSION_KEY = "context:groupConversationId";
+
+    /** A conversation whose only group context sits on an EARLIER step. */
+    private IConversationMemory memoryWithEarlierStep(String groupId, String discussionId) {
         var memory = mock(IConversationMemory.class);
+        when(memory.getConversationId()).thenReturn("conv-1");
         var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
         when(currentStep.getLatestData(CONTEXT_KEY)).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
+        // Built before stubbing: creating a mock inside thenReturn(...) is unfinished
+        // stubbing.
+        List<IData<Object>> groupIds = List.of(contextData(new Context(Context.ContextType.string, groupId)));
+        List<IData<Object>> discussions = discussionId == null
+                ? Arrays.asList((IData<Object>) null)
+                : List.of(contextData(new Context(Context.ContextType.string, discussionId)));
         var allSteps = mock(IConversationMemory.IConversationStepStack.class);
-        var earlierData = List.of(contextData(new Context(Context.ContextType.string, "group-earlier")));
-        when(allSteps.getAllLatestData(CONTEXT_KEY)).thenReturn(earlierData);
+        when(allSteps.getAllLatestData(CONTEXT_KEY)).thenReturn(groupIds);
+        when(allSteps.getAllLatestData(DISCUSSION_KEY)).thenReturn(discussions);
         when(memory.getAllSteps()).thenReturn(allSteps);
+        return memory;
+    }
 
-        assertEquals(List.of("group-earlier"), ContextualToolsProvider.resolveGroupIds(memory));
+    private static LiveDiscussionRegistry registryWithLiveMember(String discussionId, String groupId, String memberConversationId) {
+        var registry = new LiveDiscussionRegistry();
+        var gc = new GroupConversation();
+        gc.setId(discussionId);
+        gc.setGroupId(groupId);
+        gc.getMemberConversationIds().put("agent-1", memberConversationId);
+        registry.register(gc);
+        return registry;
+    }
+
+    @Test
+    void groupIdFromAnEarlierStep_isResolvedForAVerifiedMember() {
+        // A resumed turn re-enters without the original context map, so the value
+        // only exists on an earlier step — trusted because the running discussion
+        // confirms this conversation is its member, in that group.
+        var memory = memoryWithEarlierStep("group-earlier", "gc-1");
+
+        assertEquals(List.of("group-earlier"),
+                ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "group-earlier", "conv-1")));
+    }
+
+    @Test
+    void forgedPreFixGroupId_onAnEarlierStep_isIgnored() {
+        // Review #4: a client that forged context:groupId before the strip existed
+        // left it on an earlier step, with no discussion behind it.
+        var memory = memoryWithEarlierStep("another-teams-group", null);
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, new LiveDiscussionRegistry()).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_notMatchingTheDiscussionsGroup_isIgnored() {
+        var memory = memoryWithEarlierStep("another-teams-group", "gc-1");
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "conv-1")).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_forANonMemberConversation_isIgnored() {
+        var memory = memoryWithEarlierStep("my-group", "gc-1");
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "someone-else")).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_withoutARegistry_isIgnored() {
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memoryWithEarlierStep("my-group", "gc-1")).isEmpty());
     }
 
     @Test

@@ -4,8 +4,11 @@
  */
 package ai.labs.eddi.engine.model;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +45,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Dropped rather than rejected: a client that echoes back the context it once
  * saw, or a trigger whose {@code initialContext} predates this list, keeps
  * working, and the key it can no longer set was never its to set. The drop is
- * logged at WARN so it is not silent.
+ * not silent, but it is not a flood either: a client that echoes context would
+ * otherwise write a WARN on every turn. The first drop of a given key set from
+ * a given source is logged at WARN, repeats within the next hour at DEBUG — see
+ * {@link #WARNED}.
  */
 public final class ReservedContextKeys {
 
@@ -64,6 +70,16 @@ public final class ReservedContextKeys {
      * Delegation hop count carried into a callee by {@code converse_with_agent}.
      */
     public static final String DELEGATION_DEPTH = "delegationDepth";
+
+    /**
+     * {@code source|keys} combinations already reported at WARN. Bounded and
+     * expiring (the same shape as {@code ContextualToolsProvider}'s debounce): the
+     * key sets are client-chosen, so an unbounded set would be a memory leak a
+     * client could drive; expiry means a standing misbehaviour re-announces itself
+     * hourly instead of once per JVM.
+     */
+    private static final Set<String> WARNED = Collections.newSetFromMap(
+            Caffeine.newBuilder().maximumSize(1_000).expireAfterWrite(Duration.ofHours(1)).<String, Boolean>build().asMap());
 
     /** Every key above. */
     public static final Set<String> ALL = Set.of(GROUP_ID, GROUP_CONVERSATION_ID, GROUP_DEPTH, GROUP_TRANSCRIPT, DYNAMIC_AGENT_CONFIG,
@@ -100,8 +116,13 @@ public final class ReservedContextKeys {
         }
         Map<String, Context> filtered = new LinkedHashMap<>(context);
         dropped.forEach(filtered::remove);
-        LOGGER.warnf("Dropped engine-reserved context key(s) %s from %s input — these are set by the engine only",
-                sanitize(String.join(",", dropped)), sanitize(source));
+        String keys = String.join(",", dropped);
+        if (WARNED.add(source + "|" + keys)) {
+            LOGGER.warnf("Dropped engine-reserved context key(s) %s from %s input — these are set by the engine only"
+                    + " (repeats of this combination are logged at DEBUG for the next hour)", sanitize(keys), sanitize(source));
+        } else {
+            LOGGER.debugf("Dropped engine-reserved context key(s) %s from %s input", sanitize(keys), sanitize(source));
+        }
         return filtered;
     }
 
