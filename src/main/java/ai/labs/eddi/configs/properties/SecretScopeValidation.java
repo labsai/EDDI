@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
-import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+import ai.labs.eddi.secrets.model.AutoVaultReference;
 
 import java.util.List;
 
@@ -23,14 +23,15 @@ import java.util.List;
  * <li>{@code valueObject}, {@code valueList}, {@code valueInt},
  * {@code valueFloat} or {@code valueBoolean} under {@code scope: "secret"} —
  * those used to be stored as plaintext properties, scope notwithstanding;</li>
- * <li>{@code convertToObject: true}, which turns the value into a map;</li>
  * <li>a literal property name the vault reference cannot carry ({@code /},
- * braces, {@code $}, whitespace).</li>
+ * braces, {@code $}).</li>
  * </ul>
- * A {@code fromObjectPath} instruction is accepted: what it yields is only
- * known at run time, where {@link SecretPropertyVault} refuses anything that is
- * not a string. Throws {@link IllegalArgumentException}, which the stores turn
- * into a 400.
+ * What only the run time can decide is left to it: a {@code fromObjectPath}
+ * value, and {@code convertToObject: true} (which converts only a value shaped
+ * like a JSON object, so a plain token still vaults).
+ * {@code SecretPropertyVault} refuses anything that turns out not to be a
+ * string, and the turn fails. Throws {@link IllegalArgumentException}, which
+ * the stores turn into a 400.
  */
 public final class SecretScopeValidation {
 
@@ -57,14 +58,10 @@ public final class SecretScopeValidation {
                 throw new IllegalArgumentException(location + " has scope 'secret' but sets valueObject, valueList, valueInt, valueFloat or "
                         + "valueBoolean. Only a string value can be vaulted — use valueString or fromObjectPath.");
             }
-            if (Boolean.TRUE.equals(instruction.getConvertToObject())) {
-                throw new IllegalArgumentException(location + " has scope 'secret' and convertToObject: true. Only a string value can be "
-                        + "vaulted — drop convertToObject.");
-            }
             String name = instruction.getName();
-            if (name != null && !name.contains("{") && !SecretPropertyVault.isEmbeddableName(name)) {
+            if (name != null && !name.contains("{") && !AutoVaultReference.isEmbeddable(name)) {
                 throw new IllegalArgumentException(location + " has scope 'secret' but its name cannot be part of a vault reference: it "
-                        + "must not contain '/', '{', '}', '$' or whitespace.");
+                        + "must not contain '/', '{', '}' or '$'.");
             }
         }
     }

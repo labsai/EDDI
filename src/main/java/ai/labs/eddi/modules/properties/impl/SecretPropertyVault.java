@@ -14,14 +14,20 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.AutoVaultReference;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -38,13 +44,13 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * none.
  * <p>
  * <b>One vault entry per conversation.</b> The key is
- * {@code <agentId>.<conversationId>.<property>} under the default tenant. It
- * used to be {@code <agentId>.<property>}, shared by every conversation of the
- * agent: the vault write is an upsert, so the second user to enter a key
- * replaced the first user's, and the first user's calls went out with the
- * second user's credential. The tenant used to come from a {@code tenantId}
- * conversation property, which a client can set through a context expression;
- * it is no longer consulted.
+ * {@code <agentId>.<conversationId>.<property>} under the default tenant (see
+ * {@link AutoVaultReference}). It used to be {@code <agentId>.<property>},
+ * shared by every conversation of the agent: the vault write is an upsert, so
+ * the second user to enter a key replaced the first user's, and the first
+ * user's calls went out with the second user's credential. The tenant used to
+ * come from a {@code tenantId} conversation property, which a client can set
+ * through a context expression; it is no longer consulted.
  * <p>
  * The resolver cache is invalidated after every write: re-entering a secret in
  * the same conversation overwrites the same entry, and the cached previous
@@ -86,6 +92,13 @@ public class SecretPropertyVault {
      */
     private static final int MIN_NORMALIZED_MATCH_LENGTH = 4;
     private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
+    /**
+     * Written into the description of every entry this class stores, followed by
+     * the conversation id. Together with the key shape it is what
+     * {@link #deleteConversationSecrets} matches on, so a secret an operator
+     * created under a similar-looking name is never removed.
+     */
+    static final String AUTO_VAULT_DESCRIPTION_PREFIX = "Auto-vaulted from conversation ";
 
     private final ISecretProvider secretProvider;
     private final SecretResolver secretResolver;
@@ -99,37 +112,15 @@ public class SecretPropertyVault {
     }
 
     /**
-     * The vault reference a secret property of this conversation is stored under.
-     * The single definition of the key, shared with the apicall reference guard
-     * that has to recognise it.
-     *
-     * @return the reference, or {@code null} when any part is missing or the name
-     *         cannot be embedded in a reference
+     * An instruction that sets a {@code scope: "secret"} property could not be
+     * vaulted. Unchecked, so the pre-request / post-response instruction loop of
+     * {@code PrePostUtils} — which logs and skips any other failing instruction —
+     * lets it fail the turn instead of silently storing nothing.
      */
-    public static SecretReference referenceFor(String agentId, String conversationId, String propertyName) {
-        if (isNullOrEmpty(agentId) || isNullOrEmpty(conversationId) || !isEmbeddableName(propertyName) || !isEmbeddableName(agentId)
-                || !isEmbeddableName(conversationId)) {
-            return null;
+    public static class SecretPropertyException extends IllegalStateException {
+        public SecretPropertyException(String message, Throwable cause) {
+            super(message, cause);
         }
-        return new SecretReference(SecretReference.DEFAULT_TENANT, agentId + "." + conversationId + "." + propertyName);
-    }
-
-    /**
-     * Whether {@code part} can sit inside {@code ${vault:<key>}} without changing
-     * what the reference parses to: a {@code /} would re-parse as a tenant
-     * separator, a brace would end or nest the reference.
-     */
-    public static boolean isEmbeddableName(String part) {
-        if (isNullOrEmpty(part)) {
-            return false;
-        }
-        for (int i = 0; i < part.length(); i++) {
-            char c = part.charAt(i);
-            if (c == '/' || c == '{' || c == '}' || c == '$' || Character.isWhitespace(c) || Character.isISOControl(c)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /**
@@ -150,16 +141,16 @@ public class SecretPropertyVault {
                     + "but the instruction produced " + (value == null ? "null" : "a " + value.getClass().getSimpleName())
                     + ". Refusing to persist it in plaintext.");
         }
-        SecretReference ref = referenceFor(memory.getAgentId(), memory.getConversationId(), name);
+        SecretReference ref = AutoVaultReference.of(memory.getAgentId(), memory.getConversationId(), name);
         if (ref == null) {
             scrubSecretInput(memory, name, plaintext);
             throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret': the property name must not contain "
-                    + "'/', '{', '}', '$' or whitespace, and the conversation must have an agent and conversation id. Refusing to persist "
+                    + "'/', '{', '}' or '$', and the conversation must have an agent and conversation id. Refusing to persist "
                     + "the value in plaintext.");
         }
 
         try {
-            secretProvider.store(ref, plaintext, "Auto-vaulted from conversation " + memory.getConversationId(), List.of(memory.getAgentId()));
+            secretProvider.store(ref, plaintext, AUTO_VAULT_DESCRIPTION_PREFIX + memory.getConversationId(), List.of(memory.getAgentId()));
         } catch (ISecretProvider.SecretProviderException e) {
             // Fail CLOSED. The historical behaviour returned the plaintext, which was then
             // persisted TWICE — as a conversation property and (because the scrub below
@@ -185,6 +176,68 @@ public class SecretPropertyVault {
         // so nothing else can.
         vaulted.setAutoVaulted(Boolean.TRUE);
         return vaulted;
+    }
+
+    /**
+     * Delete the vault entries the secret properties of these conversations were
+     * stored under — called when conversations are permanently deleted (explicit
+     * delete, the ended-conversation retention sweep).
+     * <p>
+     * One entry per conversation means one entry more for every conversation that
+     * entered a secret; without this they would outlive their conversations
+     * forever. An entry qualifies only when its key carries the conversation id as
+     * {@code <agentId>.<conversationId>.<property>} AND its description is the one
+     * {@link #vault} writes, so nothing an operator created is touched. Entries are
+     * found with one listing for the whole batch. Best effort: a failure is logged
+     * and never stops the conversation delete.
+     *
+     * @return the number of entries deleted
+     */
+    public int deleteConversationSecrets(Collection<String> conversationIds) {
+        if (conversationIds == null || conversationIds.isEmpty() || !secretProvider.isAvailable()) {
+            return 0;
+        }
+        List<SecretMetadata> entries;
+        try {
+            entries = secretProvider.listKeys(SecretReference.DEFAULT_TENANT);
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.warnf("Could not list vault entries to remove the secrets of %d deleted conversation(s): %s", conversationIds.size(),
+                    e.getMessage());
+            return 0;
+        }
+        Set<String> ids = new HashSet<>(conversationIds);
+        int deleted = 0;
+        for (SecretMetadata entry : entries) {
+            String conversationId = conversationIdOf(entry);
+            if (conversationId == null || !ids.contains(conversationId)) {
+                continue;
+            }
+            var ref = new SecretReference(SecretReference.DEFAULT_TENANT, entry.keyName());
+            try {
+                secretProvider.delete(ref);
+                secretResolver.invalidateCache(ref);
+                deleted++;
+            } catch (ISecretProvider.SecretNotFoundException e) {
+                // already gone — nothing to do
+            } catch (ISecretProvider.SecretProviderException e) {
+                LOGGER.warnf("Could not delete vault entry '%s' of deleted conversation '%s': %s", sanitize(entry.keyName()),
+                        sanitize(conversationId), e.getMessage());
+            }
+        }
+        return deleted;
+    }
+
+    /**
+     * The conversation an auto-vaulted entry belongs to, or {@code null} when the
+     * entry is not one {@link #vault} wrote.
+     */
+    private static String conversationIdOf(SecretMetadata entry) {
+        String description = entry.description();
+        if (description == null || !description.startsWith(AUTO_VAULT_DESCRIPTION_PREFIX) || entry.keyName() == null) {
+            return null;
+        }
+        String conversationId = description.substring(AUTO_VAULT_DESCRIPTION_PREFIX.length());
+        return entry.keyName().contains("." + conversationId + ".") ? conversationId : null;
     }
 
     /**

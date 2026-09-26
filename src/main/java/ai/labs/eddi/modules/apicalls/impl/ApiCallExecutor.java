@@ -21,10 +21,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.secrets.ConfigReferenceGuard;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -315,13 +317,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (isResponseSuccessful && call.getSaveResponse()) {
                         // Success bodies land in conversation memory, which is persisted as a
                         // single document — cap them just like the error bodies above.
-                        // Redacted BEFORE truncation, so a cut cannot leave half a secret
-                        // that no longer matches. Same by-value rule as the error body: a
-                        // response echoing a credential this request sent must not carry it
-                        // into memory, template data or the tool result.
-                        final String responseBody = truncateResponseBody(
-                                RequestRedactor.redactResolvedSecrets(response.getContentAsString(), built.resolvedSecrets()),
-                                resolveMaxResponseSize(call), call.getName());
+                        // A response echoing a credential this request sent must not carry it
+                        // into memory, template data or the tool result — but a success body
+                        // is the data the call exists to fetch, so the redaction must not
+                        // mangle it. See redactSuccessBody.
+                        final String rawBody = response.getContentAsString();
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                         if (actualContentType != null) {
                             actualContentType = actualContentType.split(";")[0];
@@ -331,12 +331,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                         Object responseObject;
                         if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                            String responseBody = truncateResponseBody(rawBody, resolveMaxResponseSize(call), call.getName());
                             try {
-                                responseObject = jsonSerialization.deserialize(responseBody, Object.class);
+                                // Parsed from the UNREDACTED body and scrubbed as a tree: a secret
+                                // is removed from string values (and replaces a number only when it
+                                // IS the number), so the JSON stays valid and no digit run inside an
+                                // unrelated number is rewritten.
+                                responseObject = redactSuccessTree(jsonSerialization.deserialize(responseBody, Object.class),
+                                        built.resolvedSecrets());
                             } catch (IOException jsonEx) {
                                 LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
                                         call.getName(), jsonEx.getMessage());
-                                responseObject = responseBody;
+                                responseObject = redactSuccessText(responseBody, built.resolvedSecrets());
                             }
                         } else {
                             if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
@@ -344,7 +350,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                         + "as content-type, instead was (%s)";
                                 LOGGER.warn(format(message, call.getName(), actualContentType));
                             }
-                            responseObject = responseBody;
+                            // Redacted BEFORE truncation, so a cut cannot leave half a secret
+                            // that no longer matches.
+                            responseObject = truncateResponseBody(redactSuccessText(rawBody, built.resolvedSecrets()), resolveMaxResponseSize(call),
+                                    call.getName());
                         }
 
                         var responseObjectName = call.getResponseObjectName();
@@ -395,7 +404,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // branch was actively harmful: it was the sole reason static analysis
                 // inferred the variable nullable and reported the loop body as an NPE risk,
                 // and a fabricated 500 would have masked a real defect instead of surfacing it.
-                prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response.getHttpCode(), false);
+                Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, response.getHttpCode(),
+                        false);
+                // A token a post-response scope:secret instruction just vaulted was
+                // scrubbed from conversation memory, but this map was built from the
+                // response before that and is what an LLM tool call hands the model.
+                if (vaulted != null && !vaulted.isEmpty()) {
+                    result.replaceAll((key, value) -> {
+                        Object cleaned = SecretValueScrubber.scrubDeep(value, vaulted, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+                        return cleaned != null ? cleaned : value;
+                    });
+                }
 
                 return result;
             }
@@ -849,6 +868,79 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
+     * Below this length a substituted secret is not searched for inside the text of
+     * a SUCCESS body — a vaulted Basic-auth username such as {@code alice} or a
+     * short account id would otherwise be rewritten inside ordinary data. It is
+     * still replaced where a JSON value IS the secret. Error bodies and logs redact
+     * every length: there the value is the failure reason, not data.
+     */
+    static final int MIN_SUCCESS_BODY_REDACTION_LENGTH = 8;
+
+    /**
+     * A success body treated as text: only secrets long enough to be unambiguous.
+     */
+    static String redactSuccessText(String body, Set<String> resolvedSecrets) {
+        return RequestRedactor.redactResolvedSecrets(body, longSecrets(resolvedSecrets));
+    }
+
+    /**
+     * A parsed JSON success body: long secrets removed from string values, short
+     * ones only where a value equals them, numbers only when they are the secret.
+     */
+    static Object redactSuccessTree(Object tree, Set<String> resolvedSecrets) {
+        if (tree == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return tree;
+        }
+        Set<String> longOnes = longSecrets(resolvedSecrets);
+        Set<String> shortOnes = new HashSet<>(resolvedSecrets);
+        shortOnes.removeAll(longOnes);
+        Object cleaned = SecretValueScrubber.scrubDeep(tree, longOnes, shortOnes, RequestRedactor.REDACTED);
+        return cleaned != null ? cleaned : tree;
+    }
+
+    private static Set<String> longSecrets(Set<String> resolvedSecrets) {
+        if (resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> longOnes = new HashSet<>();
+        for (String secret : resolvedSecrets) {
+            if (secret != null && secret.length() >= MIN_SUCCESS_BODY_REDACTION_LENGTH) {
+                longOnes.add(secret);
+            }
+        }
+        return longOnes;
+    }
+
+    /**
+     * The caller-token reference, whose resolved value is added to the redaction
+     * set.
+     */
+    private static final String CALLER_TOKEN_REFERENCE = "${caller:token}";
+
+    /**
+     * Record a credential the request carries so a response echoing it is redacted
+     * like a vault plaintext. A header value such as {@code Bearer <token>} is also
+     * recorded without its scheme, because an echo quotes the token, not the
+     * header.
+     */
+    private static void addCredential(Set<String> resolvedSecrets, String credential) {
+        if (credential == null || credential.isBlank()) {
+            return;
+        }
+        resolvedSecrets.add(credential);
+        int space = credential.lastIndexOf(' ');
+        if (space > 0 && credential.length() - space - 1 >= MIN_SCHEMELESS_CREDENTIAL_LENGTH) {
+            resolvedSecrets.add(credential.substring(space + 1));
+        }
+    }
+
+    /**
+     * Shorter scheme-less remainders are not recorded: they would redact ordinary
+     * text.
+     */
+    private static final int MIN_SCHEMELESS_CREDENTIAL_LENGTH = 8;
+
+    /**
      * Response headers with the plaintexts this request substituted removed from
      * their values — a server may echo a credential back in a header as easily as
      * in a body.
@@ -946,7 +1038,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
+            boolean callerTokenReferenced = headerValue != null && headerValue.contains(CALLER_TOKEN_REFERENCE);
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            if (callerTokenReferenced) {
+                // Echo redaction covers the caller's token too, not only vault plaintexts.
+                addCredential(resolvedSecrets, callerIdentityResolver.currentCallerToken());
+            }
             // Connections resolve last, and only in a header. A ${connection:name}
             // resolves to a credential bound to THIS caller and THIS moment, so
             // unlike a vault reference it cannot be substituted into a cached
@@ -975,6 +1072,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     throw connectionHeaderCollision(credential.headerName());
                 }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
+                addCredential(resolvedSecrets, credential.headerValue());
                 connectionOwnedHeaders.add(credential.headerName());
                 continue;
             }

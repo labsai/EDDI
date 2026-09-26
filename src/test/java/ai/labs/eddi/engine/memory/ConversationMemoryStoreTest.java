@@ -62,6 +62,22 @@ class ConversationMemoryStoreTest {
     }
 
     @Test
+    @DisplayName("storeConversationMemorySnapshot — an unpersisted snapshot is inserted under its pre-allocated id")
+    void storeSnapshotPreallocatedId() throws Exception {
+        String preallocated = store.newConversationId();
+        assertTrue(ObjectId.isValid(preallocated), preallocated);
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setId(preallocated);
+        snapshot.setUnpersisted(true);
+
+        assertEquals(preallocated, store.storeConversationMemorySnapshot(snapshot));
+
+        verify(objectCollection).insertOne(snapshot);
+        verify(objectCollection, never()).replaceOne(any(Bson.class), any(ConversationMemorySnapshot.class));
+        assertFalse(snapshot.isUnpersisted(), "a second write must update, not insert again");
+    }
+
+    @Test
     @DisplayName("storeConversationMemorySnapshot — replaces when conversationId exists")
     void storeSnapshotReplace() throws Exception {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();

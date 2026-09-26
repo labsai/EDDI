@@ -512,6 +512,8 @@ class ConversationStepRunner {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
         var conversationId = conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
+        // The pre-allocated id now names a stored document: later writes update it.
+        conversationMemory.setUnpersisted(false);
         // The store stamped the revision it created. Carry it back so a second write
         // from this same live memory (a start turn that stores and is then stored
         // again, a resume that commits twice) presents the revision it just created

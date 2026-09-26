@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -93,10 +94,17 @@ public class PrePostUtils {
         return templateDataObjects;
     }
 
-    public void executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, boolean validationError,
-                                            IConversationMemory memory, Map<String, Object> templateDataObjects)
+    /**
+     * @return the plaintexts that {@code scope: "secret"} instructions vaulted —
+     *         the caller removes them from anything it still holds that did not
+     *         pass through conversation memory (an LLM tool result); empty when
+     *         none were
+     */
+    public Set<String> executePropertyInstructions(List<PropertyInstruction> propertyInstructions, int httpCode, boolean validationError,
+                                                   IConversationMemory memory, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
 
+        Set<String> vaulted = new LinkedHashSet<>();
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
                 if ((validationError && propertyInstruction.getRunOnValidationError())
@@ -137,10 +145,18 @@ public class PrePostUtils {
                         if (scope == Property.Scope.secret) {
                             // scope:secret is honoured here too: this path used to store the
                             // value as a plaintext property like any other scope. A value that
-                            // cannot be vaulted (not a string) is refused, never stored.
+                            // cannot be vaulted (not a string, or the vault is disabled) fails
+                            // the turn, like it does in the property setter — skipping it would
+                            // leave {properties.x} empty and the next call failing with a 401
+                            // that names nothing.
                             if (!"".equals(propertyValue)) {
-                                memory.getConversationProperties().put(propertyName,
-                                        secretPropertyVault.vault(memory, propertyName, propertyValue));
+                                try {
+                                    memory.getConversationProperties().put(propertyName,
+                                            secretPropertyVault.vault(memory, propertyName, propertyValue));
+                                    vaulted.add((String) propertyValue);
+                                } catch (LifecycleException e) {
+                                    throw new SecretPropertyVault.SecretPropertyException(e.getMessage(), e);
+                                }
                             }
                         } else if (propertyValue instanceof String s) {
                             memory.getConversationProperties().put(propertyName, new Property(propertyName, s, scope));
@@ -161,12 +177,15 @@ public class PrePostUtils {
                         }
 
                         templateDataObjects.put("properties", memory.getConversationProperties().toMap());
+                    } catch (SecretPropertyVault.SecretPropertyException e) {
+                        throw e;
                     } catch (Exception e) {
                         LOGGER.error(e.getLocalizedMessage(), e);
                     }
                 }
             }
         }
+        return vaulted;
     }
 
     public boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
@@ -200,18 +219,23 @@ public class PrePostUtils {
         currentStep.addConversationOutputMap(outputKey, map);
     }
 
-    public void runPostResponse(IConversationMemory memory, PostResponse postResponse, Map<String, Object> templateDataObjects, int httpCode,
-                                boolean validationError)
+    /**
+     * @return the plaintexts the post-response {@code scope: "secret"} instructions
+     *         vaulted, see {@link #executePropertyInstructions}
+     */
+    public Set<String> runPostResponse(IConversationMemory memory, PostResponse postResponse, Map<String, Object> templateDataObjects,
+                                       int httpCode, boolean validationError)
             throws IOException, ITemplatingEngine.TemplateEngineException {
 
+        Set<String> vaulted = Set.of();
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
-            executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
+            vaulted = executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
 
             buildOutput(memory, templateDataObjects, httpCode, postResponse);
             buildQuickReplies(memory, templateDataObjects, httpCode, postResponse);
         }
-
+        return vaulted;
     }
 
     private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)

@@ -157,6 +157,15 @@ public class ConversationMemorySnapshot {
     private transient int persistedStepCount = UNKNOWN_PERSISTED_STEP_COUNT;
 
     /**
+     * The conversation id was allocated before the first write and no document
+     * exists under it yet, so the store must INSERT under that id rather than
+     * update. Never persisted, like {@link #persistedStepCount}.
+     *
+     * @see ai.labs.eddi.engine.memory.IConversationMemory#isUnpersisted()
+     */
+    private transient boolean unpersisted;
+
+    /**
      * "The persisted step count is not known", which forces a full-document write.
      * The safe default in every direction: a snapshot that never came from a load,
      * a document whose steps and outputs disagreed, and a memory whose history was
@@ -652,5 +661,16 @@ public class ConversationMemorySnapshot {
     @JsonIgnore
     public void setPersistedStepCount(int persistedStepCount) {
         this.persistedStepCount = persistedStepCount;
+    }
+
+    /** See {@link #unpersisted}. */
+    @JsonIgnore
+    public boolean isUnpersisted() {
+        return unpersisted;
+    }
+
+    @JsonIgnore
+    public void setUnpersisted(boolean unpersisted) {
+        this.unpersisted = unpersisted;
     }
 }

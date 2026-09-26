@@ -22,9 +22,12 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -85,14 +88,25 @@ class PrePostUtilsSecretScopeTest {
     }
 
     @Test
-    @DisplayName("a vault failure leaves no property at all — in particular not a plaintext one")
-    void vaultFailureStoresNothing() throws Exception {
+    @DisplayName("review #5: a vault failure fails the turn loudly and leaves no property — in particular not a plaintext one")
+    void vaultFailureFailsTheTurn() throws Exception {
         doThrow(new ISecretProvider.SecretProviderException("vault disabled")).when(secretProvider).store(any(), anyString(), anyString(),
                 anyList());
 
-        prePostUtils.executePropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")), 200, false, memory, templateData);
+        var failure = assertThrows(SecretPropertyVault.SecretPropertyException.class, () -> prePostUtils
+                .executePropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")), 200, false, memory, templateData));
 
+        assertTrue(failure.getMessage().contains("EDDI_VAULT_MASTER_KEY"), failure.getMessage());
         assertNull(memory.getConversationProperties().get("accessToken"));
+    }
+
+    @Test
+    @DisplayName("review #6: the vaulted plaintexts are reported to the caller, so it can scrub what it still holds")
+    void vaultedPlaintextsAreReturned() throws Exception {
+        var vaulted = prePostUtils.executePropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")), 200, false,
+                memory, templateData);
+
+        assertEquals(Set.of(TOKEN), vaulted);
     }
 
     @Test
@@ -103,7 +117,8 @@ class PrePostUtilsSecretScopeTest {
         templateData.put("tokenResponse", Map.of("claims", "{\"sub\":\"u\"}"));
         when(jsonSerialization.deserialize(anyString())).thenReturn(Map.of("sub", "u"));
 
-        prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData);
+        assertThrows(SecretPropertyVault.SecretPropertyException.class,
+                () -> prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData));
 
         verify(jsonSerialization).deserialize(anyString());
         verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());

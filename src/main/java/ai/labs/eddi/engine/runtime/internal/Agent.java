@@ -48,7 +48,21 @@ public class Agent implements IAgent {
     public IConversation startConversation(final String userId, final Map<String, Context> context, IPropertiesHandler propertiesHandler,
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
-        var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        return startConversation(null, userId, context, propertiesHandler, outputProvider);
+    }
+
+    @Override
+    public IConversation startConversation(final String conversationId, final String userId, final Map<String, Context> context,
+                                           IPropertiesHandler propertiesHandler, final IConversation.IConversationOutputRenderer outputProvider)
+            throws LifecycleException, IllegalAccessException {
+        ConversationMemory conversationMemory;
+        if (conversationId != null) {
+            conversationMemory = new ConversationMemory(conversationId, agentId, agentVersion, userId);
+            // Allocated, not stored: the first write inserts under this id.
+            conversationMemory.setUnpersisted(true);
+        } else {
+            conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        }
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }

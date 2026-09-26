@@ -24,7 +24,6 @@ import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
@@ -32,6 +31,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.secrets.ConfigReferenceGuard;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -1258,14 +1258,7 @@ public class LlmTask implements ILifecycleTask {
      * vault, so conversation data in them may carry anything — including the
      * characters of a vault reference — without releasing a secret.
      */
-    private static final Set<String> PROMPT_PARAMS = Set.of(KEY_SYSTEM_MESSAGE, KEY_PROMPT);
-
-    /**
-     * A global variable reference. Not a credential itself, but a variable may hold
-     * one, so a data-supplied {@code ${vars:…}} is an indirection to a vault
-     * reference once {@code ChatModelRegistry} expands it.
-     */
-    private static final Pattern VARS_REFERENCE = Pattern.compile("\\$\\{vars:[^}]*\\}");
+    static final Set<String> PROMPT_PARAMS = Set.of(KEY_SYSTEM_MESSAGE, KEY_PROMPT);
 
     /**
      * Render the task parameters, refusing a credential reference that came from
@@ -1308,8 +1301,9 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Apply {@link #requireConfiguredReferences} to every rendered parameter that
-     * reaches vault resolution — all of them except {@link #PROMPT_PARAMS}.
+     * {@link ConfigReferenceGuard#requireConfiguredParameters} for the task
+     * parameters: every one of them reaches vault resolution except
+     * {@link #PROMPT_PARAMS}.
      *
      * @throws LifecycleException
      *             naming the first parameter that carries a reference its template
@@ -1318,41 +1312,10 @@ public class LlmTask implements ILifecycleTask {
     static void guardRenderedParameters(Map<String, String> configured, Map<String, String> rendered, Map<String, Object> templateData,
                                         Map<String, Property> conversationProperties)
             throws LifecycleException {
-        for (var entry : rendered.entrySet()) {
-            String key = entry.getKey();
-            if (PROMPT_PARAMS.contains(key)) {
-                continue;
-            }
-            try {
-                requireConfiguredReferences(configured.get(key), entry.getValue(), "LLM parameter '" + key + "'", templateData,
-                        conversationProperties);
-            } catch (IllegalArgumentException e) {
-                throw new LifecycleException(e.getMessage(), e);
-            }
-        }
-    }
-
-    /**
-     * {@link ConfigReferenceGuard#requireConfiguredReferences}, plus the
-     * {@code ${vars:…}} indirection the httpcall path handles by guarding again
-     * after expansion — here the expansion happens later, in
-     * {@code ChatModelRegistry}, so a data-supplied variable reference is refused
-     * outright.
-     */
-    static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
-                                            Map<String, Property> conversationProperties) {
-        if (rendered == null || !rendered.contains("${")) {
-            return;
-        }
-        ConfigReferenceGuard.requireConfiguredReferences(template, rendered, location, templateData, conversationProperties);
-        var variables = VARS_REFERENCE.matcher(rendered);
-        while (variables.find()) {
-            String reference = variables.group();
-            if (template == null || !template.contains(reference)) {
-                throw new IllegalArgumentException(location + " contains the reference " + reference
-                        + ", which the agent configuration does not write there: it came from conversation data (user input, a model reply,"
-                        + " an API response or client context). References are only resolved where the configuration wrote them.");
-            }
+        try {
+            ConfigReferenceGuard.requireConfiguredParameters(configured, rendered, PROMPT_PARAMS, "LLM", templateData, conversationProperties);
+        } catch (IllegalArgumentException e) {
+            throw new LifecycleException(e.getMessage(), e);
         }
     }
 

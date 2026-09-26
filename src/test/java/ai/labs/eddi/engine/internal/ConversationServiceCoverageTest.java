@@ -306,7 +306,7 @@ class ConversationServiceCoverageTest {
             IAgent mockAgent = mock(IAgent.class);
             when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID))
                     .thenReturn(mockAgent);
-            when(mockAgent.startConversation(any(), any(), any(), any()))
+            when(mockAgent.startConversation(any(), any(), any(), any(), any()))
                     .thenThrow(new IllegalAccessException("Access denied"));
 
             assertThrows(ResourceStoreException.class,

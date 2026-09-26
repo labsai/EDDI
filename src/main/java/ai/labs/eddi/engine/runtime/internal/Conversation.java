@@ -89,6 +89,15 @@ public class Conversation implements IConversation {
     private final Set<String> secretContextValues = new LinkedHashSet<>();
 
     /**
+     * The secret context entries whose whole value is a string — the only source of
+     * exact-match candidates. The leaves of a secret OBJECT are not: its
+     * {@code "tokenType": "Bearer"} or {@code "port": 8080} would otherwise blank
+     * every equal value of the turn, loaded {@code longTerm} properties included,
+     * and that loss would be persisted.
+     */
+    private final Set<String> secretContextStrings = new LinkedHashSet<>();
+
+    /**
      * Shorter secret values are not searched for INSIDE other values: replacing
      * every "4711" in a turn's output would destroy it. They are still replaced
      * wherever a value IS the secret — see
@@ -97,14 +106,14 @@ public class Conversation implements IConversation {
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
 
     /**
-     * Secret values from this length up to
+     * Secret string values from this length up to
      * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} are replaced where a property,
      * datum, list element, map value or audit field equals them exactly. Before, a
      * short secret — a PIN, a four-digit code — copied into a property by a
      * template was stored verbatim, in {@code longTerm} user memory and the audit
-     * trail included. Below this length a value is not a credential, and
-     * {@code true}/{@code false} are never treated as one: a secret object's
-     * boolean fields would otherwise blank every such value of the turn.
+     * trail included. Only a context entry whose whole value is a string qualifies
+     * (see {@link #secretContextStrings}); below this length a value is not a
+     * credential, and {@code true}/{@code false} are never treated as one.
      */
     static final int MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH = 4;
 
@@ -854,7 +863,7 @@ public class Conversation implements IConversation {
      * {@link #MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH}.
      */
     private List<String> exactSecretContextValues() {
-        return secretContextValues.stream()
+        return secretContextStrings.stream()
                 .filter(value -> value.length() >= MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH && value.length() < MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
                 .filter(value -> !"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value))
                 .toList();
@@ -983,12 +992,16 @@ public class Conversation implements IConversation {
         List<IData<Context>> contextData = new LinkedList<>();
         secretContextKeys.clear();
         secretContextValues.clear();
+        secretContextStrings.clear();
         if (context != null) {
             for (String key : context.keySet()) {
                 Context entry = context.get(key);
                 if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
                     secretContextKeys.add(key);
                     SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+                    if (entry.getValue() instanceof String text) {
+                        secretContextStrings.add(text);
+                    }
                 }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.

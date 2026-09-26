@@ -117,7 +117,7 @@ class ConversationServiceResolutionPrincipalTest {
         doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
         doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
         doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
-        doReturn(conversation).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+        doReturn(conversation).when(agent).startConversation(any(), eq(USER_ID), anyMap(), any(), isNull());
         doReturn(memory).when(conversation).getConversationMemory();
         doReturn(ConversationState.READY).when(memory).getConversationState();
         doReturn(new Stack<>()).when(memory).getRedoCache();
@@ -223,7 +223,7 @@ class ConversationServiceResolutionPrincipalTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(memory).when(conversation).getConversationMemory();
             return conversation;
-        }).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+        }).when(agent).startConversation(any(), eq(USER_ID), anyMap(), any(), isNull());
 
         conversationService.startConversation(ENV, AGENT_ID, USER_ID, null);
 
@@ -262,7 +262,7 @@ class ConversationServiceResolutionPrincipalTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(memory).when(conversation).getConversationMemory();
             return conversation;
-        }).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+        }).when(agent).startConversation(any(), eq(USER_ID), anyMap(), any(), isNull());
 
         service.startConversation(ENV, AGENT_ID, USER_ID, null);
 
@@ -290,7 +290,7 @@ class ConversationServiceResolutionPrincipalTest {
             IConversation conversation = mock(IConversation.class);
             doReturn(memory).when(conversation).getConversationMemory();
             return conversation;
-        }).when(agent).startConversation(eq(USER_ID), anyMap(), any(), isNull());
+        }).when(agent).startConversation(any(), eq(USER_ID), anyMap(), any(), isNull());
 
         conversationService.startConversation(ENV, AGENT_ID, USER_ID, null);
 

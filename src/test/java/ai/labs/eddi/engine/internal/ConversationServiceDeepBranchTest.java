@@ -359,7 +359,7 @@ class ConversationServiceDeepBranchTest {
             var conversationProperties = mock(ConversationProperties.class);
             doReturn(new HashSet<>()).when(conversationProperties).entrySet();
             when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
-            when(mockAgent.startConversation(any(), any(), any(), any())).thenReturn(conversation);
+            when(mockAgent.startConversation(any(), any(), any(), any(), any())).thenReturn(conversation);
             when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
                     .thenReturn(CONVERSATION_ID);
 

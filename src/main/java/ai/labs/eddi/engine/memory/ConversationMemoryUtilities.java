@@ -80,6 +80,8 @@ public class ConversationMemoryUtilities {
         // append the steps this turn added instead of rewriting the whole document; see
         // IConversationMemory#getPersistedStepCount.
         snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
+        // A pre-allocated id not yet in the store: insert under it, do not update.
+        snapshot.setUnpersisted(conversationMemory.isUnpersisted());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());

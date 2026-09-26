@@ -51,6 +51,11 @@ public class ConversationMemory implements IConversationMemory {
      * {@link IConversationMemory#getPersistedStepCount()}.
      */
     private int persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
+    /**
+     * The conversation id was allocated before the first store. See
+     * {@link IConversationMemory#isUnpersisted()}.
+     */
+    private boolean unpersisted;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -223,6 +228,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setPersistedStepCount(int persistedStepCount) {
         this.persistedStepCount = persistedStepCount;
+    }
+
+    @Override
+    public boolean isUnpersisted() {
+        return unpersisted;
+    }
+
+    @Override
+    public void setUnpersisted(boolean unpersisted) {
+        this.unpersisted = unpersisted;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

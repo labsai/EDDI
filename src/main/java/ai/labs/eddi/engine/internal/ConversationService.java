@@ -417,7 +417,12 @@ public class ConversationService implements IConversationService {
             bindResolutionPrincipal(resolutionPrincipal);
             bindCallerIdentity(startCaller);
             try {
-                conversation = latestAgent.startConversation(userId, context,
+                // The id is allocated BEFORE the CONVERSATION_START turn runs, so that
+                // turn can already name its conversation: a scope:secret property it
+                // sets is vaulted under a per-conversation key, and an apicall of the
+                // same turn has to recognise that reference. The store inserts the
+                // memory under this id on the first write below.
+                conversation = latestAgent.startConversation(conversationMemoryStore.newConversationId(), userId, context,
                         createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
             } finally {
                 // Restore rather than clear — this can be a sub-agent conversation

@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.UUID;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -72,6 +74,23 @@ class PostgresConversationMemoryStoreUnitTest {
 
         assertNotNull(id);
         verify(preparedStatement).executeUpdate();
+    }
+
+    @Test
+    void storeSnapshot_preallocatedId_insertsUnderThatId() throws Exception {
+        String preallocated = store.newConversationId();
+        assertEquals(preallocated, UUID.fromString(preallocated).toString());
+        ConversationMemorySnapshot snapshot = createSnapshot(preallocated);
+        snapshot.setUnpersisted(true);
+        when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertEquals(preallocated, store.storeConversationMemorySnapshot(snapshot));
+
+        // The INSERT binds the id first; an UPDATE would bind it as parameter 5.
+        verify(connection).prepareStatement(contains("INSERT INTO conversation_memories"));
+        verify(preparedStatement).setString(1, preallocated);
+        assertFalse(snapshot.isUnpersisted());
     }
 
     @Test

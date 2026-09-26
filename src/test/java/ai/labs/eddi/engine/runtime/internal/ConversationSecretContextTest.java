@@ -336,6 +336,24 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("review #4: leaves of a secret OBJECT are never exact-matched — unrelated equal values survive")
+    void objectLeavesAreNotExactMatched() throws Exception {
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("preferredPort", new Property("preferredPort", "8080", Scope.longTerm));
+            memory.getConversationProperties().put("scheme", new Property("scheme", "Bearer", Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object,
+                Map.of("token", TOKEN, "tokenType", "Bearer", "port", 8080));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("oauth", secretObject));
+
+        assertEquals("8080", memory.getConversationProperties().get("preferredPort").getValueString());
+        assertEquals("Bearer", memory.getConversationProperties().get("scheme").getValueString());
+    }
+
+    @Test
     @DisplayName("JSON: the flag is read from requests and omitted from entries that do not set it")
     void contextJson() throws Exception {
         Context parsed = MAPPER.readValue("{\"type\":\"string\",\"value\":\"x\",\"secret\":true}", Context.class);
