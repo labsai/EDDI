@@ -5,10 +5,12 @@
 package ai.labs.eddi.modules.templating;
 
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.impl.OutputGeneration;
@@ -70,6 +72,9 @@ class ContextSuppliedOutputTemplatingTest {
         when(converter.convert(any())).thenAnswer(inv -> {
             Map<String, Object> data = new HashMap<>();
             data.put("vars", Map.of("apiKey", SECRET));
+            // Captured from user input, the documented wizard pattern — the user typed a
+            // probe.
+            data.put("properties", Map.of("agentName", PROBE));
             return data;
         });
 
@@ -122,7 +127,9 @@ class ContextSuppliedOutputTemplatingTest {
     @Test
     @DisplayName("a Qute loop sent as context output is not evaluated")
     void loopIsNotEvaluated() throws Exception {
-        String loop = "{#for i in 2000000000}x{/for}";
+        // A small count on purpose: if the fix regresses, this renders "xxx" and fails
+        // cleanly instead of allocating gigabytes in the test fork.
+        String loop = "{#for i in 3}x{/for}";
         storeContext("context:output", List.of(Map.of("valueAlternatives", List.of(Map.of("type", "text", "text", loop)))));
 
         runOutputAndTemplating(null);
@@ -145,13 +152,61 @@ class ContextSuppliedOutputTemplatingTest {
         runOutputAndTemplating(outputGeneration);
 
         IData<Object> authored = memory.getCurrentStep().getLatestData("output:text:greet");
-        assertFalse(authored.isVerbatim());
+        // Templated once, then frozen, so a later templating pass leaves it alone.
+        assertTrue(authored.isVerbatim());
         assertEquals("Key: " + SECRET, ((TextOutputItem) authored.getResult()).getText());
         IData<List<QuickReply>> authoredQuickReplies = memory.getCurrentStep().getLatestData("quickReplies:greet");
         assertEquals("QR " + SECRET, authoredQuickReplies.getResult().getFirst().getValue());
 
         IData<Object> fromContext = memory.getCurrentStep().getLatestData("output:text:context");
         assertEquals(PROBE, ((TextOutputItem) fromContext.getResult()).getText());
+    }
+
+    @Test
+    @DisplayName("the verbatim flag survives a save and reload (tool-call HITL resume re-enters after the output task)")
+    void verbatimSurvivesPersistence() throws Exception {
+        storeContext("context:output", List.of(Map.of("valueAlternatives", List.of(Map.of("type", "text", "text", PROBE)))));
+        outputGenerationTask.execute(memory, null);
+
+        // Save and reload the way ConversationHitlService does on resume, through the
+        // stored JSON shape — then only the later workflow's templating task runs.
+        var mapper = new ObjectMapper();
+        var json = mapper.writeValueAsString(ConversationMemoryUtilities.convertConversationMemory(memory));
+        assertTrue(json.contains("\"verbatim\":true"), "the flag must be written to the stored document: " + json);
+        memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(mapper.readValue(json, ConversationMemorySnapshot.class));
+
+        outputTemplateTask.execute(memory, null);
+
+        IData<Object> output = memory.getCurrentStep().getLatestData("output:text:context");
+        assertTrue(output.isVerbatim());
+        assertEquals(PROBE, String.valueOf(output.getResult() instanceof TextOutputItem text
+                ? text.getText()
+                : ((Map<?, ?>) output.getResult()).get("text")));
+        assertNoSecretInConversationOutput();
+    }
+
+    @Test
+    @DisplayName("a second templating pass does not render what the first one substituted in")
+    void secondTemplatingPassDoesNotReRender() throws Exception {
+        memory.getCurrentStep().storeData(new Data<List<String>>("actions", List.of("named")));
+        var outputGeneration = new OutputGeneration(null);
+        outputGeneration.addOutputEntry(new OutputEntry("named", 0,
+                List.of(new OutputValue(List.of(new TextOutputItem("Your agent is called {properties.agentName}")))),
+                List.of(new QuickReply("Call {properties.agentName}", "call", false))));
+
+        outputGenerationTask.execute(memory, outputGeneration);
+        // Two workflows, each ending with the templating step.
+        outputTemplateTask.execute(memory, null);
+        outputTemplateTask.execute(memory, null);
+
+        IData<Object> output = memory.getCurrentStep().getLatestData("output:text:named");
+        assertEquals("Your agent is called " + PROBE, ((TextOutputItem) output.getResult()).getText());
+        IData<List<QuickReply>> quickReplies = memory.getCurrentStep().getLatestData("quickReplies:named");
+        assertEquals("Call " + PROBE, quickReplies.getResult().getFirst().getValue());
+        assertNoSecretInConversationOutput();
+        for (IData<Object> twin : memory.getCurrentStep().<Object>getAllData("output")) {
+            assertFalse(String.valueOf(twin.getResult()).contains(SECRET), "leaked via " + twin.getKey());
+        }
     }
 
     private void storeContext(String key, Object value) {

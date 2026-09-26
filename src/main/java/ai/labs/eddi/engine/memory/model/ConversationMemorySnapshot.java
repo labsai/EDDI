@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.lang.reflect.Field;
@@ -367,6 +368,15 @@ public class ConversationMemorySnapshot {
         private String originWorkflowId;
         private boolean isPublic;
         private boolean committed = true;
+        /**
+         * {@code IData#isVerbatim()}, carried through a save and reload: a tool-call
+         * HITL resume reloads memory and re-enters the pipeline after the output task,
+         * so an entry that lost the flag here would be rendered by a later templating
+         * task. Omitted from the stored document while false, so existing documents and
+         * the common case are unchanged.
+         */
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        private boolean verbatim;
 
         @Override
         public boolean equals(Object o) {
@@ -464,10 +474,20 @@ public class ConversationMemorySnapshot {
             this.committed = committed;
         }
 
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        public boolean isVerbatim() {
+            return verbatim;
+        }
+
+        public void setVerbatim(boolean verbatim) {
+            this.verbatim = verbatim;
+        }
+
         @Override
         public String toString() {
             return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp
-                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ")";
+                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ", verbatim=" + verbatim
+                    + ")";
         }
     }
 

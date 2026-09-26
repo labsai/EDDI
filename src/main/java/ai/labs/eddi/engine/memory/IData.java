@@ -70,9 +70,14 @@ public interface IData<T> {
      * Qute: read {@code {snippets.*}} and {@code {vars.*}}, or loop and allocate
      * until the worker stalls.
      * <p>
-     * Deliberately <b>not persisted</b>. It only has meaning inside the turn that
-     * stored the entry, and every path that renders output again (a rerun, a HITL
-     * resume) re-runs the output task, which sets it afresh.
+     * The templating task also sets it on every entry it has rendered, so a second
+     * templating pass in the same turn (one per workflow) cannot evaluate what the
+     * first one substituted in.
+     * <p>
+     * <b>Persisted</b> with the step ({@code ResultSnapshot#isVerbatim}): a
+     * tool-call HITL resume reloads memory and re-enters the pipeline after the
+     * output task, so a flag that did not survive the reload would let a later
+     * templating task render the entry.
      * <p>
      * Default: {@code false}. Phrased this way round so that the safe answer for
      * every existing entry — authored output, templated as before — is also the
