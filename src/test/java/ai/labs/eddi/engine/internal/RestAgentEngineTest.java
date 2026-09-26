@@ -36,6 +36,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
@@ -318,6 +320,36 @@ class RestAgentEngineTest {
             var captor = ArgumentCaptor.forClass(Response.class);
             verify(asyncResponse).resume(captor.capture());
             assertEquals(410, captor.getValue().getStatus());
+        }
+
+        /**
+         * A queued turn skipped because the conversation changed under it (a superseded
+         * rerun, a turn that could not be rebuilt) must not be told to "retry shortly"
+         * as if the conversation were merely busy; one skipped because it ended is
+         * answered like any say into an ended conversation.
+         */
+        @ParameterizedTest
+        @CsvSource({"ENDED,410,", "IN_PROGRESS,409,retry shortly", "READY,409,changed while your message was queued",
+                "ERROR,409,changed while your message was queued"})
+        @DisplayName("a skipped turn is answered according to the state it was skipped in")
+        void skippedTurnAnswer(ConversationState state, int status, String reasonFragment) throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            doAnswer(inv -> {
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationState(state);
+                ((IConversationService.ConversationResponseHandler) inv.getArgument(6)).onSkipped(snapshot);
+                return null;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false, List.of(), new InputData("Hello", Map.of()), asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            assertEquals(status, captor.getValue().getStatus());
+            if (reasonFragment != null) {
+                assertTrue(String.valueOf(captor.getValue().getEntity()).contains(reasonFragment),
+                        "got: " + captor.getValue().getEntity());
+            }
         }
 
         @Test

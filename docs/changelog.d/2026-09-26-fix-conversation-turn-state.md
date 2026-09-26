@@ -20,7 +20,15 @@ the fix.
   runner in place of a finished callable, because the `Conversation` captures its
   longTerm baseline from the memory it is built over. A turn that cannot be rebuilt
   (the agent went away meanwhile) is reported as skipped, not run on the stale
-  snapshot. Residual: two turns of one conversation running concurrently on
+  snapshot. A queued **rerun** is never rebuilt: it re-executes the step the caller
+  saw, and rebuilt over a newer memory it would re-execute another turn's step (its
+  tool calls and LLM spend included), so a superseded rerun is skipped. The REST
+  `say` endpoint now answers a skip by the state it happened in: ENDED → 410,
+  IN_PROGRESS → 409 "retry shortly", and an idle conversation (superseded rerun,
+  failed rebuild) → 409 "the conversation changed while your message was queued —
+  reload it before sending again" instead of the misleading "retry shortly".
+  `IConversationMemoryStore.getRevision` is abstract, so a future store cannot
+  silently disable the check. Residual: two turns of one conversation running concurrently on
   *different* pods still merge with last-writer-wins on the top-level fields,
   which is what the append path already documents.
 - **E2 — a lost pause stayed in the state cache.** The say path caches the state a
@@ -48,9 +56,16 @@ the fix.
   recalled (recall matches on `groupIds`). A recalled group memory also lost its
   groups when it was written back. `Property` now carries the `groupIds` of the
   entry it was recalled from. On write the groups come from, in order: the
-  property's own, then the baseline property it replaced, then the turn's
-  `groupId` context (for a resume, the latest `context:groupId` of the
-  conversation). `MemoryCheckpoint` copies the field too.
+  property's own, then the baseline property it replaced, then the `groupId`
+  context of the turn itself. An earlier step's `context:groupId` is deliberately
+  NOT used: a step written before reserved context keys were enforced may carry a
+  client-set value. So a resume, which has no context of its own, writes a
+  brand-new group property without groups. Once PR 831 (reserved context keys)
+  merges, this should switch to its verified group resolver. `MemoryCheckpoint`
+  copies the field too. `groupIds` cannot be configured: `PropertyInstruction`
+  ignores it in `property.json`. Recalled group ids do show up in serialized
+  conversation properties over REST and MCP — they are the user's own memory's
+  groups.
 - **M-E3 — redo resurrected an abandoned branch.** A new turn never cleared the redo
   cache, so undo → say → redo spliced the withdrawn step back in. The public
   `ConversationMemory.startNextStep()` now clears it. The package-private overload
@@ -73,11 +88,22 @@ the fix.
   (100000) and `eddi.nats.stream-max-bytes` (256 MiB).
 - **16 MB — persistent heartbeats grew without bound.** A `conversationStrategy:
   persistent` schedule appended a step on every fire to one document until MongoDB
-  refused it, and from then on every fire was lost. Once the conversation reaches
-  `eddi.schedule.persistent-conversation-max-steps` (default 1000, `0` disables),
-  the schedule ends it and starts a new one. Nothing is trimmed, and the old
-  conversation stays readable. A persistent conversation that has ENDED is also
-  replaced now; every fire into it used to be refused, forever.
+  refused it, and from then on every fire was lost. The rollover is **opt-in**:
+  with `eddi.schedule.persistent-conversation-max-steps` set (default `0`, off), a
+  conversation that has reached that many steps AND is idle (READY, ERROR,
+  EXECUTION_INTERRUPTED) is ended and replaced by a new one. The
+  `conversation`-scoped properties are copied into the new conversation (what its
+  own start turn set wins). `longTerm` properties need nothing, they live in user
+  memory. The **LLM history does not carry over**. A conversation that is
+  AWAITING_HUMAN or busy is never rolled over: that would end the pending approval
+  (audited as a scheduler decision), abort a running resume or refuse a human's
+  in-flight turn. When enabled, every persistent schedule already past the limit
+  rolls over on its first idle fire. While the rollover is off, a persistent
+  conversation past 1000 steps is reported once at WARN. Nothing is trimmed and the
+  old conversation stays readable. A persistent conversation that has ENDED is
+  replaced now as well; every fire into it used to be refused, forever. The fire
+  reads the stored conversation once, raw, rather than converting every step into
+  a response snapshot. See [scheduling.md](../scheduling.md#long-running-persistent-schedules).
 - **E3 — migrations marked complete on empty collections.** The V6 Qute, channel
   connector and workspace access-index migrations read the collections the V6 rename
   migration populates. If the rename migration was still pending, they found
@@ -96,7 +122,10 @@ the fix.
   property), and deployment rows gain `lastModified` (ignored by the reader). Both
   are additive. No migration is needed.
 - REST/MCP shapes: unchanged, apart from the new nullable `groupIds` field on
-  serialized properties.
+  serialized properties. The REST `say` endpoint's answer to a skipped turn now
+  depends on the state (410 for ENDED, a different 409 text for an idle
+  conversation that changed under the queued message).
+- `property.json`: a `groupIds` field on a property instruction is ignored.
 - New config keys: `eddi.nats.stream-max-age`, `eddi.nats.stream-max-messages`,
   `eddi.nats.stream-max-bytes`, `eddi.schedule.persistent-conversation-max-steps`.
   They are documented in [configuration-reference.md](../configuration-reference.md).
@@ -125,5 +154,5 @@ the fix.
 
 ```decision-log
 | 2026-09-26 | A queued turn whose snapshot was superseded is rebuilt over a reloaded memory (revision probe first) | H13a/E1: queued turns ran on request-time memory | Always reloading (doubles every turn's load); refreshing the memory in place (the Conversation's longTerm baseline would stay stale) |
-| 2026-09-26 | Persistent schedules roll over to a new conversation at a step limit instead of trimming | 16 MB document limit | Trimming steps (destroys history, violates "full data is never deleted by optimization") |
+| 2026-09-26 | Persistent schedules may roll over (opt-in, idle only, conversation properties carried) at a step limit instead of trimming | 16 MB document limit | Trimming steps (destroys history, violates "full data is never deleted by optimization"); on by default (silently resets a stateful agent's history) |
 ```

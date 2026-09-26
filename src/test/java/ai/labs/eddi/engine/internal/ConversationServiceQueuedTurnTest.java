@@ -10,12 +10,14 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -25,6 +27,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -254,6 +257,100 @@ class ConversationServiceQueuedTurnTest {
     }
 
     // ---------------------------------------------------------------------------
+
+    /**
+     * A rerun re-executes the step the caller saw. Rebuilt over a memory another
+     * turn has since extended, it would re-execute THAT turn's step — its tool
+     * calls and LLM spend included — so a superseded rerun is skipped instead.
+     */
+    @Test
+    @DisplayName("a queued rerun whose snapshot was superseded is skipped, not rebuilt over a different step")
+    void supersededRerunIsSkipped() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
+                .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(), new InputData("", Map.of()), true, handler);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+
+        verify(conversation, never()).rerun(any());
+        assertEquals(1, builtOver.size(), "a rerun must not be rebuilt over the newer memory");
+        verify(handler).onSkipped(any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    @DisplayName("a queued rerun whose snapshot is current still runs")
+    void currentRerunRuns() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(), new InputData("", Map.of()), true, handler);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+
+        verify(conversation).rerun(any());
+        verify(handler, never()).onSkipped(any());
+    }
+
+    @Test
+    @DisplayName("H13a: a superseded streaming turn is rebuilt with its event sink, and completes the stream")
+    void supersededStreamingTurnIsRebuiltAndCompletesTheStream() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
+                .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        IConversation staleConversation = mock(IConversation.class);
+        IConversation currentConversation = mock(IConversation.class);
+        stubContinueConversation(staleConversation, currentConversation);
+        doAnswer(inv -> {
+            IConversationMemory memory = builtOver.get(1);
+            memory.getEventSink().onToken("hello");
+            renderers.get(1).renderOutput(memory);
+            return null;
+        }).when(currentConversation).say(anyString(), any());
+
+        StreamingResponseHandler streamingHandler = mock(StreamingResponseHandler.class);
+        conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("streamed", Map.of()),
+                streamingHandler);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+
+        verify(staleConversation, never()).say(anyString(), any());
+        assertNotNull(builtOver.get(1).getEventSink(), "the rebuilt memory must carry the stream's event sink");
+        verify(streamingHandler).onToken("hello");
+        ArgumentCaptor<SimpleConversationMemorySnapshot> completed = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+        verify(streamingHandler).onComplete(completed.capture());
+        assertEquals(2, completed.getValue().getConversationSteps().size(), "the stream completes with the rebuilt turn's memory");
+    }
+
+    @Test
+    @DisplayName("a store blip while reporting a conflict does not escape the completion callback, and the cache is still dropped")
+    void conflictReportSurvivesAStoreBlip() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+        doThrow(new ConcurrentConversationModificationException(CONVERSATION_ID, 1L))
+                .when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+        // READY for the queued-turn guard, then the store is unreachable.
+        doReturn(ConversationState.READY).doThrow(new IllegalStateException("store blip"))
+                .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+        assertDoesNotThrow(this::runQueuedSay);
+
+        verify(conversationStateCache).remove(CONVERSATION_ID);
+    }
 
     private ConversationResponseHandler runQueuedSay() throws Exception {
         ConversationResponseHandler handler = mock(ConversationResponseHandler.class);

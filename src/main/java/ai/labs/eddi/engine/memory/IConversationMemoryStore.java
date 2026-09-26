@@ -117,9 +117,7 @@ public interface IConversationMemoryStore {
      *         conversation does not exist or the backend cannot answer — callers
      *         must treat {@code null} as "unknown", not as "changed"
      */
-    default Long getRevision(String conversationId) {
-        return null;
-    }
+    Long getRevision(String conversationId);
 
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 
