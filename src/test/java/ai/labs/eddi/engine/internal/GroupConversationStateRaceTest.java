@@ -80,10 +80,11 @@ class GroupConversationStateRaceTest {
     private final AtomicBoolean deleted = new AtomicBoolean();
     private final AtomicInteger blindWrites = new AtomicInteger();
     /**
-     * When set, the next read returns what it sees and THEN a racing cancel
-     * commits.
+     * When set, the next read returns what it sees and THEN a racing writer on
+     * another pod commits this state.
      */
-    private final AtomicBoolean cancelAfterNextRead = new AtomicBoolean();
+    private final AtomicReference<GroupConversationState> flipAfterNextRead = new AtomicReference<>();
+    private AgentGroupConfiguration config;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -113,11 +114,12 @@ class GroupConversationStateRaceTest {
             gc.setId(GC_ID);
             gc.setGroupId(GROUP_ID);
             gc.setState(persisted.get());
-            if (cancelAfterNextRead.compareAndSet(true, false)) {
-                // The other pod's cancelDiscussion (no local token): CAS the persisted
-                // state IN_PROGRESS → CANCELLED and report success — landing just after
-                // the leg's phase-boundary re-check saw IN_PROGRESS.
-                persisted.compareAndSet(GroupConversationState.IN_PROGRESS, GroupConversationState.CANCELLED);
+            GroupConversationState flip = flipAfterNextRead.getAndSet(null);
+            if (flip != null) {
+                // The other pod's writer (e.g. cancelDiscussion with no local token):
+                // CAS the persisted state away from IN_PROGRESS and report success —
+                // landing just after the leg's phase-boundary re-check saw IN_PROGRESS.
+                persisted.compareAndSet(GroupConversationState.IN_PROGRESS, flip);
             }
             return gc;
         });
@@ -143,7 +145,7 @@ class GroupConversationStateRaceTest {
         var rid = mock(IResourceStore.IResourceId.class);
         when(rid.getVersion()).thenReturn(1);
         when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(rid);
-        var config = new AgentGroupConfiguration();
+        config = new AgentGroupConfiguration();
         config.setName("Race group");
         config.setStyle(DiscussionStyle.ROUND_TABLE);
         config.setMaxRounds(2);
@@ -179,7 +181,7 @@ class GroupConversationStateRaceTest {
     void crossPodCancel_isNotOverwrittenByTheRunningLeg() throws Exception {
         // The cancel lands in the check-then-act window: after the boundary re-read
         // (which therefore sees IN_PROGRESS), before the boundary write.
-        stubMember(() -> cancelAfterNextRead.set(true));
+        stubMember(() -> flipAfterNextRead.set(GroupConversationState.CANCELLED));
         var listener = mock(GroupDiscussionEventListener.class);
 
         GroupConversation result = service.discuss(GROUP_ID, "Question?", "user-1", 0, listener);
@@ -242,5 +244,61 @@ class GroupConversationStateRaceTest {
                 "the first discuss() leg is not an operation-in-progress, so delete used to tear its members and "
                         + "agents down under it without ever telling it to stop");
         verify(conversationStore).delete(GC_ID);
+    }
+
+    @Test
+    @DisplayName("review #3: a leg superseded to FAILED/REJECTED ends its stream with a terminal error event")
+    void supersededToFailed_sendsATerminalEvent() throws Exception {
+        stubMember(() -> flipAfterNextRead.set(GroupConversationState.FAILED));
+        var listener = mock(GroupDiscussionEventListener.class);
+
+        GroupConversation result = service.discuss(GROUP_ID, "Question?", "user-1", 0, listener);
+
+        assertEquals(GroupConversationState.FAILED, persisted.get(), "the other writer's outcome stands");
+        assertEquals(GroupConversationState.FAILED, result.getState());
+        verify(listener).onGroupError(any());
+        verify(listener, never()).onGroupComplete(any());
+        verify(listener, never()).onCancelled(any());
+    }
+
+    @Test
+    @DisplayName("review #3: a leg superseded to COMPLETED/CLOSED ends its stream with group_complete")
+    void supersededToClosed_sendsGroupComplete() throws Exception {
+        stubMember(() -> flipAfterNextRead.set(GroupConversationState.CLOSED));
+        var listener = mock(GroupDiscussionEventListener.class);
+
+        service.discuss(GROUP_ID, "Question?", "user-1", 0, listener);
+
+        assertEquals(GroupConversationState.CLOSED, persisted.get());
+        verify(listener).onGroupComplete(any());
+        verify(listener, never()).onGroupError(any());
+    }
+
+    @Test
+    @DisplayName("review #4: a member turn failing because another node deleted the discussion ends as a cancel, not a failure")
+    void memberFailureAfterCrossNodeDelete_endsAsCancelled() throws Exception {
+        // ABORT turns the member failure into a discussion-level exception — the path
+        // that used to log ERROR, count a failure and throw a 5xx for a deletion.
+        config.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.ABORT, 0,
+                ProtocolConfig.MemberUnavailablePolicy.SKIP));
+        when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1"))).thenReturn(mock(IAgent.class));
+        when(conversationService.startConversation(any(Environment.class), eq("a1"), anyString(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+        doAnswer(inv -> {
+            // Node B deleted the discussion: its member conversations are ended, so
+            // this node's next turn fails before any write could notice.
+            deleted.set(true);
+            throw new IllegalStateException("conversation ended");
+        }).when(conversationService).say(any(Environment.class), eq("a1"), anyString(), any(), any(), any(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+        var listener = mock(GroupDiscussionEventListener.class);
+
+        GroupConversation result = assertDoesNotThrow(() -> service.discuss(GROUP_ID, "Question?", "user-1", 0, listener),
+                "a deletion elsewhere is not this leg's failure — no GroupExecutionException / 5xx");
+
+        assertEquals(GroupConversationState.CANCELLED, result.getState());
+        assertTrue(deleted.get(), "and nothing recreated the document");
+        verify(listener).onCancelled(any());
+        verify(listener, never()).onGroupError(any());
     }
 }
