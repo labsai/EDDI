@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.integrations.openai.model.ModelObject;
+import io.quarkus.security.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -367,6 +369,45 @@ class AgentModelResolverTest {
 
         resolver.invalidate();
         assertEquals(4, resolver.listModels().size());
+    }
+
+    // ─── the USE gate on resolution (H2h) ───
+
+    /**
+     * A guard that refuses USE on {@code deniedAgentId} and admits everything else.
+     */
+    private AgentModelResolver resolverDenying(String deniedAgentId) {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(deniedAgentId);
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
+        resolver.initCache();
+        return resolver;
+    }
+
+    @Test
+    void resolve_agentTheCallerMayNotUse_isIndistinguishableFromUnknown() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Private Support");
+        var resolver = resolverDenying(AGENT_ID_SUPPORT);
+
+        var byCanonical = assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("private-support-a3f9c1"));
+        var unknown = assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("private-support-ffffff"));
+        assertEquals(unknown.getMessage().replace("private-support-ffffff", "X"),
+                byCanonical.getMessage().replace("private-support-a3f9c1", "X"),
+                "a refused agent must answer exactly like an absent one, or /v1/models/{id} is an oracle");
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve(AGENT_ID_SUPPORT));
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("Private Support"));
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("private-support"));
+    }
+
+    @Test
+    void resolve_nameShared_withAnUnusableAgent_neitherLeaksNorIsAmbiguous() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+        givenAgent(AGENT_ID_SALES, "Support");
+
+        assertEquals(AGENT_ID_SUPPORT, resolverDenying(AGENT_ID_SALES).resolve("Support").agentId(),
+                "the private namesake must not take part in the uniqueness decision, nor be named in an error");
     }
 
     /**

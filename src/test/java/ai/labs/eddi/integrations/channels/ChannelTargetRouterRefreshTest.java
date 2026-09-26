@@ -12,7 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
@@ -54,7 +54,7 @@ class ChannelTargetRouterRefreshTest {
 
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
-    private IRestAgentAdministration agentAdmin;
+    private IDeploymentStatusReader agentAdmin;
     private IAgentStore agentStore;
     private SecretResolver secretResolver;
     private ChannelTargetRouter router;
@@ -66,7 +66,7 @@ class ChannelTargetRouterRefreshTest {
     void setUp() throws Exception {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
-        agentAdmin = mock(IRestAgentAdministration.class);
+        agentAdmin = mock(IDeploymentStatusReader.class);
         agentStore = mock(IAgentStore.class);
         secretResolver = mock(SecretResolver.class);
 
@@ -80,7 +80,7 @@ class ChannelTargetRouterRefreshTest {
         accumulatedDescriptors = new ArrayList<>();
 
         // Default: no legacy agents
-        when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
+        when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(List.of());
     }
 
     @Test
@@ -209,7 +209,7 @@ class ChannelTargetRouterRefreshTest {
                 Deployment.Environment.production, agentId, 1,
                 Deployment.Status.READY, desc);
 
-        when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+        when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                 .thenReturn(List.of(status));
         when(agentStore.read(eq(agentId), eq(1))).thenReturn(agentConfig);
     }
@@ -846,7 +846,7 @@ class ChannelTargetRouterRefreshTest {
             var status = new AgentDeploymentStatus(
                     Deployment.Environment.production, AGENT_ID, 1,
                     Deployment.Status.READY, desc);
-            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
@@ -861,7 +861,7 @@ class ChannelTargetRouterRefreshTest {
             var status = new AgentDeploymentStatus(
                     Deployment.Environment.production, AGENT_ID, 1,
                     Deployment.Status.READY, null);
-            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
 
             assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
@@ -885,7 +885,7 @@ class ChannelTargetRouterRefreshTest {
             var status = new AgentDeploymentStatus(
                     Deployment.Environment.production, AGENT_ID, 1,
                     Deployment.Status.READY, desc);
-            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
             when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
@@ -911,7 +911,7 @@ class ChannelTargetRouterRefreshTest {
             var status = new AgentDeploymentStatus(
                     Deployment.Environment.production, AGENT_ID, 1,
                     Deployment.Status.READY, desc);
-            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
             when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
 
@@ -943,7 +943,7 @@ class ChannelTargetRouterRefreshTest {
             var status = new AgentDeploymentStatus(
                     Deployment.Environment.production, AGENT_ID, 1,
                     Deployment.Status.READY, desc);
-            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
             when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
             when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));

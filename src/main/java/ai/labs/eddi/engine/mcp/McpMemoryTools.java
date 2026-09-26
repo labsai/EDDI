@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import java.util.Arrays;
+import io.quarkus.security.ForbiddenException;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -21,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
@@ -44,12 +47,14 @@ public class McpMemoryTools {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpMemoryTools(IUserMemoryStore userMemoryStore, IJsonSerialization jsonSerialization, SecurityIdentity identity,
-            OwnershipValidator ownershipValidator,
+            OwnershipValidator ownershipValidator, ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.userMemoryStore = userMemoryStore;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
@@ -98,7 +103,15 @@ public class McpMemoryTools {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
-            List<String> groups = groupIds != null && !groupIds.isBlank() ? List.of(groupIds.split(",")) : List.of();
+            List<String> groups = groupIds != null && !groupIds.isBlank()
+                    ? Arrays.stream(groupIds.split(",")).map(String::trim).filter(id -> !id.isEmpty()).toList()
+                    : List.of();
+            try {
+                // Same rule as REST: naming a group must not unlock its team memories.
+                resourceAccessGuard.requireUseAccessToEach(groups, "group");
+            } catch (ForbiddenException e) {
+                return errorJson("Access denied: you do not have access to one of the named groups");
+            }
             String recallOrder = order != null && !order.isBlank() ? order : "most_recent";
             int maxEntries = limit != null && limit > 0 ? limit : 50;
 

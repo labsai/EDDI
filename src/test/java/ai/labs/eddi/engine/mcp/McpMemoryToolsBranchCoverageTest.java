@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -43,7 +44,7 @@ class McpMemoryToolsBranchCoverageTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, false);
+        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, mock(ResourceAccessGuard.class), false);
     }
 
     // ─── listUserMemories ────────────────────────────────────────────────

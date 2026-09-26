@@ -9,6 +9,7 @@ import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.container.Suspended;
@@ -16,8 +17,14 @@ import jakarta.ws.rs.core.MediaType;
 
 /**
  * Standalone semantic parser endpoint for NLP evaluation.
+ * <p>
+ * An authoring tool — the Manager's dictionary tester — so it carries the same
+ * roles as the parser configuration store it evaluates. It used to declare
+ * none, which left it open to every authenticated principal, including one
+ * holding no EDDI role at all.
  */
 @Path("/parser")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 @Tag(name = "Tools / NLP", description = "Standalone semantic parser")
 public interface IRestSemanticParser {
 

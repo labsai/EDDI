@@ -206,6 +206,15 @@ public class AgentModelResolver {
      * <li>the bare slug — only when unique</li>
      * </ol>
      * Steps 3 and 4 raise {@link AmbiguousModelException} rather than guessing.
+     * <p>
+     * <b>Only agents the caller may use take part.</b> An agent the USE gate would
+     * refuse resolves exactly like one that is not deployed at all — the same
+     * {@link UnknownModelException}, the same message — and is left out of the name
+     * and slug candidate sets before uniqueness is judged. Resolving it anyway made
+     * {@code GET /v1/models/{id}} an oracle for private agents' ids and names (and
+     * made an ambiguity error list them), and let a chat keep reusing a
+     * conversation mapped before its agent was un-shared, because the USE check sat
+     * only on the path that starts a new conversation.
      */
     public ResolvedModel resolve(String requestedModel) throws UnknownModelException, AmbiguousModelException {
         if (requestedModel == null || requestedModel.isBlank()) {
@@ -225,30 +234,38 @@ public class AgentModelResolver {
 
         // 1. canonical model id
         Entry entry = catalogue.byModelId().get(id.toLowerCase(Locale.ROOT));
-        if (entry != null) {
+        if (entry != null && mayUse(entry.agentId())) {
             return toResolved(entry, raw, stateless);
         }
 
         // 2. bare agentId
         entry = catalogue.byAgentId().get(id);
-        if (entry != null) {
+        if (entry != null && mayUse(entry.agentId())) {
             return toResolved(entry, raw, stateless);
         }
 
         // 3. descriptor name (unique only)
-        List<Entry> byName = catalogue.byName().get(id.toLowerCase(Locale.ROOT));
-        if (byName != null) {
+        List<Entry> byName = usable(catalogue.byName().get(id.toLowerCase(Locale.ROOT)));
+        if (!byName.isEmpty()) {
             return toResolved(requireUnique(byName, id, "name"), raw, stateless);
         }
 
         // 4. bare slug (unique only)
-        List<Entry> bySlug = catalogue.bySlug().get(slugify(id));
-        if (bySlug != null) {
+        List<Entry> bySlug = usable(catalogue.bySlug().get(slugify(id)));
+        if (!bySlug.isEmpty()) {
             return toResolved(requireUnique(bySlug, id, "slug"), raw, stateless);
         }
 
         throw new UnknownModelException("No deployed agent matches model '" + id
                 + "'. Call GET /v1/models for the available ids.");
+    }
+
+    /** The candidates the caller may use; empty for none (or no candidates). */
+    private List<Entry> usable(List<Entry> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        return candidates.stream().filter(candidate -> mayUse(candidate.agentId())).toList();
     }
 
     /** Drop the cached catalogue — used by tests and after a deployment change. */

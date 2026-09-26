@@ -17,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
 import java.util.Date;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -262,6 +263,23 @@ public class ResourceAccessGuard {
             LOGGER.debugf("Use detail: resourceId='%s', type='%s', granted='%s'", sanitize(resourceId), resourceTypeLabel, granted);
             throw new ForbiddenException("Access denied: you do not have access to this " + resourceTypeLabel
                     + ". Ask its owner to share it with you, or have them publish it if it is meant to be public.");
+        }
+    }
+
+    /**
+     * {@link #requireUseAccess} for every id in a caller-supplied list; blank
+     * entries are skipped. For inputs that <em>scope</em> a read by naming
+     * resources, such as the group ids of a memory recall, where naming one the
+     * caller may not use must not widen what they see.
+     */
+    public void requireUseAccessToEach(Collection<String> resourceIds, String resourceTypeLabel) {
+        if (resourceIds == null || seesEverything()) {
+            return;
+        }
+        for (String resourceId : resourceIds) {
+            if (resourceId != null && !resourceId.isBlank()) {
+                requireUseAccess(resourceId.trim(), resourceTypeLabel);
+            }
         }
     }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -45,7 +46,7 @@ class RestUserMemoryStoreBranchTest {
         store = mock(IUserMemoryStore.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
-        rest = new RestUserMemoryStore(store, identity, ownershipValidator);
+        rest = new RestUserMemoryStore(store, identity, ownershipValidator, mock(ResourceAccessGuard.class));
     }
 
     // === getVisibleMemories error path ===

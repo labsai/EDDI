@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import io.quarkus.security.ForbiddenException;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.connections.IConnectionStore;
@@ -97,6 +99,8 @@ class RestExportServiceExtendedBranchTest {
     private SecretScrubber secretScrubber;
     @Mock
     private IScheduleStore scheduleStore;
+    @Mock
+    private ResourceAccessGuard resourceAccessGuard;
 
     private RestExportService exportService;
 
@@ -108,7 +112,7 @@ class RestExportServiceExtendedBranchTest {
                 dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
-                scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class), mock(IConnectionStore.class));
+                scheduleStore, resourceAccessGuard, mock(BackupMetrics.class), mock(IConnectionStore.class));
     }
 
     // =========================================================
@@ -392,8 +396,7 @@ class RestExportServiceExtendedBranchTest {
             descriptor.setName("My Agent");
             String result = (String) method.invoke(exportService, descriptor, "id123", 2);
 
-            assertTrue(result.startsWith("My-Agent-"), result);
-            assertTrue(result.endsWith("id123-2.zip"));
+            assertTrue(result.matches("My-Agent--id123-2-[0-9a-f]{32}\\.zip"), result);
         }
 
         @Test
@@ -412,8 +415,7 @@ class RestExportServiceExtendedBranchTest {
             // class then rejected both the decoded "ü" and the literal "%" — so the
             // export succeeded into an archive that could never be downloaded.
             assertTrue(result.matches("^[a-zA-Z0-9_.+\\-]+$"), result);
-            assertTrue(result.startsWith("Muller-Bot-"), result);
-            assertTrue(result.endsWith("id123-2.zip"));
+            assertTrue(result.matches("Muller-Bot--id123-2-[0-9a-f]{32}\\.zip"), result);
         }
 
         @Test
@@ -427,7 +429,7 @@ class RestExportServiceExtendedBranchTest {
             descriptor.setName(null);
             String result = (String) method.invoke(exportService, descriptor, "id123", 2);
 
-            assertEquals("id123-2.zip", result);
+            assertTrue(result.matches("id123-2-[0-9a-f]{32}\\.zip"), result);
         }
 
         @Test
@@ -441,7 +443,7 @@ class RestExportServiceExtendedBranchTest {
             descriptor.setName("");
             String result = (String) method.invoke(exportService, descriptor, "id123", 2);
 
-            assertEquals("id123-2.zip", result);
+            assertTrue(result.matches("id123-2-[0-9a-f]{32}\\.zip"), result);
         }
     }
 
@@ -617,7 +619,7 @@ class RestExportServiceExtendedBranchTest {
         @Test
         @DisplayName("serves the archive as an attachment named after the file")
         void servesAsAttachment() throws Exception {
-            Path archive = archiveDir.resolve("My-Agent-aaaa11112222333344445555-1.zip");
+            Path archive = archiveDir.resolve("My-Agent--aaaa11112222333344445555-1-0123456789abcdef0123456789abcdef.zip");
             Files.write(archive, new byte[]{0x50, 0x4b, 0x03, 0x04});
             Response response = null;
             try {
@@ -626,14 +628,31 @@ class RestExportServiceExtendedBranchTest {
                 assertEquals(200, response.getStatus());
                 // Without this the browser renders the ZIP inline (or saves it under
                 // the endpoint's last path segment) instead of offering it by name.
-                assertEquals("attachment; filename=\"" + archive.getFileName() + "\"",
+                assertEquals("attachment; filename=\"My-Agent-aaaa11112222333344445555-1.zip\"",
                         response.getHeaderString("Content-Disposition"));
+                verify(resourceAccessGuard).requireAccess("aaaa11112222333344445555", AccessLevel.VIEW, "agent");
             } finally {
                 // The entity is an open stream on the file, and Windows will not
                 // delete a file while a handle is held.
                 if (response != null && response.getEntity() instanceof InputStream stream) {
                     stream.close();
                 }
+                Files.deleteIfExists(archive);
+            }
+        }
+
+        @Test
+        @DisplayName("an archive of an agent the caller may not VIEW is refused, not served (H2c)")
+        void downloadRequiresViewOnTheExportedAgent() throws Exception {
+            Path archive = archiveDir.resolve("Private--bbbb11112222333344445555-1-0123456789abcdef0123456789abcdef.zip");
+            Files.write(archive, new byte[]{0x50, 0x4b, 0x03, 0x04});
+            try {
+                doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
+                        .requireAccess("bbbb11112222333344445555", AccessLevel.VIEW, "agent");
+
+                assertThrows(ForbiddenException.class,
+                        () -> exportService.getAgentZipArchive(archive.getFileName().toString()));
+            } finally {
                 Files.deleteIfExists(archive);
             }
         }

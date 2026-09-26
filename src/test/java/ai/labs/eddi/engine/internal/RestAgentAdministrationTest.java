@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import java.util.ArrayList;
+import ai.labs.eddi.engine.model.AgentDeploymentStatus;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -53,6 +56,7 @@ class RestAgentAdministrationTest {
     private IScheduleStore scheduleStore;
     private TenantQuotaService tenantQuotaService;
     private RestAgentAdministration restAgentAdmin;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -71,9 +75,13 @@ class RestAgentAdministrationTest {
         lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(any(), anyInt())).thenReturn(QuotaCheckResult.OK);
         agentStore = mock(IAgentStore.class);
+        // Everything visible by default, as with workspaces off; the scoping itself is
+        // covered in GetDeploymentStatuses below.
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        lenient().when(resourceAccessGuard.currentLevel(any())).thenReturn(AccessLevel.OWN);
         restAgentAdmin = new RestAgentAdministration(runtime, agentFactory, agentStore, deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
-                deploymentListener, scheduleStore, tenantQuotaService, mock(ResourceAccessGuard.class));
+                deploymentListener, scheduleStore, tenantQuotaService, resourceAccessGuard);
     }
 
     @Nested
@@ -311,6 +319,60 @@ class RestAgentAdministrationTest {
 
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentAdmin.getDeploymentStatuses(Deployment.Environment.test));
+        }
+
+        private void deployed(String agentId, DocumentDescriptor descriptor) throws Exception {
+            var agent = mock(IAgent.class);
+            when(agent.getAgentId()).thenReturn(agentId);
+            when(agent.getAgentVersion()).thenReturn(1);
+            when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+            when(documentDescriptorStore.readDescriptor(agentId, 1)).thenReturn(descriptor);
+            var current = new ArrayList<>(agentFactory.getAllLatestAgents(Deployment.Environment.production));
+            current.add(agent);
+            when(agentFactory.getAllLatestAgents(any())).thenReturn(current);
+        }
+
+        @Test
+        @DisplayName("drops agents the caller may not USE (MCP list_agents / discover_agents share this)")
+        void dropsAgentsWithoutUse() throws Exception {
+            var mine = new DocumentDescriptor();
+            mine.setLastModifiedOn(new Date(2000));
+            var theirs = new DocumentDescriptor();
+            theirs.setLastModifiedOn(new Date(1000));
+            deployed("mine", mine);
+            deployed("theirs", theirs);
+            when(resourceAccessGuard.currentLevel("theirs")).thenReturn(null);
+
+            var result = restAgentAdmin.getDeploymentStatuses(Deployment.Environment.production);
+
+            assertEquals(List.of("mine"), result.stream().map(AgentDeploymentStatus::getAgentId).toList());
+        }
+
+        @Test
+        @DisplayName("redacts every descriptor it returns with the level decided on the current descriptor")
+        void redactsDescriptors() throws Exception {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(1000));
+            deployed("shared", descriptor);
+            when(resourceAccessGuard.currentLevel("shared")).thenReturn(AccessLevel.USE);
+
+            restAgentAdmin.getDeploymentStatuses(Deployment.Environment.production);
+
+            verify(resourceAccessGuard).redactUnlessOwner(descriptor, AccessLevel.USE);
+        }
+
+        @Test
+        @DisplayName("the unscoped reader for engine code neither filters nor redacts")
+        void unscopedReaderIsRaw() throws Exception {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(1000));
+            deployed("private", descriptor);
+            when(resourceAccessGuard.currentLevel("private")).thenReturn(null);
+
+            var result = restAgentAdmin.readAllDeploymentStatuses(Deployment.Environment.production);
+
+            assertEquals(1, result.size());
+            verify(resourceAccessGuard, never()).redactUnlessOwner(any(), any());
         }
     }
 
