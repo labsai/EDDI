@@ -447,8 +447,11 @@ leaves a marker in the state. The marker is missed by every complete run, exactl
 page, and once it has been missed `tombstoneAfterMissedRuns` times a run removes every chunk of the
 source that no run since the purge wrote. A page only briefly absent after the purge therefore gets
 the same grace as any other: once it is back it is re-embedded and survives. The sweep runs only on a
-complete run that read every document it found; a run with a failure leaves the old chunks alone and
-the next such run sweeps.
+complete run that read every document it found: a document the server would not serve (a timeout, a
+5xx, a 429, a 401 or 403) or that failed to embed still has only its old chunks, so such a run leaves
+them alone and the next run without one sweeps. A failure that answered the question does not hold it
+back — a 404 or 410 says the page is gone, and an uploaded file with no readable text has had its old
+version retired already — so one dead link does not keep every orphan retrievable.
 
 **Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
@@ -570,7 +573,8 @@ into a browser — so extraction is bounded in these ways:
   PDFBox allocate anything; it decodes each stream's declared filter chain (Flate, LZW, RunLength,
   ASCIIHex, ASCII85) and passes over image streams, which text extraction never decodes. A page's
   program is checked against the deadline as it runs, and a page that lays out far more glyphs than
-  the character cap could ever keep is stopped rather than held in memory whole.
+  the character cap could ever keep is stopped rather than held in memory whole — keeping the text it
+  laid out up to that point, so a dense first page is not mistaken for a scan.
 - **An archive naming the same part twice is refused.** A real Office file never does, and two entries
   under one name means two readers can disagree about the contents.
 

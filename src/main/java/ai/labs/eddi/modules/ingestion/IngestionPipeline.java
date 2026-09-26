@@ -414,12 +414,15 @@ public class IngestionPipeline {
      * Only on a run that read every document it found: a document that failed to
      * embed, or that the server would not serve, still has only its old chunks, and
      * they are the ones to keep. Otherwise the marker stays live and the next such
-     * run sweeps.
+     * run sweeps. A failure that answered the question does not hold the sweep
+     * back: a 404 or 410 says the page is gone, and a file that yields no text has
+     * had its old version retired already — so one dead link, or one unreadable
+     * upload, no longer keeps every orphan retrievable for good.
      *
      * @return whether the sweep ran, so the marker can be retired
      */
     private boolean sweepOrphans(IngestionSource source, String sourceKey, String runId, Collector collector) {
-        if (collector.failed > 0 || collector.superseded) {
+        if (collector.inconclusive > 0 || collector.superseded) {
             return false;
         }
         Set<String> runsSinceClear = new HashSet<>();
@@ -860,6 +863,14 @@ public class IngestionPipeline {
          * Of those failures, the ones that said nothing about whether the page exists.
          */
         private int unreachable;
+        /**
+         * Failures after which a document's old chunks may still be its only copy: the
+         * content could not be looked at, did not embed, or its superseded chunks could
+         * not be removed. The orphan sweep waits for a run with none. Not
+         * {@link #failed}, which also counts the definitive answers — a 404, a file
+         * with no text.
+         */
+        private int inconclusive;
         private int segments;
         private int tombstoned;
         private boolean replaceUnsupported;
@@ -973,6 +984,9 @@ public class IngestionPipeline {
         public void onError(CrawlError error) {
             failed++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+            if (error.contentUnknown()) {
+                inconclusive++;
+            }
 
             if (mode != Mode.INGEST || error.documentId() == null || !error.contentUnknown()) {
                 return;
@@ -1060,6 +1074,7 @@ public class IngestionPipeline {
                 LOGGER.warnf(e, "Could not remove the superseded chunks of file '%s' of source '%s'",
                         LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()));
                 unreachable++;
+                inconclusive++;
                 stateStore.recordUnreachable(sourceKey, file.fileId(), runId);
                 return;
             }
@@ -1069,6 +1084,7 @@ public class IngestionPipeline {
 
         private void recordDocumentFailure(RuntimeException e) {
             failed++;
+            inconclusive++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             LOGGER.warnf(e, "Failed to ingest a document of source '%s'",
                     LogSanitizer.sanitize(source.getName()));

@@ -680,6 +680,38 @@ class RagSourceIngestionServiceTest {
         }
 
         @Test
+        @DisplayName("the fire's caller hears the outcome even when settling the source afterwards fails")
+        void theOutcomeIsReportedWhenCleanUpThrows() throws Exception {
+            // Settling a source that changed under its run touches the state store. A
+            // failure there used to escape the worker before the report, so a failed
+            // scheduled run left no FAILED entry in the fire log.
+            var source = source("0 2 * * *");
+            var renamed = knowledgeBase(source("0 2 * * *"));
+            renamed.setName("renamed-while-running");
+            var currentVersion = mock(IResourceStore.IResourceId.class);
+            when(currentVersion.getVersion()).thenReturn(3);
+            when(ragStore.read(KB_ID, 1)).thenReturn(knowledgeBase(source));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(currentVersion);
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+            // doThrow, not when(...): the setUp stub would run on when()'s own call.
+            doThrow(new IngestionStateStoreException("database unwell", null))
+                    .when(pipeline).claimForMaintenance(anyString(), any());
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+                    .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
+            var outcome = new AtomicReference<IngestionReport>();
+            var done = new CountDownLatch(1);
+
+            service.processScheduledFire(KB_ID, 1, SOURCE_ID, report -> {
+                outcome.set(report);
+                done.countDown();
+            });
+
+            assertTrue(done.await(5, TimeUnit.SECONDS), "the outcome must be reported");
+            assertEquals(IngestionReport.Outcome.FAILED, outcome.get().outcome());
+            verify(pipeline).claimForMaintenance(eq(KB_ID), any());
+        }
+
+        @Test
         @DisplayName("a shutdown closes the runs in flight instead of leaving them to be reaped")
         void shutdownClosesRunsInFlight() throws Exception {
             // A worker is a virtual thread that just stops with the JVM, leaving its

@@ -1008,6 +1008,68 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a dead link does not hold the sweep back")
+        void aDeadLinkStillSweeps() {
+            // The sweep waited for a run with no failure at all, and a 404 counts as
+            // one. One dead link on a site therefore kept every orphan from before the
+            // purge retrievable for good — the defect the sweep exists to fix.
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a><a href=\"" + SITE + "/dead\">d</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .page(SITE + "/gone", pageWith("Will vanish."))
+                    .page(SITE + "/dead", pageWith("Will be a 404."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/dead\">d</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .status(SITE + "/dead", 404);
+            IngestionReport report = null;
+            for (int i = 0; i < 3; i++) {
+                report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+
+            assertEquals(1, report.documentsFailed(), "the dead link is still reported");
+            assertTrue(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
+                    "a page that left before the purge must not stay retrievable because another one 404s");
+            assertTrue(embeddingStore.segmentsOf(SITE + "/dead").isEmpty(),
+                    "nor the dead page itself, whose only chunks predate the purge");
+            assertFalse(embeddingStore.segmentsOf(SITE + "/keep").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a document that failed to embed keeps its old chunks through the sweep")
+        void anEmbeddingFailureHoldsTheSweepBack() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/stuck\">s</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .page(SITE + "/stuck", pageWith("Provider refuses this one."))
+                    .page(SITE + "/gone", pageWith("Will vanish."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            doAnswer(invocation -> {
+                List<TextSegment> segments = invocation.getArgument(0);
+                if (segments.stream().anyMatch(segment -> segment.text().contains("Provider refuses"))) {
+                    throw new RuntimeException("provider returned 429");
+                }
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/stuck\">s</a></body></html>")
+                    .page(SITE + "/stuck", pageWith("Provider refuses this one."));
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+
+            assertFalse(embeddingStore.segmentsOf(SITE + "/stuck").isEmpty(),
+                    "a page that did not embed has only its chunks from before the purge, and keeps them");
+        }
+
+        @Test
         @DisplayName("an ordinary run, with state, sweeps nothing")
         void aRunWithStateSweepsNothing() {
             FakeSite site = new FakeSite()

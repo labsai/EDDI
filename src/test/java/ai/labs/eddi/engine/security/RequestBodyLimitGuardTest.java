@@ -14,6 +14,7 @@ import io.quarkus.vertx.http.runtime.filters.Filters;
 import io.vertx.ext.web.RoutingContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigInteger;
 
@@ -21,9 +22,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -81,13 +84,32 @@ class RequestBodyLimitGuardTest {
     }
 
     @Test
-    @DisplayName("refuses an HTTP/2 body that arrives without a length")
-    void refusesAnUnsizedHttp2Body() {
-        RoutingContext context = request("PUT", "/agentstore/agents/abc", null, null, HttpVersion.HTTP_2, false);
+    @DisplayName("an HTTP/2 GET that has not ended yet when the filter runs is not taken for an unsized body")
+    void allowsAnUnendedHttp2Get() {
+        // A bodyless GET is not yet ended when a filter sees it, so "HTTP/2 and not
+        // ended" refused ordinary reads: agent sync's GETs to another instance, sent
+        // over h2c by the JDK client, came back 411 and the sync failed with 502.
+        RoutingContext context = request("GET", "/agentstore/agents/abc/currentversion", null, null,
+                HttpVersion.HTTP_2, false);
 
         guard().handle(context);
 
-        verify(context.response()).setStatusCode(411);
+        verify(context).next();
+        verify(context.response(), never()).setStatusCode(anyInt());
+    }
+
+    @Test
+    @DisplayName("an HTTP/2 refusal carries no Connection header, which HTTP/2 forbids")
+    void anHttp2RefusalHasNoConnectionHeader() {
+        // The JDK client discards a response carrying one as malformed, so the
+        // caller saw a protocol error instead of the 413.
+        RoutingContext context = request("PUT", "/agentstore/agents/abc", 40 * MB, null, HttpVersion.HTTP_2, false);
+
+        guard().handle(context);
+
+        verify(context.response()).setStatusCode(413);
+        verify(context.response(), never()).putHeader(eq(HttpHeaders.CONNECTION), any(CharSequence.class));
+        verify(context.response()).end(anyString());
     }
 
     @Test
@@ -171,13 +193,22 @@ class RequestBodyLimitGuardTest {
         // same mechanism HttpMethodGuard relies on. Proving that ordering end to end
         // needs a booted application (a @QuarkusTest), which needs the Docker-backed
         // dev services this unit suite does not have; what can be proven here is that
-        // the guard puts itself in that chain, below HttpMethodGuard.
+        // the guard puts itself in that chain, below HttpMethodGuard. Both register
+        // on one Filters, and the order is read from what each actually passed —
+        // higher runs first — rather than from the two constants, which says
+        // nothing about what register() does with them.
         Filters filters = mock(Filters.class);
 
+        new HttpMethodGuard().register(filters);
         guard().register(filters);
 
-        verify(filters).register(any(), eq(RequestBodyLimitGuard.PRIORITY));
-        assertTrue(RequestBodyLimitGuard.PRIORITY < HttpMethodGuard.PRIORITY);
+        ArgumentCaptor<Integer> priorities = ArgumentCaptor.forClass(Integer.class);
+        verify(filters, times(2)).register(any(), priorities.capture());
+        int methodGuard = priorities.getAllValues().get(0);
+        int bodyGuard = priorities.getAllValues().get(1);
+        assertEquals(RequestBodyLimitGuard.PRIORITY, bodyGuard);
+        assertTrue(bodyGuard < methodGuard, "a refused method must be turned away before its body is sized: "
+                + bodyGuard + " is not below " + methodGuard);
     }
 
     @Test

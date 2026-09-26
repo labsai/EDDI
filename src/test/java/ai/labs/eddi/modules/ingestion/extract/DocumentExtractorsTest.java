@@ -477,9 +477,26 @@ class DocumentExtractorsTest {
             // million of them was a million objects before the character cap applied.
             String huge = "x".repeat(25_000);
 
-            String text = extractor.extract(OfficeFixtures.pdf("Intro", huge), limits.withMaxCharacters(100));
+            String text = extractor.extract(OfficeFixtures.pdf("Intro", huge, "Never reached"),
+                    limits.withMaxCharacters(100));
 
-            assertEquals("Intro", text);
+            assertTrue(text.startsWith("Intro\n\nxxxx"), text);
+            assertTrue(text.length() <= 100, text);
+            assertFalse(text.contains("Never"), text);
+        }
+
+        @Test
+        @DisplayName("keeps what a dense first page laid out before it was stopped")
+        void keepsTheTextOfADenseFirstPage() {
+            // The page is stopped at its glyph allowance. Its text used to be dropped
+            // with it, so a readable PDF whose first page is a small-font table came
+            // back empty — and the upload probe called it a scan.
+            String dense = "dense table cell ".repeat(1_500);
+
+            String text = extractor.extract(OfficeFixtures.pdf(dense, "Second page"), limits.withMaxCharacters(64));
+
+            assertTrue(text.startsWith("dense table cell dense"), text);
+            assertTrue(text.length() <= 64, text);
         }
 
         /**
@@ -540,6 +557,16 @@ class DocumentExtractorsTest {
         void refusesBlankText() {
             assertThrows(UnreadableDocumentException.class, () -> extractors.requireText(
                     "  \n\t ".getBytes(StandardCharsets.UTF_8), "text/plain", limits));
+        }
+
+        @Test
+        @DisplayName("accepts a PDF whose first page holds more glyphs than the probe lays out")
+        void acceptsADenseFirstPage() {
+            // The probe asks for a few dozen characters, so the first page may lay out
+            // only about twenty thousand glyphs. A denser page is still text, not a scan.
+            byte[] pdf = OfficeFixtures.pdf("dense table cell ".repeat(1_500));
+
+            extractors.requireText(pdf, "application/pdf", limits);
         }
 
         @Test
