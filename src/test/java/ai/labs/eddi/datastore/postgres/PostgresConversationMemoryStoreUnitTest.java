@@ -116,6 +116,8 @@ class PostgresConversationMemoryStoreUnitTest {
 
         assertEquals(4L, store.getRevision("conv-123"));
         assertNull(store.getRevision("conv-123"));
+        // Both paths - a row found and no row - must release the ResultSet.
+        verify(resultSet, times(2)).close();
     }
 
     /**
