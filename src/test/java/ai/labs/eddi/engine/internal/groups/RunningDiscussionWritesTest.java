@@ -12,9 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -72,10 +70,9 @@ class RunningDiscussionWritesTest {
         doThrow(new IResourceStore.ResourceModifiedException("persisted is CANCELLED"))
                 .when(store).updateIfState(eq(gc), any());
 
-        var thrown = assertThrows(RunningDiscussionWrites.DiscussionSupersededException.class,
+        assertThrows(RunningDiscussionWrites.DiscussionSupersededException.class,
                 () -> RunningDiscussionWrites.updateWhileRunning(store, gc));
 
-        assertTrue(RunningDiscussionWrites.isLostOwnership(new RuntimeException("wrapped", thrown)));
         verify(store, never()).update(any());
     }
 
@@ -86,9 +83,8 @@ class RunningDiscussionWritesTest {
         doThrow(new IGroupConversationStore.GroupConversationGoneException("gone", null))
                 .when(store).updateIfState(eq(gc), any());
 
-        var thrown = assertThrows(IGroupConversationStore.GroupConversationGoneException.class,
+        assertThrows(IGroupConversationStore.GroupConversationGoneException.class,
                 () -> RunningDiscussionWrites.updateWhileRunning(store, gc));
-        assertTrue(RunningDiscussionWrites.isLostOwnership(thrown));
-        assertFalse(RunningDiscussionWrites.isLostOwnership(new IllegalStateException("unrelated")));
+        verify(store, never()).update(any());
     }
 }

@@ -83,28 +83,4 @@ public final class RunningDiscussionWrites {
             super("Group conversation " + groupConversationId + " is no longer running — another writer owns its state", cause);
         }
     }
-
-    /**
-     * Whether {@code failure}, anywhere in its cause chain, is this leg losing its
-     * document — superseded or deleted. Such a failure is never a discussion
-     * failure: nothing broke, somebody else decided the outcome.
-     */
-    public static boolean isLostOwnership(Throwable failure) {
-        return findCause(failure, DiscussionSupersededException.class) != null
-                || findCause(failure, IGroupConversationStore.GroupConversationGoneException.class) != null;
-    }
-
-    /** The first throwable of {@code type} in {@code failure}'s cause chain. */
-    public static <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
-        int depth = 0;
-        for (Throwable t = failure; t != null && depth < 32; t = t.getCause(), depth++) {
-            if (type.isInstance(t)) {
-                return type.cast(t);
-            }
-            if (t.getCause() == t) {
-                break;
-            }
-        }
-        return null;
-    }
 }
