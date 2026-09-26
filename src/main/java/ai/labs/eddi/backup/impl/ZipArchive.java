@@ -30,7 +30,7 @@ public class ZipArchive implements IZipArchive {
     static final String MAX_TOTAL_BYTES_PROPERTY = "eddi.backup.import.max-uncompressed-bytes";
 
     static final int DEFAULT_MAX_ENTRIES = 10_000;
-    static final long DEFAULT_MAX_ENTRY_BYTES = 64L * 1024 * 1024;
+    static final long DEFAULT_MAX_ENTRY_BYTES = 32L * 1024 * 1024;
     static final long DEFAULT_MAX_TOTAL_BYTES = 256L * 1024 * 1024;
 
     /**
@@ -53,7 +53,7 @@ public class ZipArchive implements IZipArchive {
 
     @Inject
     public ZipArchive(@ConfigProperty(name = MAX_ENTRIES_PROPERTY, defaultValue = "10000") int maxEntries,
-            @ConfigProperty(name = MAX_ENTRY_BYTES_PROPERTY, defaultValue = "67108864") long maxEntryBytes,
+            @ConfigProperty(name = MAX_ENTRY_BYTES_PROPERTY, defaultValue = "33554432") long maxEntryBytes,
             @ConfigProperty(name = MAX_TOTAL_BYTES_PROPERTY, defaultValue = "268435456") long maxTotalBytes) {
         this.maxEntries = maxEntries;
         this.maxEntryBytes = maxEntryBytes;
