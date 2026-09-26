@@ -9,9 +9,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.Deflater;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -260,6 +263,150 @@ class DocumentExtractorsTest {
                     limits.withMaxCharacters(4));
             assertTrue(text.length() <= 4, text);
         }
+
+        /** A limit small enough that a test can exceed it without allocating much. */
+        private final ExtractionLimits oneMegabyte = new ExtractionLimits(200_000, 500, 5_000, 64, 1024 * 1024);
+
+        @Test
+        @DisplayName("refuses a stream that inflates past the budget, before PDFBox decodes it")
+        void refusesADeflateBomb() {
+            // PDFBox decodes a stream whole into memory, with no limit of its own. A
+            // few kilobytes of deflate expand to gigabytes, and the first read of such
+            // a stream was an OutOfMemoryError in the ingestion worker.
+            byte[] bomb = pdfWithStream(zlib(new byte[4 * 1024 * 1024]));
+
+            var failure = assertThrows(UnreadableDocumentException.class, () -> extractor.extract(bomb, oneMegabyte));
+
+            assertTrue(failure.getMessage().contains("expands"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("measures a stream the way PDFBox reads it, whatever its first two bytes say")
+        void refusesABombBehindABogusHeader() {
+            // PDFBox skips the zlib header without checking it. A scan that looked for
+            // a valid header first would pass straight over this one.
+            byte[] rawDeflate = deflate(new byte[4 * 1024 * 1024], true);
+            byte[] disguised = new byte[rawDeflate.length + 2];
+            disguised[0] = 'Q';
+            disguised[1] = 'Q';
+            System.arraycopy(rawDeflate, 0, disguised, 2, rawDeflate.length);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdfWithStream(disguised), oneMegabyte));
+
+            // Not merely refused — the fixture is no loadable PDF, so PDFBox would
+            // refuse it too. Refused by the budget, before PDFBox saw it.
+            assertTrue(failure.getMessage().contains("expands"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("measures a stream compressed twice at the level that expands most")
+        void refusesANestedBomb() {
+            byte[] twice = zlib(zlib(new byte[4 * 1024 * 1024]));
+            assertTrue(zlib(new byte[4 * 1024 * 1024]).length < 1024 * 1024,
+                    "the outer level alone must be within the budget, or this proves nothing");
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdfWithStream(twice), oneMegabyte));
+
+            assertTrue(failure.getMessage().contains("expands"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("a stream within the budget is not refused")
+        void acceptsAStreamWithinTheBudget() {
+            // The same fixture shape as the bombs, below the budget: what refuses it
+            // is PDFBox, because it is no real PDF — not the budget.
+            byte[] fine = pdfWithStream(zlib(new byte[512 * 1024]));
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(fine, oneMegabyte));
+
+            assertFalse(failure.getMessage().contains("expands"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("gives up with a message once the time budget is spent")
+        void honoursItsTimeBudget() {
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(OfficeFixtures.pdf("Some text"), limits.withMaxDuration(Duration.ofNanos(1))));
+
+            assertTrue(failure.getMessage().contains("too long"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("stops a page that lays out far more glyphs than could ever be kept")
+        void stopsAPageThatClaimsTooManyGlyphs() {
+            // A page's glyphs are held until the page is done, so one page claiming a
+            // million of them was a million objects before the character cap applied.
+            String huge = "x".repeat(25_000);
+
+            String text = extractor.extract(OfficeFixtures.pdf("Intro", huge), limits.withMaxCharacters(100));
+
+            assertEquals("Intro", text);
+        }
+
+        /**
+         * Not a loadable PDF — it does not need to be: the budget is checked on the raw
+         * bytes before PDFBox is given them.
+         */
+        private byte[] pdfWithStream(byte[] data) {
+            var out = new ByteArrayOutputStream();
+            out.writeBytes(("%PDF-1.4\n1 0 obj\n<< /Length " + data.length + " /Filter /FlateDecode >>\nstream\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.writeBytes(data);
+            out.writeBytes("\nendstream\nendobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII));
+            return out.toByteArray();
+        }
+
+        private byte[] zlib(byte[] data) {
+            return deflate(data, false);
+        }
+
+        private byte[] deflate(byte[] data, boolean raw) {
+            var deflater = new Deflater(Deflater.BEST_COMPRESSION, raw);
+            try {
+                deflater.setInput(data);
+                deflater.finish();
+                var out = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                while (!deflater.finished()) {
+                    out.write(buffer, 0, deflater.deflate(buffer));
+                }
+                return out.toByteArray();
+            } finally {
+                deflater.end();
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("Probing an upload for text")
+    class ProbingForText {
+
+        @Test
+        @DisplayName("refuses a scan with no text layer, and says why")
+        void refusesAScan() {
+            // It used to be stored, listed as waiting to be indexed, and skipped as
+            // blank by every run, with nothing anywhere saying why.
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractors.requireText(OfficeFixtures.pdfWithNoText(), "application/pdf", limits));
+
+            assertTrue(failure.getMessage().contains("no text layer"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("refuses a text file with nothing in it")
+        void refusesBlankText() {
+            assertThrows(UnreadableDocumentException.class, () -> extractors.requireText(
+                    "  \n\t ".getBytes(StandardCharsets.UTF_8), "text/plain", limits));
+        }
+
+        @Test
+        @DisplayName("accepts a file with text")
+        void acceptsText() {
+            extractors.requireText(OfficeFixtures.pdf("", "Second page has words"), "application/pdf", limits);
+        }
     }
 
     @Nested
@@ -486,6 +633,20 @@ class DocumentExtractorsTest {
             byte[] png = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
             assertThrows(UnreadableDocumentException.class,
                     () -> extractors.resolveMimeType("chart.png", png));
+        }
+
+        @Test
+        @DisplayName("refuses text under a name that claims a format with a signature")
+        void refusesTextNamedAsABinaryFormat() {
+            // The name's word used to be taken, so a text file renamed .pdf or .docx
+            // was stored as one — and failed on every run as a corrupt document.
+            byte[] text = "just some notes".getBytes(StandardCharsets.UTF_8);
+
+            for (String name : List.of("notes.pdf", "notes.docx", "notes.xlsx", "notes.pptx")) {
+                var failure = assertThrows(UnreadableDocumentException.class,
+                        () -> extractors.resolveMimeType(name, text), name);
+                assertTrue(failure.getMessage().contains("not a"), failure.getMessage());
+            }
         }
 
         @Test

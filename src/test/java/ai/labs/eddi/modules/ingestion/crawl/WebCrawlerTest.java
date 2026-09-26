@@ -173,14 +173,70 @@ class WebCrawlerTest {
         @Test
         @DisplayName("a canonical link decides the document identity")
         void honoursCanonicalLink() {
+            // Honoured as de-duplication: the page it names is fetched and stored under
+            // its own URL, and this one is not stored a second time.
             FakeSite site = new FakeSite()
                     .page(SITE + "/a?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/a\">"
-                            + "</head><body>A</body></html>");
+                            + "</head><body>A</body></html>")
+                    .page(SITE + "/a", "<html><body>A</body></html>");
             RecordingSink sink = new RecordingSink();
 
             new WebCrawler(site).crawl(request(SITE + "/a?page=2"), sink);
 
             assertEquals(List.of(SITE + "/a"), sink.documentIds());
+        }
+
+        @Test
+        @DisplayName("a canonical link cannot store one page's content under another page's id")
+        void canonicalCannotTakeOverAnotherPage() {
+            // The canonical used to BE the identity: any page on the host could name
+            // /pricing as its canonical and have its own text embedded as /pricing.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/forum/post", "<html><head><link rel=\"canonical\" href=\"" + SITE
+                            + "/pricing\"></head><body>Everything is free today</body></html>")
+                    .page(SITE + "/pricing", "<html><body>Plans start at ten euros</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/forum/post"), sink);
+
+            assertEquals(List.of(SITE + "/pricing"), sink.documentIds());
+            assertTrue(sink.page(SITE + "/pricing").html().contains("ten euros"),
+                    "the document stored as /pricing must be /pricing's own content");
+            assertFalse(sink.page(SITE + "/pricing").html().contains("free today"));
+        }
+
+        @Test
+        @DisplayName("a page whose canonical target produces nothing is stored as itself")
+        void canonicalToAMissingPageKeepsThePage() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/a?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/a\">"
+                            + "</head><body>Only here</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/a?page=2"), sink);
+
+            assertEquals(List.of(SITE + "/a?page=2"), sink.documentIds(),
+                    "deferring to a page that is not there must not lose this one");
+        }
+
+        @Test
+        @DisplayName("the links of a page that defers to its canonical are still followed")
+        void deferringPageStillContributesLinks() {
+            // The second page of a listing that names the first as canonical is where
+            // the later entries are linked from. Returning before reading its links
+            // made every one of them unreachable, and then "missing".
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/list?page=2"))
+                    .page(SITE + "/list", "<html><body>first page</body></html>")
+                    .page(SITE + "/list?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/list\">"
+                            + "</head><body><a href=\"" + SITE + "/item-7\">item 7</a></body></html>")
+                    .page(SITE + "/item-7", "<html><body>Item seven</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/item-7"), sink.documentIds().toString());
+            assertFalse(sink.documentIds().contains(SITE + "/list?page=2"));
         }
 
         @Test
@@ -514,26 +570,55 @@ class WebCrawlerTest {
     @DisplayName("responses")
     class Responses {
 
+        /** A crawl one link deep, so the seed's links are followed and /a is a leaf. */
+        private CrawlRequest oneLinkDeep() {
+            return request(SITE + "/", new Scope(true, false, "/", 1, List.of()), Limits.defaults());
+        }
+
         @Test
         @DisplayName("a 304 reports the document unchanged rather than re-ingesting it")
         void notModifiedIsReportedUnchanged() {
-            FakeSite site = new FakeSite().conditional(SITE + "/a", "<html><body>A</body></html>", "\"v1\"");
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .conditional(SITE + "/a", "<html><body>A</body></html>", "\"v1\"");
             RecordingSink sink = new RecordingSink().knows(SITE + "/a", "\"v1\"", null);
 
-            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/a"), sink);
+            CrawlSummary summary = new WebCrawler(site).crawl(oneLinkDeep(), sink);
 
             assertEquals(List.of(SITE + "/a"), sink.unchanged());
-            assertTrue(sink.pages().isEmpty());
+            assertEquals(1, sink.pages().size(), "only the seed, whose links were wanted, is downloaded");
             assertEquals(1, summary.pagesUnchanged());
+        }
+
+        @Test
+        @DisplayName("a page whose links are followed is never revalidated, so its children are still reached")
+        void pagesAboveTheDepthLimitAreFetchedInFull() {
+            // A 304 has no body and so no links. The children of an unchanged parent
+            // were never reached, a crawl that otherwise covered the site called them
+            // missing, and after two runs they were deleted.
+            FakeSite site = new FakeSite()
+                    .conditional(SITE + "/", linkTo(SITE + "/child"), "\"v1\"")
+                    .page(SITE + "/child", "<html><body>Child</body></html>");
+            RecordingSink sink = new RecordingSink()
+                    // Keyed as the crawler keys the seed: its canonical form.
+                    .knows(CrawlUrls.canonicalize(SITE + "/"), "\"v1\"", null);
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/child"), sink.documentIds().toString());
+            var command = site.requests().stream().filter(r -> r.url().equals(SITE + "/")).findFirst().orElseThrow();
+            assertEquals(null, command.ifNoneMatch(), "validators would earn a 304 and hide the links");
         }
 
         @Test
         @DisplayName("stored validators are sent as conditional headers")
         void sendsConditionalHeaders() {
-            FakeSite site = new FakeSite().page(SITE + "/a", "<html><body>A</body></html>");
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .page(SITE + "/a", "<html><body>A</body></html>");
             RecordingSink sink = new RecordingSink().knows(SITE + "/a", "\"v1\"", "Wed, 21 Oct 2026 07:28:00 GMT");
 
-            new WebCrawler(site).crawl(request(SITE + "/a"), sink);
+            new WebCrawler(site).crawl(oneLinkDeep(), sink);
 
             var command = site.requests().stream().filter(r -> r.url().equals(SITE + "/a")).findFirst().orElseThrow();
             assertEquals("\"v1\"", command.ifNoneMatch());
@@ -782,6 +867,54 @@ class WebCrawlerTest {
 
             assertTrue(sink.documentIds().contains(SITE + "/orphan"),
                     "a page in the sitemap must be found even when nothing links to it");
+        }
+
+        @Test
+        @DisplayName("a sitemap index is followed to the sitemaps it lists")
+        void followsSitemapIndex() {
+            // A site with more than one sitemap publishes an index. Its <loc> entries
+            // are sitemaps, and were queued as pages — fetched, skipped as not HTML,
+            // and the pages they list never found.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap_index.xml")
+                    .sitemapIndex(SITE + "/sitemap_index.xml", SITE + "/sitemap-docs.xml")
+                    .sitemap(SITE + "/sitemap-docs.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+            assertEquals(1, site.requestCount(SITE + "/sitemap-docs.xml"));
+        }
+
+        @Test
+        @DisplayName("without a Sitemap line, the conventional /sitemap.xml is read")
+        void readsTheConventionalSitemap() {
+            FakeSite site = new FakeSite()
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            // robots.txt is not read at all here, which used to mean no sitemap either.
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("the conventional /sitemap.xml is not read where robots.txt disallows it")
+        void conventionalSitemapHonoursRobots() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nDisallow: /sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>");
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(site.wasRequested(SITE + "/sitemap.xml"));
         }
 
         @Test

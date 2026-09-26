@@ -27,10 +27,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,6 +48,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,6 +81,9 @@ class RagSourceIngestionServiceTest {
         // returns an empty Optional and every runAsync assertion below passes for the
         // wrong reason.
         when(pipeline.reserveRun(anyString(), any())).thenAnswer(invocation -> stateStore
+                .startRun(IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
+        // The maintenance claim too: a purge is decided under it.
+        when(pipeline.claimForMaintenance(anyString(), any())).thenAnswer(invocation -> stateStore
                 .startRun(IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
     }
 
@@ -117,6 +125,33 @@ class RagSourceIngestionServiceTest {
             assertTrue(RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata()));
             assertEquals(KB_ID, RagIngestionSchedules.ragConfigId(schedule.getMetadata()));
             assertEquals(SOURCE_ID, RagIngestionSchedules.sourceId(schedule.getMetadata()));
+        }
+
+        @Test
+        @DisplayName("a cron more frequent than the deployment allows is refused, naming the source")
+        void refusesACronBelowTheMinimumInterval() {
+            // Ingestion schedules are written to the store directly, not through the
+            // schedule API that enforces eddi.schedule.min-interval-seconds — so the
+            // operator's minimum held for every schedule but these.
+            service.minIntervalSeconds = 3600;
+            var knowledgeBase = knowledgeBase(source("*/5 * * * *"));
+
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> service.requireAllowedIntervals(knowledgeBase));
+
+            assertTrue(failure.getMessage().contains("docs"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("min-interval-seconds"), failure.getMessage());
+            assertDoesNotThrow(() -> service.requireAllowedIntervals(knowledgeBase(source("0 2 * * *"))));
+        }
+
+        @Test
+        @DisplayName("a writer that skipped the check still does not get a too-frequent schedule")
+        void syncSkipsACronBelowTheMinimumInterval() throws Exception {
+            service.minIntervalSeconds = 3600;
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("*/5 * * * *")), Set.of());
+
+            verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
@@ -582,16 +617,60 @@ class RagSourceIngestionServiceTest {
     class ScheduledFire {
 
         @Test
-        @DisplayName("loads the knowledge base and runs the named source")
+        @DisplayName("loads the knowledge base, claims a run and starts it on its own worker")
         void runsTheNamedSource() throws Exception {
             var source = source("0 2 * * *");
             when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST)))
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
                     .thenReturn(IngestionReport.skipped(SOURCE_ID, "stub"));
 
-            service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+            IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
 
-            verify(pipeline).run(eq(KB_ID), any(RagConfiguration.class), any(IngestionSource.class), eq(Mode.INGEST));
+            assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
+            assertTrue(report.isSuccess(), "a started run is a successful fire");
+            verify(pipeline, timeout(5_000)).run(eq(KB_ID), any(RagConfiguration.class),
+                    any(IngestionSource.class), eq(Mode.INGEST), eq(report.runId()));
+        }
+
+        @Test
+        @DisplayName("the crawl does not run on the scheduler's thread, which cancels a fire after its lease")
+        void theFireReturnsWhileTheRunGoesOn() throws Exception {
+            // The scheduler waits a lease (five minutes) for a fire and then
+            // interrupts it; a crawl's default budget is ten. Run on that thread,
+            // every sizeable scheduled crawl was interrupted mid-run and never
+            // reconciled a deletion.
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            var release = new CountDownLatch(1);
+            var runThread = new AtomicReference<Thread>();
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+                runThread.set(Thread.currentThread());
+                release.await(10, TimeUnit.SECONDS);
+                return IngestionReport.skipped(SOURCE_ID, "stub");
+            });
+
+            try {
+                IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+
+                assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
+                verify(pipeline, timeout(5_000)).run(anyString(), any(), any(), eq(Mode.INGEST), anyString());
+                assertNotEquals(Thread.currentThread(), runThread.get(), "the run needs a thread of its own");
+            } finally {
+                release.countDown();
+            }
+        }
+
+        @Test
+        @DisplayName("a fire while a run holds the source is reported as already running, not started")
+        void aFireWhileRunningIsAlreadyRunning() throws Exception {
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source));
+
+            IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+
+            assertEquals(IngestionReport.Outcome.ALREADY_RUNNING, report.outcome());
+            verify(pipeline, never()).run(anyString(), any(), any(), any(), anyString());
         }
 
         @Test
@@ -672,10 +751,47 @@ class RagSourceIngestionServiceTest {
             String otherRunId = stateStore.startRun(otherKey).orElseThrow();
             stateStore.recordIngested(otherKey, "doc", "hash", null, null, otherRunId);
 
-            service.purge(KB_ID, source);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+
+            assertTrue(service.purge(KB_ID, source));
 
             assertTrue(stateStore.lookup(key, "doc").isEmpty());
             assertTrue(stateStore.lookup(otherKey, "doc").isPresent(), "another knowledge base must be untouched");
+            assertTrue(stateStore.activeRun(key).isEmpty(), "the purge's own claim goes with the state");
+        }
+
+        @Test
+        @DisplayName("a purge is refused while a run holds the source, and purges nothing")
+        void purgeIsRefusedWhileARunHoldsTheSource() {
+            // Decided under the run claim. A check made first let a run start in
+            // between; the purge then deleted its RUNNING row — the one thing stopping
+            // a second crawl — and the worker wrote its state back over the purge.
+            var source = source(null);
+            String key = IngestionPipeline.stateKey(KB_ID, source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "doc", "hash", null, null, runId);
+
+            assertFalse(service.purge(KB_ID, source));
+
+            assertTrue(stateStore.lookup(key, "doc").isPresent());
+            assertEquals(runId, stateStore.activeRun(key).orElseThrow().runId(), "the run keeps its claim");
+        }
+
+        @Test
+        @DisplayName("a rename clears the state even while a run is in flight, and stops that run")
+        void renameClearsStateUnderARun() {
+            var source = source(null);
+            String key = IngestionPipeline.stateKey(KB_ID, source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "doc", "hash", null, null, runId);
+
+            service.forgetStateAfterRename(KB_ID, source);
+
+            assertTrue(stateStore.lookup(key, "doc").isEmpty());
+            assertTrue(stateStore.activeRun(key).isEmpty(),
+                    "the running row goes too, which is what tells the run to stop");
         }
 
         @Test
@@ -765,21 +881,137 @@ class RagSourceIngestionServiceTest {
             assertEquals(1, fileStore.list(keyOf(source)).size());
         }
 
-        @Test
-        @DisplayName("says nothing about a crawl, which owns no files of its own")
-        void ignoresCrawlSources() {
+        private IngestionSource crawlSource(String id) {
             var web = new IngestionSource.WebSource();
             web.setStartUrl("https://example.com/");
             var crawl = new IngestionSource();
-            crawl.setId("src-web");
+            crawl.setId(id);
             crawl.setName("docs");
             crawl.setWeb(web);
+            return crawl;
+        }
+
+        @Test
+        @DisplayName("removing a crawl takes what it ingested out of the knowledge base")
+        void removingACrawlTakesItsVectors() {
+            // A crawl's documents were left in place on the theory that they "come back
+            // on the next run" — but a removed source has no next run. Its chunks
+            // stayed retrievable for good, and nothing could list or delete them.
+            var crawl = crawlSource("src-web");
 
             service.discardRemovedSources(KB_ID, knowledgeBase(crawl), knowledgeBase());
 
-            // A crawl's documents come back on the next run against the same site;
-            // dropping the source is not a statement that the site is wrong.
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-web".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("turning a crawl into a file source takes the crawled pages too")
+        void changingACrawlIntoFilesTakesItsVectors() {
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawlSource("src-x")),
+                    knowledgeBase(uploadSource("src-x")));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-x".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("leaves a crawl that is still there alone")
+        void keepsACrawlThatIsStillThere() {
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawlSource("src-web")),
+                    knowledgeBase(crawlSource("src-web")));
+
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("deleting the knowledge base takes what its crawls ingested")
+        void deletingTheKnowledgeBaseTakesCrawledVectors() {
+            service.removeSchedules(KB_ID, knowledgeBase(crawlSource("src-web")));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-web".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("a run that outlived its source's removal has what it wrote afterwards removed")
+        void aRunThatOutlivedItsSourceIsCleanedUp() throws Exception {
+            // The save removed what the source had ingested, then the run — which
+            // stops only at its next check — embedded a document or two more under a
+            // source nobody lists any more.
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "late.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a run of a source that is still there is left alone afterwards")
+        void aRunOfALiveSourceIsLeftAlone() throws Exception {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "kept.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase(uploadSource("src-files")));
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        @Test
+        @DisplayName("a knowledge base that cannot be read after a run is not mistaken for a deleted one")
+        void anUnreadableKnowledgeBaseDeletesNothing() throws Exception {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "kept.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        @Test
+        @DisplayName("a run that wrote into a renamed knowledge base's old store leaves no state behind")
+        void aRunAcrossARenameIsPurgedAfterwards() throws Exception {
+            // The rename cleared the state so the next run would fill the new store;
+            // the run then recorded documents it had written into the old one, and the
+            // next run found them "unchanged" and never embedded them where retrieval
+            // now looks.
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "late.md", "hash", null, null, runId);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+            var renamed = knowledgeBase(uploadSource("src-files"));
+            renamed.setName("new-name");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            assertTrue(stateStore.lookup(key, "late.md").isEmpty());
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        private IResourceStore.IResourceId resourceId(int version) {
+            return new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return KB_ID;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return version;
+                }
+            };
         }
 
         @Test

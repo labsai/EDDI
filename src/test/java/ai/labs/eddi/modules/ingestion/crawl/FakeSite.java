@@ -105,6 +105,18 @@ public final class FakeSite implements PageFetcher {
         return this;
     }
 
+    /** Registers a sitemap index: a sitemap that lists further sitemaps. */
+    public FakeSite sitemapIndex(String url, String... sitemapUrls) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><sitemapindex>");
+        for (String sitemapUrl : sitemapUrls) {
+            xml.append("<sitemap><loc>").append(sitemapUrl).append("</loc></sitemap>");
+        }
+        xml.append("</sitemapindex>");
+        responses.put(url, new Response(200, url, "application/xml",
+                xml.toString().getBytes(StandardCharsets.UTF_8), null, null));
+        return this;
+    }
+
     @Override
     public FetchedPage fetch(FetchCommand command) throws IOException {
         requests.add(command);

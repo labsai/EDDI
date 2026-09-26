@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
@@ -25,7 +24,6 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.List;
-import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -73,6 +71,7 @@ class RestRagIngestionSourcesTest {
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBaseWithSource());
         when(sourceIngestionService.runAsync(anyString(), any(), any())).thenReturn(Optional.of("run-key"));
+        when(sourceIngestionService.purge(anyString(), any())).thenReturn(true);
     }
 
     private static RagConfiguration knowledgeBaseWithSource() {
@@ -157,16 +156,15 @@ class RestRagIngestionSourcesTest {
     @DisplayName("purging while a run is in flight is refused")
     void purgeDuringRunIsConflict() {
         // The purge deletes the RUNNING row, which is the only thing stopping a
-        // second crawl into the same knowledge base.
-        when(sourceIngestionService.activeRun(anyString(), any()))
-                .thenReturn(Optional.of(new IIngestionStateStore.IngestionRun("run-1", "kb:src-1",
-                        IIngestionStateStore.IngestionRun.Status.RUNNING, null, Instant.now(),
-                        0, 0, 0, 0, 0, 0, 0.0, null)));
+        // second crawl into the same knowledge base. Whether a run holds the source
+        // is the purge's own answer, taken under the run claim: a check made here
+        // first let a run start in between.
+        when(sourceIngestionService.purge(anyString(), any())).thenReturn(false);
 
         Response response = rest.purgeSource(KB_ID, SOURCE_ID, 1);
 
         assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
-        verify(sourceIngestionService, never()).purge(anyString(), any());
+        verify(sourceIngestionService, never()).activeRun(anyString(), any());
     }
 
     @Test

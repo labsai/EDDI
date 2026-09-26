@@ -210,6 +210,19 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified) {
+        translating("record a document as seen",
+                () -> documents.updateOne(ownedDocument(sourceId, documentId, runId),
+                        Updates.combine(
+                                Updates.set(FIELD_LAST_RUN_ID, runId),
+                                Updates.set(FIELD_MISSED_RUNS, 0),
+                                Updates.set(FIELD_TOMBSTONED, false),
+                                Updates.set(FIELD_ETAG, etag),
+                                Updates.set(FIELD_LAST_MODIFIED, lastModified)),
+                        new UpdateOptions().upsert(false)));
+    }
+
+    @Override
     public void recordUnreachable(String sourceId, String documentId, String runId) {
         // Only the run marker: the miss counter and the tombstone flag are left
         // exactly as they were, so this run neither condemns the document nor
@@ -348,7 +361,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     public List<IngestionRun> listRuns(String sourceId, int limit) {
         return translating("list a source's runs", () -> {
             List<IngestionRun> history = new ArrayList<>();
-            for (Document document : runs.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
+            for (Document document : runs.find(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.ne(FIELD_STATUS, IngestionRun.Status.MAINTENANCE.name())))
                     .sort(Sorts.descending(FIELD_STARTED_AT))
                     .limit(Math.max(1, limit))) {
                 history.add(toRun(document));

@@ -66,8 +66,9 @@ public interface CrawlSink {
      *
      * @param documentId
      *            stable canonical identity, used to match this page against what a
-     *            previous run stored. Derived from the URL after redirects and
-     *            after any {@code <link rel="canonical">}.
+     *            previous run stored. Derived from the URL that served the page,
+     *            after redirects — never from its {@code <link rel="canonical">},
+     *            which would let one page store its content under another's id
      * @param finalUrl
      *            the address actually fetched, for citation
      * @param html

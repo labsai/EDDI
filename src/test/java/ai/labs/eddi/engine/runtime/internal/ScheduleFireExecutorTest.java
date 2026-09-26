@@ -972,6 +972,23 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_ragIngestion_aStartedRunIsACompletedFire() throws Exception {
+        // The fire starts the run on its own worker and returns, so the lease can
+        // never cancel a crawl. What the run then does is in the source's run history.
+        var schedule = makeIngestionSchedule("rag-4", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport("run-7", "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                        false, false, null, Duration.ZERO, "Run run-7 started"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+        assertNull(log.errorMessage());
+        verify(scheduleStore).logFire(any());
+    }
+
+    @Test
     void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
         // The lease is shorter than a crawl's budget, so the schedule is legitimately
         // re-claimed while the first run is still going. Calling that FAILED
