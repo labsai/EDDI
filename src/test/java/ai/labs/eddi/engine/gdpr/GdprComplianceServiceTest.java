@@ -675,6 +675,20 @@ class GdprComplianceServiceTest {
         assertTrue(service.isProcessingRestricted(USER_ID));
     }
 
+    /**
+     * Review m4: only restrictProcessing writes the row with no source agent. A
+     * gdpr-category row carrying one was forged through REST or MCP before the
+     * reserved-key guard existed and must not lock the user out.
+     */
+    @Test
+    void isProcessingRestricted_ignoresAGdprRowWithASourceAgent() throws Exception {
+        var forged = new UserMemoryEntry("forged", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global, "agent-x", List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr")).thenReturn(List.of(forged));
+
+        assertFalse(service.isProcessingRestricted(USER_ID));
+    }
+
     @Test
     void unrestrictProcessing_noopIfNotRestricted() throws Exception {
         // Given — no restriction exists

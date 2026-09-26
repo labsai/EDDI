@@ -32,4 +32,14 @@ public interface IOAuthStateStore {
 
     /** Removes expired rows. */
     int deleteExpired();
+
+    /**
+     * Removes every pending authorization flow a principal started, consumed or
+     * not, for GDPR Art. 17 erasure. A state carries the principal it will bind the
+     * grant to, so a callback completing after the erasure would otherwise mint a
+     * fresh grant — a new live refresh token — for the erased identity.
+     *
+     * @return how many states were removed
+     */
+    int deleteByPrincipal(String principal);
 }

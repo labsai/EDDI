@@ -48,12 +48,12 @@ the cascade actually finished:
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
 >
-> The step names are `inFlightConversations`, `runningGroupDiscussions`,
+> The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
 > `attachments`, `hitlToolJournal`, `conversationDescriptors`,
 > `conversationCheckpoints`, `conversations`, `conversationMappingIntents`,
 > `conversationMappings`, `conversationMappingCache`, `groupConversations`,
-> `sharedArtifacts`, `schedules`, `connectionGrants`, `userMemoriesResweep`,
+> `sharedArtifacts`, `schedules`, `oauthStates`, `connectionGrants`, `userMemoriesResweep`,
 > `databaseLogs` and `auditLedger`, and they name the stores in the list below
 > plus the two cache evictions, the two lookups the cascade needs to reach them,
 > and the two signals that stop in-flight work first. `conversationIdLookup` is the worst one to
@@ -66,6 +66,9 @@ reports the same outcome: `status` is `"completed"` only when every step
 succeeded and `"partially_completed"` otherwise, alongside the same `complete`
 and `failedSteps`.
 
+`__service__` (the owner of service-bound connection grants) is a reserved system
+principal, not a user: erasing or exporting it is refused with 400.
+
 **What happens:**
 0. The user's in-flight work on the node serving the request is **stopped first**:
    running conversation turns are cancelled (they then skip their write-back to
@@ -73,8 +76,11 @@ and `failedSteps`.
    cancelled immediately. Without this, a turn or discussion still running wrote
    the data back seconds after the erasure reported success. Work running on
    another replica is not reachable from here; it is stopped by the stores
-   refusing to recreate a deleted conversation or group discussion, and step 11
-   removes any memory it managed to write in the meantime.
+   refusing to recreate a deleted conversation or group discussion, and step 12
+   removes any memory it managed to write in the meantime. From this point the
+   node's audit ledger also writes the user's pseudonym instead of their id for an
+   hour, so audit entries that cancelled work still flushes while it unwinds — or
+   that were already queued — do not land raw after step 14.
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
@@ -85,7 +91,8 @@ and `failedSteps`.
 8. Group conversation transcripts — **permanently deleted**
 9. Shared artifacts owned by the user — **permanently deleted**
 10. Schedules owned by the user — **permanently deleted**
-11. OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
+11. Pending OAuth authorization flows the user started are invalidated first (a
+    callback completing afterwards would otherwise mint a new grant), then the OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
 12. User memories — **re-swept**, for writes that landed while the cascade ran
 13. Database logs — userId **pseudonymized** (SHA-256 hash)
 14. Audit ledger — userId **pseudonymized** (SHA-256 hash)

@@ -683,8 +683,9 @@ public class GroupLifecycleOps {
 
     public void failConversation(GroupConversation gc) {
         // Never write unconditionally: conversationStore.update() is a whole-document
-        // UPSERT, so it would RE-CREATE a conversation another pod deleted and would
-        // clobber a terminal state (e.g. a cross-pod CANCELLED) with FAILED.
+        // replace, so it would clobber a terminal state (e.g. a cross-pod CANCELLED)
+        // with FAILED. (It no longer re-creates a deleted conversation — it throws
+        // GroupConversationGoneException — but the terminal-state race remains.)
         //
         // The CAS expectation must come from the PERSISTED state, not the in-memory
         // one:

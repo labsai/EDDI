@@ -77,6 +77,9 @@ public class McpGdprTools {
             return errorJson("You must pass confirmation='CONFIRM' to "
                     + "delete all user data. This action is irreversible.");
         }
+        if (GdprComplianceService.isReservedPrincipal(userId)) {
+            return errorJson("userId names a reserved system principal, not a user");
+        }
         try {
             var result = gdprComplianceService.deleteUserData(userId);
             var map = new LinkedHashMap<String, Object>();
@@ -132,6 +135,9 @@ public class McpGdprTools {
         requireRole(identity, authEnabled, "eddi-admin");
         if (userId == null || userId.isBlank()) {
             return errorJson("userId is required");
+        }
+        if (GdprComplianceService.isReservedPrincipal(userId)) {
+            return errorJson("userId names a reserved system principal, not a user");
         }
         try {
             var export = gdprComplianceService.exportUserData(userId);

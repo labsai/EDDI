@@ -118,10 +118,12 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
         if (entry.key().length() > 255) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
         }
+        // Ownership first: a caller with no access to this user learns nothing
+        // about which keys are reserved — they get the same 403 as for any key.
+        ownershipValidator.validateUserAccess(identity, entry.userId());
         if (IUserMemoryStore.isReservedKey(entry.key())) {
             return reservedKeyRefusal(entry.key());
         }
-        ownershipValidator.validateUserAccess(identity, entry.userId());
         try {
             String id = userMemoryStore.upsert(entry);
             return Response.ok(Map.of("id", id)).build();
