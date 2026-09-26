@@ -11,7 +11,10 @@ services:
       - "127.0.0.1:8180:8080"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # No default, like the root docker-compose.auth.yml: compose refuses to
+      # start without it rather than handing out admin/admin.
+      #   KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24) docker compose -f docker-compose.keycloak.yml up
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is not set - export a strong password before starting this stack}"
       KC_HOSTNAME: http://keycloak:8080
       KC_HOSTNAME_STRICT: "false"
     volumes:
@@ -49,5 +52,5 @@ volumes:
 
 # No account in the shipped realm has a password (helm/eddi/templates/NOTES.txt
 # explains why). Set one for `eddi`, `viewer` or `user` in the Keycloak admin
-# console at http://localhost:8180 — log in there with the bootstrap admin pair
-# set on the keycloak service above.
+# console at http://localhost:8180 — log in there as `admin` with the
+# KEYCLOAK_ADMIN_PASSWORD you exported.

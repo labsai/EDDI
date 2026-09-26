@@ -772,9 +772,12 @@ print_success() {
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
-    echo -e "  ${DIM}Login: install.sh printed a one-time password for \`eddi\` in the startup log${RESET}"
-    echo -e "  ${DIM}  (sudo journalctl -u google-startup-scripts | grep -A3 Login). No account ships${RESET}"
-    echo -e "  ${DIM}  a default password any more. Keycloak console admin: KEYCLOAK_ADMIN_PASSWORD${RESET}"
+    # Not in the startup log: that goes to the serial console and Cloud
+    # Logging, readable by anyone with logging.viewer on the project. The
+    # installer writes the one-time password to a root-only file instead.
+    echo -e "  ${DIM}Login: the one-time password for \`eddi\` is in /root/.eddi/first-login.txt on the VM${RESET}"
+    echo -e "  ${DIM}  (sudo cat it over gcloud compute ssh; delete it after the first login). No account${RESET}"
+    echo -e "  ${DIM}  ships a default password any more. Keycloak console admin: KEYCLOAK_ADMIN_PASSWORD${RESET}"
     echo -e "  ${DIM}  in /root/.eddi/.env on the VM.${RESET}"
   fi
 

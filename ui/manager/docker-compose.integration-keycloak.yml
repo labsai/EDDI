@@ -16,6 +16,11 @@ services:
       # application.properties already names in quarkus.oidc.auth-server-url.
       - "127.0.0.1:8180:8080"
     environment:
+      # A deliberate exception to "no default admin password": this is the
+      # throwaway CI test tier (loopback-only, `down -v` after every run, a
+      # generated realm), not something anyone deploys. Every stack meant to be
+      # run by a person — docker-compose.auth.yml, docker-compose.keycloak.yml —
+      # has no default.
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       # The issuer Keycloak stamps into tokens, pinned rather than derived from
