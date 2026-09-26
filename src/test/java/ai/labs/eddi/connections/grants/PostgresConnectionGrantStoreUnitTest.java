@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -230,9 +231,23 @@ class PostgresConnectionGrantStoreUnitTest {
         store.delete(TENANT, CONNECTION, PRINCIPAL);
 
         ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
-        verify(statement, times(2)).execute(ddl.capture());
+        verify(statement, times(3)).execute(ddl.capture());
         assertTrue(ddl.getAllValues().get(0).contains("CREATE TABLE IF NOT EXISTS connection_grants"));
         assertTrue(ddl.getAllValues().get(1).contains("CREATE INDEX IF NOT EXISTS idx_cg_tenant_principal"));
+        assertTrue(ddl.getAllValues().get(2).contains("CREATE INDEX IF NOT EXISTS idx_cg_principal ON connection_grants (principal)"));
+    }
+
+    @Test
+    @DisplayName("deleteAllByPrincipal — GDPR erasure deletes by principal alone, across tenants (H9a)")
+    void deleteAllByPrincipalSpansTenants() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(2);
+
+        assertEquals(2, store.deleteAllByPrincipal(PRINCIPAL));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertEquals("DELETE FROM connection_grants WHERE principal = ?", sql.getValue());
+        verify(preparedStatement).setString(1, PRINCIPAL);
     }
 
     @Test

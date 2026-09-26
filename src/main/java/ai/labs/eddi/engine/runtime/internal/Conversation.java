@@ -735,6 +735,19 @@ public class Conversation implements IConversation {
                 if (property == null || property.getScope() != Scope.longTerm) {
                     continue;
                 }
+                if (IUserMemoryStore.isReservedKey(propertyEntry.getKey())) {
+                    // GDPR bookkeeping (the Art. 18 flag is loaded like any global entry)
+                    // is never written back from a turn: the store refuses it, and a
+                    // property setter naming such a key would otherwise fail every turn
+                    // of the agent instead of just this one write.
+                    if (!property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                        LOGGER.warnf("Not persisting longTerm property '%s' of conversation %s: keys starting with '%s' are reserved "
+                                + "for GDPR bookkeeping", sanitize(propertyEntry.getKey()), sanitize(conversationId),
+                                IUserMemoryStore.RESERVED_KEY_PREFIX);
+                    }
+                    pending.remove(propertyEntry.getKey());
+                    continue;
+                }
                 boolean writeOwed = pending.contains(propertyEntry.getKey());
                 if (!writeOwed && property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
                     // Unchanged since the turn started AND nothing owed — already

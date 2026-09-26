@@ -1227,6 +1227,28 @@ class DreamServiceTest {
     }
 
     /**
+     * H9c: the Art. 18 flag has no owning agent, so whole-set maintenance put it in
+     * scope and a stale prune deleted it — lifting a legal restriction with no
+     * admin and no audit entry.
+     */
+    @Test
+    void prune_crossAgentMaintenance_neverTouchesTheGdprRestrictionFlag() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(400));
+        var entries = new ArrayList<>(mixedOwnershipStaleEntries());
+        entries.add(new UserMemoryEntry("gdpr-flag", "user-1", "_gdpr_processing_restricted", "true", "gdpr", Visibility.global, null,
+                List.of(), null, false, 0, stale, stale));
+        when(store.getAllEntries("user-1")).thenReturn(entries).thenReturn(List.of());
+        dreamConfig.setDetectContradictions(false);
+        dreamConfig.setCrossAgentMaintenance(true);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(3, result.entriesPruned());
+        verify(store, never()).deleteEntry("gdpr-flag");
+    }
+
+    /**
      * The same boundary on the summarization side: another agent's memory text must
      * not be serialized into the prompt that goes to <em>this</em> agent's
      * configured provider/baseUrl, and its originals must not be deleted and

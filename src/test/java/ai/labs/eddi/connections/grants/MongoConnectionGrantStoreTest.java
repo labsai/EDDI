@@ -85,7 +85,7 @@ class MongoConnectionGrantStoreTest {
         // usable.
         ArgumentCaptor<Bson> keys = ArgumentCaptor.forClass(Bson.class);
         ArgumentCaptor<IndexOptions> options = ArgumentCaptor.forClass(IndexOptions.class);
-        verify(grants, times(2)).createIndex(keys.capture(), options.capture());
+        verify(grants, times(3)).createIndex(keys.capture(), options.capture());
 
         assertEquals(List.of("tenantId", "connectionName", "principal"), List.copyOf(render(keys.getAllValues().get(0)).keySet()),
                 "the prefix order is what lets this index also serve a tenant-only scan");
@@ -98,11 +98,46 @@ class MongoConnectionGrantStoreTest {
     void createsTheTenantPrincipalIndex() {
         ArgumentCaptor<Bson> keys = ArgumentCaptor.forClass(Bson.class);
         ArgumentCaptor<IndexOptions> options = ArgumentCaptor.forClass(IndexOptions.class);
-        verify(grants, times(2)).createIndex(keys.capture(), options.capture());
+        verify(grants, times(3)).createIndex(keys.capture(), options.capture());
 
         assertEquals(List.of("tenantId", "principal"), List.copyOf(render(keys.getAllValues().get(1)).keySet()));
         assertFalse(options.getAllValues().get(1).isUnique(), "one principal legitimately holds a grant per connection, so this key repeats");
         assertEquals("idx_grant_tenant_principal", options.getAllValues().get(1).getName());
+    }
+
+    @Test
+    @DisplayName("startup — a principal-only index serves GDPR export and erasure, which span tenants")
+    void createsThePrincipalIndex() {
+        ArgumentCaptor<Bson> keys = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<IndexOptions> options = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(grants, times(3)).createIndex(keys.capture(), options.capture());
+
+        assertEquals(List.of("principal"), List.copyOf(render(keys.getAllValues().get(2)).keySet()));
+        assertEquals("idx_grant_principal", options.getAllValues().get(2).getName());
+    }
+
+    // ==================== GDPR: every tenant (H9a) ====================
+
+    @Test
+    @DisplayName("deleteAllByPrincipal — filters on the principal alone, so every tenant's grant goes")
+    void deleteAllByPrincipalSpansTenants() {
+        deleteManyRemoves(2L);
+
+        assertEquals(2, store.deleteAllByPrincipal(PRINCIPAL));
+
+        Map<String, BsonValue> filter = capturedDeleteManyFilter();
+        assertEquals(Set.of("principal"), filter.keySet());
+        assertEquals(PRINCIPAL, filter.get("principal").asString().getValue());
+    }
+
+    @Test
+    @DisplayName("findAllByPrincipal — filters on the principal alone")
+    void findAllByPrincipalSpansTenants() {
+        findReturns(List.of(fullDocument()));
+
+        assertEquals(1, store.findAllByPrincipal(PRINCIPAL).size());
+
+        assertEquals(Set.of("principal"), capturedFindFilter().keySet());
     }
 
     // ==================== find ====================

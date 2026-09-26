@@ -122,5 +122,8 @@ public class RestGdprAdmin implements IRestGdprAdmin {
         if (userId == null || userId.isBlank()) {
             throw new BadRequestException("userId must not be blank");
         }
+        if (GdprComplianceService.isReservedPrincipal(userId)) {
+            throw new BadRequestException("userId names a reserved system principal, not a user");
+        }
     }
 }

@@ -54,6 +54,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_KEY = "key";
+    /**
+     * Anchored match for {@link IUserMemoryStore#isReservedKey}; the prefix has no
+     * regex metacharacters.
+     */
+    private static final String RESERVED_KEY_REGEX = "^" + RESERVED_KEY_PREFIX;
     private static final String FIELD_VALUE = "value";
     private static final String FIELD_CATEGORY = "category";
     private static final String FIELD_VISIBILITY = "visibility";
@@ -125,6 +130,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             return;
         }
 
+        // Refused before the first write, so a rejected call leaves nothing half
+        // merged behind.
+        properties.keySet().forEach(IUserMemoryStore::rejectReservedKey);
+
         // Upsert each key-value pair as a global entry in usermemories
         Instant now = Instant.now();
         for (Map.Entry<String, Object> entry : properties.entrySet()) {
@@ -145,8 +154,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
-        // Delete all global entries for this user
-        memoriesCollection.deleteMany(and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name())));
+        // Delete all global entries for this user — except the GDPR bookkeeping keys,
+        // which only the admin unrestrict path and the erasure cascade may remove.
+        memoriesCollection.deleteMany(and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name()),
+                Filters.not(Filters.regex(FIELD_KEY, RESERVED_KEY_REGEX))));
     }
 
     // === Structured entries ===
@@ -154,6 +165,20 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public String upsert(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entry, "entry");
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        return write(entry);
+    }
+
+    @Override
+    public String upsertReserved(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        if (!IUserMemoryStore.isReservedKey(entry.key())) {
+            throw new IllegalArgumentException("upsertReserved accepts only reserved keys, got '" + entry.key() + "'");
+        }
+        return write(entry);
+    }
+
+    private String write(UserMemoryEntry entry) {
         RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
@@ -401,7 +426,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // cleanup
         Bson filter = and(
                 Filters.lt(FIELD_UPDATED_AT, cutoff.toString()),
-                Filters.not(Filters.regex(FIELD_KEY, "^_gdpr_")));
+                Filters.not(Filters.regex(FIELD_KEY, RESERVED_KEY_REGEX)));
         DeleteResult result = memoriesCollection.deleteMany(filter);
         return result.getDeletedCount();
     }

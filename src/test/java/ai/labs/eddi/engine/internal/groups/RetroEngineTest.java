@@ -71,6 +71,11 @@ class RetroEngineTest {
             return id;
         }
 
+        @Override
+        public String upsertReserved(UserMemoryEntry entry) {
+            return upsert(entry);
+        }
+
         private UserMemoryEntry withId(UserMemoryEntry e, String id, Instant createdAt) {
             return new UserMemoryEntry(id, e.userId(), e.key(), e.value(), e.category(), e.visibility(), e.sourceAgentId(),
                     e.groupIds(), e.sourceConversationId(), e.conflicted(), e.accessCount(), createdAt,

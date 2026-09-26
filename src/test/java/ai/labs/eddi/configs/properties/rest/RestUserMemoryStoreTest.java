@@ -207,11 +207,48 @@ class RestUserMemoryStoreTest {
 
     @Test
     void deleteAllForUser_shouldReturn204() throws Exception {
-        doNothing().when(store).deleteAllForUser("user-1");
-
         Response response = rest.deleteAllForUser("user-1");
 
         assertEquals(204, response.getStatus());
+        // H9c: a user clearing their memories must not lift their own Art. 18 flag.
+        verify(store).deleteAllExceptReserved("user-1");
+        verify(store, never()).deleteAllForUser(any());
+    }
+
+    @Test
+    void upsertMemory_refusesAReservedKeyWith400() throws Exception {
+        var entry = new UserMemoryEntry(null, "user-1", "_gdpr_processing_restricted", "false", "fact",
+                Visibility.global, null, List.of(), null, false, 0, null, null);
+
+        Response response = rest.upsertMemory(entry);
+
+        assertEquals(400, response.getStatus());
+        verify(store, never()).upsert(any());
+    }
+
+    /**
+     * Review N3: a caller without access gets the ordinary 403, not a 400 revealing
+     * key rules.
+     */
+    @Test
+    void upsertMemory_checksOwnershipBeforeTheReservedKeyRule() {
+        var entry = new UserMemoryEntry(null, "someone-else", "_gdpr_processing_restricted", "false", "fact",
+                Visibility.global, null, List.of(), null, false, 0, null, null);
+        doThrow(new ForbiddenException("no")).when(ownershipValidator).validateUserAccess(any(), eq("someone-else"));
+
+        assertThrows(ForbiddenException.class, () -> rest.upsertMemory(entry));
+    }
+
+    @Test
+    void deleteMemory_refusesTheRestrictionRowWith400() throws Exception {
+        var row = new UserMemoryEntry("e1", "user-1", "_gdpr_processing_restricted", "true", "gdpr",
+                Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(store.findEntryById("e1")).thenReturn(Optional.of(row));
+
+        Response response = rest.deleteMemory("e1");
+
+        assertEquals(400, response.getStatus());
+        verify(store, never()).deleteEntry(any());
     }
 
     // === countMemories ===

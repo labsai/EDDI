@@ -14,6 +14,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.util.Map;
+
 /**
  * REST endpoint for flat property operations. Delegates to
  * {@link IUserMemoryStore}, which operates on {@code global} entries in the
@@ -54,6 +56,16 @@ public class RestPropertiesStore implements IRestPropertiesStore {
     @Override
     public Response mergeProperties(String userId, Properties properties) {
         ownershipValidator.validateUserAccess(identity, userId);
+        if (properties != null) {
+            for (String key : properties.keySet()) {
+                if (IUserMemoryStore.isReservedKey(key)) {
+                    // A merge is a global upsert keyed on (userId, key): "false" here
+                    // overwrote an admin's Art. 18 restriction in place.
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity(Map.of("error", new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage())).build();
+                }
+            }
+        }
         try {
             userMemoryStore.mergeProperties(userId, properties);
             return Response.ok().build();

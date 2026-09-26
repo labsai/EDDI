@@ -37,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -96,7 +97,7 @@ import java.util.concurrent.atomic.DoubleAdder;
  * @author ginccc
  */
 @ApplicationScoped
-public class GroupConversationService implements IGroupConversationService {
+public class GroupConversationService implements IGroupConversationService, UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
@@ -164,8 +165,8 @@ public class GroupConversationService implements IGroupConversationService {
      * <li>{@code tryResolveMemberToolPause} blocks on a {@code resumeFuture} that
      * was never registered against the cancellation token;</li>
      * <li>a {@code MemberType.GROUP} member is dispatched into a nested synchronous
-     * {@code discuss(...)} with no token at all, under its own {@code activeTokens}
-     * entry.</li>
+     * {@code discuss(...)} with no token at all, under its own
+     * {@code discussionControls} entry.</li>
      * </ul>
      * For a turn parked at either of those, this timeout is the mechanism rather
      * than the backstop: the orchestrator reclaims the task once it expires while
@@ -335,12 +336,12 @@ public class GroupConversationService implements IGroupConversationService {
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
-                activeTokens, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
+                discussionControls, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
         // for the executeDiscussion/resolvePhases/cleanupEphemeralAgents callbacks
         // resumeDiscussion and cleanupAfterTerminalState make back into the facade.
         this.hitlCoordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, auditLedgerService,
-                signingGuard, activeTokens, executorService, callerIdentityContext, this,
+                signingGuard, discussionControls, executorService, callerIdentityContext, this,
                 counterGroupHitlPause, counterGroupHitlResume, counterGroupFailure);
     }
 
@@ -515,7 +516,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Register the control token BEFORE submitting: the caller already has the
         // conversation ID, so a cancel can arrive before the executor thread runs —
         // it must find a signalable token instead of racing the DB state.
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
 
         // Run the discussion in a virtual thread — reuse the same gc (no duplicate
         // creation)
@@ -540,7 +541,7 @@ public class GroupConversationService implements IGroupConversationService {
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will ever run this
             // discussion. Fail it instead of leaving an IN_PROGRESS zombie.
-            activeTokens.remove(gc.getId());
+            discussionControls.remove(gc.getId());
             failConversation(gc);
             throw new GroupDiscussionException("Failed to start group discussion: " + e.getMessage(), e);
         }
@@ -587,7 +588,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
         gc.setInheritedCostCeiling(maxCostPerRun);
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
         final var discussionCaller = callerIdentityContext.captureOrCurrent();
         try {
             executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
@@ -598,7 +599,7 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }));
         } catch (RuntimeException e) {
-            activeTokens.remove(gc.getId());
+            discussionControls.remove(gc.getId());
             failConversation(gc);
             throw new GroupDiscussionException("Failed to start cadence discussion: " + e.getMessage(), e);
         }
@@ -720,7 +721,7 @@ public class GroupConversationService implements IGroupConversationService {
         // computeIfAbsent — startAndDiscussAsync/resumeDiscussion pre-register the
         // token before submitting, and a cancel signal set on it in that window
         // must NOT be wiped by a fresh token here.
-        activeTokens.computeIfAbsent(gc.getId(), k -> new DiscussionControlToken());
+        discussionControls.computeIfAbsent(gc.getId(), k -> new DiscussionControlToken());
 
         // MINOR-1: Only fire a start event on fresh execution (startPhaseIndex == 0),
         // not on an HITL resume. Round 1 → GROUP_START; continuation rounds →
@@ -773,7 +774,7 @@ public class GroupConversationService implements IGroupConversationService {
                 DiscussionPhase phase = phaseList.get(phaseIdx);
 
                 // NEW-3: Check control token at top of phase loop
-                var token = activeTokens.get(gc.getId());
+                var token = discussionControls.get(gc.getId());
                 if (token != null && token.isCancelled()) {
                     gc.setState(GroupConversationState.CANCELLED);
                     gc.setLastModified(Instant.now());
@@ -1276,7 +1277,7 @@ public class GroupConversationService implements IGroupConversationService {
                 // phase-loop iteration's cancel check — without this, the pause
                 // gate below would commit a pause for a cancelled discussion.
                 {
-                    var cancelToken = activeTokens.get(gc.getId());
+                    var cancelToken = discussionControls.get(gc.getId());
                     if (cancelToken != null && cancelToken.isCancelled()) {
                         gc.setState(GroupConversationState.CANCELLED);
                         gc.setLastModified(Instant.now());
@@ -1477,15 +1478,18 @@ public class GroupConversationService implements IGroupConversationService {
 
             return gc;
 
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            // A mid-run write found the document gone: a GDPR erasure or the delete
+            // endpoint removed it while this leg ran (update() no longer recreates it).
+            return stopAsDeleted(gc, listener);
         } catch (GroupDiscussionException e) {
+            if (isDeletedWhileRunning(e)) {
+                return stopAsDeleted(gc, listener);
+            }
             // R2: If the exception was caused by a cancel, route to CANCELLED
-            var cancelToken = activeTokens.get(gc.getId());
+            var cancelToken = discussionControls.get(gc.getId());
             if (cancelToken != null && cancelToken.isCancelled()) {
-                gc.setState(GroupConversationState.CANCELLED);
-                gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
-                notifyCancelled(gc, listener);
-                return gc;
+                return persistCancelled(gc, listener);
             }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
@@ -1505,14 +1509,13 @@ public class GroupConversationService implements IGroupConversationService {
             }
             throw new GroupExecutionException(e.getMessage(), e);
         } catch (Exception e) {
+            if (isDeletedWhileRunning(e)) {
+                return stopAsDeleted(gc, listener);
+            }
             // R2: If the exception was caused by a cancel, route to CANCELLED
-            var cancelToken = activeTokens.get(gc.getId());
+            var cancelToken = discussionControls.get(gc.getId());
             if (cancelToken != null && cancelToken.isCancelled()) {
-                gc.setState(GroupConversationState.CANCELLED);
-                gc.setLastModified(Instant.now());
-                conversationStore.update(gc);
-                notifyCancelled(gc, listener);
-                return gc;
+                return persistCancelled(gc, listener);
             }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
@@ -1587,6 +1590,56 @@ public class GroupConversationService implements IGroupConversationService {
         hitlCoordinator.notifyCancelled(gc, listener);
     }
 
+    /**
+     * The R2 cancel branch: persist CANCELLED and tell the listener. The persist
+     * can find the document gone — a GDPR erasure cancels the discussion AND
+     * deletes it — and that must still end the leg as a cancel, not escape from
+     * inside the catch block with the listener never told.
+     */
+    private GroupConversation persistCancelled(GroupConversation gc, GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setLastModified(Instant.now());
+        try {
+            conversationStore.update(gc);
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.infof("Group discussion %s was cancelled and deleted while running — nothing left to persist",
+                    LogSanitizer.sanitize(gc.getId()));
+        }
+        notifyCancelled(gc, listener);
+        return gc;
+    }
+
+    /**
+     * Ends a leg whose document was deleted under it (GDPR erasure, the delete
+     * endpoint, possibly on another node). Not a failure: no ERROR log, no failure
+     * metric, no 5xx. The in-memory state becomes CANCELLED so the finally block
+     * releases ephemeral agents, and the listener gets a terminal event instead of
+     * a stream that never ends. Nothing is written — there is no document to write.
+     */
+    private GroupConversation stopAsDeleted(GroupConversation gc, GroupDiscussionEventListener listener) {
+        LOGGER.infof("Group discussion %s was deleted while running — stopping without persisting", LogSanitizer.sanitize(gc.getId()));
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setLastModified(Instant.now());
+        notifyCancelled(gc, listener);
+        return gc;
+    }
+
+    /**
+     * Whether the failure is, anywhere in its cause chain, the document being gone.
+     */
+    static boolean isDeletedWhileRunning(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof IGroupConversationStore.GroupConversationGoneException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
     }
@@ -1633,7 +1686,8 @@ public class GroupConversationService implements IGroupConversationService {
     // inlined) since they're the IGroupConversationService public surface (or, for
     // cleanupEphemeralAgents, reflected + called back by GroupHitlCoordinator).
     // Moved into GroupLifecycleOps (Wave R, R1 step 8); operationsInProgress and
-    // activeTokens stay here, shared by reference — see the class Javadoc there.
+    // discussionControls stay here, shared by reference — see the class Javadoc
+    // there.
     // =================================================================
 
     @Override
@@ -1716,7 +1770,7 @@ public class GroupConversationService implements IGroupConversationService {
 
     private GroupLifecycleOps lifecycleOps() {
         return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
-                deploymentStore, sharedArtifactStore, operationsInProgress, activeTokens, this,
+                deploymentStore, sharedArtifactStore, operationsInProgress, discussionControls, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
     }
 
@@ -2298,11 +2352,65 @@ public class GroupConversationService implements IGroupConversationService {
     // HITL lifecycle — cancel & resume. Kept as declared delegators (not
     // inlined) since deleteGroupConversation and characterization tests reach
     // several of these directly or via reflection. Moved into
-    // GroupHitlCoordinator (Wave R, R1 step 7); activeTokens stays here,
+    // GroupHitlCoordinator (Wave R, R1 step 7); discussionControls stays here,
     // shared by reference with the coordinator and TaskForceEngine.
     // =================================================================
 
-    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens = new ConcurrentHashMap<>();
+    /**
+     * Cancellation controls of the discussions running on this node, keyed by
+     * group-conversation id. A {@link DiscussionControlToken} is a cooperative stop
+     * flag, not a credential, and the keys are ordinary conversation ids that are
+     * logged everywhere. This map was called {@code activeTokens}; the name made
+     * CodeQL's {@code java/sensitive-log} treat every key read from it as a secret,
+     * so the erasure sweep in {@link #stopInFlightWork}, which walks the keys, lit
+     * up each log line that later names the discussion.
+     */
+    private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls = new ConcurrentHashMap<>();
+
+    @Override
+    public String erasureStepName() {
+        return "runningGroupDiscussions";
+    }
+
+    /**
+     * GDPR erasure: cancels, immediately, every discussion running on this node for
+     * {@code userId}. Deleting a running discussion's document did not stop it —
+     * its next phase wrote the document back — so the cascade signals first. A
+     * discussion on another node is not reachable from here; it is stopped by
+     * {@code GroupConversationStore.update} refusing to recreate the deleted
+     * document, which fails that discussion's next write.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        int signalled = 0;
+        IllegalStateException failure = null;
+        for (String groupConversationId : List.copyOf(discussionControls.keySet())) {
+            try {
+                GroupConversation gc = conversationStore.read(groupConversationId);
+                if (userId.equals(gc.getUserId()) && hitlCoordinator.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_IMMEDIATE)) {
+                    signalled++;
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // finished and removed between the snapshot of ids and this read
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                // Keep signalling the rest: one unreadable discussion must not leave the
+                // others running. The failure is reported once, after the sweep, so the
+                // cascade names the step as incomplete.
+                if (failure == null) {
+                    failure = new IllegalStateException("Could not read running group discussion " + groupConversationId, e);
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+        return signalled;
+    }
 
     @Override
     public boolean cancelDiscussion(String conversationId, ControlSignal mode)
