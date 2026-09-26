@@ -40,10 +40,13 @@ public class PostgresHealthCheck implements HealthCheck {
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("PostgreSQL connection");
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("SELECT 1");
-            return builder.up().withData("database", conn.getMetaData().getDatabaseProductName()).withData("url", conn.getMetaData().getURL())
-                    .build();
+            // Status only. The JDBC URL (host, port, database, sometimes credentials)
+            // and the raw exception text were previously returned here, but
+            // /q/health/* is anonymous — neither may reach an unauthenticated caller.
+            // The connection failure detail stays in the server log.
+            return builder.up().build();
         } catch (Exception e) {
-            return builder.down().withData("error", e.getMessage()).build();
+            return builder.down().build();
         }
     }
 }
