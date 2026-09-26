@@ -48,7 +48,7 @@ class GroupConversationServiceErasureTest {
                 mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(),
                 mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), mock(NonceCacheService.class), null,
                 new CallerIdentityContext(null, null), "default", 3);
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         activeTokens = (ConcurrentHashMap<String, DiscussionControlToken>) field.get(service);
     }
