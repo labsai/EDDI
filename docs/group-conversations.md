@@ -905,8 +905,13 @@ already computed for the round in flight. The recruitment is recorded as a
 the reason, so the rest of the team can see why the roster changed.
 
 Recruitment is refused, with an actionable message, when the agent is not
-deployed, is already a member, is the recruiter itself, or when
-`maxRecruitedAgentsPerDiscussion` is reached.
+deployed, is already a member, is the recruiter itself, when
+`maxRecruitedAgentsPerDiscussion` is reached, or when the discussion's owner may
+not use the agent. A recruit speaks as that owner and at their cost, so with
+workspaces enforced it has to be an agent the owner could have started a
+conversation with: their own, one shared with them directly, or a published one.
+Team shares do not count here — the member turn runs without the owner's token,
+so their team memberships are unknown.
 
 **Recruits are never torn down.** They are pre-existing deployed agents the
 discussion borrowed, so `TeardownAgentTool` and end-of-discussion cleanup leave
@@ -956,6 +961,19 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+**What the tools may touch.**
+
+- `teardown_agent` undeploys (and optionally deletes) only an agent that is both
+  in the conversation's created list **and** carries a `dynamicOrigin` in its own
+  configuration naming the calling conversation or its discussion.
+  `create_sub_agent` stamps that marker on the agent's first version; an agent a
+  person built has none, so it can never be torn down by a tool. An agent
+  created before this marker existed is left to end-of-discussion cleanup.
+- `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
+- `converse_with_agent` continues only a conversation it started itself, on this
+  turn or an earlier one. Any other `conversationId` is refused; omit it to start
+  a new conversation.
 
 #### Model and credential inheritance
 

@@ -16,8 +16,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -171,7 +173,8 @@ class ConverseWithAgentToolGuardrailsTest {
     @Test
     @DisplayName("continuing an existing conversation still carries the hop count")
     void propagatesDepthWhenReusingConversationId() throws Exception {
-        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(true, 5, 5, null), 2);
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(true, 5, 5, null), 2,
+                new HashSet<>(Set.of("conv-existing")));
 
         tool.converseWithAgent("agent-b", "follow-up", "conv-existing");
 

@@ -276,4 +276,12 @@ public final class MemoryKeys {
      * which sees keys as strings and never resolves a typed {@code MemoryKey}.
      */
     public static final String DYNAMIC_TORN_DOWN_AGENT_IDS = "dynamic:torn_down_agent_ids";
+
+    /**
+     * Conversation ids {@code converse_with_agent} started from this conversation,
+     * cumulative across turns — the only ids its {@code conversationId} parameter
+     * may name. Written and seeded by {@code DynamicAgentToolsProvider}. Step data
+     * rather than context on purpose: the engine writes it, a client cannot.
+     */
+    public static final String DYNAMIC_DELEGATED_CONVERSATION_IDS = "dynamic:delegated_conversation_ids";
 }

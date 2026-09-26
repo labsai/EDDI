@@ -54,6 +54,24 @@ EDDI supports four context types:
 
 > An `array` context is readable in output templates and HTTP call bodies, but it can never be matched by a `contextmatcher` — see [Behavior Rules → Limitations](behavior-rules.md#limitations). Send the data as an `object` (and match with `objectKeyPath`) if you need to match into it.
 
+### Reserved Context Keys
+
+A handful of context keys belong to the engine: the group orchestrator and the
+`converse_with_agent` tool use them to hand a member conversation its group,
+its dynamic-agent policy and its delegation depth. They are **dropped from
+client input** — the REST start and say endpoints (streaming included), MCP,
+Slack, the `/v1` adapter and a trigger's `initialContext` — with a WARN log
+naming the key, so a client cannot pose as a group member:
+
+| Key | Set by the engine for |
+| --- | --- |
+| `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript` | A group member's turn |
+| `dynamicAgentConfig`, `dynamicCreatedAgentIds` | The group's dynamic-agent policy and created-agent total |
+| `delegationDepth` | A conversation started by `converse_with_agent` |
+
+Templates can still read them (`{context.groupId}`) in a conversation the engine
+started with them. The list lives in `ReservedContextKeys`.
+
 ### Secret Context Values
 
 Context is stored with the conversation step it arrives with, and it is echoed in the

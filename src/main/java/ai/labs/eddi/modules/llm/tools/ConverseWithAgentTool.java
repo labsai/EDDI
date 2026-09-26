@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -24,11 +25,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
@@ -39,6 +44,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Supports both single-turn (fire-and-forget) and multi-turn conversations.
  * When a {@code conversationId} is provided, the tool continues an existing
  * conversation; otherwise it starts a new one.
+ * <p>
+ * <b>Only conversations this tool started can be continued.</b> The id is
+ * model-supplied, and the agent-id {@code say} overload this tool drives is the
+ * engine-internal one: it performs no ownership check, because its other
+ * callers (group members, sub-agent creation) are the engine itself. Without
+ * the {@link #startedConversationIds} check the model — or whoever steers it
+ * through a prompt — could drive a turn in <em>any</em> conversation whose id
+ * it had seen, as that conversation's owner.
  *
  * @since 6.0.0
  */
@@ -54,7 +67,7 @@ public class ConverseWithAgentTool {
      * uses for nested groups, so {@code AgentOrchestrator} can read the depth back
      * out of the callee's memory and refuse to go deeper.
      */
-    public static final String CONTEXT_DELEGATION_DEPTH = "delegationDepth";
+    public static final String CONTEXT_DELEGATION_DEPTH = ReservedContextKeys.DELEGATION_DEPTH;
 
     private final IConversationService conversationService;
     private final String userId;
@@ -67,6 +80,15 @@ public class ConverseWithAgentTool {
      * {@code maxDelegationsPerTask} — finding I4.
      */
     private final AtomicInteger delegationCount = new AtomicInteger();
+
+    /**
+     * The conversations this caller has started through this tool — the only ones a
+     * supplied {@code conversationId} may name. Shared with
+     * {@code DynamicAgentToolsProvider}, which seeds it from earlier turns' step
+     * data and persists it back, so a multi-turn delegation survives the turn
+     * boundary. Server-written step data, never context: a client cannot add to it.
+     */
+    private final Set<String> startedConversationIds;
 
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
         this(conversationService, userId, permissiveDefault(), 0);
@@ -99,10 +121,23 @@ public class ConverseWithAgentTool {
      *            human started it)
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth) {
+        this(conversationService, userId, config, currentDepth, null);
+    }
+
+    /**
+     * @param startedConversationIds
+     *            conversations started by this caller in earlier turns, and the
+     *            sink this instance records new ones into. {@code null} starts from
+     *            an empty set, so only conversations this instance itself starts
+     *            can be continued.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            Set<String> startedConversationIds) {
         this.conversationService = conversationService;
         this.userId = userId;
         this.config = config != null ? config : permissiveDefault();
         this.currentDepth = Math.max(0, currentDepth);
+        this.startedConversationIds = startedConversationIds != null ? startedConversationIds : ConcurrentHashMap.newKeySet();
     }
 
     @Tool("Send a message to another deployed EDDI agent and receive its response. "
@@ -137,6 +172,21 @@ public class ConverseWithAgentTool {
                 return "⚠️ Agent '%s' is not an allowed delegation target. Allowed: %s".formatted(agentId, allowedTargets);
             }
 
+            // --- Guardrail: only conversations this tool started (C6) ---
+            // Checked before the per-task counter so a refused id does not burn a
+            // delegation slot. Trimmed the same way the start branch below treats a
+            // blank id as "none".
+            boolean continuing = conversationId != null && !conversationId.isBlank();
+            if (continuing) {
+                conversationId = conversationId.trim();
+                if (!startedConversationIds.contains(conversationId)) {
+                    LOGGER.warnf("[CONVERSE] Refused to continue conversation '%s' with agent '%s': not started by this agent",
+                            sanitize(conversationId), sanitize(agentId));
+                    return ("⚠️ Conversation '%s' was not started by you through this tool, so it cannot be continued. "
+                            + "Omit conversationId to start a new conversation with agent '%s'.").formatted(conversationId, agentId);
+                }
+            }
+
             // --- Guardrail: delegation depth (finding F18) ---
             // Without this an A→B→A cycle recurses unbounded: each hop without a
             // conversationId starts a FRESH conversation, so the busy-guard never fires.
@@ -168,11 +218,14 @@ public class ConverseWithAgentTool {
                     new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
 
             // --- Start new conversation if no conversationId provided ---
-            if (conversationId == null || conversationId.isBlank()) {
+            if (!continuing) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
+                    if (conversationId != null) {
+                        startedConversationIds.add(conversationId);
+                    }
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
                 } catch (Exception e) {

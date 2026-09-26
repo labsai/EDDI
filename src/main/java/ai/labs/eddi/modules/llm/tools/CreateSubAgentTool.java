@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -57,6 +58,12 @@ public class CreateSubAgentTool {
     private final DynamicAgentConfig config;
     private final List<String> createdAgentIds;
     private final Set<String> retainedAgentIds;
+    /**
+     * The conversation this tool runs in — recorded as the created agent's origin.
+     */
+    private final String conversationId;
+    /** The group discussion that conversation belongs to, or null. */
+    private final String groupConversationId;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -65,6 +72,29 @@ public class CreateSubAgentTool {
             DynamicAgentConfig config,
             List<String> createdAgentIds,
             Set<String> retainedAgentIds) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds, null, null);
+    }
+
+    /**
+     * @param conversationId
+     *            the calling conversation, stamped into the created agent's
+     *            {@link DynamicOrigin} so {@code teardown_agent} can later prove
+     *            this conversation created it
+     * @param groupConversationId
+     *            the discussion that conversation belongs to, or {@code null} —
+     *            lets another member of the same discussion tear the agent down
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String conversationId,
+            String groupConversationId) {
+        this.conversationId = conversationId;
+        this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
         this.conversationService = conversationService;
         this.parentAgentId = parentAgentId;
@@ -266,7 +296,8 @@ public class CreateSubAgentTool {
 
             SetupResult result;
             try {
-                result = agentSetupService.setupAgent(request);
+                result = agentSetupService.setupAgent(request,
+                        new DynamicOrigin(parentAgentId, conversationId, groupConversationId, userId));
             } catch (AgentSetupException e) {
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.

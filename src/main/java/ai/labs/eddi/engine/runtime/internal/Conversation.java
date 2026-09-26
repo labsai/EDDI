@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -789,11 +790,16 @@ public class Conversation implements IConversation {
      * Extracts groupId(s) from the conversation context map.
      * GroupConversationService puts "groupId" in the context when creating member
      * conversations.
+     * <p>
+     * Trusted because it is reserved: every entry point that accepts client context
+     * strips it ({@link ReservedContextKeys}), so the only writer left is the group
+     * orchestrator. Before that, a client naming another team's group here had that
+     * team's group-visible memories loaded into its properties.
      */
     private static List<String> extractGroupIds(Map<String, Context> context) {
         if (context == null)
             return List.of();
-        Context groupCtx = context.get("groupId");
+        Context groupCtx = context.get(ReservedContextKeys.GROUP_ID);
         if (groupCtx != null && groupCtx.getValue() != null) {
             return List.of(String.valueOf(groupCtx.getValue()));
         }

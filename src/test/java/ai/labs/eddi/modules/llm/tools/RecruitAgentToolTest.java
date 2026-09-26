@@ -114,6 +114,38 @@ class RecruitAgentToolTest {
         assertTrue(entry.content().contains(TARGET), entry.content());
     }
 
+    // =================================================================
+    // M-A1: the discussion owner must be allowed to use the recruit
+    // =================================================================
+
+    @Test
+    void recruit_refusedWhenTheDiscussionOwnerMayNotUseTheAgent() {
+        gc.setUserId("owner-1");
+        List<String> asked = new ArrayList<>();
+        var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds,
+                (agentId, principal) -> {
+                    asked.add(agentId + "@" + principal);
+                    return false;
+                });
+
+        String reply = guarded.recruitAgent(TARGET, "Reviewer", "need one");
+
+        assertTrue(reply.contains("not available to this discussion's owner"), reply);
+        assertEquals(List.of(TARGET + "@owner-1"), asked, "the check must be asked for the discussion owner");
+        assertTrue(gc.getDynamicMembers().isEmpty());
+        assertTrue(gc.getRecruitedAgentIds().isEmpty());
+        assertTrue(gc.getTranscript().isEmpty());
+    }
+
+    @Test
+    void recruit_admittedWhenTheDiscussionOwnerMayUseTheAgent() {
+        gc.setUserId("owner-1");
+        var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds,
+                (agentId, principal) -> true);
+
+        assertTrue(guarded.recruitAgent(TARGET, null, null).startsWith("Recruited"));
+    }
+
     @Test
     void recruit_isTrackedSeparatelyFromCreatedAgents() {
         // createdAgentIds drives cleanupEphemeralAgents, which UNDEPLOYS. A recruit

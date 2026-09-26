@@ -85,16 +85,18 @@ class ContextualToolsProviderGroupIdTest {
     }
 
     @Test
-    void propertyFallback_stillWorks() {
+    void groupIdProperty_isNotTrusted() {
+        // C3c: a client can set conversation properties (a properties* context entry
+        // of type expressions), so a groupId property must never scope group memory.
         var memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(null);
         when(memory.getAllSteps()).thenReturn(null);
         var props = mock(IConversationMemory.IConversationProperties.class);
-        when(props.get("groupId")).thenReturn(new Property("groupId", "group-prop", Property.Scope.conversation));
+        when(props.get("groupId")).thenReturn(new Property("groupId", "another-teams-group", Property.Scope.conversation));
         when(memory.getConversationProperties()).thenReturn(props);
 
-        assertEquals(List.of("group-prop"), ContextualToolsProvider.resolveGroupIds(memory),
-                "a config that genuinely sets a groupId property must keep working");
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
+                "only the engine-written context:groupId may name the group");
     }
 
     @Test

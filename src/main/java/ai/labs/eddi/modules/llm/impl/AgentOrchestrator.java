@@ -23,12 +23,14 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -274,6 +276,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * M-A1: the USE check {@code recruit_agent} applies on behalf of the
+     * discussion's owner. Field-injected for the same reason as the stores above;
+     * null under direct construction, where recruitment is unchecked as before.
+     */
+    @Inject
+    volatile ResourceAccessGuard resourceAccessGuard;
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -1164,7 +1174,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
             if (currentStep == null) {
                 return null;
             }
-            var data = currentStep.getLatestData("context:groupConversationId");
+            var data = currentStep.getLatestData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
             if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
                 return String.valueOf(ctx.getValue());
             }
@@ -1208,8 +1218,10 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * constructor runs; see that class's Javadoc.
      */
     private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
+        var guard = resourceAccessGuard;
         return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
-                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore);
+                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore,
+                guard != null ? guard::principalMayUse : null);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by
