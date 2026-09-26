@@ -26,6 +26,7 @@ vi.mock("../workflows", async () => {
   return {
     ...actual,
     getWorkflow: vi.fn(),
+    getWorkflowCurrentVersion: vi.fn(),
     updateWorkflow: vi.fn(),
   };
 });
@@ -35,13 +36,14 @@ vi.mock("../agents", async () => {
   return {
     ...actual,
     getAgent: vi.fn(),
+    getAgentCurrentVersion: vi.fn(),
     updateAgent: vi.fn(),
   };
 });
 
 import { updateResource } from "../resources";
-import { getWorkflow, updateWorkflow } from "../workflows";
-import { getAgent, updateAgent } from "../agents";
+import { getWorkflow, getWorkflowCurrentVersion, updateWorkflow } from "../workflows";
+import { getAgent, getAgentCurrentVersion, updateAgent } from "../agents";
 
 // ── Fixtures ───────────────────────────────────────────────────────
 
@@ -899,5 +901,76 @@ describe("a save that does not report its new version", () => {
     const result = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
 
     expect(result.newResourceVersion).toBe(1);
+  });
+});
+
+describe("a parent superseded elsewhere", () => {
+  beforeEach(() => {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1"),
+    );
+    vi.mocked(getAgent).mockResolvedValue({ workflows: [
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+    ] });
+    vi.mocked(getWorkflowCurrentVersion).mockResolvedValue(1);
+    vi.mocked(getAgentCurrentVersion).mockResolvedValue(1);
+  });
+
+  it.each([
+    ["agent", () => vi.mocked(getAgentCurrentVersion).mockResolvedValue(4), "agentChanged"],
+    ["workflow", () => vi.mocked(getWorkflowCurrentVersion).mockResolvedValue(3), "workflowChanged"],
+  ])("refuses before writing when the %s moved on", async (_what, arrange, code) => {
+    arrange();
+
+    const err = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(CascadeReferenceError);
+    expect((err as CascadeReferenceError).code).toBe(code);
+    expect(updateResource).not.toHaveBeenCalled();
+    expect(updateWorkflow).not.toHaveBeenCalled();
+    expect(updateAgent).not.toHaveBeenCalled();
+  });
+
+  it("a retry after an agent-hop 409 from a stale agent writes nothing more", async () => {
+    // First attempt: the agent moved on between the check and the PUT.
+    vi.mocked(updateResource).mockResolvedValueOnce({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+    });
+    vi.mocked(updateWorkflow).mockResolvedValueOnce({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(updateAgent).mockRejectedValueOnce(Object.assign(new Error("Conflict"), { status: 409 }));
+    const err = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT).catch((e: unknown) => e);
+    const partial = cascadePartialResult(err)!;
+
+    // The retry, from the context the failure handed out: the agent is now v2.
+    vi.mocked(getWorkflowCurrentVersion).mockResolvedValue(2);
+    vi.mocked(getAgentCurrentVersion).mockResolvedValue(2);
+    vi.mocked(updateResource).mockClear();
+    vi.mocked(updateWorkflow).mockClear();
+
+    await expect(
+      cascadeSaveResource(RT, "res1", partial.newResourceVersion!, {}, partial.retryContext),
+    ).rejects.toMatchObject({ code: "agentChanged" });
+    expect(updateResource).not.toHaveBeenCalled();
+    expect(updateWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable current version does not block the save", async () => {
+    vi.mocked(getAgentCurrentVersion).mockRejectedValue(new Error("404"));
+    vi.mocked(getWorkflowCurrentVersion).mockResolvedValue(undefined as unknown as number);
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+    });
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+    });
+
+    await expect(cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)).resolves.toMatchObject({
+      newAgentVersion: 2,
+    });
   });
 });

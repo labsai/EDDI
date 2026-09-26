@@ -4945,5 +4945,12 @@
     "headerMismatch": "Diese Verbindung sendet ihre Zugangsdaten als „{{expected}}“, also muss der Header so heißen – sonst zeigt die Konfiguration einen Namen und die Anfrage trägt einen anderen.",
     "refusedInRequest": "${connection:…} wird in Pfad, Query-Parameter oder Body abgelehnt – Zugangsdaten in einer URL landen in jedem Proxy-Log, und im Body werden sie nicht gelesen. Verweisen Sie stattdessen aus einem Header auf die Verbindung.",
     "refusedInModel": "Sprachmodelle, Embeddings und Vektorspeicher akzeptieren kein ${connection:…}: Eine Verbindung wird in einen ganzen Header aufgelöst, diese brauchen aber ein nacktes Geheimnis. Verwenden Sie hier ${vault:…}."
+  },
+  "cascadeSave": {
+    "workflowChanged": "Workflow {{workflowId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
+    "agentChanged": "Agent {{agentId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
+    "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
+    "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
   }
 }

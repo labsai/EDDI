@@ -98,4 +98,28 @@ describe("useUpdateAgentPrompt — retrying after a partial cascade", () => {
     expect(llmVersion).toBe(7);
     expect(context).toEqual({ workflowId: "wf1", workflowVersion: 4, agentId: "agent1", agentVersion: 5 });
   });
+
+  it("survives the component unmounting between the failure and the retry", async () => {
+    const retryContext = { workflowId: "wf1", workflowVersion: 1, agentId: "agent2", agentVersion: 1 };
+    vi.mocked(cascadeSaveResource)
+      .mockRejectedValueOnce(
+        new CascadeSaveError(new Error("wf conflict"), { newResourceVersion: 4, retryContext }),
+      )
+      .mockResolvedValueOnce({ newResourceVersion: 5, newWorkflowVersion: 2, newAgentVersion: 2 });
+    const vars = { agentId: "agent2", promptData: PROMPT, newSystemMessage: "new" };
+
+    const first = renderHook(() => useUpdateAgentPrompt(), { wrapper });
+    await act(async () => {
+      await first.result.current.mutateAsync(vars).catch(() => undefined);
+    });
+    // The editor closes; a new one opens on the same (untouched) agent.
+    first.unmount();
+    const second = renderHook(() => useUpdateAgentPrompt(), { wrapper });
+    await act(async () => {
+      await second.result.current.mutateAsync(vars);
+    });
+
+    const [, , llmVersion] = vi.mocked(cascadeSaveResource).mock.calls[1]!;
+    expect(llmVersion).toBe(4);
+  });
 });

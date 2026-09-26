@@ -1,5 +1,4 @@
 import { agentWriteInvalidations } from "@/lib/query-keys";
-import { useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAgent, parseResourceUri } from "@/lib/api/agents";
 import { getWorkflow } from "@/lib/api/workflows";
@@ -116,12 +115,20 @@ interface PromptRecovery {
 }
 
 /**
+ * Module scope, not the hook instance: the component that failed is often gone
+ * by the time the user retries (the editor sheet closed, the page navigated),
+ * and a fresh instance would resolve the same superseded LLM version again. The
+ * `from*Version` guard keeps a recovery from applying to prompt data that has
+ * since moved on, so sharing it is safe.
+ */
+const recoveries = new Map<string, PromptRecovery>();
+
+/**
  * Updates the system prompt via cascade save:
  *   PUT LLM resource → update Workflow URI → update Agent URI
  */
 export function useUpdateAgentPrompt() {
   const queryClient = useQueryClient();
-  const recoveries = useRef(new Map<string, PromptRecovery>());
 
   return useMutation({
     mutationFn: async ({ agentId, promptData, newSystemMessage }: UpdatePromptVars) => {
@@ -143,7 +150,7 @@ export function useUpdateAgentPrompt() {
       };
 
       const recoveryKey = agentId + "/" + promptData.llmId;
-      const recovery = recoveries.current.get(recoveryKey);
+      const recovery = recoveries.get(recoveryKey);
       const resume =
         recovery &&
         recovery.fromLlmVersion === promptData.llmVersion &&
@@ -168,12 +175,12 @@ export function useUpdateAgentPrompt() {
           updatedLlmConfig,
           context
         );
-        recoveries.current.delete(recoveryKey);
+        recoveries.delete(recoveryKey);
         return result;
       } catch (err) {
         const partial = cascadePartialResult(err);
         if (partial?.retryContext) {
-          recoveries.current.set(recoveryKey, {
+          recoveries.set(recoveryKey, {
             fromLlmVersion: promptData.llmVersion,
             fromAgentVersion: promptData.agentVersion,
             llmVersion: partial.newResourceVersion ?? llmVersion,

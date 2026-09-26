@@ -44,6 +44,11 @@ export function createWorkflow(
   return api.post<{ location: string }>("/workflowstore/workflows", config);
 }
 
+/** The workflow's current version number — `GET /workflowstore/workflows/{id}/currentversion`. */
+export function getWorkflowCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/workflowstore/workflows/${id}/currentversion`);
+}
+
 export function updateWorkflow(
   id: string,
   version: number,
