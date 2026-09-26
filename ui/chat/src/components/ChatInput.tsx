@@ -182,11 +182,23 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
    * Removing a chip unmounts the focused button. Without this, focus falls to
    * <body> and keyboard/screen-reader users lose their place in the composer.
    */
-  const focusIdxRef = useRef<number | null>(null);
+  const focusAfterRemoveRef = useRef<{ index: number; storageRef: string } | null>(
+    null,
+  );
   useEffect(() => {
-    const idx = focusIdxRef.current;
-    if (idx === null) return;
-    focusIdxRef.current = null;
+    const pending = focusAfterRemoveRef.current;
+    if (pending === null) return;
+    // Act only once the removal itself has committed. A commit that changed
+    // the list EARLIER (the chip being added) can still have this effect
+    // pending when the remove click lands; React flushes it first, and taking
+    // the intent there focused the very button about to unmount — so focus
+    // fell to <body>. Whether that happened depended on scheduler timing,
+    // which is what made the test for this flaky under CPU load.
+    if (pendingAttachments.some((a) => a.storageRef === pending.storageRef)) {
+      return;
+    }
+    focusAfterRemoveRef.current = null;
+    const idx = pending.index;
     const btns = chipsRef.current?.querySelectorAll<HTMLButtonElement>(
       '[data-testid="attachment-remove"]',
     );
@@ -278,7 +290,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const handleRemoveAttachment = useCallback(
     (a: AttachmentResult, index: number) => {
       const { storageRef, fileName } = a;
-      focusIdxRef.current = index;
+      focusAfterRemoveRef.current = { index, storageRef };
       // Delete server-side too. Only unsent attachments are removable here, so
       // this can never orphan a blob a sent turn still references — whereas
       // skipping it leaves the file in the store for the life of the
