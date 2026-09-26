@@ -47,7 +47,7 @@ class UrlValidationUtilsEmbeddedIPv4Test {
             // IPv4-compatible (deprecated, RFC 4291)
             "::7f00:1", "::a00:1",
             // Reserved IPv4
-            "240.0.0.1", "255.255.255.255", "198.18.0.1", "198.19.255.254", "192.0.0.8"})
+            "240.0.0.1", "255.255.255.255", "192.0.0.8"})
     void blocked(String literal) throws Exception {
         assertTrue(UrlValidationUtils.isPrivateAddress(address(literal)), literal);
     }
@@ -57,7 +57,9 @@ class UrlValidationUtilsEmbeddedIPv4Test {
             "64:ff9b::808:808", // NAT64 of 8.8.8.8
             "2002:808:808::1", // 6to4 of 8.8.8.8
             "2606:4700:4700::1111", // ordinary public IPv6
-            "198.17.255.255", "198.20.0.1", // either side of 198.18/15
+            // 198.18/15 (benchmarking) stays allowed on purpose: fake-IP DNS
+            // proxies (Clash, Surge) resolve every public name into it.
+            "198.18.0.1", "198.19.255.254",
             "192.0.1.1", "8.8.4.4"})
     void allowed(String literal) throws Exception {
         assertFalse(UrlValidationUtils.isPrivateAddress(address(literal)), literal);
