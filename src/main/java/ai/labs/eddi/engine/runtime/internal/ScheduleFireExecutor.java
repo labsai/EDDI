@@ -392,14 +392,21 @@ public class ScheduleFireExecutor {
                     RagIngestionSchedules.sourceId(md));
             cost = report.costUsd();
             if (report.isSuccess() || isBenignOutcome(report)) {
-                // ALREADY_RUNNING and SKIPPED are outcomes, not failures. The lease is
-                // five minutes and a crawl's default budget is ten, so the schedule is
-                // legitimately re-claimed while the first run is still going; the
-                // second fire then loses the database's single-in-flight race. Calling
-                // that FAILED increments failCount on every fire and dead-letters the
-                // schedule within days. fireTeamCadence treats the same case the same
-                // way.
+                // ALREADY_RUNNING and SKIPPED are outcomes, not failures. A run can
+                // outlast the interval between fires, so the next fire legitimately
+                // finds the previous run still going and loses the database's
+                // single-in-flight race. Calling that FAILED increments failCount on
+                // every fire and dead-letters the schedule within days.
+                // fireTeamCadence treats the same case the same way.
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                if (report.outcome() == IngestionReport.Outcome.STARTED) {
+                    // The fire starts the run and returns: a crawl outlasts the lease,
+                    // and the scheduler cancels a fire it has waited a lease for.
+                    LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s): %s", schedule.getName(),
+                            schedule.getId(), report.message());
+                    return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, null, 0.0,
+                            false);
+                }
                 if (!report.isSuccess()) {
                     LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
                             schedule.getName(), schedule.getId(), report.message());
@@ -428,6 +435,13 @@ public class ScheduleFireExecutor {
                     schedule.getId());
         }
 
+        return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, errorMessage, cost,
+                interrupted);
+    }
+
+    private ScheduleFireLog logIngestionFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber,
+                                             Instant startedAt, String status, String errorMessage, double cost,
+                                             boolean interrupted) {
         var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
                 schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, null, errorMessage,
                 attemptNumber, cost);

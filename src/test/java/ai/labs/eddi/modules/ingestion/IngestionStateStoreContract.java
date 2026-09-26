@@ -730,6 +730,76 @@ public interface IngestionStateStoreContract {
         assertEquals(longEtag, store().lookup(longSource, DOC).orElseThrow().etag());
     }
 
+    @Test
+    @DisplayName("a re-downloaded, unchanged document takes the validators of the response that proved it")
+    default void revalidatedDocumentRefreshesItsValidators() {
+        // The first ingest's ETag used to be kept for ever. A server that rotated it
+        // without changing the text then answered every later conditional request
+        // with a full 200, because the validator sent back was one it no longer knew.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", "Wed, 21 Oct 2026 07:28:00 GMT", first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String second = openRun(SOURCE);
+        store().recordSeen(SOURCE, DOC, second, "\"v2\"", null);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertEquals("\"v2\"", state.etag());
+        assertEquals(null, state.lastModified(), "a validator the server stopped sending is not sent back");
+        assertEquals("hash-1", state.contentHash(), "seeing a document never changes what was embedded");
+        assertEquals(second, state.lastRunId());
+    }
+
+    @Test
+    @DisplayName("refreshing validators is fenced like every other document write")
+    default void staleRunCannotRefreshValidators() {
+        String stale = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", null, stale);
+        forceDocumentOwner(SOURCE, DOC, "the-run-that-replaced-it");
+
+        store().recordSeen(SOURCE, DOC, stale, "\"stale\"", null);
+
+        assertEquals("\"v1\"", store().lookup(SOURCE, DOC).orElseThrow().etag());
+    }
+
+    @Test
+    @DisplayName("a released maintenance claim frees the source but never shows up as a run")
+    default void maintenanceClaimsAreNotRuns() {
+        // Deleting a file takes the run slot and used to release it as a COMPLETED
+        // run with zeroes everywhere, so the source's "last run" became an empty
+        // success and hid the real one.
+        String run = openRun(SOURCE);
+        closeRun(run, SOURCE, IngestionRun.Status.FAILED);
+        String claim = openRun(SOURCE);
+        closeRun(claim, SOURCE, IngestionRun.Status.MAINTENANCE);
+
+        List<IngestionRun> history = store().listRuns(SOURCE, 10);
+
+        assertEquals(1, history.size());
+        assertEquals(run, history.get(0).runId());
+        assertTrue(store().activeRun(SOURCE).isEmpty(), "the claim must be released");
+        assertTrue(store().startRun(SOURCE).isPresent());
+    }
+
+    @Test
+    @DisplayName("a run after a maintenance claim still owns the documents the claim stamped")
+    default void runAfterAMaintenanceClaimOwnsItsDocuments() {
+        // The claim's row is kept, not deleted, because it carries the generation the
+        // next run has to count past. Deleting it let the next run compute the same
+        // generation, find every document already stamped with it, and be fenced out
+        // of every write it made.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+        String claim = openRun(SOURCE);
+        closeRun(claim, SOURCE, IngestionRun.Status.MAINTENANCE);
+
+        String next = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, next);
+
+        assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash());
+    }
+
     // === purge ===
 
     @Test

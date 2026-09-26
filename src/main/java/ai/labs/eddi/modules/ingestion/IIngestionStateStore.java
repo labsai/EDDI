@@ -130,6 +130,26 @@ public interface IIngestionStateStore {
     void recordSeen(String sourceId, String documentId, String runId);
 
     /**
+     * {@link #recordSeen}, for a document whose body was downloaded again and
+     * turned out unchanged — and so also replaces its stored validators with the
+     * ones this response carried.
+     *
+     * <p>
+     * Without it the ETag and Last-Modified of the first ingest were kept for ever.
+     * A server that rotates its ETag without changing the text (a build id in the
+     * validator, markup outside the main content) answered every later conditional
+     * request with a full 200, because the validator sent back was one it no longer
+     * recognised — so an unchanged page never cost a 304 again. A response without
+     * validators clears them: sending back what the server stopped issuing buys
+     * nothing.
+     *
+     * <p>
+     * Fenced on {@code runId} and ignored for a document with no row, exactly like
+     * {@link #recordSeen}.
+     */
+    void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified);
+
+    /**
      * Records that this run could not find out whether a document still exists —
      * the server refused, failed, or asked us to come back later.
      *
@@ -224,7 +244,16 @@ public interface IIngestionStateStore {
     /** The run currently in flight for a source, if any. */
     Optional<IngestionRun> activeRun(String sourceId);
 
-    /** Most recent runs first. */
+    /**
+     * Most recent runs first — the runs, not the maintenance claims.
+     *
+     * <p>
+     * A claim closed as {@link IngestionRun.Status#MAINTENANCE} (deleting a file
+     * takes the run slot so no run can race it) is left out. It used to be closed
+     * as a {@code COMPLETED} run with zeroes in every counter, so after deleting
+     * one file the source's "last run" read as a successful run that saw nothing —
+     * and the real last run, with its errors, was pushed down the list.
+     */
     List<IngestionRun> listRuns(String sourceId, int limit);
 
     /**
@@ -314,7 +343,15 @@ public interface IIngestionStateStore {
             String error) {
 
         public enum Status {
-            RUNNING, COMPLETED, FAILED, CANCELLED
+            RUNNING, COMPLETED, FAILED, CANCELLED,
+            /**
+             * The run slot was held for something other than a run — a file delete — and
+             * has been released. Kept as a row, never shown: the row carries the claim's
+             * generation, which the next claim must count past, or the document rows
+             * stamped by this claim would outrank the run that follows it and fence it out
+             * of every write. {@link #listRuns} skips it.
+             */
+            MAINTENANCE
         }
 
         /**
