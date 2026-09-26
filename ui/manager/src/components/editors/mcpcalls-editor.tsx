@@ -35,6 +35,7 @@ import { EditorSection } from "./editor-section";
 import { RenamableKeyInput } from "./renamable-key-input";
 import {
   formatJsonArgument,
+  hasOwnKey,
   nextFreeKey,
   parseJsonArgument,
   renameKey,
@@ -546,6 +547,35 @@ function McpRetryEditor({
 
 // ─── McpCall Editor ──────────────────────────────────────────────────────────
 
+/**
+ * A stable React key per tool argument, surviving renames and the removal of
+ * other rows. Keying by name remounts a row on every rename (losing focus
+ * mid-word); keying by position hands a row's local state (its Text/JSON kind)
+ * to its neighbour when a row above is removed.
+ */
+function useStableArgumentIds(names: string[]) {
+  const [ids] = useState(() => new Map<string, number>());
+  const counter = useRef(0);
+  const result = names.map((name) => {
+    let id = ids.get(name);
+    if (id === undefined) {
+      id = counter.current++;
+      ids.set(name, id);
+    }
+    return id;
+  });
+  for (const name of [...ids.keys()]) {
+    if (!names.includes(name)) ids.delete(name);
+  }
+  const rename = (from: string, to: string) => {
+    const id = ids.get(from);
+    if (id === undefined) return;
+    ids.delete(from);
+    ids.set(to, id);
+  };
+  return { ids: result, rename };
+}
+
 function McpCallEditor({
   call,
   onChange,
@@ -562,6 +592,7 @@ function McpCallEditor({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [showSchema, setShowSchema] = useState(false);
+  const argumentIds = useStableArgumentIds(Object.keys(call.toolArguments ?? {}));
   const toolListId = useId();
   const matchedTool = discoveredTools.find((tl) => tl.name === call.toolName);
 
@@ -701,20 +732,19 @@ function McpCallEditor({
             </label>
             <div className="space-y-1.5">
               {Object.entries(call.toolArguments ?? {}).map(([k, v], i) => (
-                // Keyed by position: a rename must not remount the row the
-                // user is typing in.
                 <ToolArgumentRow
-                  key={i}
+                  key={argumentIds.ids[i]}
                   name={k}
                   value={v}
                   readOnly={readOnly}
-                  isNameAvailable={(next) => !(next in (call.toolArguments ?? {}))}
-                  onRename={(next) =>
+                  isNameAvailable={(next) => !hasOwnKey(call.toolArguments ?? {}, next)}
+                  onRename={(next) => {
+                    argumentIds.rename(k, next);
                     onChange({
                       ...call,
                       toolArguments: renameKey(call.toolArguments ?? {}, k, next),
-                    })
-                  }
+                    });
+                  }}
                   onValueChange={(next) =>
                     onChange({
                       ...call,

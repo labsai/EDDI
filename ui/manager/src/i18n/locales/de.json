@@ -891,7 +891,9 @@
     "removeCondition": "Bedingung entfernen",
     "noGroups": "Keine Verhaltensgruppen definiert",
     "noRules": "Keine Regeln in dieser Gruppe",
-    "noConditions": "Keine Bedingungen"
+    "noConditions": "Keine Bedingungen",
+    "sizeNoBound": "kein Limit",
+    "sizeBoundInvalid": "Muss eine ganze Zahl sein oder leer für kein Limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Keine Endpunkte in der Spezifikation gefunden",
@@ -995,9 +997,13 @@
     "authRefLiteral": "Geben Sie eine Referenz wie ${vault:mein-key} an, nicht den Schlüssel selbst. Der Schlüssel verlässt den Vault nie.",
     "runOnNoCodes": "Eine leere Liste „Bei Codes ausführen“ passt auf keinen Statuscode – diese Anweisung wird nie ausgeführt.",
     "useDefaultCodes": "Standardwerte verwenden",
-    "httpCodeFilterDefaults": "Ein leeres Feld verwendet die darin angezeigten Standardcodes.",
+    "httpCodeFilterDefaults": "Leere Felder verwenden die darin angezeigten Standardcodes.",
     "scopeSecretUnsupported": "(hier nicht im Tresor)",
-    "scopeSecretWarning": "Der Bereich „secret“ wird bei dieser Anweisung nicht im Tresor abgelegt: Der Wert wird im Klartext gespeichert. Wählen Sie einen anderen Bereich und bewahren Sie Zugangsdaten im Secrets-Tresor auf."
+    "scopeSecretWarning": "Der Bereich „secret“ wird bei dieser Anweisung nicht im Tresor abgelegt: Der Wert wird im Klartext gespeichert. Wählen Sie einen anderen Bereich und bewahren Sie Zugangsdaten im Secrets-Tresor auf.",
+    "skipNone": "keine – kein Code wird übersprungen",
+    "runSkipConflict": "{{codes}} steht auch in der Überspringen-Liste – diese Anweisung wird dafür nie ausgeführt.",
+    "httpCodeFilterSkipSet": "Ein leeres „Bei Codes ausführen“ verwendet 200, 201; ein leeres „Bei Codes überspringen“ überspringt nichts.",
+    "useDefaultSkipCodes": "Standard-Überspringliste verwenden"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Bei einem Fehler wird die Pipeline fortgesetzt; der Fehler ist verfügbar unter ",
@@ -1385,7 +1391,7 @@
     "visibilityTitle": "Welche Agents diese longTerm-Eigenschaft sehen können",
     "editValue": "Wert bearbeiten",
     "toggleGroup": "Eigenschaftsgruppe umschalten",
-    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Ist ein „Von Pfad“ gesetzt, wird der Wert im Klartext gespeichert – leeren Sie den Pfad oder wählen Sie einen anderen Bereich."
+    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich."
   },
   "dictionaryEditor": {
     "language": "Sprache",
@@ -2135,7 +2141,9 @@
       "filesLoadFailed": "Die Dateien konnten nicht geladen werden: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (wird als Rekursiv gespeichert)",
-    "saveBeforeIngest": "Speichern Sie zuerst Ihre Änderungen – Dokumente werden mit dem Speicher und dem Embedding-Modell der gespeicherten Wissensbasis aufgenommen, nicht mit den Änderungen auf dem Bildschirm."
+    "saveBeforeIngest": "Speichern Sie zuerst Ihre Änderungen – Dokumente werden mit dem Speicher und dem Embedding-Modell der gespeicherten Wissensbasis aufgenommen, nicht mit den Änderungen auf dem Bildschirm.",
+    "chunkStrategyUnsupported": "{{value}} (nicht unterstützt)",
+    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv."
   },
   "onboarding": {
     "welcome": {

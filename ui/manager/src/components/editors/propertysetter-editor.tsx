@@ -22,12 +22,33 @@ export interface PropertyInstruction {
   valueInt?: number;
   valueFloat?: number;
   valueBoolean?: boolean;
+  /** Edited in the JSON tab only; carried through the form untouched. */
+  valueObject?: Record<string, unknown>;
+  valueList?: unknown[];
   scope?: "step" | "conversation" | "longTerm" | "secret";
   visibility?: "self" | "group" | "global";
   fromObjectPath?: string;
   toObjectPath?: string;
   override?: boolean;
   convertToObject?: boolean;
+}
+
+/**
+ * Whether PropertySetterTask would store this `secret` row without vaulting it.
+ * Only a non-empty `valueString` goes through `autoVaultSecret`; a
+ * `fromObjectPath` read, or a `valueObject` / `valueList` / number / boolean
+ * value, is stored under the scope as-is.
+ */
+function storesSecretInPlainText(prop: PropertyInstruction): boolean {
+  if (prop.fromObjectPath?.trim()) return true;
+  if (prop.valueString?.trim()) return false;
+  return (
+    prop.valueObject != null ||
+    prop.valueList != null ||
+    prop.valueInt != null ||
+    prop.valueFloat != null ||
+    prop.valueBoolean != null
+  );
 }
 
 export interface SetOnActions {
@@ -155,12 +176,13 @@ function PropertyRow({
         )}
       </div>
       {/* PropertySetterTask vaults a secret only on the valueString path; a
-          value read through fromObjectPath is stored under the scope as-is. */}
-      {prop.scope === "secret" && !!prop.fromObjectPath?.trim() && (
+          value read through fromObjectPath, or given as valueObject /
+          valueList / a number or boolean, is stored under the scope as-is. */}
+      {prop.scope === "secret" && storesSecretInPlainText(prop) && (
         <p className="ps-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="property-secret-from-path-warning">
           {t(
             "propertySetterEditor.secretFromPathWarning",
-            "A secret is vaulted only when it comes from the value field. With a \"From path\" set, the value is stored in plain text — clear the path or choose another scope.",
+            "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
           )}
         </p>
       )}

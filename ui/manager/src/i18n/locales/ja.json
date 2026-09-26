@@ -891,7 +891,9 @@
     "removeCondition": "条件を削除",
     "noGroups": "動作グループが定義されていません",
     "noRules": "このグループにルールはありません",
-    "noConditions": "条件なし"
+    "noConditions": "条件なし",
+    "sizeNoBound": "制限なし",
+    "sizeBoundInvalid": "整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -997,7 +999,11 @@
     "useDefaultCodes": "既定値を使用",
     "httpCodeFilterDefaults": "空欄のフィールドには、表示されている既定のコードが使われます。",
     "scopeSecretUnsupported": "（ここではボールトに保存されません）",
-    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。"
+    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。",
+    "skipNone": "なし — スキップするコードはありません",
+    "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
+    "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
+    "useDefaultSkipCodes": "既定のスキップリストを使用"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1385,7 +1391,7 @@
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
     "toggleGroup": "プロパティグループを切り替え",
-    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」を設定すると値は平文で保存されます。パスを空にするか、別のスコープを選んでください。"
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -2135,7 +2141,9 @@
       "filesLoadFailed": "ファイルを読み込めませんでした: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}}（再帰として保存）",
-    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。"
+    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
+    "chunkStrategyUnsupported": "{{value}}（非対応）",
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
   },
   "onboarding": {
     "welcome": {

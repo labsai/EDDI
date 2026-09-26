@@ -728,3 +728,30 @@ describe("RagEditor", () => {
   });
 });
 
+
+describe("RagEditor unknown chunk strategies", () => {
+  it("tells an unsupported strategy apart from the two the server rewrites", async () => {
+    // Only paragraph/sentence are rewritten to recursive; anything else is a
+    // 400 on save, so "saved as Recursive" would be a false promise.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "semantic" }} onChange={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Document Chunking/i }));
+    const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
+    const option = [...select.options].find((o) => o.value === "semantic")!;
+    expect(option.disabled).toBe(true);
+    expect(option.textContent).toMatch(/not supported/);
+    expect(option.textContent).not.toMatch(/saved as Recursive/);
+    expect(screen.getByTestId("chunk-strategy-unsupported")).toBeInTheDocument();
+  });
+
+  it("does not warn for a legacy strategy", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={{ ...populatedConfig, chunkStrategy: "paragraph" }} onChange={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Document Chunking/i }));
+    expect(screen.queryByTestId("chunk-strategy-unsupported")).not.toBeInTheDocument();
+  });
+});

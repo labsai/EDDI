@@ -931,7 +931,9 @@
     "removeCondition": "Remove Condition",
     "noGroups": "No Rules Groups defined",
     "noRules": "No rules in this group",
-    "noConditions": "No conditions"
+    "noConditions": "No conditions",
+    "sizeNoBound": "no limit",
+    "sizeBoundInvalid": "Must be a whole number, or empty for no limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -1035,9 +1037,13 @@
     "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault.",
     "runOnNoCodes": "An empty \"Run on codes\" list matches no status code, so this instruction never runs.",
     "useDefaultCodes": "Use defaults",
-    "httpCodeFilterDefaults": "An empty field uses the default codes shown in it.",
+    "httpCodeFilterDefaults": "Empty fields use the default codes shown in them.",
     "scopeSecretUnsupported": "(not vaulted here)",
-    "scopeSecretWarning": "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault."
+    "scopeSecretWarning": "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault.",
+    "skipNone": "none — no code is skipped",
+    "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
+    "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
+    "useDefaultSkipCodes": "Use default skip list"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1425,7 +1431,7 @@
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
     "toggleGroup": "Toggle property group",
-    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. With a \"From path\" set, the value is stored in plain text — clear the path or choose another scope."
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -2215,7 +2221,9 @@
       "filesLoadFailed": "Could not load the files: {{error}}"
     },
     "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
-    "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen."
+    "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
+    "chunkStrategyUnsupported": "{{value}} (not supported)",
+    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive."
   },
   "onboarding": {
     "welcome": {

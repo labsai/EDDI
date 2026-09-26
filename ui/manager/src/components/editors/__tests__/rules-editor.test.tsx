@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   RulesEditor,
@@ -369,5 +369,47 @@ describe("RulesEditor sizematcher preset", () => {
       if (key in configs) expect(configs[key]).toMatch(/^-?\d+$/);
     }
     expect(configs).toEqual({ valuePath: "", min: "1" });
+  });
+});
+
+describe("RulesEditor sizematcher bounds", () => {
+  const sizeConfig = (configs: Record<string, string>): RulesConfig => ({
+    appendActions: false,
+    expressionsAsActions: false,
+    behaviorGroups: [
+      {
+        name: "g",
+        behaviorRules: [{ name: "r", actions: ["a"], conditions: [{ type: "sizematcher", configs }] }],
+      },
+    ],
+  });
+  const lastConfigs = (onChange: ReturnType<typeof vi.fn>) =>
+    (onChange.mock.lastCall![0] as RulesConfig).behaviorGroups[0]!.behaviorRules![0]!.conditions![0]!.configs!;
+
+  it("never writes an empty bound: a cleared bound is stored as -1 (no bound)", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "1" })} onChange={onChange} />);
+    await user.clear(screen.getByDisplayValue("1"));
+    expect(lastConfigs(onChange).min).toBe("-1");
+  });
+
+  it("shows a -1 bound as an empty 'no limit' field", () => {
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", max: "-1" })} onChange={vi.fn()} />);
+    expect(screen.queryByDisplayValue("-1")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("no limit")).toHaveValue("");
+  });
+
+  it("stores -1 when an empty added key is renamed to a bound", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key1: "" })} onChange={onChange} />);
+    fireEvent.change(screen.getByDisplayValue("key1"), { target: { value: "max" } });
+    expect(lastConfigs(onChange)).toEqual({ valuePath: "p", max: "-1" });
+  });
+
+  it("flags a bound that is not a whole number", () => {
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "abc" })} onChange={vi.fn()} />);
+    expect(screen.getByDisplayValue("abc")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(/whole number/)).toBeInTheDocument();
   });
 });

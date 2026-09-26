@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -444,5 +445,52 @@ describe("McpCallsEditor Save Response default", () => {
     );
     const box = screen.getByText("Save Response").closest("label")!.querySelector("input")!;
     expect(box).toBeChecked();
+  });
+});
+
+describe("McpCallsEditor argument rows (review follow-ups)", () => {
+  function Harness({ initial }: { initial: Record<string, unknown> }) {
+    const [config, setConfig] = useState<McpCallsConfig>({
+      mcpCalls: [{ name: "c", toolName: "t", toolArguments: initial }],
+    });
+    latestConfig = config;
+    return <McpCallsEditor data={config} onChange={setConfig} />;
+  }
+  let latestConfig: McpCallsConfig = {};
+
+  it("keeps each row's own kind when a row above it is removed", async () => {
+    // Rows keyed by position handed row 0's JSON kind to the row that moved
+    // into its place when both held the same value.
+    const user = userEvent.setup();
+    renderWithProviders(<Harness initial={{ a: "x", b: "x" }} />);
+    await user.selectOptions(screen.getByTestId("tool-argument-0-kind"), "json");
+    expect(screen.getByTestId("tool-argument-1-kind")).toHaveValue("text");
+
+    await user.click(screen.getAllByRole("button", { name: "Remove argument" })[0]!);
+    expect(Object.keys(latestConfig.mcpCalls![0]!.toolArguments!)).toEqual(["b"]);
+    expect(screen.getByTestId("tool-argument-0-kind")).toHaveValue("text");
+  });
+
+  it("does not rename a stored key with surrounding whitespace on focus and blur", () => {
+    const onChange = vi.fn();
+    renderWithProviders(
+      <McpCallsEditor data={{ mcpCalls: [{ name: "c", toolName: "t", toolArguments: { " limit": 1, limit: 2 } }] }} onChange={onChange} />,
+    );
+    const name = screen.getByTestId("tool-argument-0-name");
+    fireEvent.focus(name);
+    fireEvent.blur(name);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(name).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("accepts a name that only exists on Object.prototype", () => {
+    const onChange = vi.fn();
+    renderWithProviders(
+      <McpCallsEditor data={{ mcpCalls: [{ name: "c", toolName: "t", toolArguments: { arg1: "x" } }] }} onChange={onChange} />,
+    );
+    const name = screen.getByTestId("tool-argument-0-name");
+    fireEvent.change(name, { target: { value: "constructor" } });
+    fireEvent.blur(name);
+    expect(Object.keys((onChange.mock.lastCall![0] as McpCallsConfig).mcpCalls![0]!.toolArguments!)).toEqual(["constructor"]);
   });
 });

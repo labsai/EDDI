@@ -347,11 +347,15 @@ function KvEditor({
 
 /**
  * What the engine applies to a list that is left out (`HttpCodeValidator.DEFAULT`
- * in the backend). Shown as the placeholders, so an empty field reads as
- * "the default" rather than "nothing".
+ * in the backend). The two lists are not symmetric:
+ * - `runOnHttpCode` absent means these defaults; `[]` matches no code at all,
+ *   so the editor never writes `[]` for it.
+ * - `skipOnHttpCode` absent means the default skip list; `[]` means "skip
+ *   nothing", a real choice. An emptied skip field therefore writes `[]`, and
+ *   only "Use default skip list" makes it absent again.
  */
-const DEFAULT_RUN_ON_HTTP_CODES = "200, 201";
-const DEFAULT_SKIP_ON_HTTP_CODES = "0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502";
+const DEFAULT_RUN_ON_HTTP_CODES = [200, 201];
+const DEFAULT_SKIP_ON_HTTP_CODES = [0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502];
 
 function HttpCodeValidatorEditor({
   validator,
@@ -367,8 +371,16 @@ function HttpCodeValidatorEditor({
 
   const runCodes = validator?.runOnHttpCode ?? [];
   const skipCodes = validator?.skipOnHttpCode ?? [];
+  const skipIsDefault = validator?.skipOnHttpCode == null;
   // Stored by earlier versions of this editor. Matches no status code.
   const runsOnNothing = Array.isArray(validator?.runOnHttpCode) && validator.runOnHttpCode.length === 0;
+
+  // What PrePostUtils.verifyHttpCode will actually compare against. A code in
+  // both lists never runs — e.g. "run on 404" with the default skip list,
+  // which contains 404.
+  const effectiveRun = validator?.runOnHttpCode ?? DEFAULT_RUN_ON_HTTP_CODES;
+  const effectiveSkip = validator?.skipOnHttpCode ?? DEFAULT_SKIP_ON_HTTP_CODES;
+  const blocked = effectiveRun.filter((code) => effectiveSkip.includes(code));
 
   if (!showValidator && !readOnly) {
     return (
@@ -376,8 +388,10 @@ function HttpCodeValidatorEditor({
         type="button"
         onClick={() => {
           setShowValidator(true);
-          // Both lists absent: the engine's defaults apply until codes are typed.
-          onChange({});
+          // Run list absent (the engine's 200, 201); skip nothing, so a code
+          // typed into "Run on codes" is not silently cancelled by the
+          // default skip list.
+          onChange({ skipOnHttpCode: [] });
         }}
         className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         data-testid="add-http-code-filter"
@@ -416,7 +430,7 @@ function HttpCodeValidatorEditor({
             value={runCodes.join(", ")}
             onChange={(e) => onChange({ ...validator, runOnHttpCode: parseHttpCodeList(e.target.value) })}
             readOnly={readOnly}
-            placeholder={DEFAULT_RUN_ON_HTTP_CODES}
+            placeholder={DEFAULT_RUN_ON_HTTP_CODES.join(", ")}
             className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             data-testid="http-code-filter-run"
           />
@@ -428,15 +442,20 @@ function HttpCodeValidatorEditor({
           <input
             type="text"
             value={skipCodes.join(", ")}
-            onChange={(e) => onChange({ ...validator, skipOnHttpCode: parseHttpCodeList(e.target.value) })}
+            // Emptied means "skip nothing" ([]), not "back to the defaults".
+            onChange={(e) => onChange({ ...validator, skipOnHttpCode: parseHttpCodeList(e.target.value) ?? [] })}
             readOnly={readOnly}
-            placeholder={DEFAULT_SKIP_ON_HTTP_CODES}
+            placeholder={
+              skipIsDefault
+                ? DEFAULT_SKIP_ON_HTTP_CODES.join(", ")
+                : t("apiCallsEditor.skipNone", "none — no code is skipped")
+            }
             className="h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             data-testid="http-code-filter-skip"
           />
         </div>
       </div>
-      {runsOnNothing ? (
+      {runsOnNothing && (
         <div className="flex flex-wrap items-center gap-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="http-code-filter-runs-on-nothing">
           <span className="flex-1">
             {t(
@@ -455,11 +474,33 @@ function HttpCodeValidatorEditor({
             </button>
           )}
         </div>
-      ) : (
-        <p className="text-[10px] text-muted-foreground">
-          {t("apiCallsEditor.httpCodeFilterDefaults", "An empty field uses the default codes shown in it.")}
+      )}
+      {blocked.length > 0 && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="http-code-filter-conflict">
+          {t(
+            "apiCallsEditor.runSkipConflict",
+            "{{codes}} is also in the skip list, so this instruction never runs on it.",
+            { codes: blocked.join(", ") },
+          )}
         </p>
       )}
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+        <span className="flex-1" data-testid="http-code-filter-skip-hint">
+          {skipIsDefault
+            ? t("apiCallsEditor.httpCodeFilterDefaults", "Empty fields use the default codes shown in them.")
+            : t("apiCallsEditor.httpCodeFilterSkipSet", "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.")}
+        </span>
+        {!skipIsDefault && !readOnly && (
+          <button
+            type="button"
+            onClick={() => onChange({ ...validator, skipOnHttpCode: undefined })}
+            className="rounded border border-border px-1.5 py-0.5 font-medium hover:text-foreground"
+            data-testid="http-code-filter-default-skip"
+          >
+            {t("apiCallsEditor.useDefaultSkipCodes", "Use default skip list")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
