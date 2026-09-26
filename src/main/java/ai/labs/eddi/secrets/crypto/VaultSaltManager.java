@@ -223,6 +223,22 @@ public class VaultSaltManager {
     }
 
     /**
+     * Removes the pending salt a legacy-salt rotation reserved, for a rotation that
+     * was refused before it wrapped anything under it.
+     * <p>
+     * Only for a reservation the refused run created itself: a pending salt left by
+     * an earlier, interrupted run may already have DEKs wrapped under it and must
+     * stay. Left behind, a fresh one made every later boot and decrypt failure
+     * report an unfinished rotation that never started.
+     *
+     * @throws PersistenceException
+     *             if it cannot be deleted
+     */
+    public void discardPendingSalt() {
+        persistence.deleteMetaValue(PENDING_SALT_META_KEY);
+    }
+
+    /**
      * Migrates from the legacy salt to {@code newSalt}: persists it as the
      * deployment's salt, clears the pending marker and updates the in-memory state.
      * <p>

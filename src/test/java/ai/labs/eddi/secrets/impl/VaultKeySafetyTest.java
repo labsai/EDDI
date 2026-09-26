@@ -258,6 +258,33 @@ class VaultKeySafetyTest {
             assertEquals("two", provider(NEW_MASTER).resolve(ref("t2", "key")));
         }
 
+        /**
+         * A refused legacy-salt rotation (wrong old key, say) used to leave the salt it
+         * had reserved behind, and every later boot and decrypt failure then reported
+         * an unfinished rotation that never wrapped anything. A pending salt an
+         * earlier, interrupted run left must survive a refusal, though: DEKs are under
+         * it.
+         */
+        @Test
+        @DisplayName("a refused legacy-salt rotation takes back only the pending salt it reserved itself")
+        void refusedLegacyRotationDiscardsItsFreshPendingSalt() throws Exception {
+            seedLegacyTenant("t1", "one");
+            var provider = provider(MASTER);
+
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek("not-the-master-key-at-all", NEW_MASTER));
+            assertNull(persistence.meta.get("vault-kek-salt-pending"), "a refusal before any write must not leave a pending salt");
+
+            seedLegacyTenant("t2", "two");
+            persistence.failDekRewrapsAfter = 1;
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+            String pending = persistence.meta.get("vault-kek-salt-pending");
+            assertTrue(pending != null);
+            persistence.failDekRewrapsAfter = -1;
+
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek("not-the-master-key-at-all", NEW_MASTER));
+            assertEquals(pending, persistence.meta.get("vault-kek-salt-pending"), "an earlier run's pending salt has DEKs under it");
+        }
+
         @Test
         @DisplayName("a DEK that opens with neither key stops the rotation before anything is written")
         void unopenableDekRefusesUpFront() throws Exception {

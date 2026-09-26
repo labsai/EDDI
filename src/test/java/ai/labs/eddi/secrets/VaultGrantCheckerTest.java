@@ -220,6 +220,31 @@ class VaultGrantCheckerTest {
             assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
         }
 
+        /**
+         * A store reports absence with ResourceNotFoundException, so a null read is not
+         * a confirmed absence — the part was never inspected.
+         */
+        @Test
+        @DisplayName("checkReferences — a workflow or extension config read as null is UNKNOWN")
+        void nullReadIsUnknown() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+
+            when(workflowStore.read(anyString(), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a ${vars:…} that cannot be expanded is UNKNOWN, since its value was never scanned")
+        void unexpandableVariableIsUnknown() throws Exception {
+            deployedAgentWhoseCallCarries("${vars:model-key}");
+            when(globalVariableResolver.resolveValue("${vars:model-key}", "default")).thenThrow(new RuntimeException("store down"));
+
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
         @Test
         @DisplayName("checkReferences — a fully read config that names another key is DOES_NOT_REFERENCE")
         void readableConfigWithoutTheKey() throws Exception {

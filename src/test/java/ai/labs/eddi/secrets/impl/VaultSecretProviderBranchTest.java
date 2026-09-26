@@ -131,12 +131,16 @@ class VaultSecretProviderBranchTest {
             VaultSecretProvider provider = createAvailableProvider();
 
             when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
-            doThrow(new PersistenceException("DEK write failed"))
-                    .when(persistence).upsertDek(any(EncryptedDek.class));
+            // The first DEK is inserted, never upserted: stubbing upsertDek here left
+            // the test passing through the "created concurrently but cannot be read
+            // back" path instead of the write failure it is named for.
+            PersistenceException writeFailure = new PersistenceException("DEK write failed");
+            when(persistence.insertDek(any(EncryptedDek.class))).thenThrow(writeFailure);
 
-            assertThrows(SecretProviderException.class,
+            SecretProviderException thrown = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                             "value", null, null));
+            assertSame(writeFailure, thrown.getCause(), "the DEK write failure must be what surfaces");
         }
     }
 
