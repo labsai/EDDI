@@ -1524,4 +1524,115 @@ class RestScheduleStoreTest {
     private static ResourceAccessGuard permissiveResourceGuard() {
         return mock(ResourceAccessGuard.class);
     }
+
+    // --- Finding 3: create must not seed a caller-supplied
+    // persistentConversationId ---
+
+    @Test
+    void createSchedule_clearsCallerSuppliedPersistentConversationId() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.createSchedule(any())).thenReturn("c1");
+
+        var body = makeCronSchedule("c1");
+        body.setUserId("editor-1");
+        body.setPersistentConversationId("victim-conversation-42");
+
+        Response response = rest.createSchedule(body);
+        assertEquals(201, response.getStatus());
+
+        ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).createSchedule(captor.capture());
+        assertNull(captor.getValue().getPersistentConversationId(),
+                "create must not persist a caller-supplied persistentConversationId");
+    }
+
+    // --- Finding 4: ownership on schedule reads and state-changers ---
+
+    @Test
+    void deleteSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s1");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s1")).thenReturn(stored);
+
+        Response response = rest.deleteSchedule("s1");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).deleteSchedule(anyString());
+    }
+
+    @Test
+    void deleteSchedule_ownSchedule_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s2");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s2")).thenReturn(stored);
+
+        Response response = rest.deleteSchedule("s2");
+
+        assertEquals(204, response.getStatus());
+        verify(scheduleStore).deleteSchedule("s2");
+    }
+
+    @Test
+    void disableSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s3");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s3")).thenReturn(stored);
+
+        Response response = rest.disableSchedule("s3");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+    }
+
+    @Test
+    void readSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s4");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s4")).thenReturn(stored);
+
+        assertThrows(ForbiddenException.class, () -> rest.readSchedule("s4"));
+    }
+
+    @Test
+    void readSchedule_ownSchedule_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s5");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s5")).thenReturn(stored);
+
+        assertEquals("s5", rest.readSchedule("s5").getId());
+    }
+
+    @Test
+    void readAllSchedules_filtersOtherUsersSchedulesForEditor() throws Exception {
+        asEditor("editor-1");
+        var own = makeCronSchedule("own");
+        own.setUserId("editor-1");
+        var other = makeCronSchedule("other");
+        other.setUserId("victim-42");
+        var system = makeCronSchedule("system"); // userId null -> system/shared
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), eq(true))).thenReturn(List.of(own, other, system));
+
+        List<ScheduleConfiguration> visible = rest.readAllSchedules(null, 500, 0);
+
+        assertEquals(2, visible.size());
+        assertTrue(visible.stream().noneMatch(s -> "victim-42".equals(s.getUserId())),
+                "an editor must not see another user's schedule in the listing");
+    }
+
+    @Test
+    void readAllSchedules_adminSeesAll() throws Exception {
+        asAdmin("root");
+        var own = makeCronSchedule("own");
+        own.setUserId("editor-1");
+        var other = makeCronSchedule("other");
+        other.setUserId("victim-42");
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), eq(false))).thenReturn(List.of(own, other));
+
+        assertEquals(2, rest.readAllSchedules(null, 500, 0).size());
+    }
 }
