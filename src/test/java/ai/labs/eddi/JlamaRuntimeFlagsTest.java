@@ -63,6 +63,7 @@ class JlamaRuntimeFlagsTest {
     private static final Path DEMO_DOCKERFILE = Path.of("src", "main", "docker", "Dockerfile.demo");
     private static final Path POM = Path.of("pom.xml");
     private static final Path MISE = Path.of("mise.toml");
+    private static final Path README = Path.of("README.md");
 
     /** The flag, taken from production code so the two cannot drift apart. */
     private static final String FLAG = JlamaRuntimeSupport.REQUIRED_JVM_FLAG;
@@ -194,6 +195,28 @@ class JlamaRuntimeFlagsTest {
             assertTrue(devRun.contains(FLAG),
                     "every mise task that forks a dev JVM must forward '" + FLAG + "' (via -Djvm.args), or a Jlama"
                             + " agent behaves differently in dev than in the image. Line was: " + devRun);
+        }
+    }
+
+    /**
+     * The README's dev-mode commands are what most contributors copy, and they
+     * started {@code quarkus:dev} without the flag while {@code mise run dev}
+     * passed it — so the same checkout ran Jlama at full speed or at scalar speed
+     * depending on which instructions its owner followed.
+     */
+    @Test
+    @DisplayName("every README command that starts quarkus:dev passes the flag")
+    void readmeDevCommandsPassTheFlag() {
+        List<String> devCommands = read(README).lines()
+                .filter(line -> line.contains("mvnw") && line.contains("quarkus:dev"))
+                .toList();
+
+        assertTrue(devCommands.size() >= 3,
+                "expected README.md's Linux and Windows dev-mode commands and its command table to start quarkus:dev;"
+                        + " found " + devCommands.size());
+        for (String command : devCommands) {
+            assertTrue(command.contains("-Djvm.args=" + FLAG),
+                    "README.md must pass -Djvm.args=" + FLAG + " wherever it starts quarkus:dev. Line was: " + command);
         }
     }
 
