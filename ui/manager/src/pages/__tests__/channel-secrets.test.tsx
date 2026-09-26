@@ -60,6 +60,20 @@ describe("channel credentials are references only", () => {
     expect(puts).toEqual([]);
   });
 
+  it("never shows the plaintext token in the raw configuration, and warns that it is stored", async () => {
+    server.use(http.get("*/channelstore/channels/ch-legacy", () => HttpResponse.json(CHANNEL)));
+    renderDetail();
+    const user = userEvent.setup();
+
+    expect(await screen.findByTestId("channel-plaintext-warning")).toHaveTextContent(/botToken/);
+    await user.click(screen.getByText("Raw Configuration"));
+    const raw = await screen.findByText(/"platformConfig"/);
+    expect(raw.textContent).not.toContain("xoxb-plaintext-legacy-token");
+    expect(raw.textContent).toContain("••••••••");
+    // References are pointers, not secrets.
+    expect(raw.textContent).toContain("${vault:slack-signing-secret}");
+  });
+
   it("saves once the token is a vault reference", async () => {
     const puts: { platformConfig: Record<string, string> }[] = [];
     server.use(

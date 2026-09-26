@@ -3417,7 +3417,8 @@
     "typeGroup": "Groupe",
     "selectGroup": "Choisir un groupe…",
     "unknownGroup": "{{id}} (introuvable)",
-    "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés."
+    "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
+    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",

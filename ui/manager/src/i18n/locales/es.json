@@ -3417,7 +3417,8 @@
     "typeGroup": "Grupo",
     "selectGroup": "Selecciona un grupo…",
     "unknownGroup": "{{id}} (no encontrado)",
-    "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan."
+    "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
+    "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
   },
   "hitl": {
     "loadingApprovalDetails": "Cargando detalles de aprobación…",

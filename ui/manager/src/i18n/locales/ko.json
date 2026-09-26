@@ -3382,7 +3382,8 @@
     "typeGroup": "그룹",
     "selectGroup": "그룹 선택…",
     "unknownGroup": "{{id}} (찾을 수 없음)",
-    "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다."
+    "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다.",
+    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요."
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",

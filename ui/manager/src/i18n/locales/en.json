@@ -3423,7 +3423,8 @@
     "typeGroup": "Group",
     "selectGroup": "Select a group…",
     "unknownGroup": "{{id}} (not found)",
-    "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved."
+    "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
+    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",

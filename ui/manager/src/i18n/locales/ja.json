@@ -3382,7 +3382,8 @@
     "typeGroup": "グループ",
     "selectGroup": "グループを選択…",
     "unknownGroup": "{{id}}（見つかりません）",
-    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。"
+    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",

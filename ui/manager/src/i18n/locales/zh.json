@@ -3382,7 +3382,8 @@
     "typeGroup": "群组",
     "selectGroup": "选择群组…",
     "unknownGroup": "{{id}}（未找到）",
-    "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。"
+    "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
+    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
