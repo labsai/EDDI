@@ -143,6 +143,9 @@ describe("SchedulesPage — dead-letter panel acts on schedules, not logs", () =
           }),
         ])
       ),
+      http.get("*/schedulestore/schedules/deleted-1", () =>
+        new HttpResponse(null, { status: 404 })
+      ),
       http.get("*/schedulestore/schedules/admin/failed", () =>
         HttpResponse.json([
           {
@@ -206,3 +209,57 @@ describe("SchedulesPage — dead-letter panel acts on schedules, not logs", () =
     ).toHaveTextContent("Schedule no longer exists");
   });
 });
+
+describe("SchedulesPage — dead-letter panel beyond the listed page", () => {
+  // The list is one page (and hides HITL timeouts from non-admins). A
+  // dead-lettered schedule not on it was reported as gone and lost its actions.
+  it("looks an unlisted schedule up by id and keeps its actions when it is dead-lettered", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([scheduleRow({ id: "listed-1", name: "Listed" })])
+      ),
+      http.get("*/schedulestore/schedules/admin/failed", () =>
+        HttpResponse.json([
+          {
+            id: "log-far",
+            scheduleId: "far-1",
+            fireTime: new Date().toISOString(),
+            status: "DEAD_LETTERED",
+            attemptNumber: 3,
+          },
+          {
+            id: "log-flaky",
+            scheduleId: "flaky-1",
+            fireTime: new Date().toISOString(),
+            status: "DEAD_LETTERED",
+            attemptNumber: 3,
+          },
+        ])
+      ),
+      http.get("*/schedulestore/schedules/far-1", () =>
+        HttpResponse.json(
+          scheduleRow({ id: "far-1", name: "Far away", enabled: false, fireStatus: "DEAD_LETTERED", failCount: 3 })
+        )
+      ),
+      // Not a 404 — a failed lookup must not be reported as "gone".
+      http.get("*/schedulestore/schedules/flaky-1", () =>
+        new HttpResponse(null, { status: 500 })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderSchedules();
+    await user.click(await screen.findByTestId("tab-failed"));
+    const table = await screen.findByTestId("failed-fires-table");
+
+    await waitFor(() =>
+      expect(within(table).getByTestId("failed-retry-far-1")).toBeInTheDocument()
+    );
+    expect(within(table).getByText("Far away")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(table).getByTestId("failed-no-action-log-flaky")).toHaveTextContent("—")
+    );
+    expect(within(table).queryByText("Schedule no longer exists")).not.toBeInTheDocument();
+  });
+});
+

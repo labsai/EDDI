@@ -429,3 +429,27 @@ describe("useHistoryLogs — paging", () => {
   });
 });
 
+describe("useHistoryLogs — repeated rows", () => {
+  it("keeps identical rows within a page and drops only the rows a page boundary repeats", async () => {
+    const same = { timestamp: 5000, level: "WARN", loggerName: "t", message: "retry" };
+    server.use(
+      http.get("*/logs/history", ({ request }) => {
+        const skip = Number(new URL(request.url).searchParams.get("skip") ?? "0");
+        return HttpResponse.json(
+          skip === 0
+            ? [same, { ...same }]
+            // One row shifted in from the previous page, plus one older row.
+            : [{ ...same }, { timestamp: 4000, level: "INFO", loggerName: "t", message: "older" }]
+        );
+      })
+    );
+    const { result } = renderHook(() => useHistoryLogs({ limit: 2 }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    expect(result.current.data!.map((r) => r.message)).toEqual(["retry", "retry", "older"]);
+  });
+});
+

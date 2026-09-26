@@ -246,6 +246,7 @@ describe("ConversationMonitoringPage — bulk end uses the current state", () =>
   });
 
   it("does not end a conversation that paused for approval since the dialog was opened", async () => {
+    vi.mocked(toast.warning).mockClear();
     let reads = 0;
     let ended = false;
     server.use(
@@ -273,6 +274,43 @@ describe("ConversationMonitoringPage — bulk end uses the current state", () =>
     await waitFor(() =>
       expect(within(dialog).getByText(/Awaiting Human and will have its pending approval cancelled/)).toBeInTheDocument()
     );
+  });
+
+  // Same COUNT of paused conversations, different conversation: the one the
+  // dialog warned about resumed and another paused. Compared by count, this
+  // ended the new one without the operator having seen it.
+  it("compares which conversations are paused, not how many", async () => {
+    vi.mocked(toast.warning).mockClear();
+    let reads = 0;
+    let ended = false;
+    const a = { ...ACTIVE_ROWS[0], conversationId: "conv-a" };
+    const b = { ...ACTIVE_ROWS[0], conversationId: "conv-b" };
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () => {
+        reads++;
+        return HttpResponse.json(
+          reads === 1
+            ? [{ ...a, conversationState: "AWAITING_HUMAN" }, b]
+            : [a, { ...b, conversationState: "AWAITING_HUMAN" }]
+        );
+      }),
+      http.post("*/conversationstore/conversations/end", () => {
+        ended = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+    await chooseAgent(user);
+    await screen.findByTestId("active-conversation-list");
+    await user.click(screen.getByTestId("select-all"));
+    await user.click(screen.getByTestId("end-selected"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "End selected" }));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(ended).toBe(false);
   });
 });
 

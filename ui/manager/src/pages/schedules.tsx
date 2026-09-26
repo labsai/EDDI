@@ -27,6 +27,8 @@ import {
   Ban,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useQueries } from "@tanstack/react-query";
+import { isApiError } from "@/lib/api-client";
 import {
   useSchedules,
   useCreateSchedule,
@@ -40,6 +42,7 @@ import {
   useFireLogs,
 } from "@/hooks/use-schedules";
 import {
+  getSchedule,
   fireLogDurationMs,
   parseInstant,
   mayHaveMoreSchedules,
@@ -74,29 +77,28 @@ function isHitlTimeoutSchedule(s: ScheduleConfiguration): boolean {
   return s.metadata?.hitlType === "hitl_timeout";
 }
 
-/** The metadata markers the backend's ScheduleFireExecutor reads to choose a
- *  fire path other than "send a message to an agent": HITL approval timeouts,
- *  RAG ingestion (RagIngestionSchedules), dream consolidation (DreamService) and
- *  standing-team cadences (TeamCadenceService). */
-const SYSTEM_SCHEDULE_MARKERS = [
-  "hitlType",
-  "ragIngestion",
-  "dreamType",
-  "teamCadenceType",
-] as const;
-
-/** A schedule the platform minted for itself. The edit form only knows how to
- *  describe a CHAT schedule, and a PUT is a full replace: saving it dropped the
- *  metadata marker, so an edited RAG-ingestion, dream or team-cadence schedule
- *  silently became one that messages an agent and stopped crawling or
- *  consolidating. The backend also refuses a body that carries some of these
- *  markers, so echoing them is no way out either — these schedules are changed
- *  where they are defined (the knowledge base, the agent, the team). */
+/** A schedule the platform minted for itself: a HITL approval timeout, a RAG
+ *  ingestion (RagIngestionSchedules), dream consolidation (DreamService) or a
+ *  standing-team cadence (TeamCadenceService) — the markers the backend's
+ *  ScheduleFireExecutor reads to choose a fire path other than "send a message
+ *  to an agent". Checked the way the backend checks them.
+ *
+ *  The edit form only knows how to describe a CHAT schedule, and a PUT is a
+ *  full replace: saving one of these dropped the marker, so an edited
+ *  RAG-ingestion, dream or team-cadence schedule silently became one that
+ *  messages an agent and stopped crawling or consolidating. The backend also
+ *  refuses a body carrying some of these markers, so echoing them is no way out
+ *  either — these schedules are changed where they are defined (the knowledge
+ *  base, the agent, the team). */
 function isSystemManagedSchedule(s: ScheduleConfiguration): boolean {
   const md = s.metadata;
   if (!md) return false;
-  return SYSTEM_SCHEDULE_MARKERS.some(
-    (key) => md[key] != null && md[key] !== false && md[key] !== ""
+  const nonEmpty = (v: unknown) => typeof v === "string" && v.length > 0;
+  return (
+    md.hitlType === "hitl_timeout" ||
+    md.ragIngestion === true ||
+    nonEmpty(md.dreamType) ||
+    nonEmpty(md.teamCadenceType)
   );
 }
 
@@ -360,10 +362,40 @@ function FailedFiresPanel({
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
+  // The list is one page, and hides HITL timeouts from non-admins. A failed
+  // log whose schedule is not on it is looked up by id rather than declared
+  // gone — only a 404 means gone.
+  const missingIds = useMemo(() => {
+    if (!schedules || !failed) return [];
+    const listed = new Set(schedules.map((s) => s.id));
+    return [...new Set(failed.map((l) => l.scheduleId))].filter(
+      (id) => !listed.has(id)
+    );
+  }, [schedules, failed]);
+  const lookups = useQueries({
+    queries: missingIds.map((id) => ({
+      queryKey: ["schedules", "detail", id],
+      queryFn: () => getSchedule(id),
+      retry: false,
+      staleTime: 15_000,
+    })),
+  });
+  const fetched = new Map<string, ScheduleConfiguration>();
+  const gone = new Set<string>();
+  missingIds.forEach((id, idx) => {
+    const q = lookups[idx];
+    if (q?.data) fetched.set(id, q.data);
+    else if (q?.error && isApiError(q.error) && q.error.status === 404) gone.add(id);
+  });
+
   const scheduleFor = (scheduleId: string) =>
-    schedules?.find((s) => s.id === scheduleId);
+    schedules?.find((s) => s.id === scheduleId) ?? fetched.get(scheduleId);
   const nameFor = (scheduleId: string) =>
     scheduleFor(scheduleId)?.name ?? scheduleId;
+  // A stable, collision-free row key: a log's id, or its position when it has
+  // none — prefixed so a numeric id can never equal an index.
+  const rowKey = (log: ScheduleFireLog, i: number) =>
+    log.id != null ? `id:${log.id}` : `idx:${i}`;
 
   // The rows are FIRE LOGS, but retry and dismiss act on the SCHEDULE — and the
   // backend only accepts them while that schedule is DEAD_LETTERED right now.
@@ -373,14 +405,14 @@ function FailedFiresPanel({
   // once per schedule (on its newest log; the list is newest first) and only
   // while the schedule itself is dead-lettered. Other rows say what state the
   // schedule is actually in.
-  const actionableLogIds = new Set<string | number>();
+  const actionableRows = new Set<string>();
   {
     const seen = new Set<string>();
     (failed ?? []).forEach((log, i) => {
       if (seen.has(log.scheduleId)) return;
       seen.add(log.scheduleId);
       if (scheduleFor(log.scheduleId)?.fireStatus === "DEAD_LETTERED") {
-        actionableLogIds.add(log.id ?? i);
+        actionableRows.add(rowKey(log, i));
       }
     });
   }
@@ -481,7 +513,7 @@ function FailedFiresPanel({
             <tbody>
               {failed.map((log, i) => (
                 <tr
-                  key={log.id ?? i}
+                  key={rowKey(log, i)}
                   className="border-b border-border/50 transition-colors hover:bg-muted/30"
                   data-testid={`failed-row-${log.scheduleId}`}
                 >
@@ -511,20 +543,19 @@ function FailedFiresPanel({
                     {log.errorMessage ?? "—"}
                   </td>
                   <td className="px-5 py-3">
-                    {!actionableLogIds.has(log.id ?? i) ? (
+                    {!actionableRows.has(rowKey(log, i)) ? (
                       <div
                         className="text-end text-xs text-muted-foreground"
                         data-testid={`failed-no-action-${log.id ?? i}`}
                       >
                         {(() => {
-                          if (!schedules) return "—";
                           const current = scheduleFor(log.scheduleId);
-                          if (!current)
-                            return t(
-                              "schedules.failedScheduleGone",
-                              "Schedule no longer exists"
-                            );
-                          return <StatusBadge schedule={current} />;
+                          if (current) return <StatusBadge schedule={current} />;
+                          if (!gone.has(log.scheduleId)) return "—";
+                          return t(
+                            "schedules.failedScheduleGone",
+                            "Schedule no longer exists"
+                          );
                         })()}
                       </div>
                     ) : (

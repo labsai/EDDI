@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
-import { historyEntryKey, logEntryKey } from "@/lib/log-entries";
+import { historyEntryKey, keyedOldestFirst, logEntryKey } from "@/lib/log-entries";
 import type { LogEntry, DatabaseLogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
 import { useDeployedAgents } from "@/hooks/use-chat";
@@ -406,8 +406,8 @@ function LiveTab() {
             {/* Keyed by the line's identity, not its index: with index keys every
                 new line shifted every key, so React remounted the whole list
                 (and reset every expanded stack trace) once per log line. */}
-            {[...filteredEntries].reverse().map((entry) => (
-              <LogRow key={logEntryKey(entry)} entry={entry} />
+            {keyedOldestFirst([...filteredEntries].reverse(), logEntryKey).map(({ item: entry, key }) => (
+              <LogRow key={key} entry={entry} />
             ))}
           </div>
         )}
@@ -652,8 +652,8 @@ function HistoryTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
-            {filteredLogs.map((entry) => (
-              <LogRow key={historyEntryKey(entry)} entry={entry} />
+            {keyedOldestFirst([...filteredLogs].reverse(), historyEntryKey).reverse().map(({ item: entry, key }) => (
+              <LogRow key={key} entry={entry} />
             ))}
             {hasMore && (
               <div className="flex justify-center p-3">

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { cn } from "@/lib/utils";
-import { logEntryKey, mergeNewestFirst } from "@/lib/log-entries";
+import { keyedOldestFirst, logEntryKey, mergeNewestFirst } from "@/lib/log-entries";
 import {
   ScrollText,
   Pause,
@@ -261,8 +261,8 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
             </p>
           </div>
         ) : (
-          filteredLogs.map((entry) => (
-            <LogLine key={logEntryKey(entry)} entry={entry} />
+          keyedOldestFirst(filteredLogs, logEntryKey).map(({ item: entry, key }) => (
+            <LogLine key={key} entry={entry} />
           ))
         )}
       </div>
