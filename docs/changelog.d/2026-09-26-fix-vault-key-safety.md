@@ -94,6 +94,9 @@ Findings from the 2026-09-25 code review, each with a regression test.
 - **Impact analysis completeness.** A workflow or extension config read as `null`, and a `${vars:…}` that
   cannot be expanded, make `checkReferences` answer `UNKNOWN` rather than `DOES_NOT_REFERENCE`. The deploy gate
   (`findUngrantedReferences`) is unchanged.
+- **Interrupted adoption.** `adoptCurrentMasterKey` also clears system values when the system tenant holds no
+  DEK. An adoption interrupted between deleting the system DEKs and its second clear left a value no key can
+  open, and a re-run skipped the cleanup, so every later pin failed.
 - **Test.** `dekPersistenceFailure` now fails `insertDek` (the first DEK is never upserted) and asserts the
   write failure is the cause.
 

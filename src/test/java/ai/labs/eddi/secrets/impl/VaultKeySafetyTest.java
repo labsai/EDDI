@@ -511,6 +511,29 @@ class VaultKeySafetyTest {
             assertEquals("fresh", after.pinSystemValue("audit-hmac-key", "fresh"), "system values are re-created under the new key");
         }
 
+        /**
+         * An adoption that stopped after deleting the system DEKs but before its second
+         * clear leaves a system value no DEK can open. The re-run has no unreadable
+         * system DEK to notice, so it must clear orphaned system values on its own.
+         */
+        @Test
+        @DisplayName("re-running an interrupted adoption clears system values left without a system DEK")
+        void rerunAdoptionClearsOrphanedSystemValues() throws Exception {
+            var before = provider(LOST);
+            before.store(ref("t1", "key"), "one", null, null);
+            before.pinSystemValue("audit-hmac-key", "pinned-under-the-lost-key");
+            String orphan = persistence.meta.get(VaultSecretProvider.SYSTEM_VALUE_META_PREFIX + "audit-hmac-key");
+            var after = provider(REPLACEMENT);
+            after.adoptCurrentMasterKey();
+            // What an interrupted run leaves: system DEKs gone, the value still there.
+            persistence.meta.put(VaultSecretProvider.SYSTEM_VALUE_META_PREFIX + "audit-hmac-key", orphan);
+
+            var rerun = after.adoptCurrentMasterKey();
+
+            assertTrue(rerun.systemValuesReset());
+            assertEquals("fresh", after.pinSystemValue("audit-hmac-key", "fresh"), "the pin must not fail on the orphaned value");
+        }
+
         @Test
         @DisplayName("a vault holding no DEKs adopts a different key at startup — the dev 'restarted with another key' case")
         void emptyVaultAdoptsTheConfiguredKey() throws Exception {
