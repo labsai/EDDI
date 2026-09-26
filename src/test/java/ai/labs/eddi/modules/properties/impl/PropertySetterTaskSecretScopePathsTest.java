@@ -54,7 +54,7 @@ import static org.mockito.Mockito.when;
  */
 class PropertySetterTaskSecretScopePathsTest {
 
-    private static final String TOKEN = "tok-live-0123456789abcdef";
+    private static final String TOKEN = "tok-live-aaaaaaaaaaaaaaaa";
 
     private ISecretProvider secretProvider;
     private PropertySetterTask task;

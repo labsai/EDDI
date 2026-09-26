@@ -149,7 +149,7 @@ public class PrePostUtils {
                             // the turn, like it does in the property setter — skipping it would
                             // leave {properties.x} empty and the next call failing with a 401
                             // that names nothing.
-                            if (!"".equals(propertyValue)) {
+                            if (!(propertyValue instanceof String str) || !str.isEmpty()) {
                                 try {
                                     memory.getConversationProperties().put(propertyName,
                                             secretPropertyVault.vault(memory, propertyName, propertyValue));
