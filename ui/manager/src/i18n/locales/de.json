@@ -893,7 +893,7 @@
     "noRules": "Keine Regeln in dieser Gruppe",
     "noConditions": "Keine Bedingungen",
     "sizeNoBound": "kein Limit",
-    "sizeBoundInvalid": "Muss eine ganze Zahl sein oder leer für kein Limit."
+    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Keine Endpunkte in der Spezifikation gefunden",

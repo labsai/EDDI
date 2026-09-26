@@ -412,4 +412,28 @@ describe("RulesEditor sizematcher bounds", () => {
     expect(screen.getByDisplayValue("abc")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText(/whole number/)).toBeInTheDocument();
   });
+
+  it("stores a typed bound without surrounding whitespace", () => {
+    // SizeMatcher calls Integer.parseInt without trimming: " 2 " fails the save.
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", min: "1" })} onChange={onChange} />);
+    fireEvent.change(screen.getByDisplayValue("1"), { target: { value: " 2 " } });
+    expect(lastConfigs(onChange)).toEqual({ valuePath: "p", min: "2" });
+  });
+
+  it("flags a stored bound Integer.parseInt would refuse", () => {
+    renderWithProviders(
+      <RulesEditor data={sizeConfig({ valuePath: "p", min: " 2 ", max: "2147483648" })} onChange={vi.fn()} />,
+    );
+    expect(screen.getByDisplayValue("2147483648")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByDisplayValue(" 2 ", { normalizer: (v) => v })).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("accepts the int range limits", () => {
+    renderWithProviders(
+      <RulesEditor data={sizeConfig({ valuePath: "p", min: "-2147483648", max: "2147483647" })} onChange={vi.fn()} />,
+    );
+    expect(screen.getByDisplayValue("2147483647")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByDisplayValue("-2147483648")).not.toHaveAttribute("aria-invalid");
+  });
 });

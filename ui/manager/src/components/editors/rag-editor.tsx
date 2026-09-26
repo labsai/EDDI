@@ -493,12 +493,33 @@ function IngestionPanel({
     [kbId, version, pollStatus],
   );
 
+  // What the editor looks like *now*, for a file read that finished after the
+  // render that started it: the check at drop time is not enough on its own.
+  const readGuard = useRef({ dirty: Boolean(hasUnsavedChanges), version });
+  useEffect(() => {
+    readGuard.current = { dirty: Boolean(hasUnsavedChanges), version };
+  }, [hasUnsavedChanges, version]);
+
   const handleFiles = useCallback(
     (files: FileList) => {
       if (hasUnsavedChanges) return;
       Array.from(files).forEach((file) => {
         const reader = new FileReader();
         reader.onload = () => {
+          if (!mountedRef.current) return;
+          // Edited (or saved as a new version) while the file was being read:
+          // the ingest would go to a knowledge base other than the one on screen.
+          if (readGuard.current.dirty || readGuard.current.version !== version) {
+            setIngestions((prev) => [
+              ...prev,
+              {
+                ingestionId: `err-${Date.now()}`,
+                status: `failed: ${file.name} was not ingested — the knowledge base changed while it was read`,
+                documentName: file.name,
+              },
+            ]);
+            return;
+          }
           const content = reader.result as string;
           startIngestion(content, file.name);
         };
@@ -511,7 +532,7 @@ function IngestionPanel({
         reader.readAsText(file);
       });
     },
-    [startIngestion, hasUnsavedChanges],
+    [startIngestion, hasUnsavedChanges, version],
   );
 
   const handleTextIngest = useCallback(() => {

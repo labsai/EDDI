@@ -893,7 +893,7 @@
     "noRules": "此组中没有规则",
     "noConditions": "无条件",
     "sizeNoBound": "无限制",
-    "sizeBoundInvalid": "必须是整数，留空表示无限制。"
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",

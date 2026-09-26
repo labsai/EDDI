@@ -84,6 +84,15 @@ known findings U1 and U2. Manager-only; no backend, REST or stored-config shape 
   when a run starts, refetched when a run finishes, invalidated after a purge, and refetched after
   a retried upload; a failed list load is shown with a retry instead of "No files yet"; and the
   "Run now" in the files banner is not offered on a disabled source.
+- **Second review round**. A `secret` property row that has both a `valueString` and a typed
+  value now warns too: PropertySetterTask vaults the string, then writes the typed value over it
+  in plain text. A sizematcher bound is stored trimmed and must fit a Java `int`, since
+  `Integer.parseInt` neither trims nor accepts `2147483648`. The Enter that confirms an IME
+  composition no longer commits a key rename. MCP argument row ids are pruned in an effect
+  instead of during render. A document whose file read finishes after the knowledge base was
+  edited or saved again is refused with a message instead of being ingested into the saved
+  version. The two page tests that still expected the removed "Parallel Tool Execution" control
+  and the old `arg<n>` count now assert the new behaviour.
 
 ### What changes for authors
 

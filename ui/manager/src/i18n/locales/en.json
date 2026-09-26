@@ -933,7 +933,7 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions",
     "sizeNoBound": "no limit",
-    "sizeBoundInvalid": "Must be a whole number, or empty for no limit."
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
