@@ -237,9 +237,24 @@ public class ResourceAccessGuard {
      * unreadable descriptor is {@code false}, the same fail-closed answer
      * {@link #requireUseAccess} gives, and with enforcement off everything is
      * admitted, as everywhere else.
+     * <p>
+     * An administrator is admitted only through
+     * {@link #principalMayUse(String, String, boolean)}: whether a principal holds
+     * {@code eddi-admin} is a claim on their token, which this method cannot see.
      */
     public boolean principalMayUse(String resourceId, String principal) {
-        if (!settings.isEnforcing()) {
+        return principalMayUse(resourceId, principal, false);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String)}, with the caller's word on whether
+     * {@code principal} is an administrator — which admits everything, exactly as
+     * {@link #seesEverything()} does on the request path. The flag must come from
+     * the principal's own captured identity
+     * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
+     */
+    public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        if (!settings.isEnforcing() || principalIsAdmin) {
             return true;
         }
         if (resourceId == null || resourceId.isBlank()) {

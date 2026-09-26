@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URI;
@@ -651,6 +652,34 @@ class McpConversationToolsExtendedTest {
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("No Agent trigger"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void chatManaged_triggerInitialContext_reservedKeysNeverReachTheConversation() throws Exception {
+        // Review #7: a trigger's initialContext is editor-written config, not engine
+        // state — it must not be able to pose as a group member's policy.
+        when(userConversationStore.readUserConversation("support", "user1"))
+                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(new HashMap<>(Map.of(
+                "dynamicAgentConfig", new Context(Context.ContextType.object, Map.of("enabled", true)),
+                "dynamicCreatedAgentIds", new Context(Context.ContextType.object, List.of("victim")),
+                "lang", new Context(Context.ContextType.string, "en"))));
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        trigger.setAgentDeployments(List.of(deployment));
+        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+        ArgumentCaptor<Map<String, Context>> passed = ArgumentCaptor.forClass(Map.class);
+        // Stop right after the start: only the context handed to it is under test.
+        when(conversationService.startConversation(any(), eq(AGENT_ID), any(), passed.capture()))
+                .thenThrow(new RuntimeException("stop here"));
+
+        tools.chatManaged("support", "user1", "hello", null);
+
+        assertEquals(Set.of("lang"), passed.getValue().keySet());
     }
 
     @Test

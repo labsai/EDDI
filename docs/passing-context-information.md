@@ -60,8 +60,9 @@ A handful of context keys belong to the engine: the group orchestrator and the
 `converse_with_agent` tool use them to hand a member conversation its group,
 its dynamic-agent policy and its delegation depth. They are **dropped from
 client input** — the REST start and say endpoints (streaming included), MCP,
-Slack, the `/v1` adapter and a trigger's `initialContext` — with a WARN log
-naming the key, so a client cannot pose as a group member:
+Slack, the `/v1` adapter and a trigger's `initialContext` — so a client cannot
+pose as a group member. The first drop of a given key set from a given entry
+point is logged at WARN, repeats within the hour at DEBUG:
 
 | Key | Set by the engine for |
 | --- | --- |

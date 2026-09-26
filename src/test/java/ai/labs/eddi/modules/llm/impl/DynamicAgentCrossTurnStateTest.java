@@ -9,14 +9,19 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.setup.SetupAgentRequest;
+import ai.labs.eddi.engine.setup.SetupResult;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
+import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiPredicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,11 +40,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * The dynamic-agent state that has to survive the turn boundary, on a real
@@ -50,20 +58,25 @@ class DynamicAgentCrossTurnStateTest {
 
     private IConversationService conversationService;
     private IAgentFactory agentFactory;
+    private AgentSetupService agentSetupService;
     private DynamicAgentToolsProvider provider;
 
     @BeforeEach
     void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
         agentFactory = mock(IAgentFactory.class);
-        provider = new DynamicAgentToolsProvider(mock(AgentSetupService.class), mock(CapabilityRegistryService.class), conversationService,
-                agentFactory, mock(IAgentStore.class), mock(IDeploymentStore.class), new LiveDiscussionRegistry(),
-                mock(IAgentGroupStore.class));
+        agentSetupService = mock(AgentSetupService.class);
+        provider = providerWithUseCheck(null);
         doAnswer(invocation -> {
             IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;
         }).when(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    private DynamicAgentToolsProvider providerWithUseCheck(BiPredicate<String, String> useCheck) {
+        return new DynamicAgentToolsProvider(agentSetupService, mock(CapabilityRegistryService.class), conversationService, agentFactory,
+                mock(IAgentStore.class), mock(IDeploymentStore.class), new LiveDiscussionRegistry(), mock(IAgentGroupStore.class), useCheck);
     }
 
     private static ConversationMemory memory() {
@@ -151,5 +164,48 @@ class DynamicAgentCrossTurnStateTest {
                 "someone-elses-conversation");
 
         assertTrue(result.contains("cannot be continued"), result);
+    }
+
+    @Test
+    @DisplayName("review #1: create_sub_agent's initial-message conversation can be continued by converse_with_agent")
+    void createThenContinue() throws Exception {
+        when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                .thenReturn(new SetupResult("created", "sub-1", "agent-1/Analyst", "anthropic", "m", true, "ready", null, null, null, null,
+                        null, null));
+        when(conversationService.startConversation(any(), eq("sub-1"), any(), any()))
+                .thenReturn(new ConversationResult("conv-briefing", null));
+        var memory = memory();
+        List<Object> tools = new ArrayList<>();
+        provider.addDynamicAgentTools(tools, List.of("create_sub_agent", "converse_with_agent"), memory);
+        var create = tools.stream().filter(CreateSubAgentTool.class::isInstance).map(CreateSubAgentTool.class::cast).findFirst().orElseThrow();
+        var converse = tools.stream().filter(ConverseWithAgentTool.class::isInstance).map(ConverseWithAgentTool.class::cast).findFirst()
+                .orElseThrow();
+
+        String created = create.createSubAgent("Analyst", "You analyse", "anthropic", "m", "Here is your briefing", null);
+        assertTrue(created.contains("conv-briefing"), created);
+        String followUp = converse.converseWithAgent("sub-1", "follow-up", "conv-briefing");
+
+        assertFalse(followUp.contains("cannot be continued"), followUp);
+        verify(conversationService).say(any(), eq("sub-1"), eq("conv-briefing"), anyBoolean(), anyBoolean(), any(),
+                argThat((InputData input) -> input != null && "follow-up".equals(input.getInput())), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("review #2: delegation to an agent this conversation created skips the USE check; any other agent needs it")
+    void createdAgentsAreExemptFromTheDelegationUseCheck() throws Exception {
+        when(conversationService.startConversation(any(), anyString(), any(), any())).thenReturn(new ConversationResult("conv-new", null));
+        var memory = memory();
+        memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS, List.of("sub-1")));
+        memory.startNextStep();
+        var converse = (ConverseWithAgentTool) buildWith(providerWithUseCheck((agentId, principal) -> false), memory, "converse_with_agent");
+
+        assertFalse(converse.converseWithAgent("sub-1", "hi", null).contains("not available"));
+        assertTrue(converse.converseWithAgent("someone-elses-agent", "hi", null).contains("not available"));
+    }
+
+    private static Object buildWith(DynamicAgentToolsProvider provider, ConversationMemory memory, String toolName) {
+        List<Object> tools = new ArrayList<>();
+        provider.addDynamicAgentTools(tools, List.of(toolName), memory);
+        return tools.get(0);
     }
 }

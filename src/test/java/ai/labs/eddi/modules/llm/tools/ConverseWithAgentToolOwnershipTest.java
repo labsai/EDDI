@@ -12,9 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -109,5 +112,46 @@ class ConverseWithAgentToolOwnershipTest {
                 .converseWithAgent("agent-b", "hi", "conv-anything");
 
         assertTrue(result.contains("cannot be continued"), result);
+    }
+    @Test
+    @DisplayName("review #2: a new conversation with an agent the user may not use is refused before it starts")
+    void newConversationRequiresUseAccess() throws Exception {
+        List<String> asked = new ArrayList<>();
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, ConcurrentHashMap.newKeySet(),
+                (agentId, principal) -> {
+                    asked.add(agentId + "@" + principal);
+                    return false;
+                });
+
+        String result = tool.converseWithAgent("other-teams-private-agent", "what do you know?", null);
+
+        assertTrue(result.contains("not available to this user"), result);
+        assertEquals(List.of("other-teams-private-agent@user-1"), asked);
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("review #2: an agent the user may use is started as before")
+    void newConversationWithUsableAgentStarts() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, ConcurrentHashMap.newKeySet(),
+                (agentId, principal) -> true);
+
+        tool.converseWithAgent("agent-b", "hi", null);
+
+        verify(conversationService).startConversation(any(), eq("agent-b"), eq("user-1"), any());
+    }
+
+    @Test
+    @DisplayName("review #2: continuing a conversation this tool started does not re-ask the USE check")
+    void continuationDoesNotReaskUseCheck() throws Exception {
+        Set<String> started = ConcurrentHashMap.newKeySet();
+        started.add("conv-started");
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, started, (agentId, principal) -> {
+            throw new AssertionError("must not be consulted for a continuation");
+        });
+
+        String result = tool.converseWithAgent("agent-b", "follow-up", "conv-started");
+
+        assertFalse(result.contains("not available"), result);
     }
 }

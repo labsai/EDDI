@@ -227,9 +227,10 @@ class ConversationServiceTest {
         void sayStripsReservedKeys() {
             InputData input = forgedInput();
 
-            // The snapshot lookup fails (unstubbed store) after the strip; only the strip
-            // is under test here.
-            assertThrows(Exception.class, () -> conversationService.say(CONVERSATION_ID, false, true, List.of(), input, false,
+            // The unstubbed store makes the snapshot lookup, which runs after the strip,
+            // throw ConversationNotFoundException — asserted exactly, so any other
+            // failure on the way there fails this test instead of passing it.
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.say(CONVERSATION_ID, false, true, List.of(), input, false,
                     mock(IConversationService.ConversationResponseHandler.class)));
 
             assertEquals(Set.of("lang"), input.getContext().keySet());
@@ -240,7 +241,7 @@ class ConversationServiceTest {
         void sayStreamingStripsReservedKeys() {
             InputData input = forgedInput();
 
-            assertThrows(Exception.class, () -> conversationService.sayStreaming(CONVERSATION_ID, false, true, List.of(), input,
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.sayStreaming(CONVERSATION_ID, false, true, List.of(), input,
                     mock(IConversationService.StreamingResponseHandler.class)));
 
             assertEquals(Set.of("lang"), input.getContext().keySet());

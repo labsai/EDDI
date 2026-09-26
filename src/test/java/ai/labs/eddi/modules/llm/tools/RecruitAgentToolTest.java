@@ -138,6 +138,22 @@ class RecruitAgentToolTest {
     }
 
     @Test
+    void recruit_offLimitsAgent_doesNotRevealWhetherItIsDeployed() throws Exception {
+        // Review #6: the USE check runs before the deployment check, so the refusal is
+        // the same for a deployed and an undeployed off-limits agent.
+        gc.setUserId("owner-1");
+        var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds,
+                (agentId, principal) -> false);
+
+        String deployed = guarded.recruitAgent(TARGET, null, null);
+        String undeployed = guarded.recruitAgent("never-deployed", null, null);
+
+        assertTrue(deployed.contains("not available to this discussion's owner"), deployed);
+        assertTrue(undeployed.contains("not available to this discussion's owner"), undeployed);
+        verify(deploymentStore, never()).readDeploymentInfos(any());
+    }
+
+    @Test
     void recruit_admittedWhenTheDiscussionOwnerMayUseTheAgent() {
         gc.setUserId("owner-1");
         var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds,

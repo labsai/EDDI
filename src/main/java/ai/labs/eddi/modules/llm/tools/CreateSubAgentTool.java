@@ -61,9 +61,14 @@ public class CreateSubAgentTool {
     /**
      * The conversation this tool runs in — recorded as the created agent's origin.
      */
-    private final String conversationId;
+    private final String callerConversationId;
     /** The group discussion that conversation belongs to, or null. */
     private final String groupConversationId;
+    /**
+     * The conversations {@code converse_with_agent} may continue, shared with it;
+     * may be null.
+     */
+    private final Set<String> delegatedConversationIds;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -75,14 +80,32 @@ public class CreateSubAgentTool {
         this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds, null, null);
     }
 
+    /** Without delegation tracking — see the full constructor. */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, null);
+    }
+
     /**
-     * @param conversationId
+     * @param callerConversationId
      *            the calling conversation, stamped into the created agent's
      *            {@link DynamicOrigin} so {@code teardown_agent} can later prove
      *            this conversation created it
      * @param groupConversationId
      *            the discussion that conversation belongs to, or {@code null} —
      *            lets another member of the same discussion tear the agent down
+     * @param delegatedConversationIds
+     *            the conversations {@code converse_with_agent} may continue; the
+     *            initial-message conversation is added so the model can follow up
+     *            in it. {@code null} records nowhere.
      */
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -91,9 +114,11 @@ public class CreateSubAgentTool {
             DynamicAgentConfig config,
             List<String> createdAgentIds,
             Set<String> retainedAgentIds,
-            String conversationId,
-            String groupConversationId) {
-        this.conversationId = conversationId;
+            String callerConversationId,
+            String groupConversationId,
+            Set<String> delegatedConversationIds) {
+        this.callerConversationId = callerConversationId;
+        this.delegatedConversationIds = delegatedConversationIds;
         this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
         this.conversationService = conversationService;
@@ -297,7 +322,7 @@ public class CreateSubAgentTool {
             SetupResult result;
             try {
                 result = agentSetupService.setupAgent(request,
-                        new DynamicOrigin(parentAgentId, conversationId, groupConversationId, userId));
+                        new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId));
             } catch (AgentSetupException e) {
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.
@@ -326,6 +351,13 @@ public class CreateSubAgentTool {
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, Collections.emptyMap());
                     conversationId = convResult.conversationId();
+                    // Review #1: the result hands this id to the model, whose obvious
+                    // next move is converse_with_agent(agentId, msg, conversationId).
+                    // Engine-started and owned by this same user, so it counts as
+                    // started by this conversation.
+                    if (conversationId != null && delegatedConversationIds != null) {
+                        delegatedConversationIds.add(conversationId);
+                    }
 
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);

@@ -911,7 +911,10 @@ not use the agent. A recruit speaks as that owner and at their cost, so with
 workspaces enforced it has to be an agent the owner could have started a
 conversation with: their own, one shared with them directly, or a published one.
 Team shares do not count here — the member turn runs without the owner's token,
-so their team memberships are unknown.
+so their team memberships are unknown. An owner who holds `eddi-admin` on the
+request that drives the turn is admitted, as they are everywhere else. The access
+check runs before the deployment check, so a refusal never reveals whether an
+off-limits agent is deployed.
 
 **Recruits are never torn down.** They are pre-existing deployed agents the
 discussion borrowed, so `TeardownAgentTool` and end-of-discussion cleanup leave
@@ -968,12 +971,18 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   in the conversation's created list **and** carries a `dynamicOrigin` in its own
   configuration naming the calling conversation or its discussion.
   `create_sub_agent` stamps that marker on the agent's first version; an agent a
-  person built has none, so it can never be torn down by a tool. An agent
-  created before this marker existed is left to end-of-discussion cleanup.
+  person built has none, so it can never be torn down by a tool.
+- End-of-discussion cleanup applies the same marker: it deletes only agents whose
+  `dynamicOrigin` names this discussion, leaves agents marked for another one
+  alone, and only **undeploys** — never deletes — an agent with no marker (one
+  created before markers existed, or never created by `create_sub_agent`).
 - `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
 - `converse_with_agent` continues only a conversation it started itself, on this
-  turn or an earlier one. Any other `conversationId` is refused; omit it to start
-  a new conversation.
+  turn or an earlier one — or the one `create_sub_agent` opened with its initial
+  message. Any other `conversationId` is refused; omit it to start a new
+  conversation. Starting one requires the user to be allowed to use the target
+  agent, the same rule as recruitment above; agents this conversation or its
+  discussion created are exempt.
 
 #### Model and credential inheritance
 

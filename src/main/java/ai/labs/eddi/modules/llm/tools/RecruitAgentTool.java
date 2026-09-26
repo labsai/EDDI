@@ -152,17 +152,18 @@ public class RecruitAgentTool {
         if (gc.getRecruitedAgentIds().size() >= cap) {
             return "This discussion has already recruited its limit of %d agent(s). Work with the current team.".formatted(cap);
         }
-        if (!isDeployedAndReady(wanted)) {
-            return "Agent '%s' is not deployed and ready, so it cannot join. Use findAgentsByCapability to find one that is."
-                    .formatted(wanted);
-        }
+
         // M-A1: the recruit will speak as the discussion's owner, so the owner must be
-        // allowed to use it. Reported as an access refusal so the model stops
-        // retrying that id rather than waiting for a deployment that will not help.
+        // allowed to use it. Checked BEFORE the deployment check (review #6): the other
+        // order told the model whether an agent it may not touch is deployed.
         if (useCheck != null && !useCheck.test(wanted, gc.getUserId())) {
             LOGGER.warnf("Recruitment of '%s' into group conversation %s refused: the discussion owner has no access to it",
                     sanitize(wanted), sanitize(groupConversationId));
             return "Agent '%s' is not available to this discussion's owner, so it cannot join. Pick an agent they can use."
+                    .formatted(wanted);
+        }
+        if (!isDeployedAndReady(wanted)) {
+            return "Agent '%s' is not deployed and ready, so it cannot join. Use findAgentsByCapability to find one that is."
                     .formatted(wanted);
         }
 

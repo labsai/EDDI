@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -623,7 +624,25 @@ public class GroupLifecycleOps {
             }
 
             try {
-                boolean shouldDelete = policy == LifecyclePolicy.EPHEMERAL || policy == LifecyclePolicy.AGENT_DECIDES;
+                // The created list alone used to decide a PERMANENT delete here, the
+                // same trust teardown_agent placed in it. The agent's own dynamicOrigin
+                // must name this discussion too (review #3):
+                // - names this discussion: the policy applies in full;
+                // - names another conversation/discussion: not ours — left alone;
+                // - no marker (created before markers existed, or never created by
+                // create_sub_agent at all) or unreadable: undeploy only, never delete.
+                OriginVerdict verdict = originVerdict(agentId, gc.getId());
+                if (verdict == OriginVerdict.FOREIGN) {
+                    LOGGER.warnf("Ephemeral cleanup: agent '%s' was not created by group conversation %s — leaving it alone",
+                            LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(gc.getId()));
+                    continue;
+                }
+                boolean shouldDelete = (policy == LifecyclePolicy.EPHEMERAL || policy == LifecyclePolicy.AGENT_DECIDES)
+                        && verdict == OriginVerdict.CREATED_HERE;
+                if (verdict == OriginVerdict.UNVERIFIED && policy != LifecyclePolicy.UNDEPLOY_ONLY) {
+                    LOGGER.warnf("Ephemeral cleanup: agent '%s' carries no verifiable dynamic origin — undeploying only, not deleting",
+                            LogSanitizer.sanitize(agentId));
+                }
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
@@ -635,6 +654,35 @@ public class GroupLifecycleOps {
             } catch (Exception e) {
                 LOGGER.warnf("Ephemeral cleanup failed for agent '%s': %s", agentId, e.getMessage());
             }
+        }
+    }
+
+    /** What an agent's {@code dynamicOrigin} says about who created it. */
+    enum OriginVerdict {
+        CREATED_HERE, FOREIGN, UNVERIFIED
+    }
+
+    /**
+     * Reads the agent's current configuration and compares its
+     * {@code dynamicOrigin} with this discussion. Never throws: anything that
+     * cannot be read is {@link OriginVerdict#UNVERIFIED}, which the caller turns
+     * into "undeploy, never delete".
+     */
+    OriginVerdict originVerdict(String agentId, String groupConversationId) {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            AgentConfiguration.DynamicOrigin origin = configuration != null ? configuration.getDynamicOrigin() : null;
+            if (origin == null) {
+                return OriginVerdict.UNVERIFIED;
+            }
+            return groupConversationId != null && groupConversationId.equals(origin.getCreatedInGroupConversationId())
+                    ? OriginVerdict.CREATED_HERE
+                    : OriginVerdict.FOREIGN;
+        } catch (Exception e) {
+            LOGGER.debugf("Ephemeral cleanup: could not read agent '%s' to verify its origin: %s", LogSanitizer.sanitize(agentId),
+                    e.getMessage());
+            return OriginVerdict.UNVERIFIED;
         }
     }
 

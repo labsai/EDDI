@@ -193,6 +193,8 @@ When agents participate in a [Group Conversation](group-conversations.md), the `
 
 Only the engine can name the group. `groupId` is a [reserved context key](passing-context-information.md#reserved-context-keys) that is dropped from client input, and a conversation *property* called `groupId` is ignored — properties can be set by the client, so trusting one would let a caller read and write another team's group memories.
 
+A `groupId` found only on an earlier step of the conversation (a resumed turn, a later turn without group context) is used only while the discussion named on that step is running, this conversation is one of its members, and it belongs to that group — so a value a client forged before the reserved-key filter existed does not keep working.
+
 ## REST API
 
 Base path: `/usermemorystore/memories`
