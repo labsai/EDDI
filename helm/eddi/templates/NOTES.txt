@@ -20,7 +20,7 @@
 
        cosign verify \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
          {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
 {{- if not .Values.eddi.image.digest }}
 
@@ -70,6 +70,16 @@
     it is refused every read tool over MCP. The unprivileged fixtures
     (viewer/viewer, user/user) still log straight in.
 
+{{- end }}
+
+{{- if and .Values.ingress.enabled (empty .Values.ingress.tls) }}
+
+  ⚠️  Ingress is enabled but ingress.tls is empty.
+
+     EDDI is being published over plain HTTP. Every request — including bearer
+     tokens and, without OIDC, unauthenticated API calls — crosses the network in
+     cleartext. Configure ingress.tls (a cert-manager Certificate or an existing
+     TLS Secret) before exposing this to anything but a trusted LAN.
 {{- end }}
 
   📊 Components:

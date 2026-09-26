@@ -12,6 +12,12 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────
+# EDDI_BRANCH selects which git ref the compose/support files are fetched from.
+# When it is not set explicitly, it is DERIVED from EDDI_VERSION after argument
+# parsing (see resolve_eddi_branch): pinning a release with --eddi-version=6.4.0
+# must fetch that release's compose files from its tag, not whatever is on `main`,
+# which can be a compose file newer than the pinned image.
+EDDI_BRANCH_EXPLICIT="${EDDI_BRANCH:-}"
 EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_VERSION="${EDDI_VERSION:-latest}"
 EDDI_PORT="${EDDI_PORT:-7070}"
@@ -438,6 +444,26 @@ for arg in "$@"; do
   esac
 done
 
+# Resolve EDDI_BRANCH now that --eddi-version has been parsed. An explicit
+# EDDI_BRANCH always wins; otherwise a pinned version fetches its matching tag and
+# only the floating "latest" falls back to main.
+resolve_eddi_branch() {
+  if [[ -n "$EDDI_BRANCH_EXPLICIT" ]]; then
+    EDDI_BRANCH="$EDDI_BRANCH_EXPLICIT"
+  elif [[ -n "${EDDI_VERSION:-}" && "$EDDI_VERSION" != "latest" ]]; then
+    # Release tags are not v-prefixed (see AGENTS.md CI notes), so the tag IS the
+    # version string, e.g. EDDI_VERSION=6.4.0 -> ref 6.4.0.
+    EDDI_BRANCH="$EDDI_VERSION"
+  else
+    EDDI_BRANCH="main"
+  fi
+  if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+    echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2; exit 1
+  fi
+  COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
+}
+resolve_eddi_branch
+
 # ── Pre-flight checks ─────────────────────────────────────
 
 detect_platform() {
@@ -684,8 +710,11 @@ wizard_auth() {
   step 3 "Authentication"
   echo "  How should EDDI handle user access?"
   echo ""
-  echo -e "  ${BOLD}1)${RESET} Open access    ${DIM}no login needed (dev / personal)${RESET}"
-  echo -e "  ${BOLD}2)${RESET} Keycloak       ${DIM}multi-user OIDC (production)${RESET}"
+  echo -e "  ${BOLD}1)${RESET} Open access    ${DIM}no login needed — bound to 127.0.0.1 only (dev / personal)${RESET}"
+  echo -e "  ${BOLD}2)${RESET} Keycloak       ${DIM}multi-user OIDC — required before exposing off-box (production)${RESET}"
+  echo ""
+  echo -e "  ${DIM}Open access stays safe because EDDI listens on localhost only. Do not set${RESET}"
+  echo -e "  ${DIM}EDDI_BIND to a public interface without choosing Keycloak here.${RESET}"
   echo ""
   local auth_choice
   auth_choice=$(ask "1" "1" "2")
@@ -918,6 +947,17 @@ resolve_compose_files() {
     fi
   fi
 
+  # Create the two sensitive files owner-only from the outset (mode 600), before a
+  # single byte is written. The vault master key lands in .env, and writing it
+  # under the default umask and chmod-ing 600 thirty lines later left a window in
+  # which the key was world/group-readable on a multi-user host. `install -m 600`
+  # (and truncation, which preserves the mode) closes that window; the chmod below
+  # is now belt-and-suspenders. Only these two files are restricted — the compose,
+  # monitoring and Keycloak files downloaded above must stay readable by the
+  # non-root users inside the containers that bind-mount them.
+  install -m 600 /dev/null "$EDDI_DIR/.eddi-config"
+  install -m 600 /dev/null "$EDDI_DIR/.env"
+
   # Save config for eddi CLI wrapper (no secrets — vault key stays in .env only)
   echo "COMPOSE_FILES=${COMPOSE_FILES[*]}" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
@@ -940,6 +980,12 @@ EDDI_DATASTORE_TYPE=${db_txt}
 EDDI_PORT=$EDDI_PORT
 EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
 EDDI_VERSION=$EDDI_VERSION
+# EDDI is published on the loopback interface (127.0.0.1) by default — it ships
+# unauthenticated, so it is not reachable from the network out of the box. To
+# expose it, turn authentication on first (re-run with --with-auth) and then set
+# the interface here, e.g. EDDI_BIND=0.0.0.0. Exposing it unauthenticated makes
+# every API endpoint reachable without a token.
+# EDDI_BIND=127.0.0.1
 EOF
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT
@@ -1714,6 +1760,28 @@ case "${1:-help}" in
         sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=${NEW_VERSION}|" "$ENV_FILE"
       else
         echo "EDDI_VERSION=${NEW_VERSION}" >> "$ENV_FILE"
+      fi
+
+      # Fetch the pinned release's compose files from its matching git tag, not
+      # from whatever ref this install was originally set to. A pinned image
+      # served compose files from `main` can drift — a compose file newer than the
+      # image it is meant to run. Release tags are not v-prefixed, so the tag is
+      # the version string. "latest" has no tag, so it stays on main.
+      if [[ "$NEW_VERSION" == "latest" ]]; then
+        EDDI_BRANCH="main"
+      else
+        EDDI_BRANCH="$NEW_VERSION"
+      fi
+      if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+        echo "Invalid EDDI_BRANCH derived from --eddi-version: $EDDI_BRANCH" >&2
+        exit 1
+      fi
+      COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
+      # Persist so `eddi start`/`restart`/`update` stay on the pinned ref.
+      if grep -q '^EDDI_BRANCH=' "$CONFIG_FILE" 2>/dev/null; then
+        sed -i "s|^EDDI_BRANCH=.*|EDDI_BRANCH=${EDDI_BRANCH}|" "$CONFIG_FILE"
+      else
+        echo "EDDI_BRANCH=${EDDI_BRANCH}" >> "$CONFIG_FILE"
       fi
     fi
 

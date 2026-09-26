@@ -22,8 +22,12 @@
 #
 #  USAGE EXAMPLES
 #  ──────────────
-#    # Quick demo (open access, no HTTPS)
-#    ./gcp/provision-vm.sh create
+#    # Auth-protected demo, firewall scoped to your IP (recommended default)
+#    ./gcp/provision-vm.sh create --with-auth
+#
+#    # Quick open-access demo (no auth) — must acknowledge it is unauthenticated;
+#    # the firewall is still scoped to your IP unless you also pass --source-ranges
+#    ./gcp/provision-vm.sh create --i-understand-public
 #
 #    # Keycloak + Let's Encrypt HTTPS  ← recommended for demos
 #    ./gcp/provision-vm.sh create --with-auth --https \
@@ -104,7 +108,12 @@ ${BOLD}Create options:${RESET}
   --with-auth               Enable Keycloak OIDC auth
   --with-monitoring         Include Grafana + Prometheus
   --with-postgres           Use PostgreSQL instead of MongoDB
-  --open-access             No auth (dev/demo mode, default)
+  --open-access             No auth — requires --i-understand-public
+  --source-ranges=CIDR[,..] Restrict the firewall to these ranges
+                            [default: the IP running this script, /32]
+  --i-understand-public     Open the firewall to 0.0.0.0/0 AND allow an
+                            open-access (no-auth) VM. Exposes EDDI (and, with
+                            --with-auth, the Keycloak login) to the whole internet.
   --vault-key=KEY           Set EDDI vault master key (min 16 chars)
   --https                   Set up nginx + Let's Encrypt HTTPS (implies --with-auth)
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
@@ -132,8 +141,11 @@ ${BOLD}Machine type reference:${RESET}
   e2-standard-8  8 vCPU, 32 GB   high load / full stack
 
 ${BOLD}Examples:${RESET}
-  # Quick open-access demo
-  $(basename "$0") create
+  # Auth-protected demo, firewall scoped to your IP (the safe default)
+  $(basename "$0") create --with-auth
+
+  # Open-access demo (no auth) — must be acknowledged explicitly
+  $(basename "$0") create --i-understand-public
 
   # Keycloak + HTTPS (recommended for demos you share with others)
   $(basename "$0") create --with-auth --https \\
@@ -187,6 +199,66 @@ resolve_project() {
   info "Project: ${CYAN}${GCP_PROJECT}${RESET}"
 }
 
+# ── Exposure controls ───────────────────────────────────────────────────────
+
+# The public IP of the machine running this script, used to scope firewall rules
+# to the operator by default instead of to the whole internet.
+detect_caller_ip() {
+  local ip
+  ip=$(curl -fsS --max-time 10 https://checkip.amazonaws.com 2>/dev/null | tr -d '[:space:]') || ip=""
+  if [[ -z "$ip" ]]; then
+    ip=$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null | tr -d '[:space:]') || ip=""
+  fi
+  printf '%s' "$ip"
+}
+
+# Decide, once, what CIDR(s) the firewall rules will allow. Explicit
+# --source-ranges always wins; --i-understand-public opens to the internet;
+# otherwise the caller's detected IP is used and the create fails loudly if it
+# cannot be determined (rather than silently falling back to 0.0.0.0/0).
+resolve_source_ranges() {
+  if [[ -n "$SOURCE_RANGES_EXPLICIT" ]]; then
+    SOURCE_RANGES="$SOURCE_RANGES_EXPLICIT"
+    info "Firewall scoped to --source-ranges: ${CYAN}${SOURCE_RANGES}${RESET}"
+    return 0
+  fi
+  if [[ "$I_UNDERSTAND_PUBLIC" == "true" ]]; then
+    SOURCE_RANGES="0.0.0.0/0"
+    warn "Firewall will allow 0.0.0.0/0 — the whole internet — because --i-understand-public was passed."
+    return 0
+  fi
+  local ip
+  ip=$(detect_caller_ip)
+  if [[ -z "$ip" ]]; then
+    fail "Could not detect your public IP to scope the firewall rules.\n     Pass --source-ranges=<CIDR> (e.g. your office range) or --i-understand-public\n     to open the VM to the whole internet on purpose."
+  fi
+  SOURCE_RANGES="${ip}/32"
+  info "Firewall scoped to your IP: ${CYAN}${SOURCE_RANGES}${RESET}  ${DIM}(override with --source-ranges=, widen with --i-understand-public)${RESET}"
+}
+
+# An open-access (no-auth) VM must be an explicit choice, never the default: the
+# whole point of the guard is that `create` with no flags no longer stands up an
+# unauthenticated EDDI reachable off-box.
+require_auth_or_public_ack() {
+  if [[ "$WITH_AUTH" != "true" && "$I_UNDERSTAND_PUBLIC" != "true" ]]; then
+    fail "Refusing to create an open-access (no authentication) EDDI VM.\n\n     Every API endpoint would be reachable without a token. Choose one:\n       • add --with-auth            → Keycloak OIDC login (recommended)\n       • add --i-understand-public  → create it unauthenticated anyway\n\n     By default the firewall is scoped to your own IP; --i-understand-public also\n     opens it to 0.0.0.0/0 unless you pass --source-ranges=<CIDR> as well."
+  fi
+}
+
+# One random master-realm superuser password per create, printed once by
+# print_success. Alphanumeric so it survives the compose/env plumbing unquoted.
+generate_kc_admin_password() {
+  [[ "$WITH_AUTH" != "true" ]] && return 0
+  if command -v openssl &>/dev/null; then
+    KC_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-24)"
+  else
+    KC_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-24)"
+  fi
+  if [[ ${#KC_ADMIN_PASSWORD} -lt 16 ]]; then
+    fail "Could not generate a Keycloak admin password (openssl/urandom unavailable)."
+  fi
+}
+
 # ── Firewall rules ────────────────────────────────────────────────────────────
 
 ensure_firewall_rule() {
@@ -200,9 +272,13 @@ ensure_firewall_rule() {
     return 0
   fi
 
-  echo -ne "  Creating firewall rule '${rule_name}'... "
+  echo -ne "  Creating firewall rule '${rule_name}' (source: ${SOURCE_RANGES})... "
   local fw_err
   fw_err=$(mktemp /tmp/eddi-fw-err-XXXXXX)
+  # --source-ranges is REQUIRED here: gcloud defaults an omitted value to
+  # 0.0.0.0/0, which is how these rules used to publish EDDI (and the admin/admin
+  # Keycloak) to the entire internet. SOURCE_RANGES is resolved before any rule is
+  # created (resolve_source_ranges), so it is always a concrete, non-empty value.
   if gcloud compute firewall-rules create "$rule_name" \
     --project="$GCP_PROJECT" \
     --direction=INGRESS \
@@ -210,6 +286,7 @@ ensure_firewall_rule() {
     --network=default \
     --action=ALLOW \
     --rules="tcp:${ports}" \
+    --source-ranges="$SOURCE_RANGES" \
     --target-tags="$NETWORK_TAG" \
     --description="$description" \
     --quiet >/dev/null 2>"$fw_err"; then
@@ -309,6 +386,14 @@ build_startup_script() {
   local p_flags="${install_flags}"
   local p_setup_https="${SETUP_HTTPS}"
   local p_le_email="${LETSENCRYPT_EMAIL:-admin@example.com}"
+  # Emitted only with --with-auth. Exported before install.sh runs docker compose,
+  # so docker-compose.auth.yml's ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin} picks up the
+  # random password instead of the admin/admin default. Single-quoted; the value
+  # is alphanumeric (generate_kc_admin_password), so it cannot break the quoting.
+  local p_kc_admin_export=""
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    p_kc_admin_export="export KC_BOOTSTRAP_ADMIN_USERNAME='${KC_ADMIN_USERNAME}'; export KC_BOOTSTRAP_ADMIN_PASSWORD='${KC_ADMIN_PASSWORD}'"
+  fi
 
   cat <<STARTUP_SCRIPT
 #!/usr/bin/env bash
@@ -426,6 +511,9 @@ export EDDI_BRANCH="${p_branch}"
 export EDDI_VERSION="${p_version}"
 export EDDI_PORT="${p_port}"
 export EDDI_HTTPS_PORT="${p_https_port}"
+# Random Keycloak master-realm admin password (empty/unset without --with-auth),
+# consumed by docker-compose.auth.yml via install.sh's docker compose invocation.
+${p_kc_admin_export}
 
 curl -fsSL "https://raw.githubusercontent.com/labsai/EDDI/\${EDDI_BRANCH}/install.sh" \\
   | bash -s -- ${p_flags}
@@ -484,6 +572,18 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
+
+    # The realm's OIDC endpoints (/realms/eddi/...) must be public so the Manager
+    # SPA can log users in, but the master-realm admin console must NOT be: it is
+    # the superuser surface for the whole identity provider. Block it here; reach
+    # it over an SSH tunnel or the (firewall-scoped) direct :8180. 404, not 403,
+    # so the console's existence is not even confirmed to a scanner.
+    location /admin/ {
+        return 404;
+    }
+    location = /admin {
+        return 404;
+    }
 
     location / {
         proxy_pass         http://localhost:8180;
@@ -556,7 +656,7 @@ OVERRIDE_EOF
   for attempt in \$(seq 1 18); do
     KC_TOKEN=\$(curl -sf -X POST \\
       "http://localhost:8180/realms/master/protocol/openid-connect/token" \\
-      -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \\
+      -d "client_id=admin-cli&username=\${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}&password=\${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}&grant_type=password" \\
       2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
     [[ -n "\${KC_TOKEN:-}" ]] && break
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
@@ -768,13 +868,19 @@ print_success() {
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
-    echo -e "  ${DIM}Login:  eddi / eddi  (admin)  •  viewer / viewer  (read-only)${RESET}"
-    echo -e "  ${DIM}Keycloak console admin: admin / admin${RESET}"
+    echo -e "  ${BOLD}Keycloak admin console${RESET}  ${KC_ADMIN_USERNAME} / ${YELLOW}${KC_ADMIN_PASSWORD}${RESET}"
+    echo -e "  ${DIM}↑ generated for this VM, shown ONCE — store it now. The console is not${RESET}"
+    echo -e "  ${DIM}  exposed on the public HTTPS host; reach it over the direct :8180 port${RESET}"
+    echo -e "  ${DIM}  (firewall-scoped to ${SOURCE_RANGES}) or an SSH tunnel.${RESET}"
+    echo ""
+    echo -e "  ${DIM}The 'eddi' EDDI admin account ships WITHOUT a password — set one:${RESET}"
+    echo -e "  ${DIM}  Keycloak console → Users → eddi → Credentials → Set password${RESET}"
+    echo -e "  ${DIM}Seeded dev logins (disable/rotate before sharing): viewer/viewer, user/user${RESET}"
   fi
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}  ${DIM}(admin/admin — dev default, change it; port firewall-scoped to ${SOURCE_RANGES})${RESET}"
     echo -e "  ${BOLD}Prometheus${RESET}   ${CYAN}http://${EXTERNAL_IP}:9090${RESET}"
   fi
 
@@ -821,6 +927,7 @@ print_config_summary() {
   echo -e "  EDDI version:   ${BOLD}labsai/eddi:${EDDI_VERSION}${RESET}"
   echo -e "  Database:       ${BOLD}${db_label}${RESET}"
   echo -e "  Auth:           ${BOLD}${auth_label}${RESET}"
+  echo -e "  Firewall src:   ${BOLD}${SOURCE_RANGES}${RESET}"
   echo -e "  HTTPS:          ${BOLD}${https_label}${RESET}"
   echo -e "  Monitoring:     ${BOLD}${mon_label}${RESET}"
   echo -e "  Static IP:      ${BOLD}${STATIC_IP}${RESET}"
@@ -831,8 +938,11 @@ print_config_summary() {
 # ── Command: create ───────────────────────────────────────────────────────────
 
 cmd_create() {
+  require_auth_or_public_ack
   check_prerequisites
   resolve_project
+  resolve_source_ranges
+  generate_kc_admin_password
   print_config_summary
   maybe_reserve_static_ip
   setup_firewall_rules
@@ -1136,6 +1246,19 @@ NO_WAIT="false"
 VAULT_KEY_ARG=""
 EXTERNAL_IP=""
 RESERVED_IP=""
+# Firewall exposure. By default every ingress rule is scoped to the IP running
+# this script (detected at create time), NOT to 0.0.0.0/0 — GCP's own default
+# when --source-ranges is omitted, which is how the VM used to be world-open.
+# --source-ranges=<CIDR[,CIDR]> overrides the detected IP; --i-understand-public
+# opens the rules to the whole internet and is also the explicit acknowledgement
+# required to create an open-access (no-auth) VM at all.
+SOURCE_RANGES=""
+SOURCE_RANGES_EXPLICIT=""
+I_UNDERSTAND_PUBLIC="false"
+# Random master-realm superuser password for Keycloak, generated per create when
+# --with-auth is set (was the hardcoded admin/admin from docker-compose.auth.yml).
+KC_ADMIN_USERNAME="admin"
+KC_ADMIN_PASSWORD=""
 
 COMMAND="${1:-help}"
 shift || true
@@ -1157,6 +1280,8 @@ for arg in "$@"; do
     --with-monitoring)      WITH_MONITORING="true" ;;
     --with-postgres)        WITH_POSTGRES="true" ;;
     --open-access)          WITH_AUTH="false" ;;
+    --source-ranges=*)      SOURCE_RANGES_EXPLICIT="${arg#*=}" ;;
+    --i-understand-public)  I_UNDERSTAND_PUBLIC="true" ;;
     --https)                SETUP_HTTPS="true"; WITH_AUTH="true" ;;
     --no-https)             SETUP_HTTPS="false" ;;
     --static-ip)            STATIC_IP="true" ;;

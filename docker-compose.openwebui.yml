@@ -48,8 +48,10 @@ services:
       # DEMO ONLY, obviously: a master key committed to a compose file protects
       # nothing. Generate a real one per deployment:  openssl rand -base64 32
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-demo-only-vault-master-key-not-for-production-use}"
+    # Loopback-only: this demo runs EDDI with auth disabled (see above), so its
+    # port must not be reachable off-box. Open WebUI reaches it as http://eddi:7070.
     ports:
-      - "${EDDI_PORT:-7070}:7070"
+      - "127.0.0.1:${EDDI_PORT:-7070}:7070"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -102,21 +104,23 @@ services:
     entrypoint: ["/bin/sh", "/seed.sh"]
 
   open-webui:
-    # The one image in the compose set that is NOT version-pinned, and the only
-    # one that floats deliberately rather than by oversight. `:main` is
-    # open-webui's rolling development tag, so the same `docker compose up`
-    # produces a different UI on every run and a breaking change upstream turns
-    # this documented demo of the /v1 adapter into an unreproducible bug report.
+    # Pinned to a released tag rather than the rolling `:main`. `:main` is
+    # open-webui's development tag: the same `docker compose up` produced a
+    # different UI on every run, a breaking change upstream turned this documented
+    # demo into an unreproducible bug report, and — the reason it moved here — a
+    # rolling tag pulls whatever image the registry serves at that moment, which is
+    # a supply-chain hazard rather than just a reproducibility one.
     #
-    # Pin it: set OPEN_WEBUI_VERSION to a released tag from
-    # https://github.com/open-webui/open-webui/releases (e.g.
-    # `OPEN_WEBUI_VERSION=v0.6.5 docker compose -f docker-compose.openwebui.yml up`),
-    # or add it to .env. The default stays `main` because a wrong literal here
-    # fails the pull outright, which is a worse first run than a drifting UI —
-    # so choosing the tag is left to whoever can check the release list.
-    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-main}
+    # Override with a newer release from
+    # https://github.com/open-webui/open-webui/releases:
+    #   OPEN_WEBUI_VERSION=v0.6.5 docker compose -f docker-compose.openwebui.yml up
+    # For the strongest guarantee, pin by digest instead of tag:
+    #   OPEN_WEBUI_VERSION=v0.6.5@sha256:<digest>
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-v0.6.5}
+    # Loopback-only: this demo sets WEBUI_AUTH=false below, so the UI must not be
+    # reachable off-box. Open it at http://localhost:${OPEN_WEBUI_PORT:-3000}.
     ports:
-      - "${OPEN_WEBUI_PORT:-3000}:8080"
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-3000}:8080"
     environment:
       - "OPENAI_API_BASE_URL=http://eddi:7070/v1"
       - "OPENAI_API_KEY=${EDDI_OPENAI_COMPAT_API_KEY:-sk-eddi-demo}"

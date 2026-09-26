@@ -224,8 +224,26 @@ jobs:
                   continue;
                 }
 
+                // Never auto-approve a PR that touches CI/CD or any workflow config.
+                // A change under .github/** can weaken the very gates this job trusts
+                // (the required-checks list, branch protection wiring) or edit this
+                // file to approve itself, and the checks above would still be green.
+                // These need a human reviewer regardless of Copilot + CI status.
+                const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
+                  owner, repo, pull_number: number, per_page: 100,
+                });
+                if (changedFiles.some(f => f.filename.startsWith('.github/'))) {
+                  core.info(`PR #${number}: modifies .github/** (CI/workflow config); leaving to a human reviewer.`);
+                  continue;
+                }
+
                 await github.rest.pulls.createReview({
-                  owner, repo, pull_number: number, event: 'APPROVE',
+                  // commit_id pins the approval to the exact commit that satisfied
+                  // every gate above. Omitted, GitHub records the approval against
+                  // whatever the PR head is at the moment of the call — so a commit
+                  // pushed in the window between the CI/Copilot checks and this API
+                  // call would be approved without ever having been reviewed or built.
+                  owner, repo, pull_number: number, event: 'APPROVE', commit_id: headSha,
                   body: 'Auto-approved: GitHub Copilot reviewed with no unresolved comments and all CI checks passed.\n\n'
                     + '_This approval satisfies the review requirement only; branch protection still governs merge._',
                 });

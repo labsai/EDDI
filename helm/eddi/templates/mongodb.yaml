@@ -1,4 +1,19 @@
 {{- if .Values.mongodb.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+type: Opaque
+stringData:
+  # Consumed by the mongo container itself, which reads its bootstrap root
+  # credentials from these env vars during initdb. mirrors postgres.yaml.
+  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongodb.rootUsername | quote }}
+  {{- $mongoPassword := required "mongodb.rootPassword is required when mongodb.enabled=true — the chart no longer ships an unauthenticated MongoDB. Generate one: openssl rand -base64 24" .Values.mongodb.rootPassword }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ $mongoPassword | quote }}
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -25,6 +40,22 @@ spec:
       containers:
         - name: mongodb
           image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          # Providing MONGO_INITDB_ROOT_USERNAME/PASSWORD makes the official mongo
+          # image create the root user on first init AND enable authentication —
+          # the same mechanism docker-compose.yml relies on. Every client (EDDI
+          # included) must then authenticate; an unauthenticated in-cluster MongoDB
+          # was reachable by any pod that could resolve the Service.
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_PASSWORD
           ports:
             - containerPort: 27017
               name: mongo

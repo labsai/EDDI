@@ -85,10 +85,20 @@ eddi:
 
   # Authentication escape hatches.
   #
-  # Left empty they follow oidc.enabled — OIDC off means the guards would refuse
-  # to boot, so the chart opts out for you and the quickstart works. Set them
-  # explicitly only for a deployment that runs without OIDC on purpose (air-gapped,
-  # or a demo) and wants /mcp or /secretstore closed anyway.
+  # allowUnauthenticated (the whole conversation API): left empty it follows
+  # oidc.enabled, so a no-OIDC quickstart still boots the general API.
+  #
+  # allowUnauthenticatedMcp / allowUnauthenticatedSecretStore: these are NO LONGER
+  # derived from oidc.enabled. The MCP server exposes agent CRUD, conversations,
+  # memories and audit trails; /secretstore writes the vault — turning OIDC off
+  # must not silently open them. Left empty they render "false", so a deployment
+  # running without OIDC must opt each one in EXPLICITLY (set it to true here) or
+  # HighValueSurfaceGuard refuses to boot and names exactly what to set. Enable
+  # OIDC instead wherever you can.
+  #
+  # Also note: with ingress.enabled=true and oidc.enabled=false the chart refuses
+  # to render unless allowUnauthenticated is set explicitly — publishing an
+  # unauthenticated EDDI to the network has to be a deliberate choice.
   #
   # Accepts a real boolean (false / true) or its quoted string form; an explicit
   # false always wins over the value derived from oidc.enabled.
@@ -168,6 +178,20 @@ mongodb:
   image:
     repository: mongo
     tag: "7.0"
+  # Root credentials for the in-chart MongoDB. The database runs WITH
+  # authentication (--auth) and EDDI connects as this user — an unauthenticated
+  # in-cluster MongoDB is reachable by any pod that can resolve its Service.
+  # rootPassword is REQUIRED when mongodb.enabled=true; no default is shipped.
+  # Generate: openssl rand -base64 24
+  #
+  # ⚠️  Set this BEFORE the first install, for the same reason as postgres.password:
+  # the mongo image reads MONGO_INITDB_ROOT_PASSWORD only during first init against
+  # an empty data volume, and that volume survives upgrades. Changing it on a later
+  # `helm upgrade` rotates EDDI's half while the database keeps the old one and every
+  # connection then fails authentication. To rotate afterwards, change the user in
+  # the database first (db.changeUserPassword in the admin db), then upgrade.
+  rootUsername: eddi
+  rootPassword: ""
   storage:
     size: 10Gi
     # storageClassName: standard

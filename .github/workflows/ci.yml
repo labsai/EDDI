@@ -1378,6 +1378,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history so the release-provenance check below can ask whether the
+          # tagged commit is an ancestor of origin/main.
+          fetch-depth: 0
+
+      - name: Verify a release tag is on main (release provenance)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # A tag can be pushed onto ANY commit — including one that never went
+          # through review — and this workflow then builds it, publishes :latest,
+          # cosign-signs it and cuts a GitHub Release. Refuse unless the tagged
+          # commit has actually landed on main. This is the in-workflow half of the
+          # control; a protected tag ruleset / environment is the other half and
+          # must be configured in repo settings (it cannot be set from code).
+          git fetch --no-tags --depth=2147483647 origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tagged commit $GITHUB_SHA is not an ancestor of origin/main. A release must be built from a reviewed commit that has merged to main; refusing to publish and sign an image from an unmerged commit. Merge the change first, then tag the resulting commit on main."
+            exit 1
+          fi
+          echo "Tagged commit $GITHUB_SHA is on origin/main — release provenance OK."
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
@@ -2159,30 +2179,26 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      - name: Sign Docker images (keyless)
+      - name: Sign Docker image digest (keyless)
+        if: steps.docker-push.outputs.digest != ''
         env:
           PRIMARY_TAG: ${{ needs.build-image.outputs.primary-tag }}
+          DIGEST: ${{ steps.docker-push.outputs.digest }}
         run: |
-          IS_RELEASE="${{ needs.build-image.outputs.is-release }}"
-          IS_STABLE="${{ needs.build-image.outputs.is-stable }}"
+          # Sign the immutable DIGEST, not a tag. A cosign signature is bound to the
+          # manifest the reference resolves to, so `cosign sign …:latest` signs
+          # whatever :latest points at right now — a tag another push can move under
+          # the signature. Signing the digest once covers every tag that points at it
+          # (:latest, the semver aliases and the primary tag all resolve to this same
+          # digest), and `cosign verify …:<tag>` still passes because verify resolves
+          # the tag to the digest before checking.
+          echo "=== Signing ${DOCKER_IMAGE}@${DIGEST} ==="
+          cosign sign --yes "${DOCKER_IMAGE}@${DIGEST}"
 
-          echo "=== Signing ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
-          cosign sign --yes "${DOCKER_IMAGE}:${PRIMARY_TAG}"
-
-          if [[ "$IS_STABLE" == "true" ]]; then
-            echo "=== Signing semver aliases ==="
-            cosign sign --yes ${DOCKER_IMAGE}:${{ needs.build-image.outputs.minor-tag }}
-            cosign sign --yes ${DOCKER_IMAGE}:${{ needs.build-image.outputs.major-tag }}
-          fi
-
-          if [[ "$IS_RELEASE" == "true" ]]; then
-            echo "=== Signing latest ==="
-            cosign sign --yes ${DOCKER_IMAGE}:latest
-          fi
-
-          echo "### 🔏 Docker Images Signed (Sigstore cosign)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Keyless OIDC signing via GitHub Actions identity." >> "$GITHUB_STEP_SUMMARY"
-          echo "Verify: \`cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github\\.com/labsai/EDDI/\\.github/workflows/ci\\.yml@refs/(heads/main|tags/.+)$' ${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🔏 Docker Image Signed (Sigstore cosign)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Keyless OIDC signing via GitHub Actions identity, on the image DIGEST." >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`${DIGEST}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: \`cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github\\.com/labsai/EDDI/\\.github/workflows/ci\\.yml@refs/(heads/main|tags/[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?)$' ${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate SLSA provenance attestation
         if: steps.docker-push.outputs.digest != ''
@@ -2221,7 +2237,7 @@ jobs:
             ```bash
             cosign verify \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+              --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
               ${{ env.DOCKER_IMAGE }}:${{ needs.docker.outputs.primary-tag }}
             ```
 
@@ -2245,7 +2261,7 @@ jobs:
           echo "=== Verifying signature for ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
           cosign verify \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+            --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
             "${DOCKER_IMAGE}:${PRIMARY_TAG}"
           echo "✅ Image signature verified"
           echo "### 🔏 Image Signature Verified" >> "$GITHUB_STEP_SUMMARY"

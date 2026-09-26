@@ -68,8 +68,15 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev --import-realm
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # admin/admin is the DEV default for the local docker-compose quick start,
+      # where Keycloak is only reachable on 127.0.0.1. Any deployment that exposes
+      # Keycloak off-box must override these — the GCP provisioner
+      # (gcp/provision-vm.sh) generates a random KC_BOOTSTRAP_ADMIN_PASSWORD per VM
+      # and exports it before `docker compose up`, so this default is never what a
+      # public instance runs with. Override locally too:
+      #   KC_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 24)" docker compose ... up
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
       # KC_HOSTNAME must equal what browsers use to reach Keycloak.
