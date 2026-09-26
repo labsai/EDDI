@@ -195,6 +195,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             throw new IllegalArgumentException("targetServerUrl cannot be null or empty");
         }
 
+        // Every plaintext any attempt substituted, so a failure message that quotes the
+        // request (a URI, a header) is redacted before it is logged or becomes the
+        // task error the turn records.
+        Set<String> substitutedSecrets = new HashSet<>();
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 
@@ -225,6 +229,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // instruction can write a property between attempts, and the guard has to
                     // judge the request it is actually about to send.
                     BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
+                    substitutedSecrets.addAll(built.resolvedSecrets());
                     request = built.request();
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
@@ -247,9 +252,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        LOGGER.warn("Error Msg:" + response.getHttpCodeMessage());
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), built.resolvedSecrets());
+                        LOGGER.warn("Error Msg:" + httpCodeMessage);
 
-                        String errorBody = response.getContentAsString();
+                        // A server that rejects a credential routinely echoes it ("invalid
+                        // api key sk-…"). The executor knows exactly which plaintexts it
+                        // sent, so those are removed by value before the body goes
+                        // anywhere — memory, template data, the tool result or a log.
+                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), built.resolvedSecrets());
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -271,13 +281,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // data the call exists to fetch — but an error body's
                         // value to the model is the failure REASON, which survives
                         // redaction. The memory-side {name}Error entry keeps the
-                        // raw text, as it always has, for operators debugging via
-                        // the store.
+                        // text minus the plaintexts this request substituted (removed
+                        // above), for operators debugging via the store.
                         // The status-message fallback is server-authored text of the
                         // same trust class as the body — redacted for the same reason.
                         String toolErrorBody = truncatedError != null && !truncatedError.isBlank()
                                 ? SecretRedactionFilter.redact(truncatedError)
-                                : SecretRedactionFilter.redact(response.getHttpCodeMessage());
+                                : SecretRedactionFilter.redact(httpCodeMessage);
                         result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
@@ -296,7 +306,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
                     Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        responseObjectHeader = withoutCredentialHeaders(response.getHttpHeader());
+                        responseObjectHeader = redactHeaderValues(withoutCredentialHeaders(response.getHttpHeader()), built.resolvedSecrets());
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
                         // NOT put into `result` here — see the ordered insert below.
@@ -305,8 +315,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (isResponseSuccessful && call.getSaveResponse()) {
                         // Success bodies land in conversation memory, which is persisted as a
                         // single document — cap them just like the error bodies above.
-                        final String responseBody = truncateResponseBody(response.getContentAsString(), resolveMaxResponseSize(call),
-                                call.getName());
+                        // Redacted BEFORE truncation, so a cut cannot leave half a secret
+                        // that no longer matches. Same by-value rule as the error body: a
+                        // response echoing a credential this request sent must not carry it
+                        // into memory, template data or the tool result.
+                        final String responseBody = truncateResponseBody(
+                                RequestRedactor.redactResolvedSecrets(response.getContentAsString(), built.resolvedSecrets()),
+                                resolveMaxResponseSize(call), call.getName());
                         String actualContentType = response.getHttpHeader().get(CONTENT_TYPE);
                         if (actualContentType != null) {
                             actualContentType = actualContentType.split(";")[0];
@@ -385,6 +400,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return result;
             }
         } catch (Exception e) {
+            RuntimeException safe = withoutSecrets(e, substitutedSecrets);
+            if (safe != null) {
+                LOGGER.error(safe.getMessage(), safe);
+                throw new LifecycleException(safe.getMessage(), safe);
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
@@ -547,7 +567,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         long executionEnd = currentTimeMillis();
         long duration = executionEnd - executionStart;
 
-        LOGGER.info(call.getName() + " Response: " + response.toString());
+        LOGGER.info(call.getName() + " Response: " + RequestRedactor.safeResponseLog(response, resolvedSecrets));
         LOGGER.info(call.getName()
                 + format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n", duration, delayInMillis, duration + delayInMillis));
 
@@ -597,7 +617,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
                         IResponse response = request.send();
-                        logExecutionResponse(response, callName, executionStart, currentTimeMillis(), false);
+                        logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
                     } else {
                         executeFireAndForgetCall(built, callName);
                     }
@@ -614,14 +634,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         IRequest request = built.request();
         LOGGER.info(httpCallsName + " Request (f'n'f): " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
         long executionStart = currentTimeMillis();
-        request.send(res -> logExecutionResponse(res, httpCallsName, executionStart, currentTimeMillis(), true));
+        request.send(res -> logExecutionResponse(res, built.resolvedSecrets(), httpCallsName, executionStart, currentTimeMillis(), true));
     }
 
-    private static void logExecutionResponse(IResponse response, String httpCallsName, long executionStart, long executionEnd,
-                                             boolean fireAndForget) {
+    private static void logExecutionResponse(IResponse response, Set<String> resolvedSecrets, String httpCallsName, long executionStart,
+                                             long executionEnd, boolean fireAndForget) {
 
         long duration = executionEnd - executionStart;
-        LOGGER.info(httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + response.toString());
+        LOGGER.info(
+                httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + RequestRedactor.safeResponseLog(response, resolvedSecrets));
         // No trailing "\n": the console pattern ends in %n, and a newline in a log
         // MESSAGE is now escaped rather than printed (CWE-117), so this one would
         // render as a literal "\n" at the end of the line.
@@ -781,8 +802,68 @@ public class ApiCallExecutor implements IApiCallExecutor {
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
+    /**
+     * Build the request, making sure no failure on the way carries a plaintext the
+     * build already substituted.
+     * <p>
+     * {@code URI.create} quotes the whole string it rejects, and the path is
+     * resolved before it is parsed — so a secret in a URL path (a webhook token, a
+     * Segment write key) used to reach the ERROR log and the task-error digest
+     * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
+     * The same holds for any other exception whose message quotes the request.
+     */
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties)
+            throws ITemplatingEngine.TemplateEngineException {
+        var resolvedSecrets = new HashSet<String>();
+        try {
+            return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
+        } catch (RuntimeException e) {
+            RuntimeException safe = withoutSecrets(e, resolvedSecrets);
+            throw safe != null ? safe : e;
+        }
+    }
+
+    /**
+     * A copy of {@code failure} with every {@code secrets} plaintext removed from
+     * its message, or {@code null} when neither it nor any cause mentions one. The
+     * copy deliberately has no cause: the original chain quotes the same text.
+     */
+    static RuntimeException withoutSecrets(Throwable failure, Set<String> secrets) {
+        if (secrets == null || secrets.isEmpty()) {
+            return null;
+        }
+        boolean mentioned = false;
+        for (Throwable t = failure; t != null && !mentioned; t = t.getCause() == t ? null : t.getCause()) {
+            String message = t.getMessage();
+            if (message != null && !RequestRedactor.redactResolvedSecrets(message, secrets).equals(message)) {
+                mentioned = true;
+            }
+        }
+        if (!mentioned) {
+            return null;
+        }
+        String redacted = RequestRedactor.redactResolvedSecrets(String.valueOf(failure.getMessage()), secrets);
+        return new IllegalArgumentException(failure.getClass().getSimpleName() + ": " + redacted
+                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)");
+    }
+
+    /**
+     * Response headers with the plaintexts this request substituted removed from
+     * their values — a server may echo a credential back in a header as easily as
+     * in a body.
+     */
+    private static Map<String, String> redactHeaderValues(Map<String, String> headers, Set<String> resolvedSecrets) {
+        if (headers == null || resolvedSecrets == null || resolvedSecrets.isEmpty()) {
+            return headers;
+        }
+        var redacted = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
+        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        return redacted;
+    }
+
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+                                      Map<String, Property> conversationProperties, Set<String> resolvedSecrets)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -791,7 +872,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var resolvedSecrets = new HashSet<String>();
         var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
         // Resolve global variable references, then vault references in URL
         targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
