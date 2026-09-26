@@ -99,6 +99,12 @@ public class AuditKeyring {
 
     /** Key ids known to be recorded in the vault — a positive cache only. */
     private final Set<String> recordedKeyIds = ConcurrentHashMap.newKeySet();
+    /**
+     * Whether every key this keyring holds is recorded. Cleared until a recording
+     * pass succeeds for all of them, so a failed write is retried from
+     * {@link #signingKey()} instead of leaving that key unrecorded until restart.
+     */
+    private volatile boolean keyIdsRecorded;
 
     /**
      * When the next pin attempt may run, in {@link System#currentTimeMillis()}.
@@ -207,8 +213,10 @@ public class AuditKeyring {
                 }
                 rebuildVerificationSet();
             }
-            recordKeyIds(provider);
             pinRetryMillis = MIN_PIN_RETRY_MILLIS;
+            if (!recordKeyIds(provider)) {
+                scheduleRetry();
+            }
             if (!pinnedKey.id().equals(masterDerived.id())) {
                 LOGGER.infof("Audit Ledger: using the audit key pinned in the vault (key id %s); the vault master key has been rotated since "
                         + "it was pinned, and the ledger's key deliberately has not.", pinnedKey.id());
@@ -241,7 +249,8 @@ public class AuditKeyring {
      * Best-effort: an unrecorded key only means its rows would report INVALID
      * rather than UNKNOWN_KEY if the key were ever lost.
      */
-    private void recordKeyIds(ISecretProvider provider) {
+    private boolean recordKeyIds(ISecretProvider provider) {
+        boolean all = true;
         for (SigningKey key : new SigningKey[]{signing, pinned, masterDerived, configured}) {
             if (key == null || recordedKeyIds.contains(key.id())) {
                 continue;
@@ -250,8 +259,34 @@ public class AuditKeyring {
                 provider.pinSystemValue(KEY_ID_RECORD_PREFIX + key.id(), key.id());
                 recordedKeyIds.add(key.id());
             } catch (Exception e) {
+                all = false;
                 LOGGER.debugf("Audit Ledger: could not record key id %s: %s", key.id(), e.getMessage());
             }
+        }
+        keyIdsRecorded = all;
+        return all;
+    }
+
+    /**
+     * One more recording pass after the pin succeeded but a key id did not get
+     * recorded, under the same backoff and single-flight guard as the pin retry.
+     */
+    private void retryRecordKeyIds() {
+        if (System.currentTimeMillis() < nextPinAttempt.get() || !pinInProgress.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            ISecretProvider provider = secretProvider.get();
+            if (provider.isAvailable() && recordKeyIds(provider)) {
+                pinRetryMillis = MIN_PIN_RETRY_MILLIS;
+            } else {
+                scheduleRetry();
+            }
+        } catch (Exception e) {
+            scheduleRetry();
+            LOGGER.debugf("Audit Ledger: could not record key ids: %s", e.getMessage());
+        } finally {
+            pinInProgress.set(false);
         }
     }
 
@@ -300,12 +335,17 @@ public class AuditKeyring {
 
     /**
      * The key new entries are signed with, or null when signing is disabled. Also
-     * where a failed pin is retried, with backoff, off the lock.
+     * where a failed pin, or a key id that failed to be recorded after the pin, is
+     * retried, with backoff, off the lock.
      */
     public SigningKey signingKey() {
         initialize();
-        if (pinned == null && pinOutstanding()) {
-            pinWithVault();
+        if (pinned == null) {
+            if (pinOutstanding()) {
+                pinWithVault();
+            }
+        } else if (!keyIdsRecorded) {
+            retryRecordKeyIds();
         }
         return signing;
     }

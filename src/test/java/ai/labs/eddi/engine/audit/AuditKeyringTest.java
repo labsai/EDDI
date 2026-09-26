@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -165,6 +167,41 @@ class AuditKeyringTest {
         assertTrue(elsewhere.isRecordedKeyId(signingId), "another node reads the record from the vault");
         assertFalse(elsewhere.isRecordedKeyId("0123456789abcdef"), "an id nobody recorded is not a lost key");
         assertFalse(AuditKeyring.fromMasterKey(MASTER).isRecordedKeyId(signingId), "without a vault nothing counts as recorded");
+    }
+
+    /**
+     * The key id record is written after the pin. A failed record used to be final
+     * until restart, so rows signed with that key would report INVALID rather than
+     * UNKNOWN_KEY if the key were ever lost.
+     */
+    @Test
+    @DisplayName("a key id that failed to be recorded is retried lazily from signingKey()")
+    void failedKeyIdRecordIsRetried() throws Exception {
+        var keyring = new AuditKeyring(Optional.of(MASTER), Optional.empty(), Optional.empty(), vault);
+        keyring.initialize();
+        // The pin succeeds; recording the key id behind it fails until the vault
+        // recovers.
+        AtomicBoolean recordsFail = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            if (recordsFail.get() && inv.<String>getArgument(0).startsWith(AuditKeyring.KEY_ID_RECORD_PREFIX)) {
+                throw new ISecretProvider.SecretProviderException("db down");
+            }
+            pinned.putIfAbsent(inv.getArgument(0), inv.getArgument(1));
+            return pinned.get(inv.<String>getArgument(0));
+        }).when(provider).pinSystemValue(anyString(), anyString());
+
+        assertTrue(keyring.pinWithVault());
+        String signingId = keyring.signingKey().id();
+        assertFalse(pinned.containsKey(AuditKeyring.KEY_ID_RECORD_PREFIX + signingId));
+
+        recordsFail.set(false);
+        keyring.signingKey();
+        assertFalse(pinned.containsKey(AuditKeyring.KEY_ID_RECORD_PREFIX + signingId), "not before the backoff has elapsed");
+
+        keyring.resetPinBackoffForTesting();
+        keyring.signingKey();
+
+        assertTrue(pinned.containsKey(AuditKeyring.KEY_ID_RECORD_PREFIX + signingId), "the next signing call must retry the record");
     }
 
     /** m6: a pin that failed at boot is retried while entries are signed. */

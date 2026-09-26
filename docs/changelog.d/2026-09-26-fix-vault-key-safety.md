@@ -39,8 +39,8 @@ Findings from the 2026-09-25 code review, each with a regression test.
 - **L-S1 — AAD.** New secrets are sealed with AES-GCM associated data naming tenant and key, and new DEK
   wrappings with tenant and generation (`a1:` prefix). Unprefixed ciphertext keeps decrypting without AAD, so
   nothing is migrated; DEK rotation re-seals secrets into the bound form and KEK rotation re-wraps DEKs into it.
-  Sealed values of other subsystems (OAuth grants, system values) are not bound yet — follow-up, needs a row
-  identity in `seal()`.
+  OAuth connection grants sealed through `seal()` are not bound yet — follow-up, needs a row identity in
+  `seal()`. System values are bound to their name (see M1 below).
 - **L-S3 — tenant reset.** `SealedDataRotationParticipant.discardAll` is called before the DEKs are deleted;
   `ConnectionGrantResealer` deletes the tenant's OAuth grants (which would otherwise fail GCM on every request
   because the next DEK reuses the dekId). A participant failure stops the reset with the DEKs in place. The
@@ -49,7 +49,7 @@ Findings from the 2026-09-25 code review, each with a regression test.
   as a whole-row write. A null grant/description now means "not supplied": both stores keep the stored values on
   update and default only on insert, which also removes the lost update against a concurrent grant edit.
 - **S6 — grant precondition.** `PUT …/grant` accepts optional `expectedAllowedAgents`; the write is conditional
-  in the store (Mongo `$all`+`$size`, Postgres `@>`/`<@`), and a mismatch is **409** with the current grant
+  in the store (Mongo `$expr`/`$setEquals`, Postgres `@>`/`<@`), and a mismatch is **409** with the current grant
   (dry runs too). Omitted, behaviour is unchanged.
 - **S7 — impact analysis.** `VaultGrantChecker.checkReferences` returns `REFERENCES` / `DOES_NOT_REFERENCE` /
   `UNKNOWN`; an unreadable agent, workflow, extension config or connection makes the impact report
@@ -82,6 +82,20 @@ Findings from the 2026-09-25 code review, each with a regression test.
   longer makes every conditional edit 409.
 - **Audit pin retry (review m6).** A failed pin is retried from `signingKey()` with backoff from 30 s to 10 min.
 - **Hot path (review nit).** `AuditKeyring` uses a volatile fast path instead of a synchronized call per entry.
+
+### Review follow-ups (CodeRabbit)
+
+- **Refused legacy-salt rotation.** `rotateKek` reserved the pending salt before verifying, so a refusal (a
+  wrong `oldMasterKey`, say) left it persisted and the deployment then reported an unfinished rotation at every
+  boot and decrypt failure. A reservation the refused run created itself is now discarded
+  (`VaultSaltManager.discardPendingSalt`); a pending salt left by an earlier interrupted run is kept.
+- **Audit key-id record retry.** A failed `audit-key-id:<id>` write after a successful pin is retried from
+  `signingKey()` under the pin backoff, instead of staying unrecorded until restart.
+- **Impact analysis completeness.** A workflow or extension config read as `null`, and a `${vars:…}` that
+  cannot be expanded, make `checkReferences` answer `UNKNOWN` rather than `DOES_NOT_REFERENCE`. The deploy gate
+  (`findUngrantedReferences`) is unchanged.
+- **Test.** `dekPersistenceFailure` now fails `insertDek` (the first DEK is never upserted) and asserts the
+  write failure is the cause.
 
 ### Compatibility
 

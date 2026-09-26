@@ -711,6 +711,7 @@ public class VaultSecretProvider implements ISecretProvider {
         boolean migratingFromLegacy;
         List<SimpleEntry<EncryptedDek, byte[]>> toRewrap = new ArrayList<>();
         int alreadyOnNewKek = 0;
+        boolean reservedFreshPendingSalt = false;
         try {
             // 1. Derive old KEK with current salt (legacy or random)
             oldKeks.add(EnvelopeCrypto.deriveKeyFromString(oldMasterKey, saltManager.getSalt()));
@@ -730,6 +731,9 @@ public class VaultSecretProvider implements ISecretProvider {
                     oldKeks.add(EnvelopeCrypto.deriveKeyFromString(oldMasterKey, earlierPending));
                 }
                 newSalt = saltManager.reservePendingSalt();
+                // No earlier pending salt: this run created the reservation, so nothing
+                // can be wrapped under it yet, and a refusal below must take it back.
+                reservedFreshPendingSalt = earlierPending == null;
                 LOGGER.info("[VAULT] KEK rotation will also migrate from legacy salt to per-deployment random salt.");
             } else {
                 newSalt = saltManager.getSalt();
@@ -754,8 +758,12 @@ public class VaultSecretProvider implements ISecretProvider {
                                     : ""));
                 }
             }
+        } catch (SecretProviderException e) {
+            discardFreshPendingSalt(reservedFreshPendingSalt);
+            throw e;
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
+            discardFreshPendingSalt(reservedFreshPendingSalt);
             throw new SecretProviderException("KEK rotation failed before anything was changed", e);
         }
 
@@ -977,6 +985,22 @@ public class VaultSecretProvider implements ISecretProvider {
         } catch (PersistenceException | IllegalArgumentException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
             throw new SecretProviderException("Could not read system value '" + sanitize(name) + "'", e);
+        }
+    }
+
+    /**
+     * Takes back the pending salt a refused legacy-salt rotation reserved, so the
+     * deployment does not go on reporting an unfinished rotation that never wrote
+     * anything. Best-effort: the refusal is what the caller needs to see.
+     */
+    private void discardFreshPendingSalt(boolean reservedFresh) {
+        if (!reservedFresh) {
+            return;
+        }
+        try {
+            saltManager.discardPendingSalt();
+        } catch (PersistenceException e) {
+            LOGGER.warn("[VAULT] Could not remove the pending salt of a refused KEK rotation: " + sanitize(e.getMessage()));
         }
     }
 

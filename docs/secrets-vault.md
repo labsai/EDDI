@@ -235,8 +235,9 @@ write access to the database fails authentication instead of decrypting as that
 row's value. Bound values carry an `a1:` prefix; values written before this carry
 none and keep decrypting without associated data, so nothing has to be migrated.
 A DEK rotation re-seals a tenant's secrets in the bound form, and a KEK rotation
-re-wraps DEKs in it. Values sealed for other subsystems (OAuth connection grants,
-system values) are not bound yet.
+re-wraps DEKs in it. System values (such as the pinned audit key) are bound to
+their name the same way. OAuth connection grants, sealed through `seal()`, are not
+bound yet.
 
 **The per-deployment salt is created once, by whichever replica gets there first.**
 It is written with an insert-if-absent and every other replica adopts the winner, so
