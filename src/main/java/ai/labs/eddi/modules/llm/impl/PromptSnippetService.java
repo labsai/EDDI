@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Cached service that loads all prompt snippets and provides them as a template
@@ -77,6 +78,26 @@ public class PromptSnippetService {
      */
     private final Cache<String, Map<String, Object>> snippetCache;
 
+    /**
+     * The last map that loaded successfully, served while the store is failing.
+     * Survives cache invalidation and expiry on purpose: it is what keeps a safety
+     * snippet in the prompt through a transient database outage.
+     */
+    private volatile Map<String, Object> lastLoaded;
+
+    /**
+     * When the last load failed ({@code 0} = it did not). For
+     * {@link #FAILURE_BACKOFF_MS} after a failure the store is not asked again —
+     * during an outage every turn would otherwise block on the driver's timeout.
+     */
+    private volatile long lastFailureAtMs;
+
+    /** Serializes store reads; see {@link #getAll()}. */
+    private final ReentrantLock loadLock = new ReentrantLock();
+
+    /** How long a failed load is remembered before the store is tried again. */
+    static final long FAILURE_BACKOFF_MS = 10_000L;
+
     @Inject
     public PromptSnippetService(IPromptSnippetStore snippetStore,
             IDocumentDescriptorStore descriptorStore,
@@ -118,9 +139,53 @@ public class PromptSnippetService {
         }
 
         cacheMissCounter.increment();
-        Map<String, Object> snippetMap = loadAllSnippets();
-        snippetCache.put(CACHE_KEY, snippetMap);
-        return snippetMap;
+        // One load at a time (single flight). Without it, every request that missed
+        // the cache in the same instant read the store on its own before the first
+        // failure could set the backoff — during an outage, a burst of request threads
+        // each blocked on the driver's timeout. A caller that finds a load in flight
+        // takes the last good map instead of queueing; only a caller with nothing to
+        // fall back on (the very first load) waits for it.
+        Map<String, Object> fallback = lastLoaded;
+        if (fallback != null) {
+            if (!loadLock.tryLock()) {
+                return fallback;
+            }
+        } else {
+            loadLock.lock();
+        }
+        try {
+            // Re-check under the lock: the load this caller waited for may have filled
+            // the cache or recorded a failure.
+            cached = snippetCache.getIfPresent(CACHE_KEY);
+            if (cached != null) {
+                return cached;
+            }
+            long failedAt = lastFailureAtMs;
+            if (failedAt != 0 && System.currentTimeMillis() - failedAt < FAILURE_BACKOFF_MS) {
+                return lastLoadedOrEmpty();
+            }
+            Map<String, Object> snippetMap = loadAllSnippets();
+            if (snippetMap == null) {
+                lastFailureAtMs = System.currentTimeMillis();
+                // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
+                // the full five-minute TTL: one transient store error and every prompt
+                // rendered {snippets.x} — safety instructions included — as blank for
+                // five minutes, with nothing but one ERROR line to show for it. Serve the
+                // last good map instead, and try the store again after the backoff.
+                return lastLoadedOrEmpty();
+            }
+            lastFailureAtMs = 0L;
+            lastLoaded = snippetMap;
+            snippetCache.put(CACHE_KEY, snippetMap);
+            return snippetMap;
+        } finally {
+            loadLock.unlock();
+        }
+    }
+
+    private Map<String, Object> lastLoadedOrEmpty() {
+        Map<String, Object> fallback = lastLoaded;
+        return fallback != null ? fallback : Collections.emptyMap();
     }
 
     /**
@@ -129,9 +194,15 @@ public class PromptSnippetService {
      */
     public void invalidateCache() {
         snippetCache.invalidateAll();
+        // An explicit invalidation (a snippet was just saved) retries at once.
+        lastFailureAtMs = 0L;
         LOGGER.debug("Snippet cache invalidated");
     }
 
+    /**
+     * @return every snippet by name, or {@code null} when the store could not be
+     *         read — which the caller must not mistake for "no snippets"
+     */
     private Map<String, Object> loadAllSnippets() {
         try {
             // Use descriptor store to enumerate all snippet resources
@@ -168,9 +239,9 @@ public class PromptSnippetService {
             LOGGER.debugv("Loaded {0} prompt snippets into cache", result.size());
             return Collections.unmodifiableMap(result);
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            LOGGER.errorv("Failed to load prompt snippets: {0}", e.getMessage());
-            return Collections.emptyMap();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+            LOGGER.errorv("Failed to load prompt snippets, keeping the last loaded set: {0}", e.getMessage());
+            return null;
         }
     }
 

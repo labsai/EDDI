@@ -80,4 +80,14 @@ interface IAgentOrchestrator {
                                                      boolean toolHitlEnabled,
                                                      JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException;
+
+    /**
+     * The tool cost tracked for a conversation so far, in USD — what a caller
+     * snapshots around a run whose own result may never arrive (a cascade step that
+     * times out still spent its tools' money). {@code 0.0} when nothing is tracked,
+     * or when the implementation does not track tool cost at all.
+     */
+    default double conversationToolCost(String conversationId) {
+        return 0.0;
+    }
 }

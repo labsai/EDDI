@@ -302,4 +302,79 @@ class ConversationSummarizerTest {
         // already summarized)
         verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString(), any());
     }
+    /**
+     * M-L3: a backlog is caught up in bounded batches. Sending all of it at once
+     * eventually exceeded the summarizer's context window, after which every turn
+     * made a failing, paid summarizer call.
+     */
+    @Test
+    void updateIfNeeded_largeBacklog_summarizesAtMostMaxTurnsPerUpdate() {
+        var memory = createMockMemory(105);
+        var config = createConfig(5);
+        config.setMaxTurnsPerUpdate(20);
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        assertTrue(content.getValue().contains("User message 20"));
+        assertFalse(content.getValue().contains("User message 21"), "turn 21 belongs to the next batch");
+        assertEquals(20, ConversationSummarizer.readSummaryThroughStep(memory),
+                "the summary records what it actually covers, so the next update continues from turn 21");
+    }
+
+    /**
+     * M-L3: the batch is shortened turn by turn until it fits the character
+     * ceiling, and a single turn larger than the ceiling is cut.
+     */
+    @Test
+    void updateIfNeeded_oversizedBatch_isShortenedToFitMaxChars() {
+        var memory = createMockMemory(12);
+        var config = createConfig(2);
+        config.setMaxCharsPerUpdate(1000);
+        memory.getConversationOutputs().get(1).put("input", "x".repeat(880));
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        assertTrue(content.getValue().length() <= 1000, "batch of " + content.getValue().length() + " chars");
+        assertEquals(2, ConversationSummarizer.readSummaryThroughStep(memory),
+                "turns 1-2 render to ~990 chars; adding turn 3 would pass 1000, so it waits for the next update");
+
+        // A first turn larger than the whole budget is cut rather than blocking
+        // forever.
+        var hugeFirst = createMockMemory(12);
+        hugeFirst.getConversationOutputs().getFirst().put("input", "y".repeat(5000));
+        summarizer.updateIfNeeded(hugeFirst, config, null);
+        assertEquals(1, ConversationSummarizer.readSummaryThroughStep(hugeFirst));
+
+        // ...and the cut-notice fits inside the budget as well.
+        var inputs = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService, times(2)).summarize(inputs.capture(), anyString(), anyString(), anyString(), any());
+        String cut = inputs.getAllValues().get(1);
+        assertTrue(cut.length() <= 1000, "oversized first-turn input was " + cut.length() + " chars");
+        assertTrue(cut.endsWith("input budget ...]"), "the cut is announced to the summarizer");
+    }
+    /**
+     * A window with nothing to summarize is stepped over (no LLM call), so a
+     * bounded batch cannot get stuck re-reading it on every turn.
+     */
+    @Test
+    void updateIfNeeded_blankWindow_advancesWithoutCallingTheLlm() {
+        var memory = createMockMemory(10);
+        for (var output : memory.getConversationOutputs().subList(0, 3)) {
+            output.remove("input");
+            output.remove("output");
+        }
+        var config = createConfig(7);
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verifyNoInteractions(summarizationService);
+        assertEquals(3, ConversationSummarizer.readSummaryThroughStep(memory));
+        assertNull(ConversationSummarizer.readSummary(memory));
+    }
 }

@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
-import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -441,11 +440,11 @@ class LlmTaskExtendedBranchTest {
     // ====================
 
     @Nested
-    @DisplayName("IOException wrapping in LifecycleException")
+    @DisplayName("IOException from convertToObject")
     class IoExceptionWrappingTests {
 
         @Test
-        @DisplayName("IOException from convertToObject wraps in LifecycleException")
+        @DisplayName("IOException from convertToObject keeps the raw response instead of failing the turn (M-L4)")
         void ioExceptionWrapping() throws Exception {
             // Create builder that returns JSON-like response
             Map<String, Provider<ILanguageModelBuilder>> jsonBuilders = new HashMap<>();
@@ -488,8 +487,10 @@ class LlmTaskExtendedBranchTest {
                     .thenThrow(new IOException("parse failure"));
 
             var task = createTask(Map.of("apiKey", "key", "convertToObject", "true"));
-            assertThrows(LifecycleException.class,
-                    () -> ioTask.execute(memory, new LlmConfiguration(List.of(task))));
+            // Used to throw a LifecycleException: a malformed or truncated JSON answer
+            // failed the whole (already paid-for) turn. It now falls back to the string.
+            assertDoesNotThrow(() -> ioTask.execute(memory, new LlmConfiguration(List.of(task))));
+            verify(jsonSerialization).deserialize(anyString(), eq(Map.class));
         }
     }
 }

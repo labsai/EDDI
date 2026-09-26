@@ -34,6 +34,15 @@ class AgentExecutionHelper {
     }
 
     /**
+     * As above, drawing backoff from a budget shared across calls (one tool-loop
+     * turn).
+     */
+    static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs)
+            throws LifecycleException {
+        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs);
+    }
+
+    /**
      * Executes chat model with retry logic based on task configuration.
      */
     static ChatResponse executeChatWithRetry(ChatModel chatModel, List<ChatMessage> messages,

@@ -41,6 +41,7 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -48,6 +49,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -172,15 +174,74 @@ class ToolLoopRunner {
         String conversationId = memory != null ? memory.getConversationId() : null;
         double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
+        List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy,
+                finalTranscript);
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(tokenHolder[0]));
         }
         responseMetadata.put("toolCostUsd", toolCostDelta(conversationId, toolCostBefore));
-        return new AgentOrchestrator.ExecutionResult(response, trace, responseMetadata);
+        return new AgentOrchestrator.ExecutionResult(response, trace, responseMetadata, toolExchange(finalTranscript));
+    }
+
+    /**
+     * The tool exchange of the final transcript, in order: every assistant message
+     * that requested tools and every tool result, but not the final answer and not
+     * the text-only conversation history. Includes an exchange the loop was started
+     * with (a cascade step that received an earlier step's tools), so it is the
+     * complete record to hand on. What a cascade escalation gives the next step so
+     * it continues from the executed tools instead of executing them again.
+     * <p>
+     * <b>Every call carries an id.</b> The exchange may be replayed to a DIFFERENT
+     * provider, and some bindings (Ollama, Gemini) pass the provider's id through
+     * as it arrives — often null — while OpenAI and Anthropic reject a tool call or
+     * result without one. A null-id call gets a synthetic {@code gen-} id, and the
+     * result that answers it (the next null-id result for the same tool, in order)
+     * gets the same id, so the pairing the next provider checks still holds.
+     */
+    static List<ChatMessage> toolExchange(List<ChatMessage> transcript) {
+        List<ChatMessage> exchange = new ArrayList<>();
+        // tool name -> synthetic ids assigned to calls whose results are still to come
+        Map<String, ArrayDeque<String>> pendingIds = new HashMap<>();
+        for (ChatMessage message : transcript) {
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                exchange.add(withCallIds(ai, pendingIds));
+            } else if (message instanceof ToolExecutionResultMessage result) {
+                exchange.add(withResultId(result, pendingIds));
+            }
+        }
+        return exchange;
+    }
+
+    private static AiMessage withCallIds(AiMessage ai, Map<String, ArrayDeque<String>> pendingIds) {
+        if (ai.toolExecutionRequests().stream().allMatch(r -> r.id() != null)) {
+            return ai;
+        }
+        List<ToolExecutionRequest> requests = new ArrayList<>();
+        for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+            if (request.id() != null) {
+                requests.add(request);
+                continue;
+            }
+            String id = "gen-" + UUID.randomUUID();
+            pendingIds.computeIfAbsent(request.name(), n -> new ArrayDeque<>()).add(id);
+            requests.add(ToolExecutionRequest.builder().id(id).name(request.name())
+                    .arguments(request.arguments() != null && !request.arguments().isBlank() ? request.arguments() : "{}").build());
+        }
+        return ai.toBuilder().toolExecutionRequests(requests).build();
+    }
+
+    private static ToolExecutionResultMessage withResultId(ToolExecutionResultMessage result,
+                                                           Map<String, ArrayDeque<String>> pendingIds) {
+        if (result.id() != null) {
+            return result;
+        }
+        var ids = pendingIds.get(result.toolName());
+        String id = ids != null && !ids.isEmpty() ? ids.poll() : "gen-" + UUID.randomUUID();
+        return result.toBuilder().id(id).build();
     }
 
     /**
@@ -211,13 +272,14 @@ class ToolLoopRunner {
     }
 
     /**
-     * The single shared tool-calling loop, wrapped in
-     * {@link AgentExecutionHelper#executeWithRetry}. Used by the live path (start
-     * iteration 0, empty {@code clearedCallIds}) and by {@link #resumeToolLoop}
-     * (start iteration {@code batch.getIterationIndex()+1}, {@code clearedCallIds}
-     * = the human-approved ids so they are never re-gated). A fresh gated batch
-     * throws {@link ToolApprovalRequiredException} to re-pause — the retry guard
-     * lets it escape unchanged.
+     * The single shared tool-calling loop. Each model call inside it is wrapped in
+     * {@link AgentExecutionHelper#executeWithRetry}; the loop itself never is, so a
+     * retry can never re-execute a tool that already ran. Used by the live path
+     * (start iteration 0, empty {@code clearedCallIds}) and by
+     * {@link #resumeToolLoop} (start iteration {@code batch.getIterationIndex()+1},
+     * {@code clearedCallIds} = the human-approved ids so they are never re-gated).
+     * A fresh gated batch throws {@link ToolApprovalRequiredException} to re-pause
+     * — it escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);
@@ -233,12 +295,15 @@ class ToolLoopRunner {
      * @param jsonPolicy
      *            decides, per request, whether {@code ResponseFormat.JSON} is set;
      *            resolved against whether THAT request carries tool specifications
+     * @param transcriptOut
+     *            when non-null, receives the loop's final message list on a normal
+     *            return (not on a pause or a failure)
      */
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                            List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                            int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
-                           JsonResponseFormatPolicy jsonPolicy)
+                           JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -261,10 +326,10 @@ class ToolLoopRunner {
                 : AgentOrchestrator.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
         TokenCountEstimator toolContextEstimator = toolContextBudget > 0 ? toolContextBudgetGuard.resolveToolContextEstimator(task) : null;
 
-        return AgentExecutionHelper.executeWithRetry(() -> {
-            // A retry REPLAYS this whole lambda, so anything the previous attempt
-            // accumulated must be discarded — otherwise a turn that retried once
-            // reports (and bills) roughly double the tokens it actually used.
+        // One backoff budget for every model request of this loop run, so per-request
+        // retries keep the documented total ceiling instead of one per request.
+        long[] backoffSpentMs = new long[1];
+        try {
             tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
             // Per-message token memo, local to this attempt: messages are immutable and
@@ -273,6 +338,7 @@ class ToolLoopRunner {
             // is a shared singleton and must stay stateless.
             Map<ChatMessage, Integer> toolContextTokenMemo = new IdentityHashMap<>();
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
+            boolean modelAnswered = false;
 
             // Engine-enforced counterweight: strict mode caps iterations
             var counterweight = task.getCounterweight();
@@ -324,7 +390,27 @@ class ToolLoopRunner {
 
                 ChatRequest chatRequest = requestBuilder.build();
 
-                ChatResponse chatResponse = chatModel.chat(chatRequest);
+                // The retry wraps THIS model call and nothing else. It used to wrap the
+                // whole loop, so a 429 on iteration 4 restarted from initialMessages and
+                // re-executed every tool iterations 0-3 had already run — a second POST,
+                // a second created agent, a second memory write — and charged and traced
+                // them twice. Retrying the single request resends the same transcript,
+                // tool results included, so the model continues where it stopped.
+                ChatResponse chatResponse;
+                try {
+                    chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task, "Agent execution",
+                            backoffSpentMs);
+                } catch (LifecycleException requestFailure) {
+                    // Nothing has executed in this run until the first request is
+                    // answered. Say so, so a caller that may retry the run (the cascade's
+                    // carried-exchange fallback) can tell "rejected up front" apart from
+                    // "failed after tools already ran", where a retry would replay them.
+                    if (!modelAnswered) {
+                        throw new FailedBeforeToolsException(requestFailure);
+                    }
+                    throw requestFailure;
+                }
+                modelAnswered = true;
                 AiMessage aiMessage = ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
                 currentMessages.add(aiMessage);
 
@@ -404,7 +490,7 @@ class ToolLoopRunner {
                             // here is only that this abandoned thread never writes stale/
                             // overwriting pause state; the resulting terminal state is
                             // fail-safe either way — a cascade discards the Future's exception
-                            // entirely, and on the live path AgentExecutionHelper.executeWithRetry
+                            // entirely, and on the live path wrapLoopFailure
                             // re-wraps this into a plain LifecycleException so the turn settles
                             // to ERROR (where the watchdog fired it already persisted
                             // EXECUTION_INTERRUPTED). Both are recoverable by the next say.
@@ -463,7 +549,7 @@ class ToolLoopRunner {
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
                     }
                 } else {
-                    return aiMessage.text();
+                    return finish(currentMessages, transcriptOut, aiMessage.text());
                 }
             }
 
@@ -481,10 +567,52 @@ class ToolLoopRunner {
             // four-word answer.
             ChatMessage last = currentMessages.get(currentMessages.size() - 1);
             if (last instanceof AiMessage aiLast && aiLast.text() != null) {
-                return aiLast.text();
+                return finish(currentMessages, transcriptOut, aiLast.text());
             }
-            return iterationBudgetSpentMessage(maxIterations);
-        }, task, "Agent execution");
+            return finish(currentMessages, transcriptOut, iterationBudgetSpentMessage(maxIterations));
+        } catch (ToolApprovalRequiredException e) {
+            // The pause signal travels up unchanged.
+            throw e;
+        } catch (LifecycleException.LifecycleInterruptedException e) {
+            // Deliberately NOT unchanged: see wrapLoopFailure.
+            throw wrapLoopFailure(e);
+        } catch (LifecycleException e) {
+            throw e;
+        } catch (Exception e) {
+            throw wrapLoopFailure(e);
+        }
+    }
+
+    /**
+     * The loop's first model request failed, so no tool of this run executed.
+     * Carries the original failure's message and wraps it as the cause, so every
+     * caller that only sees a {@link LifecycleException} is unaffected.
+     */
+    static final class FailedBeforeToolsException extends LifecycleException {
+        FailedBeforeToolsException(LifecycleException failure) {
+            super(failure.getMessage(), failure);
+        }
+    }
+
+    private static String finish(List<ChatMessage> currentMessages, List<ChatMessage> transcriptOut, String response) {
+        if (transcriptOut != null) {
+            transcriptOut.addAll(currentMessages);
+        }
+        return response;
+    }
+
+    /**
+     * The exception shape a failure outside the model call used to have when the
+     * whole loop ran inside {@code executeWithRetry}, which wrapped every
+     * non-retryable failure as {@code "Agent execution failed: <message>"}. Kept so
+     * callers see the same terminal state: in particular an abandoned-thread
+     * {@link LifecycleException.LifecycleInterruptedException} must reach the live
+     * path as a plain {@link LifecycleException}, which settles the turn to ERROR,
+     * rather than as the interrupted signal the pipeline treats as "the caller
+     * walked away".
+     */
+    private static LifecycleException wrapLoopFailure(Exception e) {
+        return new LifecycleException("Agent execution failed: " + e.getMessage(), e);
     }
 
     /**
@@ -644,12 +772,23 @@ class ToolLoopRunner {
             // available; ToolExecutionService then bypasses the cache entirely. Both
             // names go in: toolCacheScopes shares its key vocabulary with toolRateLimits
             // and toolPricing, so a slug-keyed narrowing override has to bind here too.
-            String cacheScopeTag = ToolCacheService.resolveScopeTag(toolRequest.name(), canonicalName, task.getToolCacheScopes(),
-                    task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId);
+            //
+            // Narrowed further to the tool's source and agent (M-T3), and HTTP / MCP /
+            // A2A tools — which can have side effects — are not cached at all unless the
+            // task names them in toolCacheScopes. See ToolCacheService#mayCache.
+            String toolSource = toolSources == null ? null : toolSources.get(toolRequest.name());
+            boolean cacheThisCall = enableCaching
+                    && ToolCacheService.mayCache(toolSource, toolRequest.name(), canonicalName, task.getToolCacheScopes());
+            String cacheScopeTag = cacheThisCall
+                    ? ToolCacheService.namespacedScopeTag(
+                            ToolCacheService.resolveScopeTag(toolRequest.name(), canonicalName, task.getToolCacheScopes(),
+                                    task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId),
+                            memory != null ? memory.getAgentId() : null, toolSource)
+                    : null;
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
             toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                    () -> executor.execute(toolRequest, null), enableRateLimiting, enableCaching, enableCostTracking, rateLimit);
+                    () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit);
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }

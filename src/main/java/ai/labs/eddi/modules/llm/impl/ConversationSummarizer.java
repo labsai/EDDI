@@ -141,9 +141,27 @@ public class ConversationSummarizer {
         LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", sanitize(memory.getConversationId()),
                 alreadySummarized, summarizeThroughStep, recentWindow);
 
+        // Bound the batch (M-L3). An unbounded backlog eventually outgrew the
+        // summarizer's context window, and from then on every turn made a failing,
+        // billed summarizer call. Catch up at most maxTurnsPerUpdate turns at a time,
+        // then shrink the batch until it fits maxCharsPerUpdate.
+        summarizeThroughStep = Math.min(summarizeThroughStep, alreadySummarized + config.getMaxTurnsPerUpdate());
+        int maxChars = config.getMaxCharsPerUpdate();
+        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        while (newTurnsText.length() > maxChars && summarizeThroughStep > alreadySummarized + 1) {
+            summarizeThroughStep--;
+            newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        }
+        if (newTurnsText.length() > maxChars) {
+            // A single turn larger than the whole budget: summarize its head.
+            // The notice counts toward the budget too, so the input stays within it.
+            String notice = "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
+            notice = notice.substring(0, Math.min(notice.length(), maxChars));
+            newTurnsText = newTurnsText.substring(0, maxChars - notice.length()) + notice;
+        }
+
         // Build content to summarize: previous summary + new unsummarized turns
         String existingSummary = readSummary(memory);
-        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
 
         String contentToSummarize;
         if (existingSummary != null && !existingSummary.isEmpty()) {
@@ -156,7 +174,13 @@ public class ConversationSummarizer {
         // Guard: don't call LLM with empty content (e.g., malformed outputs with no
         // text)
         if (contentToSummarize.isBlank()) {
-            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, skipping.", alreadySummarized, summarizeThroughStep);
+            // Nothing to condense in this window — but still move past it. Now that a
+            // batch is bounded, returning without advancing would re-read the same
+            // blank window on every turn and never reach the later turns that do
+            // have text. No LLM call, and the (absent) summary is left untouched.
+            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, advancing past them.", alreadySummarized, summarizeThroughStep);
+            memory.getConversationProperties().put(PROP_SUMMARY_THROUGH_STEP,
+                    new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
             return;
         }
 

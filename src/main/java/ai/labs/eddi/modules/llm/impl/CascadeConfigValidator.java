@@ -135,6 +135,11 @@ final class CascadeConfigValidator {
         }
         requireNonNegativePrice(taskId, "cascade inputPricePer1M", cascade.getInputPricePer1M());
         requireNonNegativePrice(taskId, "cascade outputPricePer1M", cascade.getOutputPricePer1M());
+        // New fields, so a hard error breaks no stored config (same rule as above).
+        if (cascade.getJudgeModel() != null) {
+            requireNonNegativePrice(taskId, "judgeModel inputPricePer1M", cascade.getJudgeModel().getInputPricePer1M());
+            requireNonNegativePrice(taskId, "judgeModel outputPricePer1M", cascade.getJudgeModel().getOutputPricePer1M());
+        }
 
         // per-step
         for (int i = 0; i < steps.size(); i++) {

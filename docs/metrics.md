@@ -380,6 +380,17 @@ eddi_llm_tokens_total                       # Tokens consumed; tags: provider, m
 eddi_llm_request_errors_total               # Failed calls; tags: provider, model, error (exception simple name)
 ```
 
+**Tag values are bounded.** `provider` is langchain4j's provider name (`OPEN_AI`,
+`ANTHROPIC`, …) or, where langchain4j has no name for the provider and reports
+`OTHER` (Jlama and HuggingFace, which used to share `provider="OTHER"`), EDDI's own
+model type (`jlama`, `huggingface`). `model` keeps its own
+series for the first 100 distinct model names a node sees, cut to 128 characters;
+every name after that is tagged `model="other"`. A model name can be templated from
+a property, and a property can be user input, so an uncapped tag was an unbounded
+number of series. Spans keep the real name. A failed call's span carries the error
+class and a secret-redacted, 256-character excerpt of the provider's message —
+never the raw text or the stack trace, which can echo the request.
+
 **These count attempts, not turns.** `AgentExecutionHelper.executeWithRetry`
 re-enters the model on a retryable failure, and each entry dispatches the
 listeners again. That is the right granularity for latency — you want the
@@ -441,6 +452,7 @@ expensive one.
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
+eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
 ```
 

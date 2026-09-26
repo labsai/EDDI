@@ -4112,12 +4112,12 @@
         {
           "id": 49,
           "type": "timeseries",
-          "title": "Streaming without partials",
+          "title": "Streaming without partials / timed out",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_streaming_no_partials_total` — the stream produced no incremental tokens, so the user waited for a single block.",
+          "description": "`eddi_llm_streaming_no_partials_total` — the stream produced no incremental tokens, so the user waited for a single block. `eddi_llm_stream_timeouts_total` — EDDI abandoned a stream at its own backstop, by path (legacy | tool_loop); counted when EDDI gives up, not when the provider eventually reports it.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -4133,7 +4133,19 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "no partials"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (path) (rate(eddi_llm_stream_timeouts_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timeout {{path}}"
             }
           ],
           "fieldConfig": {
@@ -4173,13 +4185,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }

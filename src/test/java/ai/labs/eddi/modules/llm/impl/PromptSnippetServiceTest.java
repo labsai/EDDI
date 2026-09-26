@@ -20,9 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -184,6 +190,103 @@ class PromptSnippetServiceTest {
             Map<String, Object> result = service.getAll();
 
             assertTrue(result.isEmpty());
+        }
+
+        /**
+         * M-L6: a failed load must not be cached. It used to be — as an empty map, for
+         * the full TTL — so one transient store error blanked every snippet, safety
+         * instructions included, for five minutes.
+         */
+        @Test
+        void storeFailureIsNotCachedAndTheNextCallRetries() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB unavailable"))
+                    .thenReturn(List.of(desc));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertTrue(service.getAll().isEmpty(), "nothing loaded yet, nothing to fall back to");
+            // Within the failure back-off the store is left alone ...
+            assertTrue(service.getAll().isEmpty());
+            verify(descriptorStore, times(1)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+            // ... and once it has passed, the failure was not cached: the store is read
+            // again.
+            expireFailureBackoff();
+            assertEquals("Never share PII.", service.getAll().get("safety"),
+                    "the failure was not cached as an empty map for the TTL");
+        }
+
+        private void expireFailureBackoff() throws Exception {
+            var field = PromptSnippetService.class.getDeclaredField("lastFailureAtMs");
+            field.setAccessible(true);
+            field.set(service, System.currentTimeMillis() - PromptSnippetService.FAILURE_BACKOFF_MS - 1);
+        }
+
+        /**
+         * M-L6: while the store is failing, the last successfully loaded snippets keep
+         * being served — through invalidation, which is exactly when a reload happens.
+         */
+        @Test
+        void storeFailureServesTheLastLoadedSnippets() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB unavailable"))
+                    .thenThrow(new RuntimeException("socket timeout"));
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertEquals("Never share PII.", service.getAll().get("safety"));
+            service.invalidateCache();
+            assertEquals("Never share PII.", service.getAll().get("safety"), "a checked store failure keeps the last set");
+            expireFailureBackoff();
+            assertEquals("Never share PII.", service.getAll().get("safety"), "so does an unchecked one");
+            verify(descriptorStore, times(3)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+        }
+
+        /**
+         * Review of #837: a reload is single-flight. While one caller's store read
+         * hangs (an outage, before its failure can set the back-off), a concurrent
+         * caller must not start a second read of its own; it gets the last good set.
+         */
+        @Test
+        void concurrentReloadSharesOneStoreRead() throws Exception {
+            DocumentDescriptor desc = createDescriptor("s1", 1);
+            CountDownLatch readStarted = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            when(descriptorStore.readDescriptors("ai.labs.snippet", "", 0, 0, false))
+                    .thenReturn(List.of(desc))
+                    .thenAnswer(inv -> {
+                        readStarted.countDown();
+                        release.await(5, TimeUnit.SECONDS);
+                        throw new IResourceStore.ResourceStoreException("DB unavailable");
+                    });
+            when(snippetStore.read("s1", 1))
+                    .thenReturn(new PromptSnippet("safety", "governance", null, "Never share PII.", null, true));
+
+            assertEquals("Never share PII.", service.getAll().get("safety"));
+            service.invalidateCache();
+
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<Map<String, Object>> hanging = pool.submit(service::getAll);
+                assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+
+                // Neither queued behind the hanging read nor issuing a read of its own.
+                Map<String, Object> during = assertTimeout(Duration.ofSeconds(2), () -> service.getAll());
+                assertEquals("Never share PII.", during.get("safety"), "served the last good set while the reload is in flight");
+                verify(descriptorStore, times(2)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+
+                release.countDown();
+                assertEquals("Never share PII.", hanging.get(5, TimeUnit.SECONDS).get("safety"));
+                // The failure is shared: within the back-off nobody reads the store again.
+                assertEquals("Never share PII.", service.getAll().get("safety"));
+                verify(descriptorStore, times(2)).readDescriptors("ai.labs.snippet", "", 0, 0, false);
+            } finally {
+                release.countDown();
+                pool.shutdownNow();
+            }
         }
     }
 
