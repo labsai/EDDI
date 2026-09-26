@@ -84,6 +84,16 @@ public class PromptSnippetService {
      */
     private volatile Map<String, Object> lastLoaded;
 
+    /**
+     * When the last load failed ({@code 0} = it did not). For
+     * {@link #FAILURE_BACKOFF_MS} after a failure the store is not asked again —
+     * during an outage every turn would otherwise block on the driver's timeout.
+     */
+    private volatile long lastFailureAtMs;
+
+    /** How long a failed load is remembered before the store is tried again. */
+    static final long FAILURE_BACKOFF_MS = 10_000L;
+
     @Inject
     public PromptSnippetService(IPromptSnippetStore snippetStore,
             IDocumentDescriptorStore descriptorStore,
@@ -125,8 +135,14 @@ public class PromptSnippetService {
         }
 
         cacheMissCounter.increment();
+        long failedAt = lastFailureAtMs;
+        if (failedAt != 0 && System.currentTimeMillis() - failedAt < FAILURE_BACKOFF_MS) {
+            Map<String, Object> fallback = lastLoaded;
+            return fallback != null ? fallback : Collections.emptyMap();
+        }
         Map<String, Object> snippetMap = loadAllSnippets();
         if (snippetMap == null) {
+            lastFailureAtMs = System.currentTimeMillis();
             // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
             // the full five-minute TTL: one transient store error and every prompt
             // rendered {snippets.x} — safety instructions included — as blank for
@@ -135,6 +151,7 @@ public class PromptSnippetService {
             Map<String, Object> fallback = lastLoaded;
             return fallback != null ? fallback : Collections.emptyMap();
         }
+        lastFailureAtMs = 0L;
         lastLoaded = snippetMap;
         snippetCache.put(CACHE_KEY, snippetMap);
         return snippetMap;
@@ -146,6 +163,8 @@ public class PromptSnippetService {
      */
     public void invalidateCache() {
         snippetCache.invalidateAll();
+        // An explicit invalidation (a snippet was just saved) retries at once.
+        lastFailureAtMs = 0L;
         LOGGER.debug("Snippet cache invalidated");
     }
 

@@ -41,6 +41,7 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -48,6 +49,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -192,15 +194,54 @@ class ToolLoopRunner {
      * with (a cascade step that received an earlier step's tools), so it is the
      * complete record to hand on. What a cascade escalation gives the next step so
      * it continues from the executed tools instead of executing them again.
+     * <p>
+     * <b>Every call carries an id.</b> The exchange may be replayed to a DIFFERENT
+     * provider, and some bindings (Ollama, Gemini) pass the provider's id through
+     * as it arrives — often null — while OpenAI and Anthropic reject a tool call or
+     * result without one. A null-id call gets a synthetic {@code gen-} id, and the
+     * result that answers it (the next null-id result for the same tool, in order)
+     * gets the same id, so the pairing the next provider checks still holds.
      */
     static List<ChatMessage> toolExchange(List<ChatMessage> transcript) {
         List<ChatMessage> exchange = new ArrayList<>();
+        // tool name -> synthetic ids assigned to calls whose results are still to come
+        Map<String, ArrayDeque<String>> pendingIds = new HashMap<>();
         for (ChatMessage message : transcript) {
-            if ((message instanceof AiMessage ai && ai.hasToolExecutionRequests()) || message instanceof ToolExecutionResultMessage) {
-                exchange.add(message);
+            if (message instanceof AiMessage ai && ai.hasToolExecutionRequests()) {
+                exchange.add(withCallIds(ai, pendingIds));
+            } else if (message instanceof ToolExecutionResultMessage result) {
+                exchange.add(withResultId(result, pendingIds));
             }
         }
         return exchange;
+    }
+
+    private static AiMessage withCallIds(AiMessage ai, Map<String, ArrayDeque<String>> pendingIds) {
+        if (ai.toolExecutionRequests().stream().allMatch(r -> r.id() != null)) {
+            return ai;
+        }
+        List<ToolExecutionRequest> requests = new ArrayList<>();
+        for (ToolExecutionRequest request : ai.toolExecutionRequests()) {
+            if (request.id() != null) {
+                requests.add(request);
+                continue;
+            }
+            String id = "gen-" + UUID.randomUUID();
+            pendingIds.computeIfAbsent(request.name(), n -> new ArrayDeque<>()).add(id);
+            requests.add(ToolExecutionRequest.builder().id(id).name(request.name())
+                    .arguments(request.arguments() != null ? request.arguments() : "").build());
+        }
+        return ai.toBuilder().toolExecutionRequests(requests).build();
+    }
+
+    private static ToolExecutionResultMessage withResultId(ToolExecutionResultMessage result,
+                                                           Map<String, ArrayDeque<String>> pendingIds) {
+        if (result.id() != null) {
+            return result;
+        }
+        var ids = pendingIds.get(result.toolName());
+        String id = ids != null && !ids.isEmpty() ? ids.poll() : "gen-" + UUID.randomUUID();
+        return result.toBuilder().id(id).build();
     }
 
     /**
@@ -285,6 +326,9 @@ class ToolLoopRunner {
                 : AgentOrchestrator.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
         TokenCountEstimator toolContextEstimator = toolContextBudget > 0 ? toolContextBudgetGuard.resolveToolContextEstimator(task) : null;
 
+        // One backoff budget for every model request of this loop run, so per-request
+        // retries keep the documented total ceiling instead of one per request.
+        long[] backoffSpentMs = new long[1];
         try {
             tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
@@ -352,7 +396,7 @@ class ToolLoopRunner {
                 // them twice. Retrying the single request resends the same transcript,
                 // tool results included, so the model continues where it stopped.
                 ChatResponse chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task,
-                        "Agent execution");
+                        "Agent execution", backoffSpentMs);
                 AiMessage aiMessage = ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
                 currentMessages.add(aiMessage);
 

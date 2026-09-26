@@ -171,7 +171,13 @@ public class ConversationSummarizer {
         // Guard: don't call LLM with empty content (e.g., malformed outputs with no
         // text)
         if (contentToSummarize.isBlank()) {
-            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, skipping.", alreadySummarized, summarizeThroughStep);
+            // Nothing to condense in this window — but still move past it. Now that a
+            // batch is bounded, returning without advancing would re-read the same
+            // blank window on every turn and never reach the later turns that do
+            // have text. No LLM call, and the (absent) summary is left untouched.
+            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, advancing past them.", alreadySummarized, summarizeThroughStep);
+            memory.getConversationProperties().put(PROP_SUMMARY_THROUGH_STEP,
+                    new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
             return;
         }
 

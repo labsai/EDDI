@@ -319,6 +319,9 @@ class CascadingModelExecutor {
             // mid-stream failure of a live-streamed final step does not trigger a duplicate
             // (garbled) re-emit of the buffered best response.
             boolean stepStreamedLive = false;
+            // Tool cost tracked before this step, so a step whose result never arrives
+            // (timeout, error) still charges its tools to the run's cost ceiling (m5).
+            double toolCostBeforeStep = useAgentMode ? conversationToolCost(agentOrchestrator, memory) : 0.0;
 
             try {
                 ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
@@ -371,9 +374,33 @@ class CascadingModelExecutor {
                 var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
 
                 List<ChatMessage> carried = List.copyOf(totals.carriedToolExchange);
-                StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
-                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
-                        effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried);
+                StepResult stepResult;
+                try {
+                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
+                            memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried);
+                } catch (Exception carriedRejected) {
+                    if (!rejectedCarriedExchange(carriedRejected, carried)) {
+                        throw carriedRejected;
+                    }
+                    // A carried exchange was produced by an EARLIER step's provider, and a
+                    // different provider can reject it outright (a Gemini 3 call without its
+                    // thought signature, a gateway with its own id rules). Failing here
+                    // would stop the escalation for good and return the cheap step's
+                    // low-confidence answer — worse than the replay this exchange exists to
+                    // avoid. So retry the step ONCE from the conversation alone, which is the
+                    // pre-carry behaviour, and say so in the trace and the log.
+                    LOGGER.warnf("Cascade step %d (%s) rejected the tool exchange carried from earlier steps (%s); retrying the step "
+                            + "without it — its tools may run again", i, modelType, describeFailure(carriedRejected));
+                    stepTrace.put("carriedToolExchangeRejected", describeFailure(carriedRejected));
+                    increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "carried_exchange_rejected");
+                    totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
+                    toolCostBeforeStep = conversationToolCost(agentOrchestrator, memory);
+                    carried = List.of();
+                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
+                            memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried);
+                }
 
                 long durationMs = System.currentTimeMillis() - stepStart;
                 double stepCost = computeCost(step, cascade, stepResult.tokenUsage);
@@ -491,6 +518,8 @@ class CascadingModelExecutor {
                         step.getConfidenceThreshold(), modelName);
 
             } catch (TimeoutException e) {
+                // The step's tools ran and were charged even though its result is lost.
+                totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
@@ -526,8 +555,20 @@ class CascadingModelExecutor {
                     // tool loop continued on the cheap model it had escalated away from.
                     if (tare.getBatch() != null) {
                         tare.getBatch().setCascadeStepIndex(i);
+                        // Earlier steps' tools ran too; keep them in the trace the resumed
+                        // turn reports, ahead of this step's own.
+                        if (!totals.toolTrace.isEmpty()) {
+                            List<Map<String, Object>> combined = new ArrayList<>(totals.toolTrace);
+                            if (tare.getBatch().getTraceSoFar() != null) {
+                                combined.addAll(tare.getBatch().getTraceSoFar());
+                            }
+                            tare.getBatch().setTraceSoFar(combined);
+                        }
                     }
                     throw tare;
+                }
+                if (useAgentMode) {
+                    totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 String errorType = isRetryableError(e) ? "retryable_error" : "error";
@@ -616,6 +657,29 @@ class CascadingModelExecutor {
         // #8: template step param values (parity with task params), then merge.
         Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects));
         return new StepModel(modelType, mergedParams);
+    }
+
+    /**
+     * Whether a step failure is the next provider rejecting the carried tool
+     * exchange: there WAS an exchange, and the failure is a client-side rejection
+     * (not a timeout, not a transient error, not a HITL pause), which is what a
+     * provider returns for a transcript it will not accept.
+     */
+    static boolean rejectedCarriedExchange(Exception failure, List<ChatMessage> carried) {
+        return !carried.isEmpty() && !(failure instanceof TimeoutException) && !(failure instanceof ToolApprovalRequiredException)
+                && !isRetryableError(failure);
+    }
+
+    private static double conversationToolCost(IAgentOrchestrator orchestrator, IConversationMemory memory) {
+        return orchestrator != null && memory != null ? orchestrator.conversationToolCost(memory.getConversationId()) : 0.0;
+    }
+
+    /**
+     * Tool cost tracked since {@code before}; clamped at 0 (a tracker reset can
+     * intervene).
+     */
+    private static double stepToolCostSince(IAgentOrchestrator orchestrator, IConversationMemory memory, double before) {
+        return Math.max(0.0, conversationToolCost(orchestrator, memory) - before);
     }
 
     /**

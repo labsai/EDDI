@@ -13,9 +13,17 @@ what changed, where.
 or 5xx on iteration 4 re-ran every tool from iterations 0-3: a second POST, a second created agent,
 a second memory write, each charged and traced twice. The retry now wraps the single
 `chatModel.chat(chatRequest)` call. A retry resends that one request, with every tool result
-gathered so far in its transcript, so the model continues where it stopped. Failures outside the
-model call keep their old shape (`"Agent execution failed: …"`, and an abandoned-thread interrupt
-still settles the turn to ERROR), via `wrapLoopFailure`. `AgentOrchestratorToolCostTest`: the two
+gathered so far in its transcript, so the model continues where it stopped. Exhausted and
+non-retryable model failures keep their messages ("Agent execution failed after N attempts" /
+"Agent execution failed: …"). Unchecked exceptions outside the model call are wrapped the same way,
+and an abandoned-thread interrupt still becomes a plain `LifecycleException` so the turn settles to
+ERROR (`wrapLoopFailure`). The one shape change: a plain `LifecycleException` raised inside the loop
+("Agent execution cancelled (interrupted)…", or one thrown by a tool executor) now propagates as
+itself instead of under an extra "Agent execution failed:" prefix. Nothing matches on those messages
+and the terminal state is the same. The 60-second backoff ceiling still covers the whole turn:
+every model request of one loop run draws from one shared budget
+(`RetryConfiguration.executeWithRetry(…, long[] sharedBackoffMs)`), so per-request retries cannot
+sleep a minute each. `AgentOrchestratorToolCostTest`: the two
 tests that described the old replay semantics are rewritten, and
 `retryAfterToolRunDoesNotReplayTheTool` / `exhaustedRetriesFailWithoutReplay` are added.
 
@@ -36,9 +44,25 @@ tests that described the old replay semantics are rewritten, and
   when the judge's reply was unusable and scoring fell back to the heuristic. Judge spend is
   included in `runCostUsd` / `cascadeCostUsd`, and each step's trace entry gets `judgeTokenUsage`
   and `judgeCostUsd`.
-- **Not carried (follow-up):** the partial tool exchange of a step that *timed out or threw*. Its
-  future is cancelled and its result lost, so the next step starts without it. `docs/model-cascade.md`
-  says so.
+- **Carried calls always have ids.** `ToolLoopRunner.toolExchange` gives a null-id call (Ollama and
+  Gemini bindings pass the provider's id through, often null) a synthetic `gen-` id and gives the same
+  id to the result that answers it, because OpenAI and Anthropic reject a tool call without one.
+- **Cross-provider rejection.** A step that fails with a client-side error (not a timeout, not a
+  transient 429/5xx, not a HITL pause) while carrying an exchange is retried **once from the
+  conversation alone**, the pre-carry behaviour. It is logged, recorded on the step trace as
+  `carriedToolExchangeRejected`, and counted as
+  `eddi.llm.cascade.step.errors{type=carried_exchange_rejected}`. This was chosen over carrying only
+  between identical provider types: same-provider escalations (the common case) keep the no-replay
+  guarantee, and cross-provider ones still escalate instead of silently stopping at the cheap step's
+  answer.
+- **Timed-out and failed steps' tool cost** now counts toward the ceiling. It is measured as the
+  conversation's tracked tool-cost delta around the step (`IAgentOrchestrator.conversationToolCost`),
+  so a step whose result never arrives still charges its tools.
+- **A pause inside an escalated step** keeps the earlier steps' tool calls in the batch trace, ahead
+  of its own.
+- **Not carried (follow-up):** the partial tool *exchange* (transcript) of a step that timed out or
+  threw. Its future is cancelled and its result lost, so the next step starts without it.
+  `docs/model-cascade.md` says so.
 
 ### H12 — the rolling summary and the gap marker were dropped in agent mode
 
@@ -55,7 +79,9 @@ the history minus only that one leading message.
 `CascadingModelExecutor` records the pausing step on the batch (`PendingToolCallBatch.cascadeStepIndex`,
 a new nullable field; older batches read null). `LlmTask.executeResume` rebuilds that step's model
 through the shared `CascadingModelExecutor.resolveStepModel`. If the index no longer exists (the
-config was redeployed during the pause), it falls back to the base model and logs a WARN.
+config was redeployed during the pause), it falls back to the base model and logs a WARN. When the
+continuation pauses *again* (a second gated call), `executeResume` copies the index onto the new
+batch, so the second resume also stays on the step's model.
 
 ### M-L2 — the summarizer model override wrote only `modelName`
 
@@ -70,7 +96,8 @@ unrecognised-parameter WARN. Both `SummarizationService` and `ToolResponseTrunca
 `ConversationSummaryConfig` gains `maxTurnsPerUpdate` (20) and `maxCharsPerUpdate` (60 000). A
 backlog is caught up in bounded batches, each batch is shortened turn by turn to fit, and a single
 turn larger than the budget is cut. The stored `summary_through_step` records what the summary
-actually covers.
+actually covers. A window with no renderable text is stepped over without an LLM call, so a bounded
+batch cannot stall on it.
 
 ### M-L4 — `convertToObject` failed the turn on `[` or on malformed JSON
 
@@ -87,20 +114,29 @@ unsupported" falls back.
 ### M-L6 — a transient store error cached an empty snippet map for five minutes
 
 `PromptSnippetService` no longer caches a failed load. It serves the last successfully loaded map
-(kept across invalidation and expiry) and retries the store on the next call. Unchecked store
-exceptions are covered too. Conflict note: `fix/template-injection` (C4c) also touches this class.
+(kept across invalidation and expiry). After a failure the store is left alone for 10 seconds
+(`FAILURE_BACKOFF_MS`), so an outage does not put a driver timeout on every turn; an explicit
+`invalidateCache()` retries at once. Unchecked store exceptions are covered too. Conflict note: `fix/template-injection` (C4c) also touches this class.
 This change is confined to `getAll` / `loadAllSnippets`.
 
 ### Tool cache: HTTP / MCP / A2A tools were cached by default (NEW), and the key lacked agent and source (M-T3)
 
 - `ToolCacheService.mayCache`: tools from `http`, `mcp` and `a2a` sources are cached **only when
   the task names the tool in `toolCacheScopes`**. That existing field doubles as the explicit
-  opt-in. Built-ins behave as before, and the stateful built-ins are still never cached.
+  opt-in. Built-ins stay cacheable by default, and the stateful built-ins are still never cached.
 - `ToolCacheService.namespacedScopeTag` adds `src:<source>` and `agent:<agentId>` to the key. The
   agent is omitted only for a built-in on the `global` scope, whose definition is identical for
-  every agent.
+  every agent. This means a built-in on the `user` or `conversation` scope (websearch, weather, …)
+  is no longer shared between different agents of the same user, which intentionally lowers its
+  hit rate. Pick `global` for a built-in whose result depends only on its arguments.
 - **Behaviour change:** an agent that relied on caching an HTTP/MCP/A2A tool must now list it in
   `toolCacheScopes`. Existing cache entries become unreachable (new key shape) and expire by TTL.
+
+### JSON-mode fallback and 5xx
+
+A self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a 5xx
+used to fall back to a plain request. It now fails the turn, and `docs/langchain.md` names the fix:
+`jsonResponseFormat: "off"` on the task.
 
 ### L1-L4 — LLM telemetry
 
@@ -122,7 +158,10 @@ This change is confined to `getAll` / `loadAllSnippets`.
 
 Retrieved context (vector RAG and httpCall RAG) is wrapped by `ToolResultProvenance.markRetrieved`
 in a `[retrieved context — source '…' …]` … `[end of retrieved context]` envelope before it joins
-the system prompt. The new task field `markRagProvenance` defaults to marking; `false` restores the
+the system prompt. Delimiter-shaped text **inside** the body (the closing line, or an opening
+header, in any letter case) has its bracket rewritten to `[quoted: `, so a retrieved document
+cannot close its own envelope and have the rest read as unmarked instructions. The tool-result
+envelope (`mark`) gets the same treatment; it had the same gap before this branch. The new task field `markRagProvenance` defaults to marking; `false` restores the
 bare append.
 
 ### Config surface / compatibility
