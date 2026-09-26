@@ -400,4 +400,23 @@ class NegotiationEngineTest {
         assertTrue(rendered.contains("(" + (NegotiationEngine.MAX_LEDGER_CONCESSIONS - NegotiationEngine.MAX_RENDERED_CONCESSIONS)
                 + " earlier concession(s) omitted)"), rendered);
     }
+
+    @Test
+    @DisplayName("M-G1: the ledger bounds come from the group's negotiationConfig, clamped to their ceilings")
+    void ledger_boundsAreConfigurable() {
+        var gc = gc();
+        var config = new AgentGroupConfiguration.NegotiationConfig(2, 3, 1);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a1", concessionsJson(10, 5))), 0, 0, config);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", concessionsJson(10, 5))), 1, 1, config);
+
+        assertEquals(3, gc.getNegotiation().getConcessions().size(), "2 per move, 3 in total");
+        String rendered = NegotiationEngine.appendStateIfRelevant("INPUT", gc, bargainPhase(), config);
+        assertEquals(1, rendered.lines().filter(l -> l.contains(" gave up ")).count());
+        assertTrue(rendered.contains("(2 earlier concession(s) omitted)"), rendered);
+
+        var clamped = new AgentGroupConfiguration.NegotiationConfig(10_000, -1, 0);
+        assertEquals(AgentGroupConfiguration.NegotiationConfig.CEILING_MAX_PER_MOVE, clamped.maxConcessionsPerMove());
+        assertEquals(AgentGroupConfiguration.NegotiationConfig.DEFAULT_MAX_LEDGER, clamped.maxLedgerConcessions());
+        assertEquals(AgentGroupConfiguration.NegotiationConfig.DEFAULT_MAX_RENDERED, clamped.maxRenderedConcessions());
+    }
 }

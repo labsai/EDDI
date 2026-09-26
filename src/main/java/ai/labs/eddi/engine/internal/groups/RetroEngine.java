@@ -63,13 +63,13 @@ public final class RetroEngine {
     static final String RETRO_SOURCE = "retro";
 
     /**
-     * M-G4: the most a stored lesson value (lesson plus its "applies:" context) may
-     * hold — the same 1000-character bound {@code UserMemoryTool} enforces on every
-     * other agent-written memory value by default. A retro lesson is an LLM write
-     * to team memory that every later discussion of the team recalls, and it
-     * bypassed that cap entirely.
+     * M-G4 default for {@link RetroConfig#maxLessonChars()}: the most a stored
+     * lesson value (lesson plus its "applies:" context) may hold — the same default
+     * as an agent's {@code memoryGuardrails.maxValueLength}. A retro lesson is an
+     * LLM write to team memory that every later discussion of the team recalls, and
+     * it bypassed any cap.
      */
-    static final int MAX_LESSON_VALUE_CHARS = 1000;
+    static final int MAX_LESSON_VALUE_CHARS = RetroConfig.DEFAULT_MAX_LESSON_CHARS;
 
     /** Idempotency-key prefix: {@code retro:<sha256(lesson)[0..15]>}. */
     static final String KEY_PREFIX = "retro:";
@@ -81,8 +81,16 @@ public final class RetroEngine {
     private RetroEngine() {
     }
 
-    /** One parsed lesson. */
-    public record Lesson(String lesson, String context) {
+    /**
+     * One parsed lesson, possibly truncated. {@code keyText} is the lesson as the
+     * model wrote it — the idempotency key hashes that, so a lesson stored before
+     * the length cap existed (keyed on its full text) is recognised, not stored a
+     * second time under a key over the truncated text.
+     */
+    public record Lesson(String lesson, String context, String keyText) {
+        public Lesson(String lesson, String context) {
+            this(lesson, context, lesson);
+        }
     }
 
     /**
@@ -91,6 +99,10 @@ public final class RetroEngine {
      * regardless of what the model produced.
      */
     static List<Lesson> parseLessons(String content, int maxLessonsPerRun) {
+        return parseLessons(content, maxLessonsPerRun, MAX_LESSON_VALUE_CHARS);
+    }
+
+    static List<Lesson> parseLessons(String content, int maxLessonsPerRun, int maxLessonChars) {
         if (content == null || content.isBlank()) {
             return List.of();
         }
@@ -108,7 +120,7 @@ public final class RetroEngine {
                 continue;
             }
             String context = lessonNode.path("context").isTextual() ? lessonNode.path("context").asText().trim() : null;
-            lessons.add(bounded(lesson, context != null && !context.isBlank() ? context : null));
+            lessons.add(bounded(lesson, context != null && !context.isBlank() ? context : null, maxLessonChars));
             if (lessons.size() >= maxLessonsPerRun) {
                 break;
             }
@@ -117,18 +129,17 @@ public final class RetroEngine {
     }
 
     /**
-     * Fits a lesson into {@link #MAX_LESSON_VALUE_CHARS} once rendered as the
-     * stored value. The lesson keeps priority; the context gets what is left and is
-     * dropped when nothing useful is. Truncated at parse time, so the idempotency
-     * key hashes exactly the text that is stored.
+     * Fits a lesson into {@code maxChars} once rendered as the stored value. The
+     * lesson keeps priority; the context gets what is left and is dropped when
+     * nothing useful is. The untruncated lesson rides along as the key text.
      */
-    static Lesson bounded(String lesson, String context) {
-        String boundedLesson = truncate(lesson, MAX_LESSON_VALUE_CHARS);
+    static Lesson bounded(String lesson, String context, int maxChars) {
+        String boundedLesson = truncate(lesson, maxChars);
         if (context == null) {
-            return new Lesson(boundedLesson, null);
+            return new Lesson(boundedLesson, null, lesson);
         }
-        int room = MAX_LESSON_VALUE_CHARS - boundedLesson.length() - " (applies: )".length();
-        return new Lesson(boundedLesson, room >= 20 ? truncate(context, room) : null);
+        int room = maxChars - boundedLesson.length() - " (applies: )".length();
+        return new Lesson(boundedLesson, room >= 20 ? truncate(context, room) : null, lesson);
     }
 
     private static String truncate(String text, int max) {
@@ -168,10 +179,10 @@ public final class RetroEngine {
             if (entry == null || entry.type() != TranscriptEntryType.RETRO) {
                 continue;
             }
-            for (Lesson lesson : parseLessons(entry.content(), remaining)) {
+            for (Lesson lesson : parseLessons(entry.content(), remaining, config.maxLessonChars())) {
                 try {
                     String value = lesson.context() != null ? lesson.lesson() + " (applies: " + lesson.context() + ")" : lesson.lesson();
-                    userMemoryStore.upsert(new UserMemoryEntry(null, teamOwner, KEY_PREFIX + lessonHash(lesson.lesson()), value,
+                    userMemoryStore.upsert(new UserMemoryEntry(null, teamOwner, KEY_PREFIX + lessonHash(lesson.keyText()), value,
                             "context", Visibility.group, RETRO_SOURCE, List.of(gc.getGroupId()), gc.getId(), false, 0,
                             Instant.now(), Instant.now()));
                     stored++;

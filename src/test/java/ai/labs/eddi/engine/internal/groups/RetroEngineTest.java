@@ -323,4 +323,22 @@ class RetroEngineTest {
         String stored = lessons.get(1).lesson() + " (applies: " + lessons.get(1).context() + ")";
         assertTrue(stored.length() <= RetroEngine.MAX_LESSON_VALUE_CHARS + 1, "stored value length " + stored.length());
     }
+
+    @Test
+    @DisplayName("M-G4: RetroConfig.maxLessonChars bounds the stored value; the key hashes the untruncated lesson")
+    void harvest_configurableLessonCap_keyOnFullText() {
+        String longLesson = "Always vote before synthesizing " + "x".repeat(600);
+        var config = new RetroConfig(3, 50, 200);
+
+        RetroEngine.harvest(gc, config, List.of(retroEntry("{\"lessons\":[{\"lesson\":\"" + longLesson + "\"}]}")), store,
+                "Retro", null);
+
+        assertEquals(1, store.byId.size());
+        UserMemoryEntry stored = store.byId.values().iterator().next();
+        assertTrue(String.valueOf(stored.value()).length() <= 200, "the configured cap, not the default");
+        assertEquals(RetroEngine.KEY_PREFIX + RetroEngine.lessonHash(longLesson), stored.key(),
+                "keyed on the full text, so a lesson stored before the cap is recognised rather than duplicated");
+        assertEquals(RetroConfig.CEILING_MAX_LESSON_CHARS, new RetroConfig(3, 50, Integer.MAX_VALUE).maxLessonChars());
+        assertEquals(RetroConfig.DEFAULT_MAX_LESSON_CHARS, new RetroConfig(3, 50).maxLessonChars());
+    }
 }

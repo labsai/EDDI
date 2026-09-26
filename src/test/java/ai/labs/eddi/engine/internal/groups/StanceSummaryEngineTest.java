@@ -759,4 +759,24 @@ class StanceSummaryEngineTest {
         assertTrue(input.startsWith("["), input.substring(0, 40));
         assertTrue(input.contains("earlier contribution(s) omitted]"), "the omission is stated, not silent");
     }
+
+    @Test
+    @DisplayName("G3: the summarizer input bounds come from StanceSummaryConfig, clamped to their ceilings")
+    void renderForSummarizer_boundsAreConfigurable() {
+        var entries = new ArrayList<TranscriptEntry>();
+        for (int i = 0; i < 10; i++) {
+            entries.add(new TranscriptEntry("a1", "Alice", "turn-" + i + " " + "y".repeat(900), i, "P" + i,
+                    TranscriptEntryType.OPINION, Instant.now(), null, null));
+        }
+        var config = new StanceSummaryConfig(0, "openai", "gpt", null, null, 1_000, 300);
+
+        String input = StanceSummaryEngine.renderForSummarizer(entries, config.maxInputChars(), config.maxEntryChars());
+
+        assertTrue(input.length() <= 1_000 + 200, "the configured total: " + input.length());
+        assertTrue(input.contains("turn-9 "));
+        assertFalse(input.contains("y".repeat(301)), "each contribution is cut to the configured 300");
+        var clamped = new StanceSummaryConfig(0, null, null, null, null, Integer.MAX_VALUE, -1);
+        assertEquals(StanceSummaryConfig.CEILING_MAX_INPUT_CHARS, clamped.maxInputChars());
+        assertEquals(StanceSummaryConfig.DEFAULT_MAX_ENTRY_CHARS, clamped.maxEntryChars());
+    }
 }
