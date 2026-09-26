@@ -607,24 +607,39 @@ function TaskEditor({
                         <div className="flex flex-wrap gap-1.5">
                           {BUILT_IN_TOOLS.map((tool) => {
                             const selected = task.builtInToolsWhitelist?.includes(tool) ?? false;
+                            // The last selected tool cannot be deselected: the
+                            // backend reads an empty (or absent) whitelist as
+                            // "every tool", so emptying it used to enable all of
+                            // them. Unticking "Enable Built-in Tools" is how to
+                            // have none.
+                            const isLastSelected =
+                              selected && (task.builtInToolsWhitelist?.length ?? 0) === 1;
                             return (
                               <button
                                 key={tool}
                                 type="button"
                                 aria-pressed={selected}
+                                title={
+                                  isLastSelected
+                                    ? t(
+                                        "llmEditor.lastToolHint",
+                                        "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all.",
+                                      )
+                                    : undefined
+                                }
                                 onClick={() => {
-                                  if (readOnly) return;
+                                  if (readOnly || isLastSelected) return;
                                   const wl = task.builtInToolsWhitelist ?? [];
                                   const next = selected
                                     ? wl.filter((item) => item !== tool)
                                     : [...wl, tool];
                                   onChange({
                                     ...task,
-                                    builtInToolsWhitelist: next.length > 0 ? next : undefined,
+                                    builtInToolsWhitelist: next,
                                   });
                                 }}
-                                disabled={readOnly}
-                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                                disabled={readOnly || isLastSelected}
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all disabled:cursor-not-allowed ${
                                   selected
                                     ? "bg-primary/15 text-primary border border-primary/30 shadow-sm"
                                     : "bg-secondary/50 text-muted-foreground border border-transparent hover:border-border hover:text-foreground"

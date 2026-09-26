@@ -550,7 +550,10 @@
     "toolCount": "{{total}}개 중 {{selected}}개 선택",
     "specTooLarge": "이 사양은 너무 커서 여기에서 불러올 수 없습니다",
     "specUrlInvalid": "유효한 URL이 아닙니다",
-    "specUrlScheme": "http:// 및 https:// URL만 지원됩니다"
+    "specUrlScheme": "http:// 및 https:// URL만 지원됩니다",
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 기본 제공 도구를 끄세요.",
+    "hfToken": "Hugging Face 토큰",
+    "hfTokenHint": "제한되거나 비공개인 저장소에만 필요합니다. API 키처럼 보관소에 저장됩니다."
   },
   "packages": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 워크플로와 모든 데이터가 영구적으로 제거됩니다.",
@@ -747,7 +750,8 @@
     "errorConversationEnded": "이 대화는 종료되었습니다.",
     "errorAgentNotReady": "이 에이전트는 선택한 환경에 아직 배포되지 않았습니다.",
     "errorAgentMismatch": "이 대화는 에이전트의 다른 버전에 속해 있습니다.",
-    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요."
+    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+    "sendRejected": "메시지가 전송되지 않았습니다: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -1315,7 +1319,8 @@
     "streamingTimeoutSeconds": "스트리밍 시간 초과(초)",
     "streamingTimeoutSecondsHint": "엔진 기본값(120초)을 재정의합니다. 스트리밍 중에만 적용됩니다. 비어 있음 = 기본값 사용.",
     "taskPricing": "일반 호출 요금",
-    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다."
+    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다.",
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",

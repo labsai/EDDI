@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
+import { MODEL_SUGGESTIONS, isBaseUrlRequired, isProvisionableBySetup, supportsBaseUrl } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSelfUrl } from "@/hooks/use-operator";
@@ -265,7 +265,9 @@ export function OperatorActivation({
                 id="operator-provider"
                 data-testid="operator-provider"
               >
-                {LLM_PROVIDERS.map((p) => (
+                {/* The operator is provisioned through setup-api, which cannot
+                    configure every provider (see isProvisionableBySetup). */}
+                {LLM_PROVIDERS.filter((p) => isProvisionableBySetup(p.id)).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
