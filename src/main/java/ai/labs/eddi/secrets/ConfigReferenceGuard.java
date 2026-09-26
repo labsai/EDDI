@@ -248,16 +248,33 @@ public final class ConfigReferenceGuard {
             String template = configured != null ? configured.get(key) : null;
             String location = what + " parameter '" + key + "'";
             requireConfiguredReferences(template, value, location, templateData, conversationProperties);
+            Set<String> configuredVariables = variableReferences(template);
             Matcher variables = VARS_REFERENCE.matcher(value);
             while (variables.find()) {
                 String reference = variables.group();
-                if (template == null || !template.contains(reference)) {
+                if (!configuredVariables.contains(reference)) {
                     throw new IllegalArgumentException(location + " contains the reference " + reference
                             + ", which the agent configuration does not write there: it came from conversation data (user input, a model "
                             + "reply, an API response or client context). References are only resolved where the configuration wrote them.");
                 }
             }
         }
+    }
+
+    /**
+     * The {@code ${vars:…}} references {@code template} writes — matched as whole
+     * references, like {@link #references}, not as substrings.
+     */
+    private static Set<String> variableReferences(String template) {
+        if (template == null) {
+            return Set.of();
+        }
+        Set<String> found = new LinkedHashSet<>();
+        Matcher matcher = VARS_REFERENCE.matcher(template);
+        while (matcher.find()) {
+            found.add(matcher.group());
+        }
+        return found;
     }
 
     private static String conversationInfo(Map<String, Object> templateData, String key) {

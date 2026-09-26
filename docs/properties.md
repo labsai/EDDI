@@ -253,7 +253,7 @@ If the vault is unavailable or disabled, the turn fails closed with a `Lifecycle
 
 A new conversation is given its id before its first turn runs, so a secret set on `CONVERSATION_START` (for example from client context) is vaulted like any other.
 
-The entries are removed when their conversation is permanently deleted — an explicit delete or the ended-conversation retention sweep (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`). A soft delete keeps them, as it keeps the conversation. Each entry is described `Auto-vaulted from conversation <conversationId>`.
+The entries are removed when their conversation is permanently deleted — an explicit delete or the ended-conversation retention sweep (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`). A soft delete keeps them, as it keeps the conversation. Each run of that sweep also removes any such entry older than a day whose conversation no longer exists: one a vault failure left behind when its conversation was deleted, one written by a start turn that failed before the conversation was first stored, or one of a conversation removed in bulk. Each entry is described `Auto-vaulted from conversation <conversationId>`.
 
 > **Upgrading:** a conversation that vaulted a secret under an earlier release holds a reference to the old, per-agent key (`<agentId>.<name>`), which every conversation of the agent shared. Apicalls refuse to resolve it with an error that says so; have the user enter the secret again, or start a new conversation. A `tenantId` conversation property no longer selects the vault tenant — a client can set it.
 

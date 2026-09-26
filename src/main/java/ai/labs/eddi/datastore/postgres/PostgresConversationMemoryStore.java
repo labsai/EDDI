@@ -502,6 +502,20 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean conversationExists(String conversationId) {
+        ensureSchema();
+        String sql = "SELECT 1 FROM conversation_memories WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check whether conversation exists", e);
+        }
+    }
+
+    @Override
     public ConversationState getConversationState(String conversationId) {
         ensureSchema();
         String sql = "SELECT conversation_state FROM conversation_memories WHERE id = ?::uuid";

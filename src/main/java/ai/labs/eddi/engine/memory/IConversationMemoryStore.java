@@ -101,6 +101,17 @@ public interface IConversationMemoryStore {
 
     ConversationState getConversationState(String conversationId);
 
+    /**
+     * Whether a conversation with this id is stored — independent of its state,
+     * which {@link #getConversationState} also reports as {@code null} for a
+     * document without one.
+     *
+     * @throws RuntimeException
+     *             when the store cannot answer; a caller deciding to delete
+     *             something on a {@code false} must treat that as "unknown"
+     */
+    boolean conversationExists(String conversationId);
+
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 
     List<String> getEndedConversationIds();

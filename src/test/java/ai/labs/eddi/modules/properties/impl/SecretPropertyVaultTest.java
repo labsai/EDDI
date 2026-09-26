@@ -20,9 +20,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -180,6 +182,48 @@ class SecretPropertyVaultTest {
     void deleteConversationSecretsVaultDisabled() throws Exception {
         assertEquals(0, vault.deleteConversationSecrets(List.of("conv1")));
         verify(secretProvider, never()).listKeys(anyString());
+    }
+
+    @Test
+    @DisplayName("orphan sweep: removes old entries whose conversation is gone, keeps fresh, live, unknown and foreign ones")
+    void deleteOrphanedConversationSecrets() throws Exception {
+        Instant old = Instant.now().minus(Duration.ofDays(3));
+        Instant cutoff = Instant.now().minus(Duration.ofDays(1));
+        when(secretProvider.isAvailable()).thenReturn(true);
+        when(secretProvider.listKeys("default")).thenReturn(List.of(
+                entry("agent-1.gone.apiKey", "Auto-vaulted from conversation gone", old, null),
+                entry("agent-1.live.apiKey", "Auto-vaulted from conversation live", old, null),
+                // a start turn in progress: written after the cutoff, its conversation not
+                // stored yet
+                entry("agent-1.starting.apiKey", "Auto-vaulted from conversation starting", Instant.now(), null),
+                // created long ago but re-entered recently
+                entry("agent-1.rotated.apiKey", "Auto-vaulted from conversation rotated", old, Instant.now()),
+                // the store could not answer
+                entry("agent-1.unknown.apiKey", "Auto-vaulted from conversation unknown", old, null),
+                entry("team.gone.shared", "created by ops", old, null)));
+        Predicate<String> exists = id -> {
+            if ("unknown".equals(id)) {
+                throw new IllegalStateException("store down");
+            }
+            return "live".equals(id);
+        };
+
+        int deleted = vault.deleteOrphanedConversationSecrets(exists, cutoff);
+
+        assertEquals(1, deleted);
+        verify(secretProvider).delete(new SecretReference("default", "agent-1.gone.apiKey"));
+        verify(secretProvider, times(1)).delete(any());
+    }
+
+    @Test
+    @DisplayName("orphan sweep: with the vault disabled nothing is listed")
+    void deleteOrphanedConversationSecretsVaultDisabled() throws Exception {
+        assertEquals(0, vault.deleteOrphanedConversationSecrets(id -> false, Instant.now()));
+        verify(secretProvider, never()).listKeys(anyString());
+    }
+
+    private static SecretMetadata entry(String keyName, String description, Instant createdAt, Instant rotatedAt) {
+        return new SecretMetadata("default", keyName, createdAt, null, rotatedAt, "x", description, List.of("agent-1"));
     }
 
     private static SecretMetadata entry(String keyName, String description) {

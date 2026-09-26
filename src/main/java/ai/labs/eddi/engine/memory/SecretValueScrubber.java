@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
@@ -172,6 +173,10 @@ public final class SecretValueScrubber {
                 return placeholder;
             }
             String cleaned = replaceAll(text, plaintexts, placeholder);
+            String json = exact.isEmpty() ? null : scrubEmbeddedJson(cleaned, exact, placeholder);
+            if (json != null) {
+                return json;
+            }
             return cleaned.equals(text) ? null : cleaned;
         }
         if (value instanceof Number number) {
@@ -204,7 +209,8 @@ public final class SecretValueScrubber {
             boolean changed = false;
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                String cleanedKey = replaceAll(key, plaintexts, placeholder);
+                // A key that IS a short secret is the secret, exactly like a value.
+                String cleanedKey = exact.contains(key) ? placeholder : replaceAll(key, plaintexts, placeholder);
                 Object cleaned = scrubSorted(entry.getValue(), plaintexts, exact, placeholder, deep);
                 copy.put(cleanedKey, cleaned != null ? cleaned : entry.getValue());
                 changed |= cleaned != null || !cleanedKey.equals(key);
@@ -227,6 +233,37 @@ public final class SecretValueScrubber {
             return null;
         }
         return tree == null ? null : scrubSorted(tree, plaintexts, exact, placeholder, true);
+    }
+
+    /**
+     * A string that holds serialized JSON — a tool call's raw arguments, a chat
+     * transcript, a request body — rewritten with every value (or key) that IS an
+     * exact-match secret replaced, or {@code null} when it is not JSON or carries
+     * none. Without this, {@code {"pin":"4711"}} is one string that does not equal
+     * "4711", and a short secret survived wherever a JSON document was stored as
+     * text. Nested serialized JSON is reached by the same walk.
+     */
+    private static String scrubEmbeddedJson(String text, Set<String> exact, String placeholder) {
+        String trimmed = text.strip();
+        if (trimmed.length() < 2 || !(trimmed.startsWith("{") && trimmed.endsWith("}") || trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            return null;
+        }
+        Object tree;
+        try {
+            tree = TREE_MAPPER.readValue(trimmed, Object.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+        Object cleaned = scrubSorted(tree, List.of(), exact, placeholder, false);
+        if (cleaned == null) {
+            return null;
+        }
+        try {
+            return TREE_MAPPER.writeValueAsString(cleaned);
+        } catch (JsonProcessingException e) {
+            LOGGER.warn("Serialized JSON carrying a secret could not be rewritten after scrubbing; replaced it whole");
+            return placeholder;
+        }
     }
 
     private static String replaceAll(String text, List<String> plaintexts, String placeholder) {

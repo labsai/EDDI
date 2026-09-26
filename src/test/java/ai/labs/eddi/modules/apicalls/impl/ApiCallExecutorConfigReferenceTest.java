@@ -571,4 +571,21 @@ class ApiCallExecutorConfigReferenceTest {
         assertTrue(failure.getMessage().contains("URISyntaxException") || failure.getMessage().contains("Illegal character"), failure.getMessage());
         verify(request, never()).send();
     }
+
+    @Test
+    @DisplayName("S5 — a checked template failure after the path resolved a secret does not quote it in the error")
+    void templateFailureDoesNotLeakThePathSecret() throws Exception {
+        ApiCall call = call(Map.of(), "{\"broken\": {body}}");
+        call.getRequest().setPath("/hooks/${vault:api-key}/items");
+        when(prePostUtils.templateValues(eq("{\"broken\": {body}}"), any()))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("could not render the request for /hooks/" + SECRET + "/items", null));
+
+        var failure = assertThrows(LifecycleException.class, () -> executor.execute(call, memory, data("hi"), SERVER));
+
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            assertFalse(String.valueOf(t.getMessage()).contains(SECRET), "leaked through " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        assertTrue(failure.getMessage().contains("TemplateEngineException"), failure.getMessage());
+        verify(request, never()).send();
+    }
 }

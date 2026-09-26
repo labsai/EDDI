@@ -515,6 +515,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean conversationExists(String conversationId) {
+        if (conversationId == null || !ObjectId.isValid(conversationId)) {
+            return false;
+        }
+        return conversationCollectionDocument.find(new Document(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(OBJECT_ID, 1)).first() != null;
+    }
+
+    @Override
     public ConversationState getConversationState(String conversationId) {
         Document conversationMemoryDocument = conversationCollectionDocument.find(new Document(OBJECT_ID, new ObjectId(conversationId)))
                 .projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).first();
