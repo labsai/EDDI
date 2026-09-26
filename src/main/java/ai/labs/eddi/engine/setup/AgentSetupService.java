@@ -223,6 +223,7 @@ public class AgentSetupService {
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // vaultKeyName alone is enough: it names a key the vault already holds, which
         // is the whole point of provisioning a second agent against an existing one.
@@ -475,6 +476,7 @@ public class AgentSetupService {
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
         }
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // See setupAgent: vaultKeyName alone names a key the vault already holds.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
@@ -1692,6 +1694,25 @@ public class AgentSetupService {
     }
 
     // ==================== Static Utility Methods ====================
+
+    /**
+     * Refuse a provider setup cannot turn into a working agent, before anything is
+     * created or vaulted.
+     * <p>
+     * {@code gemini-vertex} needs a GCP {@code projectId} and {@code location}
+     * (langchain4j refuses to build the model without either), and neither setup
+     * request carries them. Setup used to accept it anyway: it demanded an API key
+     * the provider never reads, vaulted that key under a new name, and produced an
+     * agent that deployed and then failed on its first turn. The caller is told how
+     * to get there instead.
+     */
+    static void rejectUnprovisionableProvider(String provider) throws AgentSetupException {
+        if (provider != null && "gemini-vertex".equals(provider.trim().toLowerCase())) {
+            throw new AgentSetupException("Provider 'gemini-vertex' cannot be set up here: it requires a GCP projectId and location, "
+                    + "which the setup request does not carry. Create the agent with another provider, then switch its LLM "
+                    + "configuration to gemini-vertex and set projectId and location there.");
+        }
+    }
 
     /**
      * Check if the given provider is a local LLM (no API key needed).
