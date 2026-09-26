@@ -341,6 +341,30 @@ describe("ShareDialog", () => {
     expect(puts).toEqual([]);
   });
 
+  it("keeps the confirmation open, with the reason, when the change fails", async () => {
+    let calls = 0;
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.put(`${SHARES}/visibility`, () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ error: "Store unavailable" }, { status: 500 })
+          : HttpResponse.json({ updated: [{ id: RESOURCE_ID, name: "Test Agent" }], skipped: [] });
+      }),
+    );
+    renderWithProviders(<ShareDialog {...props} />);
+    await userEvent.click(await screen.findByTestId("visibility-published"));
+    await userEvent.click(screen.getByTestId("visibility-apply"));
+
+    expect(await screen.findByTestId("visibility-apply-error")).toHaveTextContent("Store unavailable");
+    expect(screen.getByTestId("visibility-confirm")).toBeInTheDocument();
+
+    // Retry is one click, and success closes it.
+    await userEvent.click(screen.getByTestId("visibility-apply"));
+    await waitFor(() => expect(screen.queryByTestId("visibility-confirm")).not.toBeInTheDocument());
+    expect(calls).toBe(2);
+  });
+
   it("can keep a visibility change to this resource alone", async () => {
     let cascade: string | null = null;
     server.use(
