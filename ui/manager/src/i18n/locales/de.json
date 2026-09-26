@@ -3574,7 +3574,8 @@
     "conversationsTruncated_one": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
-    "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket."
+    "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket.",
+    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden."
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."

@@ -3611,7 +3611,8 @@
     "failedConversations_one": "{{count}} conversa não pôde ser lida e está ausente do pacote.",
     "failedConversations_other": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
     "conversationsTruncated_many": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
-    "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote."
+    "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
+    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida."
   },
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."

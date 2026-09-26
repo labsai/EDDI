@@ -3611,7 +3611,8 @@
     "failedConversations_one": "{{count}} conversation n’a pas pu être lue et est absente du paquet.",
     "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
-    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet."
+    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
+    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli."
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."
