@@ -106,7 +106,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
                 filesCollection.createIndex(Indexes.ascending("metadata." + field));
             } catch (RuntimeException e) {
                 LOGGER.warnf("Could not create the index on attachments metadata.%s; attachment lookups fall back to a scan: %s",
-                        field, e.getMessage());
+                        field, sanitize(e.getMessage()));
             }
         }
     }

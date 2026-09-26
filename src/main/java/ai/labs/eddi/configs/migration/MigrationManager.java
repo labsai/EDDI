@@ -23,6 +23,7 @@ import java.util.Map;
 import static ai.labs.eddi.configs.migration.LegacyDocumentMigrations.FIELD_NAME_CONVERSATION_PROPERTIES;
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.VERSION_FIELD;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static com.mongodb.client.model.Filters.eq;
 import static java.lang.String.format;
 
@@ -247,13 +248,14 @@ public class MigrationManager implements IMigrationManager {
             } catch (RuntimeException e) {
                 failed++;
                 String where = documentType + (isHistory ? ".history" : "");
+                String documentId = sanitize(String.valueOf(document.get(ID_FIELD)));
                 if (failed == 1) {
                     LOGGER.errorf(e, "Could not migrate %s document %s — it is left unchanged and retried on the next start",
-                            where, document.get(ID_FIELD));
+                            where, documentId);
                 } else {
                     // One stack trace per sweep is diagnosis; one per document is noise.
-                    LOGGER.errorf("Could not migrate %s document %s either: %s", where, document.get(ID_FIELD), e.getMessage());
-                    LOGGER.debugf(e, "Migration failure of %s document %s", where, document.get(ID_FIELD));
+                    LOGGER.errorf("Could not migrate %s document %s either: %s", where, documentId, sanitize(e.getMessage()));
+                    LOGGER.debugf(e, "Migration failure of %s document %s", where, documentId);
                 }
             }
         }
