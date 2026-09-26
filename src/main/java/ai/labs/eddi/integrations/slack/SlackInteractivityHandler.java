@@ -212,6 +212,10 @@ public class SlackInteractivityHandler {
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
             return;
         }
+        // Residual TOCTOU (review Finding D, accepted): reading the pause and resuming
+        // are two steps, so a resume+re-pause landing between them is not detected.
+        // Closing it fully needs an expected-pausedAt threaded into
+        // resumeConversation/resumeDiscussion and a CAS there — disproportionate here.
         PauseState pause = currentPause(parsed.value());
         if (pause == PauseState.UNKNOWN) {
             return; // could not read the subject — leave the card so it can be retried

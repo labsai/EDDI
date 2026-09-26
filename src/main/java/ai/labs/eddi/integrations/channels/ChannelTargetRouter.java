@@ -419,16 +419,28 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        ChannelIntegrationConfiguration match = null;
         for (var entry : integrationMap.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 continue;
             }
             var cfg = entry.getValue();
             if (name.equals(cfg.getName())) {
-                return Optional.of(cfg);
+                if (match != null) {
+                    // AMBIGUOUS: two integrations share this display name. Names are not
+                    // globally unique in older data, and a HITL decision authorizes and
+                    // verifies against the integration this resolves to while the
+                    // approval record is keyed by the same name string — so resolving to
+                    // EITHER of two same-named integrations would let one approve the
+                    // other's paused conversation (Finding C). Refuse rather than pick.
+                    LOGGER.warnf("Multiple '%s' integrations are named '%s' — refusing to resolve by name",
+                            prefix, name);
+                    return Optional.empty();
+                }
+                match = cfg;
             }
         }
-        return Optional.empty();
+        return Optional.ofNullable(match);
     }
 
     /**

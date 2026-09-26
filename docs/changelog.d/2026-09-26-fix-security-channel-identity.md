@@ -106,25 +106,86 @@ key still impersonates any *Open WebUI* user; only the cross-namespace reach int
 OIDC-owned identities is closed (`application.properties` `trust-user-headers`
 comment still holds).
 
-Same forward-safe + migration approach as Slack, in `OpenAiConversationBridge`
-and only for the `openwebui:`-namespaced path: a chat mapping stored under the raw
-header id is adopted and re-keyed to the namespaced id (the conversation keeps its
-raw-id owner and memories); before a new conversation starts (stateful *and*
-stateless), long-term memories under the raw id are moved to the namespaced id,
-with the namespaced identity winning any per-key/agent conflict. Best-effort — a
-migration failure never fails the turn.
+Compatibility is adopt-only, in `OpenAiConversationBridge` and only for the
+`openwebui:`-namespaced path: a chat mapping stored under the raw header id is
+adopted and re-keyed to the namespaced id, and because the conversation keeps its
+raw-id owner its long-term memories load without any move. See the adversarial
+review section below for why the standalone memory move was removed.
 
 Test `OpenAiAuthFilterTest.headerUserId_isNamespaced_soItCannotEqualABareOidcPrincipal`
 proves an OpenAI-compat identity can never collide with a bare OIDC principal;
-mutation-checked (reverting the namespacing in the filter fails it). Migration
-paths covered in `OpenAiConversationBridgeTest`.
+mutation-checked (reverting the namespacing in the filter fails it). Adopt paths
+covered in `OpenAiConversationBridgeTest`.
 
 **Files:** [`OpenAiUserIdentity.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiUserIdentity.java),
 [`OpenAiAuthFilter.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiAuthFilter.java),
 [`OpenAiConversationBridge.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiConversationBridge.java).
 
+### Adversarial review fixes (A/B/C)
+
+An adversarial review of this branch found that the memory-migration I added in
+items 3 and 4 was itself exploitable, plus a name-collision hole in the item-1
+binding. All three are fixed here.
+
+- **A (BLOCK) — OpenAI-compat memory move was cross-namespace data theft.** In the
+  default config a `/v1` shared-key caller sets `X-OpenWebUI-User-Id: <victim>`;
+  `rawId` is then the fully attacker-chosen bare `<victim>`, which is exactly where
+  OIDC principals keep long-term memories. The standalone "brand-new chat inherits"
+  move called `getAllEntries(<victim>)`, upserted the result to the attacker's
+  `openwebui:<victim>` and **deleted** it from the victim — one request relocated
+  and erased an OIDC user's entire long-term memory. Fixed by **removing the
+  standalone memory move entirely** (`OpenAiConversationBridge`). Only adoption of a
+  conversation MAPPING under the exact intent remains — an OIDC principal never has
+  an OpenWebUI mapping, and the adopted conversation keeps its raw-id owner so its
+  memories load with no move. `IUserMemoryStore` is retained (unused for migration)
+  so the no-migration invariant stays enforced by tests.
+
+- **B (Should-fix) — same class in Slack.** `SlackEventHandler.migrateLegacyMemories`
+  moved all bare-Slack-id entries keyed only on the raw id, and `team_id` is
+  attacker-supplied in a validly-signed event, so a second integration's operator
+  could pull a victim's legacy bare-id memories into their own
+  `slack:<their-team>:<user>` namespace. Fixed by **removing the standalone move**
+  (adopt/rekey keeps the raw-id owner, no move needed) and by **pinning `team_id`
+  to the signing integration** where the webhook resolves it
+  (`RestSlackWebhook.verifyOrigin` reads the owner/signer integration's
+  `platformConfig.teamId`; the payload `team_id` is only a fallback when none is
+  configured).
+
+- **C (Should-fix) — HITL binding IDOR via non-unique display name.** The item-1
+  binding keyed on the integration's mutable display **name**, and names were not
+  unique. An attacker could name their integration identically to a victim's, so
+  `getIntegrationByName` might resolve to the attacker while the approval record
+  belonged to the victim. Fixed fail-closed: `ChannelTargetRouter.getIntegrationByName`
+  now **refuses (returns empty) when more than one integration matches** a name, and
+  `RestChannelIntegrationStore` **enforces global name uniqueness per channel type**
+  on create/update/duplicate (duplicate copies get a `" (copy)"` suffix). An
+  ambiguous name therefore resolves to no owning integration and the decision is
+  refused before any record lookup. (Unique-resource-id keying was considered but
+  the fail-closed ambiguity refusal plus enforced uniqueness closes the IDOR with a
+  much smaller blast radius on a security branch.)
+
+- **D (nit) — pause-check → resume TOCTOU** in the item-1 decision path is left as a
+  documented residual: closing it needs an expected-`pausedAt` argument threaded
+  into `resumeConversation`/`resumeDiscussion` and a CAS there, which is disproportionate
+  here. Noted in `SlackInteractivityHandler`.
+
+All three fixes are mutation-checked (revert → the new test fails → restore):
+`OpenAiConversationBridgeTest.namespacedCaller_withNoLegacyMapping_neverTouchesBareIdMemories`
+(A), `SlackUserIdentityTest.newConversation_neverTouchesBareIdMemories` (B),
+`ChannelTargetRouterDeepBranchTest.duplicateNameRefused` (C). The approval-record
+store also gains real-MongoDB coverage (`MongoSlackApprovalRecordStoreTest`:
+`tryRecord` atomicity/idempotency/expiry/scoping via Testcontainers).
+
+**Files:** [`OpenAiConversationBridge.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiConversationBridge.java),
+[`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
+[`RestSlackWebhook.java`](../../src/main/java/ai/labs/eddi/integrations/slack/rest/RestSlackWebhook.java),
+[`ChannelTargetRouter.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java),
+[`RestChannelIntegrationStore.java`](../../src/main/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStore.java).
+
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
 | 2026-09-26 | Slack users are `slack:<team_id>:<user_id>` in EDDI; raw-id data is re-keyed/moved lazily | Raw Slack ids shared the OIDC principal namespace | Keeping raw ids for existing users (leaves the collision open); a one-shot bulk migration |
-| 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id data is re-keyed/moved lazily | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
+| 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id data is re-keyed lazily | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
+| 2026-09-27 | Removed the standalone bare-id memory MOVE for both OpenAI-compat and Slack; kept adopt/rekey only | The move read the shared bare-id namespace on an attacker-chosen id and could relocate+erase an OIDC user's memories (review Finding A/B) | A mapping-gated move (still leaks on a bare-id string collision with an OIDC principal) |
+| 2026-09-27 | HITL owner binding refuses an ambiguous integration name and enforces global per-type name uniqueness | Integration display names were not unique, so a copied name could bind a decision to the attacker's config (review Finding C) | Keying everything on a unique resource id (larger blast radius on a security branch) |
 ```

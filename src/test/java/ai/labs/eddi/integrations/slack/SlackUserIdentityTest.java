@@ -6,8 +6,6 @@ package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property.Visibility;
-import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -166,53 +164,42 @@ class SlackUserIdentityTest {
         verify(userConversationStore, never()).deleteUserConversation(INTENT, RAW);
     }
 
-    // ─── Memory migration ───
+    // ─── No bare-id memory move (Finding B) ───
 
-    private static UserMemoryEntry entry(String id, String userId, String key, String agent, Object value) {
-        Instant t = Instant.parse("2026-01-01T00:00:00Z");
-        return new UserMemoryEntry(id, userId, key, value, "fact", Visibility.self, agent, List.of(), "conv-old",
-                false, 3, t, t);
-    }
-
+    /**
+     * Finding B (Should-fix) regression. The Slack raw id carries no workspace and
+     * the bare-id memory namespace is shared across every source; team_id is
+     * attacker-supplied in a validly-signed event. So starting a NEW conversation
+     * must never move or delete entries out of the bare Slack id — otherwise an
+     * operator of a second integration could relocate a victim's legacy memories
+     * into their own {@code slack:<their-team>:<user>} namespace. With no legacy
+     * mapping, a fresh conversation starts and the memory store is never queried.
+     */
     @Test
-    void newConversation_movesLegacyMemoriesToNamespacedId() throws Exception {
-        when(userMemoryStore.getAllEntries(RAW)).thenReturn(List.of(
-                entry("m1", RAW, "favourite_colour", "agent-1", "blue"),
-                entry("m2", RAW, "city", "agent-1", "Vienna")));
-        // The namespaced identity already holds "city" for agent-1 — it wins.
-        when(userMemoryStore.getAllEntries(NAMESPACED)).thenReturn(List.of(
-                entry("n1", NAMESPACED, "city", "agent-1", "Graz")));
+    void newConversation_neverTouchesBareIdMemories() throws Exception {
+        // No legacy mapping under the raw id.
+        when(userConversationStore.readUserConversation(INTENT, RAW)).thenReturn(null);
 
         handler.getOrCreateConversation("agent-1", new SlackUser(RAW, NAMESPACED), INTENT);
 
-        ArgumentCaptor<UserMemoryEntry> moved = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore, times(1)).upsert(moved.capture());
-        assertEquals(NAMESPACED, moved.getValue().userId());
-        assertEquals("favourite_colour", moved.getValue().key());
-        assertEquals("blue", moved.getValue().value());
-        // Both legacy copies are removed — the conflicting one lost to the newer
-        // identity.
-        verify(userMemoryStore).deleteEntry("m1");
-        verify(userMemoryStore).deleteEntry("m2");
+        verify(userMemoryStore, never()).getAllEntries(any());
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(any());
+        verify(conversationService).startConversation(any(), any(), eq(NAMESPACED), any());
     }
 
     @Test
-    void memoryMigrationRunsBeforeTheConversationStarts() throws Exception {
-        var order = org.mockito.Mockito.inOrder(userMemoryStore, conversationService);
-        when(userMemoryStore.getAllEntries(RAW)).thenReturn(List.of(entry("m1", RAW, "k", "agent-1", "v")));
-        when(userMemoryStore.getAllEntries(NAMESPACED)).thenReturn(List.of());
+    void adoptedLegacyMapping_stillNeverMovesBareIdMemories() throws Exception {
+        // Even on the safe adopt/rekey path, no memory move happens — the conversation
+        // keeps its raw-id owner and loads its memories without any move.
+        when(userConversationStore.readUserConversation(INTENT, RAW)).thenReturn(
+                new UserConversation(INTENT, RAW, Deployment.Environment.production, "agent-1", "conv-legacy"));
 
         handler.getOrCreateConversation("agent-1", new SlackUser(RAW, NAMESPACED), INTENT);
 
-        order.verify(userMemoryStore).upsert(any());
-        order.verify(conversationService).startConversation(any(), any(), eq(NAMESPACED), any());
-    }
-
-    @Test
-    void memoryMigrationFailure_doesNotFailTheTurn() throws Exception {
-        when(userMemoryStore.getAllEntries(RAW)).thenThrow(new IResourceStore.ResourceStoreException("db down"));
-
-        assertEquals("conv-new", handler.getOrCreateConversation("agent-1", new SlackUser(RAW, NAMESPACED), INTENT));
+        verify(userMemoryStore, never()).getAllEntries(any());
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(any());
     }
 
     @Test
@@ -220,7 +207,7 @@ class SlackUserIdentityTest {
         handler.getOrCreateConversation("agent-1", new SlackUser("alice", "slack:T1:alice"), INTENT);
 
         verify(userConversationStore, never()).readUserConversation(INTENT, "alice");
-        verify(userMemoryStore, never()).getAllEntries("alice");
+        verify(userMemoryStore, never()).getAllEntries(any());
     }
 
     // ─── Persisted approval record (notifyApprovers) ───

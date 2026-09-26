@@ -246,6 +246,20 @@ class SlackInteractivityHandlerTest {
     }
 
     @Test
+    void ambiguousIntegrationName_isRefused() throws Exception {
+        // Finding C: two integrations share the display name INT_NAME, so
+        // getIntegrationByName refuses (empty). A decision naming that name can then
+        // be neither authenticated (no owning secret) nor resumed — an attacker who
+        // copies the victim integration's name cannot approve the victim's pause.
+        when(router.getIntegrationByName("slack", INT_NAME)).thenReturn(Optional.empty());
+
+        assertNull(handler.resolveSigningSecretForDecision(approvePayload("U_APPROVER", value("conv-1"))),
+                "an ambiguous integration name must not resolve to a signing secret");
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+    }
+
+    @Test
     void unknownIntegrationName_ignored() throws Exception {
         when(router.getIntegrationByName("slack", INT_NAME)).thenReturn(Optional.empty());
 

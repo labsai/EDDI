@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack.rest;
 
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
@@ -142,9 +143,15 @@ public class RestSlackWebhook {
                     }
 
                     // Delegate to handler (async — returns immediately)
+                    // Pin the workspace to the SIGNING integration's configured teamId
+                    // where it has one, so a validly-signed event cannot name a
+                    // different workspace's namespace (Finding B). Fall back to the
+                    // payload team_id only when no teamId is configured.
+                    String teamId = origin.pinnedTeamId() != null
+                            ? origin.pinnedTeamId()
+                            : stringOrNull(payload.get("team_id"));
                     eventHandler.handleEventAsync(eventId, event, botUserId(payload),
-                            new SlackEventHandler.EventOrigin(stringOrNull(payload.get("team_id")),
-                                    origin.signingIntegrationName()));
+                            new SlackEventHandler.EventOrigin(teamId, origin.signingIntegrationName()));
                 }
             }
 
@@ -166,8 +173,12 @@ public class RestSlackWebhook {
      *            for an event in a channel nobody owns, the integration whose
      *            secret signed it ({@code null} for a legacy connector, or when the
      *            channel is owned and routing goes by channel)
+     * @param pinnedTeamId
+     *            the workspace the signing/owning integration declares
+     *            ({@code platformConfig.teamId}), or {@code null} when it declares
+     *            none — the caller then falls back to the payload {@code team_id}
      */
-    private record VerifiedOrigin(String signingIntegrationName) {
+    private record VerifiedOrigin(String signingIntegrationName, String pinnedTeamId) {
     }
 
     /**
@@ -190,7 +201,7 @@ public class RestSlackWebhook {
         if (channel == null) {
             // Nothing channel-bound to act on: the handler drops events without a
             // channel, so the pooled check is all there is to bind.
-            return new VerifiedOrigin(null);
+            return new VerifiedOrigin(null, null);
         }
         if (channelTargetRouter.isChannelOwned(CHANNEL_TYPE_SLACK, channel)) {
             var ownerSecret = channelTargetRouter.getSigningSecretForChannel(CHANNEL_TYPE_SLACK, channel);
@@ -200,17 +211,32 @@ public class RestSlackWebhook {
                         sanitize(channel));
                 return null;
             }
-            return new VerifiedOrigin(null);
+            return new VerifiedOrigin(null,
+                    configuredTeamId(channelTargetRouter.getIntegration(CHANNEL_TYPE_SLACK, channel).orElse(null)));
         }
         for (var identity : channelTargetRouter.getSigningIdentities(CHANNEL_TYPE_SLACK)) {
             if (signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, identity.signingSecret())) {
-                return new VerifiedOrigin(identity.integrationName());
+                var config = channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, identity.integrationName())
+                        .orElse(null);
+                return new VerifiedOrigin(identity.integrationName(), configuredTeamId(config));
             }
         }
         // The pooled check passed a moment ago, so this is a refresh racing the
         // request. Refuse rather than guess.
         LOGGER.warnf("Slack event for unowned channel %s matched no signing identity — rejecting", sanitize(channel));
         return null;
+    }
+
+    /**
+     * The integration's declared workspace id, or {@code null} when it declares
+     * none.
+     */
+    private static String configuredTeamId(ChannelIntegrationConfiguration config) {
+        if (config == null || config.getPlatformConfig() == null) {
+            return null;
+        }
+        String teamId = config.getPlatformConfig().get("teamId");
+        return teamId != null && !teamId.isBlank() ? teamId : null;
     }
 
     private static String stringOrNull(Object value) {

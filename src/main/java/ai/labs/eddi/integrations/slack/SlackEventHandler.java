@@ -6,7 +6,6 @@ package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -139,9 +138,14 @@ public class SlackEventHandler {
     private final ISlackApprovalRecordStore approvalRecords;
 
     /**
-     * Owner of long-term memories — read once per Slack user to move entries stored
-     * under the pre-namespacing raw Slack id. See {@link SlackUserIdentity}.
+     * Retained but intentionally NOT used to migrate memories out of the shared
+     * bare Slack-id namespace (Finding B): the raw id carries no workspace, the
+     * namespace is shared across every source, and team_id is attacker-supplied in
+     * a validly-signed event — so any standalone move could relocate a victim's
+     * legacy memories into an attacker's namespace. Kept so the no-migration
+     * invariant is enforceable in tests and for a future workspace-safe migration.
      */
+    @SuppressWarnings("unused")
     private final IUserMemoryStore userMemoryStore;
 
     @Inject
@@ -1126,9 +1130,17 @@ public class SlackEventHandler {
         if (SlackUserIdentity.isLegacySlackUserId(legacyUserId)) {
             UserConversation legacy = userConversationStore.readUserConversation(intent, legacyUserId);
             if (legacy != null && legacy.getConversationId() != null) {
+                // Adopt the pre-namespacing mapping for THIS intent: the conversation
+                // keeps its raw-id owner, so its long-term memories load without any
+                // move. We deliberately do NOT move memories out of the bare Slack-id
+                // namespace here (Finding B): the raw id carries no workspace, the
+                // bare-id namespace is shared across every source, and team_id is
+                // attacker-supplied in a validly-signed event — so a standalone move
+                // would let a second integration's operator relocate a victim's
+                // legacy memories into their own namespace. Adoption is safe because
+                // it is scoped to a conversation MAPPING under this exact intent.
                 return rekeyLegacyMapping(legacy, eddiUserId);
             }
-            migrateLegacyMemories(legacyUserId, eddiUserId);
         }
 
         // Create new conversation
@@ -1191,53 +1203,6 @@ public class SlackEventHandler {
         }
         LOGGER.infof("Re-keyed legacy Slack conversation mapping %s to the namespaced user id", sanitize(intent));
         return legacy.getConversationId();
-    }
-
-    /**
-     * Move long-term memory entries stored under the raw Slack id to the namespaced
-     * id, so a new conversation still remembers what earlier ones learned. An entry
-     * the namespaced identity already holds for the same key and agent wins — it is
-     * the newer identity — and the legacy copy is dropped. Idempotent: once moved
-     * there is nothing left under the raw id, and a legacy conversation that is
-     * still running and writes there later is picked up by the next new
-     * conversation. Best-effort: a failure leaves the entries where they were.
-     */
-    private void migrateLegacyMemories(String legacyUserId, String eddiUserId) {
-        try {
-            List<UserMemoryEntry> legacyEntries = userMemoryStore.getAllEntries(legacyUserId);
-            if (legacyEntries == null || legacyEntries.isEmpty()) {
-                return;
-            }
-            Set<MemoryIdentity> held = new HashSet<>();
-            for (UserMemoryEntry entry : userMemoryStore.getAllEntries(eddiUserId)) {
-                held.add(memoryIdentity(entry));
-            }
-            int moved = 0;
-            for (UserMemoryEntry entry : legacyEntries) {
-                if (!held.contains(memoryIdentity(entry))) {
-                    userMemoryStore.upsert(new UserMemoryEntry(null, eddiUserId, entry.key(), entry.value(),
-                            entry.category(), entry.visibility(), entry.sourceAgentId(), entry.groupIds(),
-                            entry.sourceConversationId(), entry.conflicted(), entry.accessCount(),
-                            entry.createdAt(), entry.updatedAt()));
-                    moved++;
-                }
-                userMemoryStore.deleteEntry(entry.id());
-            }
-            LOGGER.infof("Moved %d legacy Slack user memory entries to the namespaced user id", moved);
-        } catch (Exception e) {
-            LOGGER.warnf("Could not migrate legacy Slack user memories: %s", e.getMessage());
-        }
-    }
-
-    /**
-     * An entry's upsert identity, less the owner: its key and the agent that wrote
-     * it.
-     */
-    private record MemoryIdentity(String key, String sourceAgentId) {
-    }
-
-    private static MemoryIdentity memoryIdentity(UserMemoryEntry entry) {
-        return new MemoryIdentity(entry.key(), entry.sourceAgentId());
     }
 
     /**

@@ -111,6 +111,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
+        validateUniqueName(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
         return response;
@@ -121,6 +122,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
+        validateUniqueName(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
         if (location != null) {
@@ -145,7 +147,13 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             platformConfig.remove("channelId");
             config.setPlatformConfig(platformConfig);
         }
+        // Names are globally unique per channel type, so a copy cannot reuse the
+        // source name. Suffix it and let validateUniqueName below confirm the result.
+        if (config.getName() != null && !config.getName().isBlank()) {
+            config.setName(deriveUniqueDuplicateName(config.getName(), config.getChannelType()));
+        }
         validateConfiguration(config);
+        validateUniqueName(config, null);
         Response response = restVersionInfo.create(config);
         URI location = response.getLocation();
         if (location != null) {
@@ -418,6 +426,88 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         } catch (Exception e) {
             LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
         }
+    }
+
+    // ─── Name uniqueness ───────────────────────────────────────────────────────
+
+    /**
+     * Reject create/update when another non-deleted integration of the same channel
+     * type already uses this (case-insensitive) name.
+     * <p>
+     * Names bind HITL approval decisions to an owning integration (the approval
+     * button value and the approval-record store key on the name, and
+     * {@code ChannelTargetRouter.getIntegrationByName} resolves by name). If two
+     * integrations shared a name, a decision could authorize against one while the
+     * record belonged to the other — so the name must be unique, and an ambiguous
+     * lookup already refuses fail-closed (Finding C).
+     *
+     * @param excludeId
+     *            the resource id being updated (null on create)
+     */
+    void validateUniqueName(ChannelIntegrationConfiguration config, String excludeId) {
+        String name = config.getName();
+        String channelType = config.getChannelType();
+        if (name == null || name.isBlank() || channelType == null) {
+            return;
+        }
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resId == null || resId.getId() == null || resId.getId().equals(excludeId)) {
+                        continue;
+                    }
+                    var existing = channelStore.read(resId.getId(), resId.getVersion());
+                    if (existing != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())
+                            && name.equalsIgnoreCase(existing.getName())) {
+                        // Do not name the conflicting integration — a uniqueness check must
+                        // not become an enumeration oracle for other people's integrations.
+                        throw new BadRequestException(
+                                "Another channel integration of type '" + channelType
+                                        + "' already uses the name '" + name + "'.");
+                    }
+                } catch (BadRequestException e) {
+                    throw e;
+                } catch (Exception e) {
+                    LOG.debugf("Skipping descriptor during name uniqueness check: %s", e.getMessage());
+                }
+            }
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.warn("Failed to check channel name uniqueness — allowing save", e);
+        }
+    }
+
+    /**
+     * A copy name that does not collide with an existing one: "{name} (copy)", then
+     * "{name} (copy 2)", "{name} (copy 3)", … until one is free.
+     */
+    private String deriveUniqueDuplicateName(String baseName, String channelType) {
+        String candidate = baseName + " (copy)";
+        for (int n = 2; nameInUse(candidate, channelType) && n < 1000; n++) {
+            candidate = baseName + " (copy " + n + ")";
+        }
+        return candidate;
+    }
+
+    private boolean nameInUse(String name, String channelType) {
+        try {
+            validateUniqueName(newNamed(name, channelType), null);
+            return false;
+        } catch (BadRequestException e) {
+            return true;
+        }
+    }
+
+    private static ChannelIntegrationConfiguration newNamed(String name, String channelType) {
+        var probe = new ChannelIntegrationConfiguration();
+        probe.setName(name);
+        probe.setChannelType(channelType);
+        return probe;
     }
 
     // ─── Descriptor sync ───────────────────────────────────────────────────────

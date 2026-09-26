@@ -715,17 +715,12 @@ class OpenAiConversationBridgeTest {
         assertTrue(captor.getValue().containsKey(OpenAiConversationBridge.CONTEXT_CHANNEL_INTENT));
     }
 
-    // ─── Legacy Open WebUI identity migration (raw id -> openwebui:<id>) ───
+    // ─── Legacy Open WebUI identity: adopt-only, NO bare-id memory move (Finding
+    // A) ───
 
     private static final String RAW_OWUI = "u_812";
     private static final String NS_OWUI = "openwebui:u_812";
     private static final String INTENT_A = OpenAiConversationBridge.INTENT_PREFIX + AGENT_ID_SUPPORT + ":chat-a";
-
-    private static UserMemoryEntry memEntry(String id, String userId, String key, String agent, Object value) {
-        Instant t = Instant.parse("2026-01-01T00:00:00Z");
-        return new UserMemoryEntry(id, userId, key, value, "fact", Visibility.self, agent, List.of(), "conv-old",
-                false, 1, t, t);
-    }
 
     @Test
     void namespacedCaller_adoptsAndRekeysALegacyRawMapping() throws Exception {
@@ -737,7 +732,8 @@ class OpenAiConversationBridgeTest {
         var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
 
         assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
-        // The conversation is kept, not recreated.
+        // The conversation is kept (memories load via its retained raw-id owner), not
+        // recreated.
         verify(conversationService, never()).startConversation(any(), any(), any(), any());
         // Re-keyed to the namespaced id, and the legacy mapping removed.
         ArgumentCaptor<UserConversation> created = ArgumentCaptor.forClass(UserConversation.class);
@@ -745,41 +741,43 @@ class OpenAiConversationBridgeTest {
         assertEquals(NS_OWUI, created.getValue().getUserId());
         assertEquals(OTHER_CONVERSATION_ID, created.getValue().getConversationId());
         verify(userConversationStore).deleteUserConversation(INTENT_A, RAW_OWUI);
+        // Adoption must NEVER touch the shared bare-id memory namespace.
+        verify(userMemoryStore, never()).getAllEntries(any());
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(any());
     }
 
+    /**
+     * Finding A (BLOCK) regression. A caller with the shared /v1 key sets
+     * X-OpenWebUI-User-Id to a victim's OIDC principal, so userId is
+     * {@code openwebui:<victim>} and the raw id is the bare {@code <victim>} — the
+     * exact namespace OIDC principals store long-term memories in. The bridge must
+     * NOT read, move, or delete anything from that bare id: the old standalone move
+     * relocated a real OIDC user's memories to the attacker identity and erased
+     * them. With no legacy OpenWebUI mapping under the raw id, a fresh conversation
+     * starts under the namespaced id and the memory store is never queried at all.
+     */
     @Test
-    void namespacedCaller_withNoLegacyMapping_movesRawIdMemoriesBeforeStarting() throws Exception {
+    void namespacedCaller_withNoLegacyMapping_neverTouchesBareIdMemories() throws Exception {
         when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
-        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenReturn(List.of(
-                memEntry("m1", RAW_OWUI, "favourite_colour", AGENT_ID_SUPPORT, "blue"),
-                memEntry("m2", RAW_OWUI, "city", AGENT_ID_SUPPORT, "Vienna")));
-        // The namespaced id already holds "city" for this agent -> it wins.
-        when(userMemoryStore.getAllEntries(NS_OWUI)).thenReturn(List.of(
-                memEntry("n1", NS_OWUI, "city", AGENT_ID_SUPPORT, "Graz")));
 
         bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
 
-        ArgumentCaptor<UserMemoryEntry> moved = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore, times(1)).upsert(moved.capture());
-        assertEquals(NS_OWUI, moved.getValue().userId());
-        assertEquals("favourite_colour", moved.getValue().key());
-        // Both legacy rows dropped; the conflicting one lost to the newer identity.
-        verify(userMemoryStore).deleteEntry("m1");
-        verify(userMemoryStore).deleteEntry("m2");
-        // Then a fresh conversation is started under the namespaced id.
+        // The core assertion: the bare-id memory namespace is never even read.
+        verify(userMemoryStore, never()).getAllEntries(any());
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(any());
+        // A fresh conversation is still started, under the namespaced id.
         verify(conversationService).startConversation(any(), eq(AGENT_ID_SUPPORT), eq(NS_OWUI), any());
     }
 
     @Test
-    void statelessNamespacedCaller_stillMovesRawIdMemories() throws Exception {
-        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenReturn(List.of(
-                memEntry("m1", RAW_OWUI, "k", AGENT_ID_SUPPORT, "v")));
-        when(userMemoryStore.getAllEntries(NS_OWUI)).thenReturn(List.of());
-
+    void statelessNamespacedCaller_neverTouchesBareIdMemories() throws Exception {
         bridge.prepare(statelessModel, simpleRequest(), headers("chat-a"), NS_OWUI);
 
-        verify(userMemoryStore).upsert(any());
-        verify(userMemoryStore).deleteEntry("m1");
+        verify(userMemoryStore, never()).getAllEntries(any());
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(any());
     }
 
     @Test
@@ -792,16 +790,6 @@ class OpenAiConversationBridgeTest {
         verify(userMemoryStore, never()).getAllEntries(any());
         // Only the namespaced-absent read happened; no raw-id fallback read.
         verify(userConversationStore, times(1)).readUserConversation(any(), any());
-    }
-
-    @Test
-    void memoryMigrationFailure_doesNotFailTheTurn() throws Exception {
-        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
-        when(userMemoryStore.getAllEntries(RAW_OWUI)).thenThrow(new RuntimeException("db down"));
-
-        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
-
-        assertEquals(CONVERSATION_ID, turn.conversationId());
     }
 
     /**

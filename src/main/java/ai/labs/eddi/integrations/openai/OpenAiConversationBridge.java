@@ -6,7 +6,6 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -30,10 +29,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -91,6 +87,14 @@ public class OpenAiConversationBridge {
 
     private final IConversationService conversationService;
     private final IUserConversationStore userConversationStore;
+    /**
+     * Retained but intentionally NOT used to migrate memories out of the shared
+     * bare-id namespace (Finding A): a leaked /v1 key lets the caller pick the raw
+     * id, so any such move could relocate and erase another source's (e.g. an OIDC
+     * principal's) memories. Kept so the no-migration invariant is enforceable in
+     * tests and for a future workspace-safe migration.
+     */
+    @SuppressWarnings("unused")
     private final IUserMemoryStore userMemoryStore;
     private final OpenAiMessageMapper messageMapper;
     private final OpenAiCompatConfig config;
@@ -198,15 +202,9 @@ public class OpenAiConversationBridge {
         String chatKey = resolveChatKey(headers, request);
         String intent = buildIntent(model.agentId(), chatKey);
 
-        String conversationId;
-        if (model.stateless()) {
-            // Stateless turns keep no mapping, but memory still loads by userId, so a
-            // namespaced Open WebUI caller must still inherit what the raw id learned.
-            migrateLegacyMemories(userId);
-            conversationId = startConversation(model, userId, intent);
-        } else {
-            conversationId = getOrCreateConversation(model, userId, intent);
-        }
+        String conversationId = model.stateless()
+                ? startConversation(model, userId, intent)
+                : getOrCreateConversation(model, userId, intent);
 
         return new PreparedTurn(conversationId, inputData, model.stateless());
     }
@@ -226,15 +224,19 @@ public class OpenAiConversationBridge {
             deleteMapping(intent, userId);
         } else {
             // No mapping under the namespaced id: an Open WebUI chat that predates
-            // namespacing may still have one under the raw header id. Adopt it (the
-            // conversation keeps its raw-id owner and memories), else move the raw
-            // id's long-term memories over before starting fresh. Mirrors
-            // SlackEventHandler.getOrCreateConversation.
+            // namespacing may still have one under the raw header id. Adopt it — the
+            // conversation keeps its raw-id owner, so its long-term memories load
+            // without any move. We deliberately do NOT move memories out of the bare
+            // id here: that namespace is shared with OIDC principals and every other
+            // source, and the raw id is caller-supplied (a leaked /v1 key lets the
+            // header be set to any string), so a standalone move would let a caller
+            // relocate and erase an OIDC user's memories (Finding A). Adoption is safe
+            // because it is scoped to a conversation MAPPING under this exact intent,
+            // which only this bridge ever writes.
             String legacyConversationId = adoptLegacyMapping(model, userId, intent);
             if (legacyConversationId != null) {
                 return legacyConversationId;
             }
-            migrateLegacyMemories(userId);
         }
 
         String conversationId = startConversation(model, userId, intent);
@@ -327,57 +329,6 @@ public class OpenAiConversationBridge {
         deleteMapping(intent, rawId);
         LOGGER.infof("Re-keyed legacy Open WebUI conversation mapping %s to the namespaced user id", sanitize(intent));
         return legacy.getConversationId();
-    }
-
-    /**
-     * Move long-term memory entries stored under the raw header id to the
-     * namespaced id, so a new conversation still remembers what earlier ones
-     * learned. No-op unless {@code userId} is a namespaced Open WebUI id. An entry
-     * the namespaced identity already holds for the same key and agent wins, and
-     * the legacy copy is dropped. Idempotent: once moved there is nothing left
-     * under the raw id. Best-effort — a failure leaves the entries where they were
-     * rather than failing the turn.
-     */
-    private void migrateLegacyMemories(String userId) {
-        String rawId = OpenAiUserIdentity.rawId(userId);
-        if (rawId == null) {
-            return;
-        }
-        try {
-            List<UserMemoryEntry> legacyEntries = userMemoryStore.getAllEntries(rawId);
-            if (legacyEntries == null || legacyEntries.isEmpty()) {
-                return;
-            }
-            Set<MemoryIdentity> held = new HashSet<>();
-            for (UserMemoryEntry entry : userMemoryStore.getAllEntries(userId)) {
-                held.add(memoryIdentity(entry));
-            }
-            int moved = 0;
-            for (UserMemoryEntry entry : legacyEntries) {
-                if (!held.contains(memoryIdentity(entry))) {
-                    userMemoryStore.upsert(new UserMemoryEntry(null, userId, entry.key(), entry.value(),
-                            entry.category(), entry.visibility(), entry.sourceAgentId(), entry.groupIds(),
-                            entry.sourceConversationId(), entry.conflicted(), entry.accessCount(),
-                            entry.createdAt(), entry.updatedAt()));
-                    moved++;
-                }
-                userMemoryStore.deleteEntry(entry.id());
-            }
-            LOGGER.infof("Moved %d legacy Open WebUI user memory entries to the namespaced user id", moved);
-        } catch (Exception e) {
-            LOGGER.warnf("Could not migrate legacy Open WebUI user memories: %s", e.getMessage());
-        }
-    }
-
-    /**
-     * An entry's upsert identity, less the owner: its key and the agent that wrote
-     * it.
-     */
-    private record MemoryIdentity(String key, String sourceAgentId) {
-    }
-
-    private static MemoryIdentity memoryIdentity(UserMemoryEntry entry) {
-        return new MemoryIdentity(entry.key(), entry.sourceAgentId());
     }
 
     // ─── turn execution ───
