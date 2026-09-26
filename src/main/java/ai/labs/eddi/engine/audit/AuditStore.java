@@ -10,14 +10,17 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.InsertManyOptions;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.bson.Document;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * MongoDB implementation of {@link IAuditStore}.
@@ -31,9 +34,10 @@ import java.util.*;
  * That mutation does <em>not</em> invalidate the entry's HMAC: since the v3
  * canonical form the signature covers
  * {@link ai.labs.eddi.engine.audit.AuditHmac#identityToken}, which maps a user
- * identifier and its pseudonym to the same value. Rows written under v1/v2
- * (which signed {@code userId} verbatim) do not verify after pseudonymisation
- * and are reported as such by the verification endpoint.
+ * identifier and its pseudonym to the same value — and since v5, a keyed
+ * pseudonym, which is why v5 rows are pseudonymised per signing key. Rows
+ * written under v1/v2 (which signed {@code userId} verbatim) do not verify
+ * after pseudonymisation and are reported as such by the verification endpoint.
  * <p>
  * Annotated {@code @DefaultBean} so PostgreSQL can provide an alternative.
  *
@@ -74,8 +78,20 @@ public class AuditStore implements IAuditStore {
 
     private final MongoCollection<Document> collection;
 
-    @Inject
+    /**
+     * Supplies the keyed pseudonyms v5 rows need; absent for a store built outside
+     * CDI, which then pseudonymises every row with the caller's pseudonym as it
+     * always did.
+     */
+    private final Instance<AuditKeyring> keyring;
+
     public AuditStore(MongoDatabase database) {
+        this(database, null);
+    }
+
+    @Inject
+    public AuditStore(MongoDatabase database, Instance<AuditKeyring> keyring) {
+        this.keyring = keyring;
         this.collection = database.getCollection(COLLECTION_NAME);
 
         // Create indexes for efficient querying
@@ -271,14 +287,32 @@ public class AuditStore implements IAuditStore {
     }
 
     /**
-     * Pseudonymisation is HMAC-preserving for v3 rows — see the class javadoc — so
-     * the blanket {@code updateMany} stays correct and stays cheap.
+     * Pseudonymisation is HMAC-preserving for v3+ rows — see the class javadoc.
+     * <p>
+     * v5 rows sign a <em>keyed</em> pseudonym, so each key's rows get the pseudonym
+     * computed under that key first; the blanket {@code updateMany} then gives
+     * every remaining row — v1 to v4, unsigned, or signed with a key this
+     * deployment no longer holds — the caller's pseudonym, as before.
      */
     @Override
     public long pseudonymizeByUserId(String userId, String pseudonym) {
-        return collection.updateMany(
+        long modified = 0;
+        for (var keyed : keyedPseudonymsFor(userId).entrySet()) {
+            modified += collection
+                    .updateMany(Filters.and(Filters.eq(F_USER_ID, userId), Filters.regex(F_HMAC, "^" + Pattern.quote("v5:" + keyed.getKey() + ":"))),
+                            new Document("$set", new Document(F_USER_ID, keyed.getValue())))
+                    .getModifiedCount();
+        }
+        return modified + collection.updateMany(
                 new Document(F_USER_ID, userId),
                 new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
+    }
+
+    private Map<String, String> keyedPseudonymsFor(String userId) {
+        if (keyring == null || !keyring.isResolvable()) {
+            return Map.of();
+        }
+        return keyring.get().keyedPseudonymsFor(userId);
     }
 
     @Override

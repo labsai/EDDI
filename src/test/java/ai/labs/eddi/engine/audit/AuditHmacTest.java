@@ -683,4 +683,64 @@ class AuditHmacTest {
             }
         }
     }
+
+    // ==================== v5: named key, keyed pseudonym (H6d, L-S2)
+    // ====================
+
+    @Nested
+    @DisplayName("v5")
+    class V5Tests {
+
+        private final AuditHmac.SigningKey key = AuditHmac.signingKey(hmacKey);
+
+        @Test
+        @DisplayName("names the signing key and verifies with it; a tampered field does not verify")
+        void namesTheKeyAndVerifies() {
+            AuditEntry entry = createTestEntry();
+            String hmac = AuditHmac.computeHmac(entry, key);
+
+            assertTrue(hmac.startsWith("v5:" + key.id() + ":"), hmac);
+            assertEquals(key.id(), AuditHmac.keyIdOf(hmac));
+            assertEquals("v5", AuditHmac.versionOf(hmac));
+            assertTrue(AuditHmac.verifyHmac(entry.withHmac(hmac), hmacKey));
+            assertFalse(AuditHmac.verifyHmac(entry.withHmac(hmac).withEnvironment("tampered"), hmacKey));
+        }
+
+        @Test
+        @DisplayName("an entry signed with a key nobody supplied is UNKNOWN_KEY, never counted as verified")
+        void unknownKey() {
+            AuditEntry entry = createTestEntry();
+            AuditEntry signed = entry.withHmac(AuditHmac.computeHmac(entry, AuditHmac.signingKey(AuditHmac.deriveHmacKey("another-key-12345"))));
+
+            assertEquals(AuditHmac.VerificationOutcome.UNKNOWN_KEY, AuditHmac.verify(signed, List.of(key), AuditRecoveryBudget.none()));
+            assertFalse(AuditHmac.verifyHmac(signed, hmacKey));
+        }
+
+        @Test
+        @DisplayName("erasure to the keyed pseudonym preserves the signature; the unsalted hash does not stand in for it")
+        void keyedPseudonymIsSignaturePreserving() {
+            AuditEntry entry = createTestEntry();
+            AuditEntry signed = entry.withHmac(AuditHmac.computeHmac(entry, key));
+
+            String keyed = AuditHmac.keyedPseudonymFor("user-1", key.pseudonymKey());
+            assertTrue(keyed.startsWith(AuditHmac.KEYED_PSEUDONYM_PREFIX));
+            assertEquals(AuditHmac.VerificationOutcome.MATCH,
+                    AuditHmac.verify(signed.withUserId(keyed), List.of(key), AuditRecoveryBudget.none()));
+            assertEquals(AuditHmac.VerificationOutcome.MISMATCH,
+                    AuditHmac.verify(signed.withUserId(AuditHmac.pseudonymFor("user-1")), List.of(key), AuditRecoveryBudget.none()));
+            assertNotEquals(keyed, AuditHmac.keyedPseudonymFor("user-1", AuditHmac.signingKey(AuditHmac.deriveHmacKey("x-12345678")).pseudonymKey()),
+                    "a keyed pseudonym cannot be recomputed without the key");
+        }
+
+        @Test
+        @DisplayName("a pre-v5 entry is tried against every key in the set")
+        void legacyEntryTriesEveryKey() {
+            AuditEntry entry = createTestEntry();
+            AuditEntry v4 = entry.withHmac(AuditHmac.computeHmac(entry, hmacKey));
+            var other = AuditHmac.signingKey(AuditHmac.deriveHmacKey("another-key-12345"));
+
+            assertEquals(AuditHmac.VerificationOutcome.MATCH, AuditHmac.verify(v4, List.of(other, key), AuditRecoveryBudget.none()));
+            assertEquals(AuditHmac.VerificationOutcome.MISMATCH, AuditHmac.verify(v4, List.of(other), AuditRecoveryBudget.none()));
+        }
+    }
 }

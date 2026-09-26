@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -162,7 +163,10 @@ public class VaultGrantChecker {
         }
 
         List<String> violations = new ArrayList<>();
-        for (String reference : collectVaultReferences(agentConfiguration, violations)) {
+        // Unreadable workflows and extension configs are collected and then ignored
+        // here, exactly as before: this is the deploy gate, and what it does with a
+        // config it cannot read is its own decision, separate from reporting.
+        for (String reference : collectVaultReferences(agentConfiguration, violations, new ArrayList<>())) {
             if (!isGranted(reference, agentId)) {
                 violations.add(reference);
             }
@@ -171,8 +175,37 @@ public class VaultGrantChecker {
     }
 
     /**
+     * What {@link #checkReferences} could establish about one agent.
+     */
+    public enum ReferenceCheck {
+        /** The agent's configuration names the secret. */
+        REFERENCES,
+        /** Every part of the configuration was read, and none names the secret. */
+        DOES_NOT_REFERENCE,
+        /**
+         * Some part of the configuration could not be read — the agent, a workflow, an
+         * extension config or a connection — so the answer is not known. Reported
+         * separately because "does not reference" is a promise that narrowing the grant
+         * breaks nothing, and an unread config cannot back it.
+         */
+        UNKNOWN
+    }
+
+    /**
      * Whether {@code agentId}'s configuration names {@code secret} anywhere the
      * deploy-time check would look.
+     *
+     * @return true only when the reference was actually found; see
+     *         {@link #checkReferences} for the answer that distinguishes "no" from
+     *         "could not tell"
+     */
+    public boolean references(String agentId, Integer agentVersion, SecretReference secret) {
+        return checkReferences(agentId, agentVersion, secret) == ReferenceCheck.REFERENCES;
+    }
+
+    /**
+     * Whether {@code agentId}'s configuration names {@code secret} anywhere the
+     * deploy-time check would look — or that this could not be established.
      * <p>
      * Deliberately the inverse question to {@link #findUngrantedReferences}: it
      * asks what an agent <em>uses</em>, with no reference to what it is allowed to
@@ -183,15 +216,15 @@ public class VaultGrantChecker {
      * Reuses the same traversal, including the {@code ${connection:…}} hop and
      * {@code ${vars:…}} expansion, so an agent that reaches a secret indirectly
      * counts here exactly as it counts at deployment.
-     *
-     * @return false whenever the answer cannot be established — an unreadable
-     *         configuration, a reference that will not parse. This method feeds a
-     *         warning, not a gate, and guessing "yes" would cry wolf on agents that
-     *         have nothing to do with the secret
+     * <p>
+     * An unreadable configuration used to answer plain "no", and the impact
+     * analysis then reported an agent it had not been able to inspect as unaffected
+     * — with {@code complete=true}. It now answers {@link ReferenceCheck#UNKNOWN},
+     * unless the part that <em>could</em> be read already names the secret.
      */
-    public boolean references(String agentId, Integer agentVersion, SecretReference secret) {
+    public ReferenceCheck checkReferences(String agentId, Integer agentVersion, SecretReference secret) {
         if (agentId == null || secret == null) {
-            return false;
+            return ReferenceCheck.DOES_NOT_REFERENCE;
         }
         AgentConfiguration agentConfiguration;
         try {
@@ -199,21 +232,22 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             LOGGER.debugf("Could not read agent '%s' v%s while looking for references to %s: %s", sanitize(agentId), agentVersion,
                     sanitize(secret.toReferenceString()), sanitize(e.getMessage()));
-            return false;
+            return ReferenceCheck.UNKNOWN;
         }
         if (agentConfiguration == null) {
-            return false;
+            return ReferenceCheck.UNKNOWN;
         }
-        for (String reference : collectVaultReferences(agentConfiguration, new ArrayList<>())) {
+        List<String> unreadable = new ArrayList<>();
+        for (String reference : collectVaultReferences(agentConfiguration, unreadable, unreadable)) {
             try {
                 if (secret.equals(SecretReference.parse(reference))) {
-                    return true;
+                    return ReferenceCheck.REFERENCES;
                 }
             } catch (IllegalArgumentException e) {
                 LOGGER.debugf("Ignoring unparseable vault reference %s in agent '%s'", sanitize(reference), sanitize(agentId));
             }
         }
-        return false;
+        return unreadable.isEmpty() ? ReferenceCheck.DOES_NOT_REFERENCE : ReferenceCheck.UNKNOWN;
     }
 
     /**
@@ -246,21 +280,22 @@ public class VaultGrantChecker {
      * rots: a new credential field is added somewhere and the scanner silently
      * stops covering it.
      */
-    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections) {
+    private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections,
+                                               List<String> unreadableResources) {
         Set<String> references = new LinkedHashSet<>();
 
         // The agent document FIRST. AgentConfiguration.DreamConfig.parameters
         // explicitly supports vault references and is handed to ChatModelRegistry by
         // DreamService, so a Dream credential lives outside every workflow resource
         // and was invisible to a workflow-only traversal.
-        scanForVaultReferences(agentConfiguration, references, ConnectionReference.DEFAULT_TENANT);
+        scanForVaultReferences(agentConfiguration, references, ConnectionReference.DEFAULT_TENANT, unreadableResources);
 
         if (agentConfiguration.getWorkflows() == null) {
             return references;
         }
 
         for (URI workflowUri : agentConfiguration.getWorkflows()) {
-            WorkflowConfiguration workflow = readWorkflow(workflowUri);
+            WorkflowConfiguration workflow = readWorkflow(workflowUri, unreadableResources);
             if (workflow == null || workflow.getWorkflowSteps() == null) {
                 continue;
             }
@@ -269,55 +304,80 @@ public class VaultGrantChecker {
                 if (step.getType() == null || configuredUri == null) {
                     continue;
                 }
-                Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
+                Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString(), unreadableResources);
                 if (extensionConfig != null) {
-                    scanForVaultReferences(extensionConfig, references, ConnectionReference.DEFAULT_TENANT);
+                    scanForVaultReferences(extensionConfig, references, ConnectionReference.DEFAULT_TENANT, unreadableResources);
                     // A ${connection:name} is an INDIRECT vault reference: the
                     // connection document holds the ${vault:…} client secret, and
                     // without following the hop an agent could use a credential it was
                     // never granted simply by naming a connection somebody else made.
-                    scanReferencedConnections(extensionConfig, references, unreadableConnections);
+                    scanReferencedConnections(extensionConfig, references, unreadableConnections, unreadableResources);
                 }
             }
         }
         return references;
     }
 
-    private WorkflowConfiguration readWorkflow(URI workflowUri) {
+    private WorkflowConfiguration readWorkflow(URI workflowUri, List<String> unreadableResources) {
         try {
             IResourceId id = RestUtilities.extractResourceId(workflowUri);
-            return id == null ? null : workflowStore.read(id.getId(), id.getVersion());
+            WorkflowConfiguration workflow = id == null ? null : workflowStore.read(id.getId(), id.getVersion());
+            if (workflow == null) {
+                // A store answers absence with ResourceNotFoundException, so null is not
+                // a confirmed absence: the workflow was not inspected.
+                unreadableResources.add(String.valueOf(workflowUri));
+            }
+            return workflow;
         } catch (Exception e) {
             LOGGER.debugf("Could not read workflow %s while checking vault grants: %s", sanitize(String.valueOf(workflowUri)),
                     sanitize(e.getMessage()));
+            unreadableResources.add(String.valueOf(workflowUri));
             return null;
         }
     }
 
     /** The extension config behind a workflow step, or {@code null}. */
-    private Object readExtensionConfig(String stepType, String configUri) {
+    private Object readExtensionConfig(String stepType, String configUri, List<String> unreadableResources) {
+        IResourceStore<?> store = storeFor(stepType);
+        if (store == null) {
+            // Not a step type whose config can carry a vault reference.
+            return null;
+        }
         try {
             IResourceId id = RestUtilities.extractResourceId(URI.create(configUri));
-            if (id == null) {
-                return null;
+            Object config = id == null ? null : store.read(id.getId(), id.getVersion());
+            if (config == null) {
+                // A store answers absence with ResourceNotFoundException, so null is not
+                // a confirmed absence: the config was not inspected.
+                unreadableResources.add(configUri);
             }
-            if (stepType.contains("ai.labs.llm")) {
-                return llmStore.read(id.getId(), id.getVersion());
-            }
-            if (stepType.contains("ai.labs.httpcalls") || stepType.contains("ai.labs.apicalls")) {
-                return apiCallsStore.read(id.getId(), id.getVersion());
-            }
-            if (stepType.contains("ai.labs.mcpcalls")) {
-                return mcpCallsStore.read(id.getId(), id.getVersion());
-            }
-            if (stepType.contains("ai.labs.rag")) {
-                // RagConfiguration carries embedding-model and vector-store
-                // credentials, both resolved through SecretResolver at runtime.
-                return ragStore.read(id.getId(), id.getVersion());
-            }
+            return config;
         } catch (Exception e) {
             LOGGER.debugf("Could not read %s config %s while checking vault grants: %s", sanitize(stepType), sanitize(configUri),
                     sanitize(e.getMessage()));
+            unreadableResources.add(configUri);
+            return null;
+        }
+    }
+
+    /**
+     * The store holding a step type's config, or {@code null} for a type not
+     * scanned.
+     */
+    private IResourceStore<?> storeFor(String stepType) {
+        if (stepType.contains("ai.labs.llm")) {
+            return llmStore;
+        }
+        if (stepType.contains("ai.labs.httpcalls") || stepType.contains("ai.labs.apicalls")) {
+            return apiCallsStore;
+        }
+        if (stepType.contains("ai.labs.mcpcalls")) {
+            return mcpCallsStore;
+        }
+        if (stepType.contains("ai.labs.rag")) {
+            // RagConfiguration carries embedding-model and vector-store
+            // credentials, both resolved through SecretResolver at runtime.
+            return ragStore;
         }
         return null;
     }
@@ -331,7 +391,8 @@ public class VaultGrantChecker {
      * new field is added, and the traversal above already made that argument for
      * vault references.
      */
-    private void scanReferencedConnections(Object config, Set<String> sink, List<String> unreadableConnections) {
+    private void scanReferencedConnections(Object config, Set<String> sink, List<String> unreadableConnections,
+                                           List<String> unreadableResources) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
@@ -341,7 +402,7 @@ public class VaultGrantChecker {
         // Variables expanded first, as for the vault scan: a ${vars:x} whose value is
         // ${connection:jira} otherwise hides the whole hop, and with it every secret
         // the connection holds.
-        Matcher matcher = CONNECTION_PATTERN.matcher(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT));
+        Matcher matcher = CONNECTION_PATTERN.matcher(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT, unreadableResources));
         Set<String> alreadyScanned = new LinkedHashSet<>();
         while (matcher.find()) {
             String tenantId = matcher.group(1) != null ? matcher.group(1) : ConnectionReference.DEFAULT_TENANT;
@@ -355,7 +416,7 @@ public class VaultGrantChecker {
                     // In the connection's own tenant: a short-form ${vars:x} in a connection
                     // filed under "acme" resolves against acme's variables at runtime, and
                     // the same name in the default tenant can hold something else entirely.
-                    scanForVaultReferences(connection, sink, ConnectionConfiguration.effectiveTenant(connection));
+                    scanForVaultReferences(connection, sink, ConnectionConfiguration.effectiveTenant(connection), unreadableResources);
                 } else {
                     // Absent, not unreadable: there is no document, so there is no
                     // secret to be ungranted for. The runtime refuses it as NOT_FOUND.
@@ -384,15 +445,17 @@ public class VaultGrantChecker {
      *            the tenant a short-form {@code ${vars:key}} resolves in — the
      *            connection's own for a connection document, the default for
      *            everything else
+     * @param unresolved
+     *            receives every {@code ${vars:…}} that could not be expanded
      */
-    private void scanForVaultReferences(Object config, Set<String> sink, String tenantId) {
+    private void scanForVaultReferences(Object config, Set<String> sink, String tenantId, List<String> unresolved) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
         } catch (Exception e) {
             return;
         }
-        Matcher matcher = SecretReference.compiledPattern().matcher(withVariablesExpanded(serialized, tenantId));
+        Matcher matcher = SecretReference.compiledPattern().matcher(withVariablesExpanded(serialized, tenantId, unresolved));
         while (matcher.find()) {
             sink.add(matcher.group(0));
         }
@@ -406,8 +469,12 @@ public class VaultGrantChecker {
      *
      * @param tenantId
      *            the tenant a short-form {@code ${vars:key}} resolves in
+     * @param unresolved
+     *            receives every {@code ${vars:…}} that could not be expanded: its
+     *            value was not scanned, so a "does not reference" answer that
+     *            ignored it would be a guess
      */
-    private String withVariablesExpanded(String serialized, String tenantId) {
+    private String withVariablesExpanded(String serialized, String tenantId, List<String> unresolved) {
         if (globalVariableResolver == null) {
             return serialized;
         }
@@ -419,6 +486,7 @@ public class VaultGrantChecker {
                 expanded = globalVariableResolver.resolveValue(vars.group(0), tenantId);
             } catch (Exception e) {
                 LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(vars.group(0)), sanitize(e.getMessage()));
+                unresolved.add(vars.group(0));
                 continue;
             }
             if (expanded != null && !expanded.equals(vars.group(0))) {

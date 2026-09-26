@@ -71,7 +71,10 @@ class SecretVaultIntegrationTest {
 
         // Create provider with real crypto, mocked persistence
         var saltManager = new VaultSaltManager(persistence);
-        saltManager.initialize(); // Uses legacy salt since mock returns null for meta
+        // No salt and no DEKs yet: a fresh deployment, whose salt is created with an
+        // insert-if-absent that hands back what it stored.
+        lenient().when(persistence.putMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
+        saltManager.initialize();
         provider = new VaultSecretProvider(Optional.of(MASTER_KEY), persistence, saltManager, meterRegistry);
         provider.initMetrics();
         provider.onStartup(new StartupEvent());

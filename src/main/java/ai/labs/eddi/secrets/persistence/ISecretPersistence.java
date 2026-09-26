@@ -36,6 +36,13 @@ public interface ISecretPersistence {
     /**
      * Insert or update an encrypted secret. The composite key is
      * {@code (tenantId, keyName)}.
+     * <p>
+     * A {@code null} {@code allowedAgents} or {@code description} means "not
+     * supplied": an update leaves the stored value alone, and an insert writes the
+     * wildcard grant and no description. A value write that did not mention the
+     * grant used to reset a narrowed grant to {@code ["*"]} and wipe the
+     * description — and, being a whole-row write, to revert any grant edit that
+     * landed between the caller's read and this write.
      *
      * @throws PersistenceException
      *             if the write fails
@@ -110,6 +117,27 @@ public interface ISecretPersistence {
     boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description);
 
     /**
+     * {@link #updateSecretGrant} guarded on the grant the caller last saw.
+     * <p>
+     * Two operators editing the same grant from two browser tabs each send a full
+     * replacement list built from what they loaded, so the second write silently
+     * reverts the first — including a narrowing that was the whole point of the
+     * first. With the list the editor started from as a precondition the second
+     * write matches nothing and the caller can say so.
+     *
+     * @param expectedAllowedAgents
+     *            the grant the caller read, canonicalised — {@code ["*"]} also
+     *            matches a row whose grant is absent or empty, since every layer
+     *            reads those as the wildcard too
+     * @return false if the row does not exist <em>or</em> its grant is no longer
+     *         {@code expectedAllowedAgents}; the caller re-reads to tell which
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretGrantIfUnchanged(String tenantId, String keyName, List<String> expectedAllowedAgents, List<String> allowedAgents,
+                                         String description);
+
+    /**
      * Records that a secret was just resolved, writing {@code lastAccessedAt} and
      * nothing else.
      * <p>
@@ -145,6 +173,35 @@ public interface ISecretPersistence {
      *             if the write fails for any other reason
      */
     boolean insertDek(EncryptedDek dek);
+
+    /**
+     * Rewrites one DEK generation's wrapping — its encrypted key and IV — but only
+     * while the row still carries {@code expectedIv}.
+     * <p>
+     * Used by KEK rotation. An upsert here could recreate a generation a tenant
+     * reset deleted a moment earlier, or overwrite a wrapping another rotation has
+     * just written; the guard turns both into a clean {@code false} the caller
+     * re-reads.
+     *
+     * @return false if the row is gone or was re-wrapped by somebody else first, in
+     *         which case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateDekWrapping(EncryptedDek dek, String expectedIv);
+
+    /**
+     * Deletes one DEK generation, but only while it still carries
+     * {@code expectedIv} — i.e. only the exact wrapping the caller inserted.
+     * <p>
+     * Used to take back a DEK a node wrapped under a KEK that turned out, a moment
+     * later, to be retired: before anything is sealed with it, so nothing is lost.
+     *
+     * @return false if the row is gone or was re-wrapped meanwhile
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv);
 
     /**
      * Find the tenant's <b>active</b> DEK — the highest generation it holds.
@@ -220,4 +277,58 @@ public interface ISecretPersistence {
     default void setMetaValue(String key, String value) {
         // Default = no-op
     }
+
+    /**
+     * Writes a metadata value only if the key holds none yet, and returns whatever
+     * the key holds afterwards — this call's value when it won, the value somebody
+     * else wrote first when it did not.
+     * <p>
+     * This is how key material that every replica must agree on is created. An
+     * unconditional {@link #setMetaValue} lets two replicas booting at once each
+     * write their own random salt, and the one that loses the race keeps deriving
+     * its KEK from a salt nobody will ever read again: every DEK it wrapped becomes
+     * unreadable at its next restart. Returning the stored value, rather than a
+     * boolean, is what lets the loser adopt the winner's value in the same call.
+     * <p>
+     * The default is a read-write-read for stores with no conditional write; both
+     * shipped stores override it with an atomic one.
+     *
+     * @return the value stored under {@code key} once the call returns, or null
+     *         only for a store with no metadata support at all
+     * @throws PersistenceException
+     *             if the read or write fails
+     */
+    default String putMetaValueIfAbsent(String key, String value) {
+        String existing = getMetaValue(key);
+        if (existing != null) {
+            return existing;
+        }
+        setMetaValue(key, value);
+        String stored = getMetaValue(key);
+        return stored != null ? stored : value;
+    }
+
+    /**
+     * Removes a metadata value. Removing an absent key is not an error.
+     *
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    default void deleteMetaValue(String key) {
+        // Default = no-op
+    }
+
+    /**
+     * Removes every metadata value whose key starts with {@code prefix}.
+     * <p>
+     * Used when an operator adopts a new master key after losing the old one: the
+     * sealed system values ({@code system-value:*}) name DEKs that are about to be
+     * deleted, and left in place they would fail authentication forever instead of
+     * being re-created.
+     *
+     * @return how many values were removed
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    int deleteMetaValuesWithPrefix(String prefix);
 }

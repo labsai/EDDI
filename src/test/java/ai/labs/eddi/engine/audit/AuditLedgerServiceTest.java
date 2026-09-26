@@ -1606,8 +1606,61 @@ class AuditLedgerServiceTest {
         List<AuditEntry> written = captor.getValue();
         AuditEntry stored = written.getFirst();
 
-        AuditEntry pseudonymised = stored.withUserId(AuditHmac.pseudonymFor("user1"));
+        // The pseudonym erasure writes into a v5 row: keyed under the key that signed
+        // it (what the stores compute through AuditKeyring#keyedPseudonymsFor).
+        byte[] pseudonymKey = AuditHmac.signingKey(service.getHmacKey()).pseudonymKey();
+        AuditEntry pseudonymised = stored.withUserId(AuditHmac.keyedPseudonymFor("user1", pseudonymKey));
         assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(pseudonymised));
+    }
+
+    /**
+     * M1: a row whose hmac names a key the deployment never recorded is what a
+     * forged row looks like, so it is INVALID — not UNKNOWN_KEY, which reads as
+     * benign.
+     */
+    @Test
+    @DisplayName("a v5 entry naming a key id nobody recorded is INVALID")
+    void unrecordedKeyIdIsInvalid() {
+        service = createService(true, "master-key-1234567890");
+
+        service.submit(entry("id-1", "conv-a", "agent-1"));
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        AuditEntry stored = ((List<AuditEntry>) captor.getValue()).getFirst();
+
+        AuditEntry forged = stored.withEnvironment("TAMPERED").withHmac("v5:0123456789abcdef:" + "0".repeat(64));
+        assertEquals(AuditVerificationStatus.INVALID, service.verifyEntry(forged));
+    }
+
+    /**
+     * L-S2: a v5 row's stored pseudonym is keyed. The unkeyed
+     * {@code gdpr-erased:<sha256>} form — which anyone with a list of candidate ids
+     * can recompute — is not what a v5 signature covers, so a store that wrote it
+     * into a v5 row would make the row read as tampered. The stores therefore
+     * pseudonymise v5 rows per key (see {@code AuditStoreTest}).
+     */
+    @Test
+    @DisplayName("a v5 entry is signed over the keyed pseudonym, not the unsalted hash")
+    void v5EntryIsSignedOverTheKeyedPseudonym() {
+        service = createService(true, "master-key-1234567890");
+
+        service.submit(entry("id-1", "conv-a", "agent-1"));
+        service.flush();
+
+        var captor = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(captor.capture());
+        @SuppressWarnings("unchecked")
+        AuditEntry stored = ((List<AuditEntry>) captor.getValue()).getFirst();
+
+        assertTrue(stored.hmac().startsWith("v5:" + AuditHmac.signingKey(service.getHmacKey()).id() + ":"), stored.hmac());
+        String keyed = AuditHmac.keyedPseudonymFor("user1", AuditHmac.signingKey(service.getHmacKey()).pseudonymKey());
+        assertTrue(keyed.startsWith(AuditHmac.KEYED_PSEUDONYM_PREFIX));
+        assertFalse(keyed.contains(AuditHmac.pseudonymFor("user1").substring(AuditHmac.GDPR_PSEUDONYM_PREFIX.length())),
+                "the keyed pseudonym must not embed the unsalted hash");
+        assertEquals(AuditVerificationStatus.INVALID, service.verifyEntry(stored.withUserId(AuditHmac.pseudonymFor("user1"))));
     }
 
     /**

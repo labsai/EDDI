@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Service Provider Interface for secrets management. Implementations handle the
@@ -100,6 +101,33 @@ public interface ISecretProvider {
      */
     SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description)
             throws SecretNotFoundException, SecretProviderException;
+
+    /**
+     * {@link #updateGrant(SecretReference, List, String)}, applied only while the
+     * secret's grant is still {@code expectedAllowedAgents}.
+     * <p>
+     * A grant edit replaces the whole list, so two operators editing from what they
+     * each loaded otherwise overwrite each other without either finding out — the
+     * later write quietly reinstating an agent the earlier one had just removed.
+     * The list the editor started from, sent back as a precondition, turns that
+     * into a {@link GrantConflictException} carrying the grant as it now stands.
+     *
+     * @param expectedAllowedAgents
+     *            the grant the caller last read, compared as a set with every
+     *            spelling of the wildcard equal; {@code null} applies the update
+     *            unconditionally
+     * @throws GrantConflictException
+     *             if the grant is no longer {@code expectedAllowedAgents}; nothing
+     *             was written
+     */
+    default SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description,
+                                       List<String> expectedAllowedAgents)
+            throws SecretNotFoundException, SecretProviderException {
+        if (expectedAllowedAgents != null) {
+            throw new SecretProviderException("This secret provider does not support conditional grant updates");
+        }
+        return updateGrant(reference, allowedAgents, description);
+    }
 
     /**
      * Delete a secret from the backend.
@@ -226,6 +254,36 @@ public interface ISecretProvider {
     String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
 
     /**
+     * Stores a deployment-level value, sealed, unless one is already stored under
+     * {@code name}, and returns whichever value is stored afterwards.
+     * <p>
+     * For key material other subsystems must keep stable across a KEK rotation —
+     * the audit ledger's HMAC key is the one that exists. Held outside every
+     * tenant's secrets: it cannot be listed, resolved through a {@code ${vault:…}}
+     * reference or deleted over the secrets API. The insert-if-absent is what makes
+     * every replica adopt the same value.
+     *
+     * @return the value stored under {@code name} once the call returns
+     * @throws SecretProviderException
+     *             if the vault is unavailable or the value cannot be stored or read
+     */
+    default String pinSystemValue(String name, String candidate) throws SecretProviderException {
+        throw new SecretProviderException("This secret provider cannot hold system values");
+    }
+
+    /**
+     * The system value pinned under {@code name}, or empty when none is. The value
+     * is authenticated by its sealing, so a row written straight into the database
+     * without the vault's keys is not returned.
+     *
+     * @throws SecretProviderException
+     *             if the vault is unavailable or the value cannot be read or opened
+     */
+    default Optional<String> readSystemValue(String name) throws SecretProviderException {
+        return Optional.empty();
+    }
+
+    /**
      * Ciphertext, its initialization vector, and the name of the key that sealed
      * it.
      * <p>
@@ -269,6 +327,24 @@ public interface ISecretProvider {
 
         public SecretProviderException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * A conditional grant update found the grant already changed by somebody else.
+     * Carries the grant as it now stands, so the caller can show it rather than
+     * re-read it.
+     */
+    class GrantConflictException extends SecretProviderException {
+        private final List<String> currentAllowedAgents;
+
+        public GrantConflictException(String message, List<String> currentAllowedAgents) {
+            super(message);
+            this.currentAllowedAgents = currentAllowedAgents == null ? List.of() : List.copyOf(currentAllowedAgents);
+        }
+
+        public List<String> getCurrentAllowedAgents() {
+            return currentAllowedAgents;
         }
     }
 }

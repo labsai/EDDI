@@ -99,4 +99,50 @@ class EnvelopeCryptoTest {
 
         assertEquals(plaintext, decrypted);
     }
+
+    // ─── L-S1: associated data binds a ciphertext to its row ───
+
+    private static final byte[] AAD_KEY = new byte[32];
+
+    @Test
+    void boundCiphertext_opensOnlyWithTheSameAssociatedData() {
+        var result = EnvelopeCrypto.encrypt("sk-secret", AAD_KEY, "row-a");
+
+        assertTrue(EnvelopeCrypto.isBound(result.ciphertext()));
+        assertEquals("sk-secret", EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, "row-a"));
+        // Copied into another row: authentication fails instead of decrypting as that
+        // row's value — the swap AES-GCM without AAD allowed.
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, "row-b"));
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, null));
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY));
+    }
+
+    @Test
+    void boundCiphertext_strippingTheMarkerDoesNotDowngradeIt() {
+        var result = EnvelopeCrypto.encrypt("sk-secret", AAD_KEY, "row-a");
+        String stripped = result.ciphertext().substring(EnvelopeCrypto.AAD_PREFIX.length());
+
+        // The tag covers the associated data, so the unbound path cannot open it.
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(stripped, result.iv(), AAD_KEY, "row-a"));
+    }
+
+    @Test
+    void legacyCiphertext_keepsDecryptingWhateverAssociatedDataIsPassed() {
+        // Every row written before AAD existed: no marker, no associated data. Passing
+        // the row's binding when reading it must not break it.
+        var legacy = EnvelopeCrypto.encrypt("sk-legacy", AAD_KEY);
+
+        assertFalse(EnvelopeCrypto.isBound(legacy.ciphertext()));
+        assertEquals("sk-legacy", EnvelopeCrypto.decrypt(legacy.ciphertext(), legacy.iv(), AAD_KEY, "row-a"));
+    }
+
+    @Test
+    void boundDek_roundTripsAndRefusesAnotherBinding() {
+        byte[] dek = EnvelopeCrypto.generateDek();
+        var wrapped = EnvelopeCrypto.encryptDek(dek, AAD_KEY, "tenant-a|1");
+
+        assertArrayEquals(dek, EnvelopeCrypto.decryptDek(wrapped.ciphertext(), wrapped.iv(), AAD_KEY, "tenant-a|1"));
+        assertThrows(EnvelopeCrypto.CryptoException.class,
+                () -> EnvelopeCrypto.decryptDek(wrapped.ciphertext(), wrapped.iv(), AAD_KEY, "tenant-b|1"));
+    }
 }

@@ -195,6 +195,73 @@ class VaultGrantCheckerTest {
             when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceStoreException("store down"));
             assertFalse(checker.references(AGENT_ID, 1, KEY));
         }
+
+        /**
+         * S7: "could not read it" is not "does not use it". The impact analysis marks
+         * its answer incomplete on UNKNOWN; answering DOES_NOT_REFERENCE here is what
+         * made it report complete=true for agents it never inspected.
+         */
+        @Test
+        @DisplayName("checkReferences — an unreadable agent is UNKNOWN, not DOES_NOT_REFERENCE")
+        void unreadableAgentIsUnknown() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — an unreadable workflow or extension config is UNKNOWN")
+        void unreadablePartIsUnknown() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+
+            when(workflowStore.read(anyString(), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        /**
+         * A store reports absence with ResourceNotFoundException, so a null read is not
+         * a confirmed absence — the part was never inspected.
+         */
+        @Test
+        @DisplayName("checkReferences — a workflow or extension config read as null is UNKNOWN")
+        void nullReadIsUnknown() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+
+            when(workflowStore.read(anyString(), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a ${vars:…} that cannot be expanded is UNKNOWN, since its value was never scanned")
+        void unexpandableVariableIsUnknown() throws Exception {
+            deployedAgentWhoseCallCarries("${vars:model-key}");
+            when(globalVariableResolver.resolveValue("${vars:model-key}", "default")).thenThrow(new RuntimeException("store down"));
+
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a fully read config that names another key is DOES_NOT_REFERENCE")
+        void readableConfigWithoutTheKey() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:some-other-key}");
+            assertEquals(VaultGrantChecker.ReferenceCheck.DOES_NOT_REFERENCE, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a reference found in the readable part wins over an unreadable part")
+        void foundReferenceWinsOverUnreadablePart() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            // The agent document itself carries the reference (a Dream credential, say).
+            agent.setDescription("${vault:llm-api-key}");
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.REFERENCES, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
     }
 
     @Nested

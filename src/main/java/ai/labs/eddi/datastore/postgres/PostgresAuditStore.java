@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.audit.AuditKeyring;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import io.quarkus.arc.DefaultBean;
@@ -175,10 +176,22 @@ public class PostgresAuditStore implements IAuditStore {
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
 
-    @Inject
+    /**
+     * Supplies the keyed pseudonyms v5 rows need; absent for a store built outside
+     * CDI, which then pseudonymises every row with the caller's pseudonym as it
+     * always did.
+     */
+    private final Instance<AuditKeyring> keyring;
+
     public PostgresAuditStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
+        this(dataSourceInstance, jsonSerialization, null);
+    }
+
+    @Inject
+    public PostgresAuditStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization, Instance<AuditKeyring> keyring) {
         this.dataSourceInstance = dataSourceInstance;
         this.jsonSerialization = jsonSerialization;
+        this.keyring = keyring;
     }
 
     private synchronized void ensureSchema() {
@@ -388,14 +401,36 @@ public class PostgresAuditStore implements IAuditStore {
 
     // === GDPR ===
 
+    /**
+     * v5 rows sign a <em>keyed</em> pseudonym, so each key's rows get the pseudonym
+     * computed under that key first; every remaining row — v1 to v4, unsigned, or
+     * signed with a key this deployment no longer holds — then gets the caller's
+     * pseudonym, as before.
+     */
     @Override
     public long pseudonymizeByUserId(String userId, String pseudonym) {
         ensureSchema();
+        Map<String, String> keyed = keyring != null && keyring.isResolvable() ? keyring.get().keyedPseudonymsFor(userId) : Map.of();
+        String keyedSql = "UPDATE audit_ledger SET user_id = ? WHERE user_id = ? AND hmac LIKE ?";
         String sql = "UPDATE audit_ledger SET user_id = ? WHERE user_id = ?";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, pseudonym);
-            ps.setString(2, userId);
-            return ps.executeUpdate();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            long modified = 0;
+            if (!keyed.isEmpty()) {
+                try (PreparedStatement ps = conn.prepareStatement(keyedSql)) {
+                    for (var entry : keyed.entrySet()) {
+                        // Key ids are hex, so the LIKE pattern has no wildcard to escape.
+                        ps.setString(1, entry.getValue());
+                        ps.setString(2, userId);
+                        ps.setString(3, "v5:" + entry.getKey() + ":%");
+                        modified += ps.executeUpdate();
+                    }
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, pseudonym);
+                ps.setString(2, userId);
+                return modified + ps.executeUpdate();
+            }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to pseudonymize audit entries for userId", e);
         }

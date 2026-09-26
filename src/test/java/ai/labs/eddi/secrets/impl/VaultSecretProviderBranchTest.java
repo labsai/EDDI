@@ -112,13 +112,16 @@ class VaultSecretProviderBranchTest {
             // No existing DEK
             when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.empty());
+            when(persistence.insertDek(any(EncryptedDek.class))).thenReturn(true);
 
             // Store should succeed, creating a new DEK along the way
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "test-value", "desc", null);
 
-            // Verify DEK was upserted
-            verify(persistence).upsertDek(any(EncryptedDek.class));
+            // Inserted, never upserted: an upsert let a concurrent first store replace
+            // generation 1 underneath a secret already sealed with it.
+            verify(persistence).insertDek(any(EncryptedDek.class));
+            verify(persistence, never()).upsertDek(any(EncryptedDek.class));
             verify(persistence).upsertSecret(any(EncryptedSecret.class));
         }
 
@@ -128,12 +131,16 @@ class VaultSecretProviderBranchTest {
             VaultSecretProvider provider = createAvailableProvider();
 
             when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
-            doThrow(new PersistenceException("DEK write failed"))
-                    .when(persistence).upsertDek(any(EncryptedDek.class));
+            // The first DEK is inserted, never upserted: stubbing upsertDek here left
+            // the test passing through the "created concurrently but cannot be read
+            // back" path instead of the write failure it is named for.
+            PersistenceException writeFailure = new PersistenceException("DEK write failed");
+            when(persistence.insertDek(any(EncryptedDek.class))).thenThrow(writeFailure);
 
-            assertThrows(SecretProviderException.class,
+            SecretProviderException thrown = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                             "value", null, null));
+            assertSame(writeFailure, thrown.getCause(), "the DEK write failure must be what surfaces");
         }
     }
 
@@ -233,11 +240,13 @@ class VaultSecretProviderBranchTest {
             EncryptedDek encDek = createEncryptedDek(dek);
 
             when(persistence.listAllDeks()).thenReturn(List.of(encDek));
+            when(persistence.updateDekWrapping(any(EncryptedDek.class), any())).thenReturn(true);
 
             int count = provider.rotateKek(MASTER_KEY, "new-master-key-abc12345678901");
 
             assertEquals(1, count);
-            verify(persistence).upsertDek(any(EncryptedDek.class));
+            verify(persistence).updateDekWrapping(any(EncryptedDek.class), any());
+            verify(persistence, never()).upsertDek(any(EncryptedDek.class));
         }
 
         @Test
@@ -255,11 +264,19 @@ class VaultSecretProviderBranchTest {
             EncryptedDek encDek = createEncryptedDek(dek);
 
             when(persistence.listAllDeks()).thenReturn(List.of(encDek));
+            when(persistence.updateDekWrapping(any(EncryptedDek.class), any())).thenReturn(true);
+            byte[] pendingSalt = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+            when(saltManager.reservePendingSalt()).thenReturn(pendingSalt);
 
             int count = provider.rotateKek(MASTER_KEY, "new-master-key-abc12345678901");
 
             assertEquals(1, count);
-            verify(saltManager).migrateSalt(any(byte[].class));
+            // The salt migrated to is the one persisted as pending before any DEK was
+            // re-wrapped under it.
+            var inOrder = inOrder(saltManager, persistence);
+            inOrder.verify(saltManager).reservePendingSalt();
+            inOrder.verify(persistence).updateDekWrapping(any(EncryptedDek.class), any());
+            inOrder.verify(saltManager).migrateSalt(pendingSalt);
         }
 
         @Test
@@ -367,7 +384,7 @@ class VaultSecretProviderBranchTest {
     class StoreDefaults {
 
         @Test
-        @DisplayName("null allowedAgents defaults to wildcard")
+        @DisplayName("null allowedAgents is passed down as 'not supplied' — the store defaults it on insert, keeps it on update")
         void nullAllowedAgentsDefaults() throws Exception {
             VaultSecretProvider provider = createAvailableProvider();
 
@@ -382,7 +399,7 @@ class VaultSecretProviderBranchTest {
 
             var captor = ArgumentCaptor.forClass(EncryptedSecret.class);
             verify(persistence).upsertSecret(captor.capture());
-            assertEquals(List.of("*"), captor.getValue().getAllowedAgents());
+            assertNull(captor.getValue().getAllowedAgents());
         }
 
         @Test
@@ -603,14 +620,15 @@ class VaultSecretProviderBranchTest {
             // No existing DEK → triggers generateAndPersistDek
             when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.empty());
+            when(persistence.insertDek(any(EncryptedDek.class))).thenReturn(true);
 
             // Store a secret — this forces DEK creation
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "test-secret-value", "desc", null);
 
-            // Verify a new DEK was upserted
+            // Verify a new DEK was inserted
             var dekCaptor = ArgumentCaptor.forClass(EncryptedDek.class);
-            verify(persistence).upsertDek(dekCaptor.capture());
+            verify(persistence).insertDek(dekCaptor.capture());
             EncryptedDek generatedDek = dekCaptor.getValue();
             assertEquals(TENANT_ID, generatedDek.getTenantId());
             assertNotNull(generatedDek.getEncryptedDek());

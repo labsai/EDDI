@@ -98,11 +98,31 @@ Same per-entry HMAC check across all of an agent's conversations. Because the sw
 
 ## HMAC Integrity
 
-When the vault master key is configured, each audit entry is signed with HMAC-SHA256:
+When the vault master key or `eddi.audit.hmac-key` is configured, each audit entry is signed with HMAC-SHA256:
 
-1. A **signing key** is derived from the vault master key using PBKDF2 with a distinct salt (`eddi-audit-hmac-v1`, 600K iterations). This makes the audit signing key cryptographically independent from the vault's KEK.
+1. A **signing key** is derived using PBKDF2 with a distinct salt (`eddi-audit-hmac-v1`, 600K iterations), so an audit key never doubles as the vault's KEK. Which secret it is derived from is described under [Signing keys and rotation](#signing-keys-and-rotation).
 2. A **canonical string** is built from all entry fields (excluding the HMAC itself), with map keys sorted alphabetically for deterministic output. Nested maps and lists are canonicalized recursively.
-3. The HMAC is computed and stored as `v4:<64 hex chars>`. The v4 canonical form signs the user identifier as an identity token rather than verbatim (so a GDPR pseudonymisation does not invalidate the signature it had), includes the per-conversation `sequence`, and signs the timestamp as epoch milliseconds truncated to milliseconds.
+3. The HMAC is computed and stored as `v5:<key id>:<64 hex chars>`. The v5 canonical form signs the user identifier as a keyed identity token rather than verbatim (so a GDPR pseudonymisation does not invalidate the signature it had), includes the per-conversation `sequence`, signs the timestamp as epoch milliseconds, and names the key that signed it.
+
+### Signing keys and rotation
+
+The signing key is chosen in this order:
+
+1. **`eddi.audit.hmac-key`** (`EDDI_AUDIT_HMAC_KEY`) — a secret for the ledger alone. Rotating the vault master key never touches it.
+2. **The key pinned in the vault.** The first time the ledger starts with the vault available, it stores the key derived from the master key *at that moment* in the vault, sealed (insert-if-absent, so every replica pins the same one), and uses that pinned key from then on. A KEK rotation re-wraps the vault's keys, so the pinned value survives it and the ledger's key does not change.
+3. **The key derived from the current master key** — what the ledger signs with until the vault is up, and the only option on a deployment without a vault.
+
+Before this, the audit key was always derived from the current master key, so a routine KEK rotation made every entry ever written fail verification after the restart.
+
+Every v5 entry names its key (a truncated HMAC of a fixed label — it identifies the key without revealing it), and is verified with exactly that key. The verification set is the signing key plus every key the deployment can derive: `eddi.audit.hmac-key`, the pinned key, the key from the current master key, and anything listed in `eddi.audit.hmac-previous-keys`. An entry naming a key outside that set cannot be checked. The key id is plain text in the row, though, so anyone able to edit a row can write one, and an unknown id proves nothing by itself. Every key the ledger pins or signs with is therefore **recorded** in the vault as a sealed system value, which cannot be forged without the vault's keys. An entry naming a recorded key the deployment no longer holds reports **`UNKNOWN_KEY`**: not proven intact, counted with the invalid entries, and resolved by listing that key in `eddi.audit.hmac-previous-keys`. An entry naming a key that was never recorded reports **`INVALID`**, like any other row that does not verify. Treat `UNKNOWN_KEY` as unverified, not as clean. Pre-v5 entries name no key, so each key in the set is tried.
+
+A failed pin at startup is retried with backoff (starting at 30 seconds, up to 10 minutes) while entries are signed, so a transient database error does not leave a node on the master-derived key until its next restart. If an operator adopts a new master key after losing the old one (see the Secrets Vault guide, *Lost master key*), the pinned key and the key records are discarded with the rest of the lost key's system values: the ledger pins a new key, and entries signed with the old one report `INVALID` unless the old audit key is listed in `eddi.audit.hmac-previous-keys`.
+
+To rotate `eddi.audit.hmac-key`, set the new value and move the old one into `eddi.audit.hmac-previous-keys`.
+
+### Keyed GDPR pseudonyms
+
+GDPR erasure replaces a user id in the ledger with a pseudonym. Up to v4 both the signature's identity token and the stored pseudonym were `gdpr-erased:<sha256(userId)>` — an unsalted hash, so anyone with a list of candidate ids could tell whose rows were erased. v5 rows use `gdpr-erased:k1:<HMAC(key, userId)>`, computed under a key derived from the signing key, which cannot be recomputed without it; erasure writes that form into the v5 rows each key signed. Rows written before v5 still receive the unkeyed form, because their signatures cover it — changing it would make them read as tampered. The database logs keep the unkeyed form as well (see the follow-up in the changelog).
 
 To verify entries have not been tampered with, use the verification endpoints above rather than recomputing digests by hand — verification has to pick the canonicalizer from the entry's own version tag.
 
@@ -112,7 +132,8 @@ The stored value carries the version of the canonical form it was computed over,
 
 | Stored value      | Canonical form | Written by                                  |
 | ----------------- | -------------- | ------------------------------------------- |
-| `v4:<hex>`        | v4             | current                                     |
+| `v5:<key id>:<hex>` | v5           | current                                     |
+| `v4:<hex>`        | v4             | before the signing key was named and the pseudonym keyed |
 | `v3:<hex>`        | v3             | before the timestamp was signed as epoch-millis |
 | `v2:<hex>`        | v2             | before the identity token and `sequence`    |
 | `<hex>` (no tag)  | v1             | before delimiter escaping                   |
