@@ -15,6 +15,10 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -28,6 +32,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -97,6 +102,47 @@ public class ScheduleFireExecutor {
      */
     @ConfigProperty(name = "eddi.schedule.fire-timeout", defaultValue = "5m")
     Duration fireTimeout = DEFAULT_FIRE_TIMEOUT;
+
+    @Inject
+    IConversationMemoryStore conversationMemoryStore;
+
+    /**
+     * Steps after which a {@code conversationStrategy=persistent} schedule rolls
+     * over to a fresh conversation. {@code 0} (the default) disables the rollover.
+     * <p>
+     * A persistent heartbeat appends a step on every fire, forever, to one
+     * conversation document, and nothing bounds that document: past MongoDB's 16 MB
+     * limit every write of the conversation fails and every fire is lost. A
+     * rollover ends the old conversation (its full history stays readable — nothing
+     * is trimmed) and starts a new one, carrying over the
+     * {@code conversation}-scoped properties. {@code longTerm} properties need no
+     * carrying, they live in user memory; the LLM's conversation history does NOT
+     * carry over. It is opt-in because that reset is visible to an agent that
+     * relies on its history, and a rollover only happens while the conversation is
+     * idle (READY, ERROR, EXECUTION_INTERRUPTED) — never over a pending approval or
+     * a running turn.
+     * <p>
+     * While it is off, a persistent conversation that passes
+     * {@link #PERSISTENT_CONVERSATION_WARN_STEPS} is reported once at WARN.
+     */
+    @ConfigProperty(name = "eddi.schedule.persistent-conversation-max-steps", defaultValue = "0")
+    int persistentConversationMaxSteps = 0;
+
+    /**
+     * Size at which a persistent conversation is reported (once) while the rollover
+     * is disabled — far enough below 16 MB for a heartbeat storing a few KB a turn.
+     */
+    static final int PERSISTENT_CONVERSATION_WARN_STEPS = 1000;
+
+    /** Conversations already reported as oversized, so each is reported once. */
+    private final Set<String> reportedOversizedConversations = ConcurrentHashMap.newKeySet();
+
+    /**
+     * States a persistent conversation may be rolled over from: nothing is running
+     * or pending.
+     */
+    private static final Set<ConversationState> ROLLOVER_STATES = EnumSet.of(ConversationState.READY, ConversationState.ERROR,
+            ConversationState.EXECUTION_INTERRUPTED);
 
     /**
      * Execute a schedule fire. Returns the fire log entry.
@@ -570,23 +616,40 @@ public class ScheduleFireExecutor {
     }
 
     private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
-        var userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
+        var userId = scheduleUserId(schedule);
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, Collections.emptyMap());
 
         return result.conversationId();
     }
 
+    /** The user a conversation this schedule starts belongs to. */
+    private static String scheduleUserId(ScheduleConfiguration schedule) {
+        return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
+    }
+
     private String resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
         String conversationId = schedule.getPersistentConversationId();
+        Map<String, Property> carriedProperties = Map.of();
 
         if (conversationId != null && !conversationId.isBlank()) {
-            // Validate conversation still exists and is usable
-            try {
-                conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
-                return conversationId;
-            } catch (Exception e) {
-                LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
+            ConversationMemorySnapshot existing = loadPersistentConversation(schedule, conversationId);
+            if (existing != null) {
+                if (existing.getConversationState() == ConversationState.ENDED) {
+                    // Every fire into an ended conversation was refused with "conversation
+                    // has ended", and the schedule never recovered on its own.
+                    LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — starting a new one",
+                            conversationId, schedule.getId());
+                } else if (!rollOverIfDue(schedule, conversationId, existing)) {
+                    return conversationId;
+                } else if (Objects.equals(existing.getUserId(), scheduleUserId(schedule))) {
+                    carriedProperties = conversationScopedProperties(existing);
+                } else {
+                    // The new conversation belongs to the schedule's CURRENT user. State
+                    // written for someone else must not be handed to them.
+                    LOGGER.infof("[SCHEDULE] Rolled-over conversation %s of schedule %s belongs to another user — "
+                            + "its conversation properties are not carried", conversationId, schedule.getId());
+                }
             }
         }
 
@@ -600,6 +663,9 @@ public class ScheduleFireExecutor {
         // again, claimed it again, and pushed a second concurrent turn into this very
         // same persistent conversation.
         String newConversationId = createNewConversation(schedule, env);
+        if (!carriedProperties.isEmpty()) {
+            carryProperties(schedule, newConversationId, carriedProperties);
+        }
         schedule.setPersistentConversationId(newConversationId);
         try {
             scheduleStore.setPersistentConversationId(schedule.getId(), newConversationId);
@@ -607,6 +673,114 @@ public class ScheduleFireExecutor {
             LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s", schedule.getId());
         }
         return newConversationId;
+    }
+
+    /**
+     * The stored persistent conversation, or {@code null} when it no longer exists,
+     * belongs to another agent or its id cannot name a conversation in this store —
+     * a new one is started then, as before. One raw load: the step count, the state
+     * and the properties all come from it, without converting every step into a
+     * response snapshot.
+     * <p>
+     * Any OTHER failure propagates. A store that is briefly unreachable is not a
+     * missing conversation: answering {@code null} there repointed the schedule at
+     * a brand-new conversation, which orphaned the old one with its history and
+     * properties for good. Propagated, it fails this fire, which the fire log
+     * records and the retry/backoff path runs again against the same conversation.
+     */
+    private ConversationMemorySnapshot loadPersistentConversation(ScheduleConfiguration schedule, String conversationId)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            ConversationMemorySnapshot existing = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (existing != null && Objects.equals(schedule.getAgentId(), existing.getAgentId())) {
+                return existing;
+            }
+        } catch (IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            // IllegalArgumentException: an id this store cannot parse (e.g. not an
+            // ObjectId) can never load — that is permanent, not transient.
+            LOGGER.debugf("[SCHEDULE] Persistent conversation %s cannot be loaded: %s", conversationId, e.getMessage());
+        }
+        LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
+        return null;
+    }
+
+    /**
+     * Ends the persistent conversation when it has reached
+     * {@link #persistentConversationMaxSteps} AND is idle; returns whether it did.
+     * <p>
+     * Idle is not optional. A persistent heartbeat is routinely AWAITING_HUMAN or
+     * busy with a human chatting in it; ending it then would terminate the pending
+     * approval (audited as a scheduler decision, announced to Slack), abort a
+     * running resume, or have the human's in-flight turn refused against the ENDED
+     * state. Such a fire keeps the conversation, and the existing skip path handles
+     * it; the rollover happens on a later, idle fire.
+     */
+    private boolean rollOverIfDue(ScheduleConfiguration schedule, String conversationId, ConversationMemorySnapshot existing) {
+        int steps = existing.getConversationSteps() != null ? existing.getConversationSteps().size() : 0;
+        if (persistentConversationMaxSteps <= 0) {
+            if (steps >= PERSISTENT_CONVERSATION_WARN_STEPS && reportedOversizedConversations.add(conversationId)) {
+                LOGGER.warnf("[SCHEDULE] Persistent conversation %s of schedule %s has %d steps and keeps growing with every fire. "
+                        + "A MongoDB document cannot exceed 16 MB; once it does, every fire is lost. Set "
+                        + "eddi.schedule.persistent-conversation-max-steps to roll it over to a new conversation.",
+                        conversationId, schedule.getId(), steps);
+            }
+            return false;
+        }
+        if (steps < persistentConversationMaxSteps) {
+            return false;
+        }
+        if (!ROLLOVER_STATES.contains(existing.getConversationState())) {
+            LOGGER.debugf("[SCHEDULE] Persistent conversation %s is at the rollover limit but %s — keeping it for now",
+                    conversationId, existing.getConversationState());
+            return false;
+        }
+        LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s reached %d steps (limit %d) — ending it and starting a "
+                + "new one with its conversation properties; its history stays readable", conversationId, schedule.getId(), steps,
+                persistentConversationMaxSteps);
+        try {
+            conversationService.endConversation(conversationId, "system:scheduler");
+        } catch (Exception e) {
+            // Rolling over anyway would leave the old conversation READY but orphaned
+            // beside the new one. Keep it; the next idle fire tries again.
+            LOGGER.warnf(e, "[SCHEDULE] Could not end persistent conversation %s of schedule %s for rollover — keeping it for now",
+                    conversationId, schedule.getId());
+            return false;
+        }
+        return true;
+    }
+
+    private static Map<String, Property> conversationScopedProperties(ConversationMemorySnapshot snapshot) {
+        Map<String, Property> carried = new LinkedHashMap<>();
+        if (snapshot.getConversationProperties() != null) {
+            snapshot.getConversationProperties().forEach((key, property) -> {
+                if (property != null && property.getScope() == Property.Scope.conversation) {
+                    carried.put(key, property);
+                }
+            });
+        }
+        return carried;
+    }
+
+    /**
+     * Writes the rolled-over conversation's {@code conversation}-scoped properties
+     * into the new one, without replacing anything its own start turn set. Nothing
+     * else can be writing the new conversation yet — only this fire knows its id —
+     * and the write is revision-guarded anyway. Best effort: a failure costs the
+     * carried state, not the fire.
+     */
+    private void carryProperties(ScheduleConfiguration schedule, String newConversationId, Map<String, Property> carried) {
+        try {
+            ConversationMemorySnapshot fresh = conversationMemoryStore.loadConversationMemorySnapshot(newConversationId);
+            if (fresh == null || fresh.getConversationState() != ConversationState.READY) {
+                LOGGER.warnf("[SCHEDULE] Conversation properties not carried into %s (schedule %s): it is not READY after its start turn",
+                        newConversationId, schedule.getId());
+                return;
+            }
+            carried.forEach(fresh.getConversationProperties()::putIfAbsent);
+            conversationMemoryStore.storeConversationMemorySnapshot(fresh);
+        } catch (Exception e) {
+            LOGGER.warnf(e, "[SCHEDULE] Conversation properties not carried into %s (schedule %s)", newConversationId, schedule.getId());
+        }
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

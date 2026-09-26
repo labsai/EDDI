@@ -5,6 +5,9 @@
 package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import java.util.List;
 import java.util.Objects;
 
 public class PropertyInstruction extends Property {
@@ -16,6 +19,24 @@ public class PropertyInstruction extends Property {
     private HttpCodeValidator httpCodeValidator;
 
     public PropertyInstruction() {
+    }
+
+    /**
+     * Not configurable: {@code groupIds} is recall metadata the engine carries from
+     * a user-memory entry onto the property it recalled. A property instruction is
+     * config, and config must not name the groups a memory is shared with, so the
+     * field inherited from {@link Property} is kept out of {@code property.json}.
+     */
+    @Override
+    @JsonIgnore
+    public List<String> getGroupIds() {
+        return null;
+    }
+
+    @Override
+    @JsonIgnore
+    public void setGroupIds(List<String> groupIds) {
+        // deliberately ignored — see getGroupIds()
     }
 
     public PropertyInstruction(String fromObjectPath, String toObjectPath, Boolean convertToObject, Boolean override, Boolean runOnValidationError,

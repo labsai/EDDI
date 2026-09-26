@@ -28,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 
 import java.util.Date;
@@ -131,6 +132,24 @@ class AgentDeploymentManagementBranchTest {
         }
 
         /**
+         * E3: the document migrations read the collections the rename migration
+         * populates. Run while it is pending, each found nothing, recorded itself as
+         * complete, and never ran again — leaving every document the rename later moved
+         * into place unmigrated. They must wait for it.
+         */
+        @Test
+        @DisplayName("E3: document migrations are parked while the rename migration is pending")
+        void documentMigrationsWaitForTheRenameMigration() {
+            when(v6RenameMigration.isPending()).thenReturn(true);
+
+            management.autoDeployAgents();
+
+            verify(v6RenameMigration).runIfNeeded();
+            verify(v6QuteMigration, never()).runIfNeeded();
+            verify(channelConnectorMigration, never()).runIfNeeded();
+        }
+
+        /**
          * {@code isPending()} is fail-safe: a migration-log read that fails answers
          * "pending", because answering "not pending" would let the sweep read every
          * agent config as deleted and retire its deployment row. That is right for the
@@ -142,10 +161,11 @@ class AgentDeploymentManagementBranchTest {
         @Test
         @DisplayName("a transient pending answer at startup still reports ready once the sweep runs")
         void readinessIsGrantedByTheSweepAfterATransientPendingAnswer() throws Exception {
-            // Two pending answers: autoDeployAgents asks once inside checkDeployments
-            // and once for the readiness decision. Every later answer is false, which
-            // is the transient read failure clearing.
-            when(v6RenameMigration.isPending()).thenReturn(true, true, false);
+            // Three pending answers: autoDeployAgents asks once before the document
+            // migrations (which it then parks), once inside checkDeployments and once
+            // for the readiness decision. Every later answer is false, which is the
+            // transient read failure clearing.
+            when(v6RenameMigration.isPending()).thenReturn(true, true, true, false);
             when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
             doAnswer(inv -> {
                 ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
@@ -161,9 +181,46 @@ class AgentDeploymentManagementBranchTest {
         }
 
         @Test
+        @DisplayName("document migrations parked at startup run once, before the sweep that first sees the rename complete reports ready")
+        void deferredDocumentMigrationsRunWhenTheSweepSeesTheRenameComplete() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(true, true, true, false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+            doAnswer(inv -> {
+                ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+            verify(v6QuteMigration, never()).runIfNeeded();
+
+            management.checkDeployments();
+            management.checkDeployments();
+
+            InOrder order = inOrder(v6QuteMigration, channelConnectorMigration, deploymentStore, agentsReadiness);
+            order.verify(v6QuteMigration).runIfNeeded();
+            order.verify(channelConnectorMigration).runIfNeeded();
+            order.verify(deploymentStore).readDeploymentInfos(deployed);
+            order.verify(agentsReadiness).setAgentsReadiness(true);
+            verify(v6QuteMigration, times(1)).runIfNeeded();
+            verify(channelConnectorMigration, times(1)).runIfNeeded();
+        }
+
+        @Test
+        @DisplayName("a normal boot does not run the document migrations a second time from the sweep")
+        void aNormalBootRunsTheDocumentMigrationsOnlyAtStartup() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+
+            management.autoDeployAgents();
+            management.checkDeployments();
+
+            verify(v6QuteMigration, times(1)).runIfNeeded();
+        }
+
+        @Test
         @DisplayName("readiness is granted once, however many sweeps follow")
         void readinessIsGrantedOnlyOnce() throws Exception {
-            when(v6RenameMigration.isPending()).thenReturn(true, true, false);
+            when(v6RenameMigration.isPending()).thenReturn(true, true, true, false);
             when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
             doAnswer(inv -> {
                 ((IMigrationManager.IMigrationFinished) inv.getArgument(0)).onComplete();

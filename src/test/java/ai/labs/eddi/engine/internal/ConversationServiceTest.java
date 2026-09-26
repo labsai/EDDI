@@ -118,7 +118,7 @@ class ConversationServiceTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         hitlResumeCompletedEvent = mock(Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,

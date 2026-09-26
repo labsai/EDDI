@@ -48,7 +48,7 @@ rather than recurring. Exactly one of the two is required.
 
 | Strategy | Behavior | Use When |
 |----------|----------|----------|
-| `persistent` | Reuses the same conversation across all fires. Context accumulates. | Dream consolidation, ongoing monitoring, stateful agents |
+| `persistent` | Reuses the same conversation across all fires. Context accumulates — and so does the conversation document, one step per fire; see [Long-running persistent schedules](#long-running-persistent-schedules). | Dream consolidation, ongoing monitoring, stateful agents |
 | `new` | Creates a fresh conversation for each fire. Clean context each time. | Report generation, data pipelines, stateless tasks |
 
 ## Configuration
@@ -367,8 +367,44 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |
 | `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. Keep it at or below `lease-timeout` — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.persistent-conversation-max-steps` | `0` (off) | Steps after which a `persistent` schedule ends its conversation and starts a new one — see [Long-running persistent schedules](#long-running-persistent-schedules) |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — note that a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The DELETE is by timestamp and therefore idempotent, so it needs no cluster claim |
+
+### Long-running persistent schedules
+
+A `persistent` schedule appends one step to the same conversation on every fire. A
+MongoDB document cannot exceed 16 MB, and a conversation past that limit can no longer
+be written: every fire after it is lost. A 60-second heartbeat that stores a few KB per
+turn gets there in weeks.
+
+Once a persistent conversation passes 1000 steps, EDDI logs a WARN naming it (once per
+conversation). To bound it, set `eddi.schedule.persistent-conversation-max-steps`. When
+the conversation reaches that many steps **and is idle** (`READY`, `ERROR` or
+`EXECUTION_INTERRUPTED`), the next fire ends it and starts a new one:
+
+- The old conversation is ended, not trimmed; its full history stays readable.
+- `conversation`-scoped properties are copied into the new conversation (anything its
+  own start turn set wins), provided the old conversation belongs to the schedule's
+  current `userId` — state written for another user is never handed on. `longTerm`
+  properties need no copying — they live in user memory.
+- If ending the old conversation fails, the fire keeps using it and a later idle fire
+  tries the rollover again, so no conversation is left open beside its replacement.
+- The model's **conversation history does not carry over**: the new conversation's LLM
+  context starts empty. An agent that needs facts across a rollover should keep them in
+  properties.
+- A conversation that is `AWAITING_HUMAN` or busy is never rolled over — that would end
+  the pending approval or the running turn. The fire is skipped as usual and the rollover
+  happens on a later, idle fire.
+
+The setting applies to every persistent schedule, including those already past the limit
+when it is enabled: each rolls over on its first idle fire after that.
+
+Independent of the setting, a persistent schedule only replaces its conversation when
+that conversation is provably gone (the store reports it missing, or it belongs to another
+agent) or has `ENDED`. A store that cannot be read fails the fire instead, and the retry
+runs against the same conversation — a brief outage does not cost the schedule its
+history.
 
 ### Observability
 

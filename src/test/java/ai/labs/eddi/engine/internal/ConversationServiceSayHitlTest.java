@@ -129,7 +129,7 @@ class ConversationServiceSayHitlTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         doReturn(new HashMap<String, String>()).when(contextLogger)
                 .createLoggingContext(any(), any(), any(), any());
         meterRegistry = new SimpleMeterRegistry();

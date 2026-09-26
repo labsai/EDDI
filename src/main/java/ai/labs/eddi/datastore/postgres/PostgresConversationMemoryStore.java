@@ -118,10 +118,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // Update existing, guarded on the revision this write was derived from.
                 // COALESCE because a row written before _rev existed carries no such key
                 // and must still be writable (it upgrades in the process).
+                // The last clause refuses to replace a stored ENDED unless this write ends
+                // the conversation itself: ending is a narrow state write that does not
+                // move _rev, so the revision guard alone would let a turn already in flight
+                // resurrect it — see ConversationMemoryStore.fullReplaceFilter.
                 String sql = """
                         UPDATE conversation_memories
                         SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
                         WHERE id = ?::uuid AND COALESCE((data->>'_rev')::bigint, 0) = ?
+                          AND (conversation_state IS DISTINCT FROM 'ENDED' OR ? = 'ENDED')
                         """;
                 try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, snapshot.getAgentId());
@@ -130,6 +135,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     ps.setString(4, json);
                     ps.setString(5, conversationId);
                     ps.setLong(6, expectedRevision);
+                    ps.setString(7, snapshot.getConversationState().name());
                     // No upsert on purpose: zero affected rows means either the row was
                     // deleted while the turn was running (GDPR erasure, retention sweep) or
                     // another writer committed first. Discarding the count dropped the
@@ -507,6 +513,23 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to get conversation state", e);
+        }
+    }
+
+    @Override
+    public Long getRevision(String conversationId) {
+        ensureSchema();
+        String sql = "SELECT COALESCE((data->>'_rev')::bigint, 0) AS rev FROM conversation_memories WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong("rev") : null;
+            }
+        } catch (SQLException e) {
+            // "Unknown", not "changed": the caller then keeps the memory it has, which is
+            // exactly what it did before it asked.
+            LOGGER.warnf("Could not read the revision of conversation %s: %s", conversationId, e.getMessage());
+            return null;
         }
     }
 

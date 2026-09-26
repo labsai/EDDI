@@ -100,7 +100,7 @@ class ConversationServiceExtendedTest {
         when(auditLedgerService.isEnabled()).thenReturn(false);
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
 
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,

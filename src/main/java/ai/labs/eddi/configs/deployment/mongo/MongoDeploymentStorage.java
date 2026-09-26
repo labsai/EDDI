@@ -24,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,11 +49,18 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
     private static final String FIELD_AGENT_ID = "agentId";
     private static final String FIELD_AGENT_VERSION = "agentVersion";
     /**
+     * When {@link #setDeploymentInfo} last wrote the row. The one piece of evidence
+     * {@link #removeDuplicateDeploymentRows()} has for which duplicate is live —
+     * see there. Not part of {@code DeploymentInfo}; the reader ignores it.
+     */
+    private static final String FIELD_LAST_MODIFIED = "lastModified";
+    /**
      * Aggregation-only field names used by
      * {@link #removeDuplicateDeploymentRows()}.
      */
     private static final String FIELD_DUPLICATE_IDS = "duplicateIds";
     private static final String FIELD_DUPLICATE_COUNT = "duplicateCount";
+    private static final String FIELD_DUPLICATE_ROWS = "duplicateRows";
 
     /**
      * MongoDB {@code IndexOptionsConflict} — an index on this key pattern exists
@@ -319,25 +327,43 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * Keeps one row per (environment, agentId, agentVersion) and removes the rest.
      *
      * <p>
-     * The survivor is the newest row: duplicates differ only in
-     * {@code deploymentStatus}, so the last-written one is what reflects the
-     * operator's last deploy/undeploy. Guessing is unavoidable here — the rows
-     * carry no timestamp of their own — but any single row is a consistent answer
-     * where two are not.
+     * The survivor has to be the LIVE row — the one the operator's last
+     * deploy/undeploy was written to. Duplicates differ only in
+     * {@code deploymentStatus}, so keeping any other one reverts that decision.
      * </p>
      *
      * <p>
-     * "Newest" is established by the leading {@code $sort} on {@code _id}, and that
-     * stage is load-bearing rather than cosmetic. {@code $push} preserves the order
-     * the documents reach {@code $group} in, and without a sort that is the storage
-     * engine's natural order, which is not insertion order and is not stable
-     * between nodes. Two nodes deduplicating the same collection during a rolling
-     * restart could therefore each keep a DIFFERENT element and, between them,
-     * delete every row for a key — an agent that was deployed silently never
-     * redeployed by {@code checkDeployments} again. Rows are inserted without an
-     * explicit {@code _id}, so Mongo assigns an ObjectId whose leading bytes are
-     * the insert timestamp: ascending {@code _id} is insertion order, and every
-     * node computes the same survivor.
+     * <b>Which row is live (E6).</b> This used to keep the row with the highest
+     * {@code _id}, i.e. the most recently <em>inserted</em>. But {@code replaceOne}
+     * rewrites the first row its filter matches, and for rows that tie on the
+     * filter that is the one found first on the {@code agentId} index — the OLDEST.
+     * So every deploy/undeploy after the duplicate appeared landed on the oldest
+     * row, and the dedupe then deleted exactly that row and kept a stale one: an
+     * undeployed agent came back, or a deployed one vanished. Two keys now decide,
+     * in the order the {@code $sort} applies them:
+     * </p>
+     * <ol>
+     * <li>{@value #FIELD_LAST_MODIFIED}, stamped by every
+     * {@link #setDeploymentInfo} since this release — the newest write wins, and a
+     * stamped row always beats an unstamped one (a missing field sorts first
+     * ascending);</li>
+     * <li>among unstamped rows, the LOWEST {@code _id} — the row {@code replaceOne}
+     * has been rewriting ({@code _id} sorts descending, so it comes last).</li>
+     * </ol>
+     * <p>
+     * That order is only a tie-breaker. Where it would decide between rows that
+     * disagree on the status without evidence — no stamp, or a tie on the newest —
+     * {@link #survivorOf} keeps the row the store's point read returns instead, or
+     * nothing at all.
+     * </p>
+     *
+     * <p>
+     * The {@code $sort} stays load-bearing. {@code $push} preserves the order the
+     * documents reach {@code $group} in, and without a sort that is the storage
+     * engine's natural order, which is not stable between nodes. Two nodes
+     * deduplicating the same collection during a rolling restart could therefore
+     * each keep a DIFFERENT element and, between them, delete every row for a key.
+     * With a total order every node computes the same survivor.
      * </p>
      *
      * @return how many rows were removed
@@ -348,11 +374,14 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
                 // rename migration and is not a duplicate of the other rows that lack it.
                 new Document("$match", new Document(FIELD_AGENT_ID, new Document("$exists", true))
                         .append(FIELD_AGENT_VERSION, new Document("$exists", true))),
-                new Document("$sort", new Document("_id", 1)),
+                new Document("$sort", new Document(FIELD_LAST_MODIFIED, 1).append("_id", -1)),
                 new Document("$group", new Document("_id",
                         new Document(FIELD_ENVIRONMENT, "$" + FIELD_ENVIRONMENT).append(FIELD_AGENT_ID, "$" + FIELD_AGENT_ID)
                                 .append(FIELD_AGENT_VERSION, "$" + FIELD_AGENT_VERSION))
                         .append(FIELD_DUPLICATE_IDS, new Document("$push", "$_id"))
+                        .append(FIELD_DUPLICATE_ROWS, new Document("$push", new Document("_id", "$_id")
+                                .append(FIELD_LAST_MODIFIED, "$" + FIELD_LAST_MODIFIED)
+                                .append(FIELD_DEPLOYMENT_STATUS, "$" + FIELD_DEPLOYMENT_STATUS)))
                         .append(FIELD_DUPLICATE_COUNT, new Document("$sum", 1))),
                 new Document("$match", new Document(FIELD_DUPLICATE_COUNT, new Document("$gt", 1))));
 
@@ -362,13 +391,68 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
             if (ids == null || ids.size() < 2) {
                 continue;
             }
-            doomed.addAll(ids.subList(0, ids.size() - 1));
+            Object survivor = survivorOf(group, ids);
+            if (survivor == null) {
+                continue;
+            }
+            for (Object id : ids) {
+                if (!id.equals(survivor)) {
+                    doomed.add(id);
+                }
+            }
         }
 
         if (doomed.isEmpty()) {
             return 0;
         }
         return (int) deploymentsCollection.deleteMany(in("_id", doomed)).getDeletedCount();
+    }
+
+    /**
+     * The id of the row to keep for one duplicate group, or {@code null} to keep
+     * them all.
+     * <p>
+     * The last element of the sorted {@code $push} is trusted only when it is
+     * unambiguous: every row carries the same {@code deploymentStatus} (then which
+     * one survives changes nothing), or it holds a {@value #FIELD_LAST_MODIFIED}
+     * strictly newer than every other row's. With no stamp at all, or a tie on the
+     * newest one, the sort order says nothing about which write came last — MongoDB
+     * does not promise which matching row {@code replaceOne} rewrites. The survivor
+     * is then the row {@code find(filter).first()} returns: the one
+     * {@link #readDeploymentInfo} has been answering with, so the dedupe keeps
+     * exactly the status the store already reports. If that cannot be read, the
+     * group is left alone and the unique index stays unbuilt (reported at ERROR)
+     * rather than guessing.
+     */
+    private Object survivorOf(Document group, List<Object> ids) {
+        Object sortedLast = ids.get(ids.size() - 1);
+        List<Document> rows = group.getList(FIELD_DUPLICATE_ROWS, Document.class);
+        if (rows == null || rows.size() != ids.size()) {
+            return sortedLast;
+        }
+        long statuses = rows.stream().map(row -> row.get(FIELD_DEPLOYMENT_STATUS)).distinct().count();
+        if (statuses <= 1) {
+            return sortedLast;
+        }
+        Object newest = rows.get(rows.size() - 1).get(FIELD_LAST_MODIFIED);
+        Object runnerUp = rows.get(rows.size() - 2).get(FIELD_LAST_MODIFIED);
+        if (newest != null && !newest.equals(runnerUp)) {
+            return sortedLast;
+        }
+
+        Document key = group.get("_id", Document.class);
+        try {
+            // The group key holds the three key fields with their stored types.
+            Document live = key == null ? null : deploymentsCollection.find(new Document(key)).first();
+            if (live != null && ids.contains(live.get("_id"))) {
+                return live.get("_id");
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not read the live deployment row for %s", key);
+        }
+        LOGGER.warnf("Duplicate deployment rows for %s disagree on their status and carry no evidence of which was "
+                + "written last — keeping all of them", key);
+        return null;
     }
 
     /**
@@ -393,6 +477,8 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
         Document filter = createFilter(environment, agentId, agentVersion);
         Document newDeploymentInfo = new Document(filter);
         newDeploymentInfo.put(FIELD_DEPLOYMENT_STATUS, deploymentStatus.toString());
+        // Evidence for removeDuplicateDeploymentRows of which duplicate is live (E6).
+        newDeploymentInfo.put(FIELD_LAST_MODIFIED, new Date());
 
         deploymentsCollection.replaceOne(filter, newDeploymentInfo, new ReplaceOptions().upsert(true));
     }
