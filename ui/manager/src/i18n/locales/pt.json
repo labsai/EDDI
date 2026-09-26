@@ -3417,7 +3417,8 @@
     "typeGroup": "Grupo",
     "selectGroup": "Escolher um grupo…",
     "unknownGroup": "{{id}} (não encontrado)",
-    "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas."
+    "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas.",
+    "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência."
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",

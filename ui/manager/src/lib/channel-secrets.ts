@@ -25,3 +25,20 @@ export function isEmptyOrReference(value: string | null | undefined): boolean {
 export function plaintextSecretFields(platformConfig: Record<string, string> | null | undefined): string[] {
   return CHANNEL_SECRET_KEYS.filter((key) => !isEmptyOrReference(platformConfig?.[key]));
 }
+
+/** What a plaintext credential is shown as wherever the config is displayed whole. */
+export const REDACTED = "••••••••";
+
+/**
+ * A copy of the config with every plaintext credential replaced by `REDACTED`.
+ * References stay as they are — they are pointers, not secrets. For display
+ * only: the raw-configuration view rendered the whole draft, so a legacy
+ * plaintext token masked in its field was one click away in clear.
+ */
+export function redactPlaintextSecrets<T extends { platformConfig?: Record<string, string> | null }>(config: T): T {
+  const fields = plaintextSecretFields(config.platformConfig);
+  if (fields.length === 0 || !config.platformConfig) return config;
+  const platformConfig = { ...config.platformConfig };
+  for (const key of fields) platformConfig[key] = REDACTED;
+  return { ...config, platformConfig };
+}
