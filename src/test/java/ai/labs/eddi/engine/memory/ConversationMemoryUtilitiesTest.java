@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.DisplayName;
@@ -179,6 +180,28 @@ class ConversationMemoryUtilitiesTest {
             assertTrue(output.containsKey("actions"));
             assertTrue(output.containsKey("output"));
             assertFalse(output.containsKey("internal:debug"));
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must drop sensitive internal keys (audit:*, *:trace:*, *Error)")
+        void detailedDropsSensitiveKeys() {
+            var snapshot = buildSnapshotWithOutputs("output", "audit:compiled_prompt", "langchain:trace:1", "httpCallError", "internal:debug");
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertTrue(output.containsKey("output"), "ordinary output must survive");
+            assertTrue(output.containsKey("internal:debug"), "non-sensitive detail must survive");
+            assertFalse(output.containsKey("audit:compiled_prompt"), "audit:* must be withheld");
+            assertFalse(output.containsKey("langchain:trace:1"), "*:trace:* must be withheld");
+            assertFalse(output.containsKey("httpCallError"), "*Error must be withheld");
+
+            var stepKeys = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .map(ConversationStepData::getKey).toList();
+            assertTrue(stepKeys.contains("output"));
+            assertFalse(stepKeys.contains("audit:compiled_prompt"), "audit:* must be withheld from step data");
+            assertFalse(stepKeys.contains("langchain:trace:1"), "*:trace:* must be withheld from step data");
+            assertFalse(stepKeys.contains("httpCallError"), "*Error must be withheld from step data");
         }
 
         @Test

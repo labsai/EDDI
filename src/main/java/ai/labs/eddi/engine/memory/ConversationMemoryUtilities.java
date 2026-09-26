@@ -217,6 +217,30 @@ public class ConversationMemoryUtilities {
         return conversationMemory;
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
+    private static boolean isSensitiveDetailedKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
+    }
+
+    /**
+     * Runs a step/output value through {@link SecretRedactionFilter} when it is a
+     * String; other shapes (lists, maps, POJOs) are returned unchanged. The
+     * sensitive internal keys are already dropped by
+     * {@link #isSensitiveDetailedKey} before this is reached, so this masks
+     * secret-looking substrings in the textual values that remain.
+     */
+    private static Object redactDetailedValue(Object value) {
+        return value instanceof String s ? SecretRedactionFilter.redact(s) : value;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
                                                                                    boolean returnDetailed, boolean returnCurrentStepOnly) {
 
@@ -226,7 +250,24 @@ public class ConversationMemoryUtilities {
         var conversationOutputs = conversationMemorySnapshot.getConversationOutputs();
         conversationOutputs = returnCurrentStepOnly ? List.of(conversationOutputs.getLast()) : conversationOutputs;
         if (returnDetailed) {
-            newSnapshot.getConversationOutputs().addAll(conversationOutputs);
+            // returnDetailed is caller-controlled and reachable by any chatting user, so
+            // the detailed projection must not leak internal step data: drop denylisted
+            // keys (audit:*, *:trace:*, *Error) and run every value through the current
+            // SecretRedactionFilter — the same discipline the SSE path already applies.
+            // Without this a plain user could read the compiled system prompt, the raw
+            // model trace and raw error bodies by setting returnDetailed=true. Admin
+            // debugging still has the owner/admin-gated raw endpoint for full fidelity.
+            var newConversationOutputs = newSnapshot.getConversationOutputs();
+            for (var conversationOutput : conversationOutputs) {
+                var newConversationOutput = new ConversationOutput();
+                for (var key : conversationOutput.keySet()) {
+                    if (isSensitiveDetailedKey(key)) {
+                        continue;
+                    }
+                    newConversationOutput.put(key, redactDetailedValue(conversationOutput.get(key)));
+                }
+                newConversationOutputs.add(newConversationOutput);
+            }
         } else {
             var newConversationOutputs = newSnapshot.getConversationOutputs();
             for (int index = 0; index < conversationOutputs.size(); index++) {
@@ -251,16 +292,22 @@ public class ConversationMemoryUtilities {
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
-                    if (returnDetailed || key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
-                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
-
-                        var result = resultSnapshot.getResult();
-                        simpleConversationStep.getConversationStep()
-                                .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
-
-                    } else {
+                    boolean whitelisted = key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX);
+                    // returnDetailed exposes every step datum; denylist the sensitive
+                    // internal keys and redact detailed values (see the outputs branch
+                    // above). The non-detailed whitelist is returned verbatim as before.
+                    if (returnDetailed) {
+                        if (isSensitiveDetailedKey(key)) {
+                            continue;
+                        }
+                    } else if (!whitelisted) {
                         continue;
                     }
+
+                    var result = returnDetailed ? redactDetailedValue(resultSnapshot.getResult()) : resultSnapshot.getResult();
+                    simpleConversationStep.getConversationStep()
+                            .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
                     simpleConversationStep.setTimestamp(resultSnapshot.getTimestamp());
                 }
