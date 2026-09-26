@@ -730,7 +730,17 @@ public class GdprComplianceService {
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===
 
-    private static final String RESTRICTION_KEY = "_gdpr_processing_restricted";
+    private static final String RESTRICTION_KEY = IUserMemoryStore.RESERVED_KEY_PREFIX + "processing_restricted";
+
+    /**
+     * Category the restriction row is written under.
+     * {@link #isProcessingRestricted} honours only rows in it: the reserved-key
+     * guard in {@code IUserMemoryStore} stops new forgeries, but a deployment may
+     * already hold a row an LLM wrote through {@code rememberFact} before that
+     * guard existed, and such a row carries the model's category ({@code fact},
+     * {@code preference}, ...), never this one.
+     */
+    static final String RESTRICTION_CATEGORY = "gdpr";
     private static final int AUDIT_EXPORT_LIMIT = 10_000;
 
     /**
@@ -754,10 +764,12 @@ public class GdprComplianceService {
         try {
             var entry = new UserMemoryEntry(
                     null, userId, RESTRICTION_KEY, "true",
-                    "gdpr", Property.Visibility.global, null,
+                    RESTRICTION_CATEGORY, Property.Visibility.global, null,
                     List.of(), null, false, 0,
                     Instant.now(), Instant.now());
-            userMemoryStore.upsert(entry);
+            // The reserved write path: the ordinary upsert refuses _gdpr_ keys, which is
+            // what stops a model or a REST caller from forging or overwriting this row.
+            userMemoryStore.upsertReserved(entry);
             publishRestriction(userId, true);
         } catch (Exception e) {
             // Drop any cached verdict rather than leaving a stale "not restricted"
@@ -783,9 +795,16 @@ public class GdprComplianceService {
         LOGGER.infof("[GDPR] Processing restriction removed [%s]", pseudonym);
 
         try {
-            var existing = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
-            if (existing.isPresent()) {
-                userMemoryStore.deleteEntry(existing.get().id());
+            // EVERY row under the key, not the first one getByKey happens to return. A
+            // global row is unique per (userId, key), but self/group rows are keyed per
+            // agent, so an older deployment can hold several — the admin's row plus rows
+            // a model forged through rememberFact before the reserved-key guard existed.
+            // Deleting one of them left the others behind: the user an admin had just
+            // released stayed locked out, and the release had been audited as done.
+            for (UserMemoryEntry row : userMemoryStore.getAllEntries(userId)) {
+                if (RESTRICTION_KEY.equals(row.key()) && row.id() != null) {
+                    userMemoryStore.deleteEntry(row.id());
+                }
             }
             // Publish the lift, do not merely forget it. Where caching is switched
             // on, a cached "true" that outlives the removal keeps answering
@@ -886,8 +905,13 @@ public class GdprComplianceService {
             return cached;
         }
         try {
-            var entry = userMemoryStore.getByKey(userId, RESTRICTION_KEY);
-            boolean restricted = entry.isPresent() && "true".equals(String.valueOf(entry.get().value()));
+            // Only a row in the gdpr category counts, and every such row is considered.
+            // getByKey returned the first row under the key whatever its category, so a
+            // model that called rememberFact("_gdpr_processing_restricted", "true")
+            // locked its own user out with a GDPR 403 that no admin had applied; and a
+            // forged "false" row that happened to sort first hid a real restriction.
+            boolean restricted = userMemoryStore.getEntriesByCategory(userId, RESTRICTION_CATEGORY).stream()
+                    .anyMatch(row -> RESTRICTION_KEY.equals(row.key()) && "true".equals(String.valueOf(row.value())));
             // Publish monotonically toward restriction: within one TTL window a
             // "restricted" observation always wins, whoever else is writing.
             //

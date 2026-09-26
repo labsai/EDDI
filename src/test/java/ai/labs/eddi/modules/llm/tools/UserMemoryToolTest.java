@@ -56,6 +56,28 @@ class UserMemoryToolTest {
         verifyNoInteractions(store);
     }
 
+    /**
+     * H9c: a model writing {@code _gdpr_processing_restricted=true} locked its own
+     * user out with a GDPR 403 no admin had applied; as a global entry the same
+     * call overwrote an admin's real restriction row in place.
+     */
+    @Test
+    void rememberFact_refusesAReservedGdprKey() {
+        String result = tool.rememberFact(" _gdpr_processing_restricted ", "true", "fact", "global");
+
+        assertTrue(result.contains("reserved"), result);
+        verifyNoInteractions(store);
+    }
+
+    /** H9c: nor may a model lift a restriction by forgetting the row. */
+    @Test
+    void forgetFact_refusesAReservedGdprKey() {
+        String result = tool.forgetFact("_gdpr_processing_restricted");
+
+        assertTrue(result.contains("reserved"), result);
+        verifyNoInteractions(store);
+    }
+
     @Test
     void rememberFact_shouldRejectKeyTooLong() {
         String longKey = "a".repeat(101);

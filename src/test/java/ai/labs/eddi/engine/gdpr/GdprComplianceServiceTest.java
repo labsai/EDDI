@@ -578,7 +578,7 @@ class GdprComplianceServiceTest {
         service.restrictProcessing(USER_ID);
 
         // Then — should upsert a user memory entry with the restriction key
-        verify(userMemoryStore).upsert(argThat(entry -> "_gdpr_processing_restricted".equals(entry.key())
+        verify(userMemoryStore).upsertReserved(argThat(entry -> "_gdpr_processing_restricted".equals(entry.key())
                 && "true".equals(entry.value())
                 && entry.userId().equals(USER_ID)));
     }
@@ -595,7 +595,7 @@ class GdprComplianceServiceTest {
     @Test
     void restrictProcessing_throwsRuntimeExceptionOnFailure() throws Exception {
         // Given — upsert fails
-        doThrow(new RuntimeException("DB error")).when(userMemoryStore).upsert(any());
+        doThrow(new RuntimeException("DB error")).when(userMemoryStore).upsertReserved(any());
 
         // When/Then — should propagate as RuntimeException
         assertThrows(RuntimeException.class,
@@ -610,8 +610,8 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(entry));
+        when(userMemoryStore.getAllEntries(USER_ID))
+                .thenReturn(List.of(entry));
 
         // When
         service.unrestrictProcessing(USER_ID);
@@ -620,11 +620,65 @@ class GdprComplianceServiceTest {
         verify(userMemoryStore).deleteEntry("entry-id");
     }
 
+    /**
+     * H9c. getByKey returns ONE row, and self/group rows are keyed per agent, so a
+     * user can hold several rows under the restriction key — the admin's, plus rows
+     * a model forged through rememberFact before the reserved-key guard existed.
+     * Deleting only the first left the user locked out after an audited release.
+     */
+    @Test
+    void unrestrictProcessing_removesEveryRowUnderTheKey() throws Exception {
+        var adminRow = new UserMemoryEntry("admin-row", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+        var forgedRow = new UserMemoryEntry("forged-row", USER_ID, "_gdpr_processing_restricted", "true",
+                "fact", Property.Visibility.self, "agent-x", List.of(), "conv-1", false, 0, Instant.now(), Instant.now());
+        var unrelated = new UserMemoryEntry("other-row", USER_ID, "favorite_color", "blue",
+                "preference", Property.Visibility.self, "agent-x", List.of(), "conv-1", false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of(adminRow, forgedRow, unrelated));
+
+        service.unrestrictProcessing(USER_ID);
+
+        verify(userMemoryStore).deleteEntry("admin-row");
+        verify(userMemoryStore).deleteEntry("forged-row");
+        verify(userMemoryStore, never()).deleteEntry("other-row");
+    }
+
+    /**
+     * H9c. A row a model wrote through rememberFact carries the model's category,
+     * never "gdpr". Honouring it let an LLM lock its own user out with a GDPR 403
+     * no admin had applied.
+     */
+    @Test
+    void isProcessingRestricted_ignoresARowOutsideTheGdprCategory() throws Exception {
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr")).thenReturn(List.of());
+        // Would have been the first match under the old getByKey lookup.
+        var forged = new UserMemoryEntry("forged-row", USER_ID, "_gdpr_processing_restricted", "true",
+                "fact", Property.Visibility.self, "agent-x", List.of(), "conv-1", false, 0, Instant.now(), Instant.now());
+        lenient().when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted")).thenReturn(Optional.of(forged));
+
+        assertFalse(service.isProcessingRestricted(USER_ID));
+    }
+
+    /**
+     * H9c. A forged "false" row that sorted first under getByKey hid the admin's
+     * real restriction; every gdpr-category row under the key is considered now.
+     */
+    @Test
+    void isProcessingRestricted_findsTheRestrictionAmongSeveralGdprRows() throws Exception {
+        var stale = new UserMemoryEntry("stale", USER_ID, "_gdpr_processing_restricted", "false",
+                "gdpr", Property.Visibility.self, "agent-x", List.of(), null, false, 0, Instant.now(), Instant.now());
+        var real = new UserMemoryEntry("real", USER_ID, "_gdpr_processing_restricted", "true",
+                "gdpr", Property.Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr")).thenReturn(List.of(stale, real));
+
+        assertTrue(service.isProcessingRestricted(USER_ID));
+    }
+
     @Test
     void unrestrictProcessing_noopIfNotRestricted() throws Exception {
         // Given — no restriction exists
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty());
+        when(userMemoryStore.getAllEntries(USER_ID))
+                .thenReturn(List.of());
 
         // When
         service.unrestrictProcessing(USER_ID);
@@ -635,8 +689,8 @@ class GdprComplianceServiceTest {
 
     @Test
     void unrestrictProcessing_throwsRuntimeExceptionOnFailure() throws Exception {
-        // Given — getByKey fails
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+        // Given — the lookup fails
+        when(userMemoryStore.getAllEntries(USER_ID))
                 .thenThrow(new RuntimeException("DB error"));
 
         // When/Then
@@ -652,8 +706,8 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(entry));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of(entry));
 
         // When/Then
         assertTrue(service.isProcessingRestricted(USER_ID));
@@ -662,8 +716,8 @@ class GdprComplianceServiceTest {
     @Test
     void isProcessingRestricted_returnsFalseWhenNotRestricted() throws Exception {
         // Given — no entry
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of());
 
         // When/Then
         assertFalse(service.isProcessingRestricted(USER_ID));
@@ -677,8 +731,8 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(entry));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of(entry));
 
         // When/Then — String.valueOf(Boolean.TRUE) == "true"
         assertTrue(service.isProcessingRestricted(USER_ID));
@@ -695,7 +749,7 @@ class GdprComplianceServiceTest {
     @Test
     void isProcessingRestricted_failsClosedButHonestlyOnException() throws Exception {
         // Given — store throws
-        when(userMemoryStore.getByKey(eq(USER_ID), any()))
+        when(userMemoryStore.getEntriesByCategory(eq(USER_ID), any()))
                 .thenThrow(new RuntimeException("Connection refused"));
 
         // When/Then — processing is still blocked, but as an availability failure
@@ -710,14 +764,14 @@ class GdprComplianceServiceTest {
      */
     @Test
     void isProcessingRestricted_isCachedAcrossTurns() throws Exception {
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of());
 
         assertFalse(service.isProcessingRestricted(USER_ID));
         assertFalse(service.isProcessingRestricted(USER_ID));
         assertFalse(service.isProcessingRestricted(USER_ID));
 
-        verify(userMemoryStore, times(1)).getByKey(USER_ID, "_gdpr_processing_restricted");
+        verify(userMemoryStore, times(1)).getEntriesByCategory(USER_ID, "gdpr");
     }
 
     /**
@@ -726,8 +780,8 @@ class GdprComplianceServiceTest {
      */
     @Test
     void restrictProcessing_takesEffectImmediatelyDespiteTheCache() throws Exception {
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of());
         assertFalse(service.isProcessingRestricted(USER_ID), "precondition: cached as unrestricted");
 
         service.restrictProcessing(USER_ID);
@@ -755,8 +809,8 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(flag));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of(flag));
         assertTrue(service.isProcessingRestricted(USER_ID), "precondition: cached as restricted");
 
         service.unrestrictProcessing(USER_ID);
@@ -788,14 +842,14 @@ class GdprComplianceServiceTest {
     @Test
     void isProcessingRestricted_cachingDisabled_readsTheStoreOnEveryTurn() throws Exception {
         var uncached = newServiceWithoutRestrictionCache();
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty());
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of());
 
         assertFalse(uncached.isProcessingRestricted(USER_ID));
         assertFalse(uncached.isProcessingRestricted(USER_ID));
         assertFalse(uncached.isProcessingRestricted(USER_ID));
 
-        verify(userMemoryStore, times(3)).getByKey(USER_ID, "_gdpr_processing_restricted");
+        verify(userMemoryStore, times(3)).getEntriesByCategory(USER_ID, "gdpr");
     }
 
     /**
@@ -813,9 +867,9 @@ class GdprComplianceServiceTest {
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
         // First turn: not restricted anywhere. Then another node writes the flag.
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(flag));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of())
+                .thenReturn(List.of(flag));
 
         assertFalse(uncached.isProcessingRestricted(USER_ID), "precondition: not restricted yet");
 
@@ -859,16 +913,16 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty())
-                .thenReturn(Optional.of(flag));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of())
+                .thenReturn(List.of(flag));
 
         assertFalse(shipped.isProcessingRestricted(USER_ID), "precondition: not restricted yet");
 
         assertTrue(shipped.isProcessingRestricted(USER_ID),
                 "with the shipped default, a restriction applied on another replica must bite on the "
                         + "very next turn — the default must not cache a negative verdict");
-        verify(userMemoryStore, times(2)).getByKey(USER_ID, "_gdpr_processing_restricted");
+        verify(userMemoryStore, times(2)).getEntriesByCategory(USER_ID, "gdpr");
     }
 
     /**
@@ -880,8 +934,8 @@ class GdprComplianceServiceTest {
     @Test
     void isProcessingRestricted_cachingDisabled_failsClosedOnAnOutageAfterASuccessfulRead() throws Exception {
         var uncached = newServiceWithoutRestrictionCache();
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.empty())
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of())
                 .thenThrow(new RuntimeException("Connection refused"));
 
         assertFalse(uncached.isProcessingRestricted(USER_ID), "precondition: one good read");
@@ -903,13 +957,13 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(flag));
+        when(userMemoryStore.getAllEntries(USER_ID))
+                .thenReturn(List.of(flag));
 
         assertDoesNotThrow(() -> uncached.restrictProcessing(USER_ID));
         assertDoesNotThrow(() -> uncached.unrestrictProcessing(USER_ID));
 
-        verify(userMemoryStore).upsert(any(UserMemoryEntry.class));
+        verify(userMemoryStore).upsertReserved(any(UserMemoryEntry.class));
         verify(userMemoryStore).deleteEntry("entry-id");
     }
 
@@ -921,8 +975,8 @@ class GdprComplianceServiceTest {
                 "gdpr", Property.Visibility.global,
                 null, List.of(), null, false, 0,
                 Instant.now(), Instant.now());
-        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
-                .thenReturn(Optional.of(entry));
+        when(userMemoryStore.getEntriesByCategory(USER_ID, "gdpr"))
+                .thenReturn(List.of(entry));
 
         // When/Then
         assertFalse(service.isProcessingRestricted(USER_ID));
@@ -1434,11 +1488,11 @@ class GdprComplianceServiceTest {
      */
     @Test
     void isProcessingRestricted_doesNotOverwriteARestrictionAppliedDuringTheRead() throws Exception {
-        when(userMemoryStore.getByKey(eq(USER_ID), anyString())).thenAnswer(invocation -> {
+        when(userMemoryStore.getEntriesByCategory(eq(USER_ID), anyString())).thenAnswer(invocation -> {
             // Stands in for the admin call landing between this read and its cache
             // write. restrictProcessing publishes "true" through the same cache.
             service.restrictProcessing(USER_ID);
-            return Optional.empty();
+            return List.of();
         });
 
         boolean firstAnswer = service.isProcessingRestricted(USER_ID);
@@ -1449,7 +1503,7 @@ class GdprComplianceServiceTest {
         reset(userMemoryStore);
         assertTrue(service.isProcessingRestricted(USER_ID),
                 "a restriction masked in the cache is a restriction not enforced");
-        verify(userMemoryStore, never()).getByKey(anyString(), anyString());
+        verify(userMemoryStore, never()).getEntriesByCategory(anyString(), anyString());
     }
 
     /**
@@ -1478,16 +1532,16 @@ class GdprComplianceServiceTest {
                 Instant.now(), Instant.now());
         var siblingRan = new AtomicBoolean(false);
 
-        when(userMemoryStore.getByKey(eq(USER_ID), anyString())).thenAnswer(invocation -> {
+        when(userMemoryStore.getEntriesByCategory(eq(USER_ID), anyString())).thenAnswer(invocation -> {
             if (siblingRan.compareAndSet(false, true)) {
                 // T2: a second in-flight turn for the same user. It misses the same
                 // empty cache, reads "not restricted", and its publish lands first.
                 assertFalse(service.isProcessingRestricted(USER_ID),
                         "precondition: the sibling really did observe and publish 'not restricted'");
-                return Optional.of(restrictedEntry);
+                return List.of(restrictedEntry);
             }
             // The sibling's own store read.
-            return Optional.empty();
+            return List.of();
         });
 
         assertTrue(service.isProcessingRestricted(USER_ID),
@@ -1498,7 +1552,7 @@ class GdprComplianceServiceTest {
         reset(userMemoryStore);
         assertTrue(service.isProcessingRestricted(USER_ID),
                 "a restriction masked in the cache is a restriction not enforced");
-        verify(userMemoryStore, never()).getByKey(anyString(), anyString());
+        verify(userMemoryStore, never()).getEntriesByCategory(anyString(), anyString());
     }
 
     /**
@@ -1706,7 +1760,7 @@ class GdprComplianceServiceTest {
     void isProcessingRestricted_nullUserIsNotRestrictedAndIsNeverLookedUp() throws Exception {
         assertFalse(service.isProcessingRestricted(null));
 
-        verify(userMemoryStore, never()).getByKey(any(), anyString());
+        verify(userMemoryStore, never()).getEntriesByCategory(any(), anyString());
     }
 
     /**

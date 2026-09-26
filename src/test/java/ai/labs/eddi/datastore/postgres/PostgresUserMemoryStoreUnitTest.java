@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -109,6 +110,54 @@ class PostgresUserMemoryStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.findEntryById("entry-1"));
+    }
+
+    // ─── reserved keys (H9c) ────────────────────────────────────
+
+    @Test
+    void upsert_refusesReservedKeyWithoutOpeningAConnection() throws Exception {
+        var forged = new UserMemoryEntry(null, "user-1", "_gdpr_processing_restricted", "true", "fact",
+                Visibility.self, "agent-1", List.of(), null, false, 0, null, null);
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> sut.upsert(forged));
+        verify(dataSource, never()).getConnection();
+    }
+
+    @Test
+    void mergeProperties_refusesReservedKeyWithoutOpeningAConnection() throws Exception {
+        var properties = new Properties();
+        properties.put("_gdpr_processing_restricted", "false");
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> sut.mergeProperties("user-1", properties));
+        verify(dataSource, never()).getConnection();
+    }
+
+    @Test
+    void upsertReserved_refusesAnOrdinaryKey() {
+        var ordinary = new UserMemoryEntry(null, "user-1", "favorite_color", "blue", "preference",
+                Visibility.self, "agent-1", List.of(), null, false, 0, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> sut.upsertReserved(ordinary));
+    }
+
+    /**
+     * {@code _} is LIKE's single-character wildcard, so the old unescaped
+     * {@code '_gdpr_%'} also spared keys such as {@code agdpr1} from retention.
+     */
+    @Test
+    void retentionAndDeleteProperties_escapeTheReservedPrefix() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        var sql = ArgumentCaptor.forClass(String.class);
+
+        sut.deleteOlderThan(30);
+        sut.deleteProperties("user-1");
+
+        verify(connection, atLeast(2)).prepareStatement(sql.capture());
+        var statements = sql.getAllValues().stream().filter(q -> q.startsWith("DELETE")).toList();
+        assertEquals(2, statements.size(), statements.toString());
+        for (String q : statements) {
+            assertTrue(q.contains("key NOT LIKE '\\_gdpr\\_%' ESCAPE '\\'"), q);
+        }
     }
 
     // ─── deleteOlderThan ────────────────────────────────────────
