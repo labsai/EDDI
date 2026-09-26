@@ -87,6 +87,28 @@ class ChangelogDisciplineJobTest {
                 "a line added inside a fence the context already opened");
     }
 
+    /**
+     * Against real git rather than a canned hunk: with git's default three lines of
+     * context a hunk can begin inside a fenced block, and the guard, reading only
+     * the hunk, lost the fence state — so a heading quoted in an example was
+     * rejected, and a closing fence read as an opening one hid a real entry added
+     * just below it. The job diffs with the whole file as context.
+     */
+    @Test
+    @DisplayName("fence state is taken from the whole file, not from a hunk that starts inside a fence")
+    void guardSeesFencesOpenedAboveTheHunk() throws Exception {
+        String longFence = "# Changelog\n\n## Entry (2026-01-01)\n\nExample:\n\n```markdown\n"
+                + "l1\nl2\nl3\nl4\nl5\nl6\n%sl7\nl8\nl9\nl10\n```\n\nTail.\n";
+        assertEquals(0, runGuardOnRepo(longFence.formatted(""), longFence.formatted("## Example (2026-01-02)\n")),
+                "a heading added deep inside an existing fenced example is not an entry");
+
+        String closedFence = "# Changelog\n\n```text\na1\na2\na3\na4\na5\n```\n%s"
+                + "t1\nt2\nt3\nt4\nt5\n";
+        assertEquals(1, runGuardOnRepo(closedFence.formatted(""),
+                closedFence.formatted("\n## Real entry (2026-09-26)\n\nBody.\n\n")),
+                "an entry added right after an existing fence closes is still an entry");
+    }
+
     @Test
     @DisplayName("the collation branch may carry only the collator's output")
     void collationBranchIsLimitedToChangelogFiles() throws Exception {
@@ -124,6 +146,75 @@ class ChangelogDisciplineJobTest {
 
     private int runGuard(String hunk) throws Exception {
         return runStep(GUARD_STEP, hunk.isEmpty() ? "" : HEADER + hunk);
+    }
+
+    /**
+     * Runs the guard step in a real repository: {@code origin} holds {@code base}
+     * as docs/changelog.md on {@code main}, and the checked-out branch changes it
+     * to {@code head}. Returns the script's exit code.
+     */
+    private int runGuardOnRepo(String base, String head) throws Exception {
+        Assumptions.assumeFalse(File.separatorChar == '\\', "the job's shell is bash on Linux");
+        Path dir = Files.createTempDirectory(tmp, "repo");
+        Path origin = dir.resolve("origin");
+        Path work = dir.resolve("work");
+        Files.createDirectories(origin.resolve("docs"));
+        git(origin, "init", "-q", "-b", "main");
+        Files.writeString(origin.resolve("docs/changelog.md"), base, StandardCharsets.UTF_8);
+        git(origin, "add", "docs/changelog.md");
+        git(origin, "commit", "-q", "-m", "base");
+        git(dir, "clone", "-q", origin.toString(), work.toString());
+        git(work, "checkout", "-q", "-b", "feature");
+        Files.writeString(work.resolve("docs/changelog.md"), head, StandardCharsets.UTF_8);
+        git(work, "commit", "-q", "-am", "head");
+
+        Path script = dir.resolve("step.sh");
+        Files.writeString(script, step(GUARD_STEP).path("run").asText(), StandardCharsets.UTF_8);
+        ProcessBuilder builder = new ProcessBuilder("bash", script.toString());
+        builder.directory(work.toFile());
+        builder.redirectErrorStream(true);
+        builder.redirectOutput(dir.resolve("out.txt").toFile());
+        isolateGit(builder.environment());
+        builder.environment().put("BASE", "main");
+        builder.environment().put("GITHUB_STEP_SUMMARY", dir.resolve("summary.md").toString());
+        Process process = builder.start();
+        assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the step did not finish");
+        return process.exitValue();
+    }
+
+    private static void git(Path dir, String... args) throws Exception {
+        String[] command = new String[args.length + 5];
+        command[0] = "git";
+        command[1] = "-c";
+        command[2] = "commit.gpgsign=false";
+        command[3] = "-c";
+        command[4] = "core.hooksPath=/dev/null";
+        System.arraycopy(args, 0, command, 5, args.length);
+        ProcessBuilder builder = new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true);
+        isolateGit(builder.environment());
+        Process process;
+        try {
+            process = builder.start();
+        } catch (IOException e) {
+            Assumptions.abort("git is not available: " + e.getMessage());
+            return;
+        }
+        String out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(process.waitFor(60, TimeUnit.SECONDS), "git " + String.join(" ", args) + " did not finish");
+        assertEquals(0, process.exitValue(), "git " + String.join(" ", args) + " failed: " + out);
+    }
+
+    /**
+     * Keeps the developer's own git configuration (signing, hooks, identity) out of
+     * the test repos.
+     */
+    private static void isolateGit(Map<String, String> env) {
+        env.put("GIT_CONFIG_NOSYSTEM", "1");
+        env.put("GIT_CONFIG_GLOBAL", "/dev/null");
+        env.put("GIT_AUTHOR_NAME", "test");
+        env.put("GIT_AUTHOR_EMAIL", "test@example.invalid");
+        env.put("GIT_COMMITTER_NAME", "test");
+        env.put("GIT_COMMITTER_EMAIL", "test@example.invalid");
     }
 
     /**

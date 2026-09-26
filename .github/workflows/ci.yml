@@ -333,7 +333,16 @@ jobs:
           # every PR that had already rotated — was rejected as an entry added
           # in place. Archives still belong in the operator_docs trigger, which
           # decides what runs, not what is allowed.
-          DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md)
+          #
+          # --unified=1000000: the whole file as context, so the diff is one
+          # hunk that starts at line 1 on both sides. The fence tracking below
+          # needs that — with git's default three lines, a hunk that begins
+          # inside a fenced block cannot see the opening fence, so a heading
+          # quoted in the example was counted (a false reject), and a closing
+          # fence in the context was read as an opening one, hiding a real
+          # entry added right below it (a false pass). The live file is capped
+          # at 250 KB, far below a million lines.
+          DIFF=$(git diff --unified=1000000 "origin/${BASE}...HEAD" -- docs/changelog.md)
 
           # What counts, on each side of the diff:
           #   - any '## ' heading, dated or not: scripts/changelog_common.py splits
@@ -351,9 +360,9 @@ jobs:
           # Lines inside a fenced code block are examples, not structure. The
           # collator skips them (changelog_common.fence_mask), so this does too:
           # it follows ``` / ~~~ fences through the lines that exist on the side
-          # being counted (that side's lines plus context), starting each hunk
-          # outside a fence. A fence opened above a hunk's first context line is
-          # not visible here; git's default three lines of context make that rare.
+          # being counted (that side's lines plus context). With full-file
+          # context that is the whole file on that side, read from line 1, so
+          # the fence state is exact rather than guessed per hunk.
           # No regex intervals in here: ubuntu-latest's awk is mawk.
           #
           # shapes SIGN            prints "<headings> <setext pairs> <rows>"

@@ -2014,11 +2014,20 @@ class DeploymentManifestsTest {
                          "config": {"included.client.audience": "other", "access.token.claim": "true"}}]},
                       {"clientId": "bearer-only", "bearerOnly": true},
                       {"clientId": "no-flows", "standardFlowEnabled": false},
+                      {"clientId": "device-only", "standardFlowEnabled": false,
+                       "attributes": {"oauth2.device.authorization.grant.enabled": "true"}},
+                      {"clientId": "device-only-field", "standardFlowEnabled": false,
+                       "oauth2DeviceAuthorizationGrantEnabled": true},
+                      {"clientId": "ciba-only", "standardFlowEnabled": false,
+                       "attributes": {"oidc.ciba.grant.enabled": "true"}},
+                      {"clientId": "ciba-off", "standardFlowEnabled": false,
+                       "attributes": {"oidc.ciba.grant.enabled": "false"}},
                       {"clientId": "good", "protocolMappers": [{"protocolMapper": "oidc-audience-mapper",
                          "config": {"included.client.audience": "eddi-backend", "access.token.claim": "true"}}]}
                     ]}""");
 
-            assertEquals(List.of("omits-standard-flow", "explicit-login", "id-token-only", "wrong-audience"),
+            assertEquals(List.of("omits-standard-flow", "explicit-login", "id-token-only", "wrong-audience",
+                    "device-only", "device-only-field", "ciba-only"),
                     clientsMissingAudience(realm, "eddi-backend"));
         }
 
@@ -2037,11 +2046,18 @@ class DeploymentManifestsTest {
                 // A bearer-only client (eddi-backend) validates tokens and mints
                 // none, whatever its flow flags say. standardFlowEnabled defaults to
                 // TRUE in Keycloak when absent, so a missing field is not a pass.
+                // The device authorization grant and CIBA mint access tokens as
+                // well; a realm export carries both as string client attributes
+                // (the device grant also as a top-level boolean in some exports).
+                JsonNode attributes = candidate.path("attributes");
                 boolean mintsTokens = !candidate.path("bearerOnly").asBoolean()
                         && (candidate.path("standardFlowEnabled").asBoolean(true)
                                 || candidate.path("directAccessGrantsEnabled").asBoolean()
                                 || candidate.path("implicitFlowEnabled").asBoolean()
-                                || candidate.path("serviceAccountsEnabled").asBoolean());
+                                || candidate.path("serviceAccountsEnabled").asBoolean()
+                                || candidate.path("oauth2DeviceAuthorizationGrantEnabled").asBoolean()
+                                || "true".equals(attributes.path("oauth2.device.authorization.grant.enabled").asText())
+                                || "true".equals(attributes.path("oidc.ciba.grant.enabled").asText()));
                 if (!mintsTokens) {
                     continue;
                 }
