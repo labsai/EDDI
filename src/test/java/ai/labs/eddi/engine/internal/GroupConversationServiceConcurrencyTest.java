@@ -40,6 +40,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -434,7 +435,13 @@ class GroupConversationServiceConcurrencyTest {
         assertEquals(members.stream().map(GroupMember::agentId).toList(),
                 gc.getTranscript().stream().map(TranscriptEntry::speakerAgentId).toList(),
                 "each timeout is attributed to the member it belongs to");
-        verify(listener, times(members.size())).onSpeakerComplete(any());
+        var completed = ArgumentCaptor.forClass(GroupConversationEventSink.SpeakerCompleteEvent.class);
+        verify(listener, times(members.size())).onSpeakerComplete(completed.capture());
+        completed.getAllValues().forEach(event -> {
+            assertEquals(GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT, event.outcome(),
+                    "a timeout is flagged as such, so a client can tell it from something the member said");
+            assertNull(event.response(), "and carries no content");
+        });
     }
 
     @Test
