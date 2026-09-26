@@ -216,6 +216,16 @@ export function isProvisionableBySetup(providerId: string): boolean {
 }
 
 /**
+ * `providerId` when the setup flows offer it, otherwise `fallback`. A stored
+ * value such as an operator configured on `gemini-vertex` before it was hidden
+ * would otherwise render a provider select with no matching option, showing
+ * one provider while the form holds another.
+ */
+export function provisionableProviderOr(providerId: string, fallback: string): string {
+  return isProvisionableBySetup(providerId) ? providerId : fallback;
+}
+
+/**
  * Providers that take an OPTIONAL credential in the key slot. Jlama downloads
  * its weights from Hugging Face, and a gated or private repository needs a
  * token; `AgentSetupService` writes the setup request's `apiKey` to the Jlama

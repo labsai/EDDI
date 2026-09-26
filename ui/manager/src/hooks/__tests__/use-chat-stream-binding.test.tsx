@@ -5,6 +5,7 @@ import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { type SSEEvent } from "@/lib/api/chat";
+import { readFileSync } from "node:fs";
 
 /**
  * A send belongs to the transcript it started in.
@@ -20,17 +21,34 @@ const h = vi.hoisted(() => ({
   gateAt: -1,
   release: (() => {}) as () => void,
   reachedGate: (() => {}) as () => void,
+  /** Whether the stream's abort signal fired. */
+  aborted: false,
+  toastError: vi.fn(),
 }));
+
+vi.mock("sonner", () => ({ toast: { error: h.toastError, success: vi.fn() } }));
 
 vi.mock("@/lib/api/chat", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/chat")>();
   return {
     ...actual,
-    sendMessageStreaming: async function* () {
+    sendMessageStreaming: async function* (
+      _env: string,
+      _agentId: string,
+      _conversationId: string,
+      _input: unknown,
+      signal?: AbortSignal,
+    ) {
+      signal?.addEventListener("abort", () => (h.aborted = true));
       for (let i = 0; i < h.frames.length; i++) {
         if (i === h.gateAt) {
-          await new Promise<void>((resolve) => {
+          // Like a real fetch body, a pending read ends with an AbortError
+          // when the signal fires.
+          await new Promise<void>((resolve, reject) => {
             h.release = resolve;
+            signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
             h.reachedGate();
           });
         }
@@ -40,7 +58,12 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
+import {
+  DETACHED_STREAM_GRACE_MS,
+  UNCONSUMED_STREAM_ERROR_CODES,
+  useChatStore,
+  useSendMessage,
+} from "@/hooks/use-chat";
 import { useDebugStore } from "@/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -63,6 +86,8 @@ describe("useSendMessage — a stream stays bound to its own transcript", () => 
     useDebugStore.getState().reset();
     h.frames = [];
     h.gateAt = -1;
+    h.aborted = false;
+    h.toastError.mockReset();
     useChatStore.setState({
       selectedAgentId: "agent-a",
       conversationId: "conv-a",
@@ -251,5 +276,113 @@ describe("setSelectedAgent — nothing of the previous agent's conversation surv
     expect(state.isProcessing).toBe(false);
     expect(state.isThinking).toBe(false);
     expect(state.conversationEpoch).toBe(epoch + 1);
+  });
+});
+
+describe("useSendMessage — streamed refusals and detached streams", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    h.gateAt = -1;
+    h.aborted = false;
+    h.toastError.mockReset();
+    useChatStore.setState({
+      selectedAgentId: "agent-a",
+      conversationId: "conv-a",
+      streamingEnabled: true,
+    });
+  });
+
+  // The streaming endpoint reports its pre-turn refusals as error frames, not
+  // statuses. Only awaiting_approval used to be rolled back; "agent version
+  // mismatch" left the unsent message in the transcript above an error bubble.
+  it("rolls back a refusal that is not a pause and says why, without the pause banner", async () => {
+    h.frames = [
+      { type: "error", data: JSON.stringify({ code: "agent_mismatch", message: "Agent version mismatch" }) },
+    ];
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "hello" }).catch(() => {});
+    });
+
+    const state = useChatStore.getState();
+    expect(state.messages).toEqual([]);
+    expect(state.isPaused).toBe(false);
+    expect(state.isProcessing).toBe(false);
+    expect(h.toastError).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the error bubble for a failure during the turn (no code: the turn ran)", async () => {
+    h.frames = [
+      { type: "token", data: "partial" },
+      { type: "error", data: JSON.stringify({ message: "Internal server error", correlationId: "c-1" }) },
+    ];
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "hello" });
+    });
+
+    const contents = useChatStore.getState().messages.map((m) => m.content);
+    expect(contents[0]).toBe("hello");
+    expect(contents[1]).toContain("Internal server error");
+    expect(h.toastError).not.toHaveBeenCalled();
+  });
+
+  // Pinned against the backend: every code the streaming endpoint emits for a
+  // pre-turn refusal must be treated as unconsumed, and nothing else.
+  it("covers exactly the codes the backend emits for pre-turn refusals", () => {
+    const root = "../../src/main/java/ai/labs/eddi/engine";
+    const streaming = readFileSync(`${root}/internal/RestAgentEngineStreaming.java`, "utf8");
+    const mapper = readFileSync(`${root}/exception/InputTooLargeExceptionMapper.java`, "utf8");
+    const emitted = new Set([...streaming.matchAll(/code = "([a-z_]+)";/g)].map((m) => m[1]!));
+    const inputTooLarge = /ERROR_CODE = "([a-z_]+)"/.exec(mapper)?.[1];
+    expect(inputTooLarge).toBeTruthy();
+    emitted.add(inputTooLarge!);
+    expect([...UNCONSUMED_STREAM_ERROR_CODES].sort()).toEqual([...emitted].sort());
+  });
+
+  // A detached stream drains so the turn can finish, but a proxy that swallows
+  // the terminal frame used to keep it (and its mutation) open for good.
+  it("aborts a detached stream once the grace period has passed", async () => {
+    h.frames = [{ type: "token", data: "A" }, doneFrame({ output: [] })];
+    h.gateAt = 1;
+    const gateReached = new Promise<void>((r) => (h.reachedGate = r));
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    let sending!: Promise<unknown>;
+    act(() => {
+      sending = result.current.mutateAsync({ message: "hi A" });
+    });
+    await gateReached;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => useChatStore.getState().setSelectedAgent("agent-b", "B"));
+      vi.advanceTimersByTime(DETACHED_STREAM_GRACE_MS - 1);
+      expect(h.aborted).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(h.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+    await act(async () => {
+      await sending;
+    });
+    expect(useChatStore.getState().messages).toEqual([]);
+  });
+
+  it("closes the live debug turn when the transcript is replaced", () => {
+    useDebugStore.getState().addEvent({
+      type: "task_start",
+      taskId: "t1",
+      taskType: "ai.labs.llm",
+      index: 0,
+      timestamp: Date.now(),
+    });
+    expect(useDebugStore.getState().currentTurnEvents).toHaveLength(1);
+
+    useChatStore.getState().setSelectedAgent("agent-b", "B");
+
+    expect(useDebugStore.getState().currentTurnEvents).toHaveLength(0);
   });
 });
