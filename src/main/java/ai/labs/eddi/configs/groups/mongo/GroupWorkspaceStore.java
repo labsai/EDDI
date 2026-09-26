@@ -34,6 +34,12 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
 
     private static final Logger LOGGER = Logger.getLogger(GroupWorkspaceStore.class);
     private static final int SINGLE_VERSION = 1;
+    private static final String REVISION_FIELD = "revision";
+    /**
+     * {@link GroupWorkspace}'s field default — what a revision-less document
+     * deserializes to.
+     */
+    private static final String INITIAL_REVISION = "0";
 
     /** Same reasoning as {@link GroupConversationStore}'s SAFE_ID. */
     private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9-]+");
@@ -167,19 +173,33 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
      * <p>
      * Now the revision is the one guard. Every write compares it and bumps it, so a
      * write lands only if nothing at all changed since the caller's read — which is
-     * also exactly what "the claim is still what I read" means. Every workspace
-     * document carries a revision (the field exists since workspaces do and
-     * defaults to {@code "0"}), so there is no pre-revision fallback; a missing or
-     * non-numeric revision is a corrupt document and fails loudly.
+     * also exactly what "the claim is still what I read" means.
+     * <p>
+     * <b>A stored document without a revision.</b> Every release that shipped
+     * workspaces (6.3.0 on) persists the field — it defaults to {@code "0"} and the
+     * serializer writes it — but a document lacking it (hand-restored, or written
+     * by a pre-release build) would otherwise match no write ever: Jackson fills
+     * the absent field with the {@code "0"} default, the CAS compares that against
+     * a missing stored value, and on both backends a missing value equals nothing.
+     * Every backlog and cadence write would exhaust its retries and 409. So the
+     * write at revision {@code "0"} (or an explicit {@code null}) also matches a
+     * stored document with no revision, inside the same atomic write
+     * ({@code storeIfFieldEqualsOrMissing}), and stamps {@code "1"}. It stays a
+     * CAS: of two writers that both read the revision-less document, the first
+     * stamps the field and the second then matches neither branch and loses. A
+     * higher revision can only have been read from a stored field, so it keeps the
+     * strict comparison. A non-numeric revision is a corrupt document and fails
+     * loudly.
      *
      * @return {@code false} if any concurrent write landed first (re-read before
      *         retrying), or the workspace was deleted
      */
     private boolean conditionalWrite(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException {
         String expected = workspace.getRevision();
+        boolean mayBeUnstamped = expected == null || INITIAL_REVISION.equals(expected);
         String bumped;
         try {
-            bumped = String.valueOf(Long.parseLong(String.valueOf(expected)) + 1);
+            bumped = String.valueOf(Long.parseLong(expected != null ? expected : INITIAL_REVISION) + 1);
         } catch (NumberFormatException e) {
             // A corrupt revision must surface through the method's declared error
             // model, not as an uncaught runtime exception the REST layer's generic
@@ -194,7 +214,11 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
             // Conditional on the PERSISTED value — cross-process atomicity, same as
             // GroupConversationStore.updateIfState. An in-JVM check would only
             // serialize one pod's writers against each other.
-            storage.storeIfFieldEquals(resource, "revision", expected);
+            if (mayBeUnstamped) {
+                storage.storeIfFieldEqualsOrMissing(resource, REVISION_FIELD, INITIAL_REVISION);
+            } else {
+                storage.storeIfFieldEquals(resource, REVISION_FIELD, expected);
+            }
             return true;
         } catch (IResourceStore.ResourceModifiedException e) {
             workspace.setRevision(expected);

@@ -52,9 +52,12 @@ public interface IGroupWorkspaceStore {
      * <p>
      * There is no unconditional write on this store: every write — backlog,
      * cadences, run claims, writebacks — goes through this revision guard (H14c). A
-     * document created before the {@code revision} field existed carries
-     * {@code null}; its first write is guarded by the run-claim value instead and
-     * stamps a revision, so it too never lands blind.
+     * stored document with no {@code revision} (none that a release wrote — the
+     * field has existed as long as workspaces have — but a hand-restored or
+     * pre-release one) reads back as the {@code "0"} default; the write at
+     * {@code "0"} also matches a stored document without the field, in the same
+     * atomic compare, and stamps {@code "1"}. Of two writers racing on such a
+     * document only the first lands, so it too never lands blind.
      *
      * @return {@code true} if the write landed; {@code false} if a concurrent
      *         writer changed the workspace first (re-read before retrying)

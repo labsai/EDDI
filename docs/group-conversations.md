@@ -460,8 +460,10 @@ single deterministic skip condition) ⑤ *Synthesis*.
   later turn. One BARGAIN turn records at most `maxConcessionsPerMove`
   concessions (default 5, ceiling 20; each side of a concession is stored
   truncated to 600 characters), the ledger stops at `maxLedgerConcessions`
-  (default 50, ceiling 500 — further concessions are dropped with a WARN; the
-  earliest are kept, they are the record the outcome quotes), and a turn's
+  (default 50, ceiling 500 — the earliest are kept, they are the record the
+  outcome quotes; further concessions are not recorded but counted, and the
+  agreement outcome says "N further concession(s) not recorded (ledger full)"
+  and carries `tally.concessionsNotRecorded`), and a turn's
   prompt quotes only the newest `maxRenderedConcessions` (default 20, ceiling
   100) with an "(N earlier concession(s) omitted)" line. `negotiationConfig` is
   a default, not a switch: without it the defaults apply.

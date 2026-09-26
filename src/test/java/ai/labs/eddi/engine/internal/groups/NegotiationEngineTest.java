@@ -12,9 +12,12 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.NegotiationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Proposal;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -418,5 +421,46 @@ class NegotiationEngineTest {
         assertEquals(AgentGroupConfiguration.NegotiationConfig.CEILING_MAX_PER_MOVE, clamped.maxConcessionsPerMove());
         assertEquals(AgentGroupConfiguration.NegotiationConfig.DEFAULT_MAX_LEDGER, clamped.maxLedgerConcessions());
         assertEquals(AgentGroupConfiguration.NegotiationConfig.DEFAULT_MAX_RENDERED, clamped.maxRenderedConcessions());
+    }
+    @Test
+    @DisplayName("M-G1: concessions the full ledger drops are counted, and the outcome and prompt say so")
+    void ledger_droppedConcessionsAreReported() {
+        var gc = gc();
+        var config = new AgentGroupConfiguration.NegotiationConfig(2, 3, 5);
+        NegotiationEngine.applyRepeat(gc, List.of(
+                bargain("a1", "{\"proposal\": {\"terms\": \"50/50\"}, " + concessionsJson(2, 5).substring(1))), 0, 0,
+                config);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", concessionsJson(2, 5))), 1, 1, config);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", concessionsJson(2, 5))), 2, 2, config);
+
+        assertEquals(3, gc.getNegotiation().getConcessions().size());
+        assertEquals(3, gc.getNegotiation().getDroppedConcessions(),
+                "one of the second move's two plus both of the third's — silently lost before");
+
+        String rendered = NegotiationEngine.appendStateIfRelevant("INPUT", gc, bargainPhase(), config);
+        assertTrue(rendered.contains("(3 later concession(s) not recorded — the ledger is full)"), rendered);
+
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 3, 3, config);
+        assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD), "mod", "Bargaining"));
+        var decision = gc.getDecision();
+        assertTrue(decision.outcome().contains("3 concession(s) on the ledger, 3 further concession(s) not recorded"),
+                decision.outcome());
+        assertEquals(3, decision.tally().get("concessionsNotRecorded"));
+    }
+
+    @Test
+    @DisplayName("a ledger under its cap reports no dropped concessions, and a state stored before the counter existed reads as 0")
+    void ledger_noDropsReportsNothing_andLegacyStateReadsZero() throws Exception {
+        var gc = gc();
+        NegotiationEngine.applyRepeat(gc, List.of(
+                bargain("a1", "{\"proposal\": {\"terms\": \"50/50\"}, " + concessionsJson(1, 5).substring(1))), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 1, 1);
+        assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD), "mod", "Bargaining"));
+        assertFalse(gc.getDecision().outcome().contains("not recorded"), gc.getDecision().outcome());
+        assertFalse(gc.getDecision().tally().containsKey("concessionsNotRecorded"));
+
+        var mapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        var legacy = mapper.readValue("{\"proposals\": [], \"concessions\": []}", NegotiationState.class);
+        assertEquals(0, legacy.getDroppedConcessions());
     }
 }

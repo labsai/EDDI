@@ -1057,6 +1057,35 @@ class PostgresResourceStorageTest {
     }
 
     @Test
+    void storeIfFieldEqualsOrMissing_matchesTheValueOrAMissingKeyInOneUpdate() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 1, config);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        storage.storeIfFieldEqualsOrMissing(resource, "revision", "0");
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        // ->> is SQL NULL for an absent key, and NULL = '0' is not true — without the
+        // IS NULL branch a document stored before the field existed never matches.
+        assertTrue(sql.getValue().contains("(data ->> 'revision' = ? OR data ->> 'revision' IS NULL)"), sql.getValue());
+        verify(preparedStatement).setString(5, "0");
+    }
+
+    @Test
+    void storeIfFieldEqualsOrMissing_mismatch_throwsResourceModifiedException() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 1, config);
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(resultSet.next()).thenReturn(true);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeIfFieldEqualsOrMissing(resource, "revision", "0"));
+    }
+
+    @Test
     void storeIfFieldEquals_traversesADottedFieldPath() throws Exception {
         TestConfig config = new TestConfig("value1");
         when(jsonSerialization.serialize(config)).thenReturn("{}");

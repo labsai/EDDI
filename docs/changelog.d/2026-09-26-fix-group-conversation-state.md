@@ -38,9 +38,15 @@ document (`stopIfEndedElsewhere`): gone means deleted, a non-running state means
 `casRunningDiscussion` compared the run claim, and cadence add/delete wrote unconditionally — each a whole-document
 replace. A backlog add read before a cadence claim passed its revision check after it and wrote the claim away
 (run orphaned, pulled tasks back to PENDING and pulled again); a claim wrote back a backlog missing a concurrently
-added task. Now there is one scheme: every write compares and bumps the revision. (Every workspace document carries
-a revision — the field defaults to `"0"` and exists since workspaces do — so a missing one is refused as corrupt;
-`casRunningDiscussion` no longer takes the expected claim, which an unchanged revision already implies.)
+added task. Now there is one scheme: every write compares and bumps the revision. (`casRunningDiscussion` no longer
+takes the expected claim, which an unchanged revision already implies.) Every release that shipped workspaces (6.3.0
+on) persists the `revision` field, but a stored document *without* it — hand-restored, or from a pre-release build —
+would otherwise never be writable: it reads back as the `"0"` default, and on both backends a strict `revision == "0"`
+never matches a missing field (MongoDB's equality filter; PostgreSQL's `data ->> 'revision'` is NULL). So the write at
+revision `"0"` uses a new storage primitive, `IResourceStorage.storeIfFieldEqualsOrMissing` (MongoDB
+`$or: [{revision: "0"}, {revision: null}]`; PostgreSQL `(… = ? OR … IS NULL)`), inside the same atomic write, and
+stamps `"1"`. It stays a CAS: of two writers racing on a revision-less document the first stamps the field and the
+second matches neither branch and loses. A higher revision keeps the strict comparison.
 `IGroupWorkspaceStore.update` is gone. Cadence add/delete are revision-checked with the same re-read-and-retry as
 backlog adds and answer **409** after `MAX_CAS_ATTEMPTS`. A lost add deletes the schedule it just created; a delete
 writes the workspace first and deletes the schedule only once that write has landed, so a 409 leaves cadence and
@@ -58,9 +64,12 @@ id), nothing runs until `launch()` after the claim is won, and a lost claim call
 **Group prompt and record bounds (M-G1, M-G2, M-G3, M-G4, G3)** — the bounds are configurable, with the values
 below as defaults and hard ceilings no config can exceed (see "Config surface").
 - *M-G1* `NegotiationEngine`: one BARGAIN turn records at most 5 concessions, each stored truncated to the quoting
-  bound (600 chars); the ledger stops at 50 (WARN, earliest kept — they are the record the outcome quotes); a turn's
+  bound (600 chars); the ledger stops at 50 (earliest kept — they are the record the outcome quotes); a turn's
   prompt quotes only the newest 20 with "(N earlier concession(s) omitted)", which also bounds ledgers stored before
-  the caps.
+  the caps. Concessions past the ledger cap are counted, not only logged: `NegotiationState.droppedConcessions`
+  (additive; a stored state without it reads 0) feeds "N further concession(s) not recorded (ledger full)" in the
+  AGREEMENT outcome, `tally.concessionsNotRecorded`, and a line in the rendered ledger — so a capped ledger is never
+  presented as the complete record.
 - *M-G2* `VoteTallyEngine`: only what was cast counts. For a JSON ballot only the `vote`/`votes` values are read,
   never the free-text `statement`, which the old fallback scanned; an explicitly empty ballot (`"votes": []`,
   `"vote": null`, or no vote field) is a non-vote; a cast in a shape the method did not ask for still counts when it
@@ -142,12 +151,19 @@ caps. Documented in [`group-conversations.md`](../group-conversations.md).
 [`GroupLifecycleOps.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupLifecycleOps.java),
 [`GroupConversationStore.java`](../../src/main/java/ai/labs/eddi/configs/groups/mongo/GroupConversationStore.java),
 [`GroupWorkspaceStore.java`](../../src/main/java/ai/labs/eddi/configs/groups/mongo/GroupWorkspaceStore.java),
+[`IResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/IResourceStorage.java),
+[`MongoResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/mongo/MongoResourceStorage.java),
+[`PostgresResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorage.java),
+[`NegotiationEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/NegotiationEngine.java),
 [`RestGroupWorkspace.java`](../../src/main/java/ai/labs/eddi/configs/groups/rest/RestGroupWorkspace.java),
 [`TeamCadenceService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/TeamCadenceService.java)
 
 **Tests:** `GroupConversationStateRaceTest` (a CAS fake store: a cancel landing between the boundary re-read and the
 write; a delete mid-run; delete signalling the leg; superseded to FAILED/CLOSED sends a terminal event; a member
 turn failing after a cross-node delete ends as a cancel), `RunningDiscussionWritesTest`, `GroupWorkspaceStoreTest`,
+`GroupWorkspaceStoreMongoContainerTest` / `GroupWorkspaceStorePostgresContainerTest` (Testcontainers: a revision-less
+document's first write lands, two racing first writes → one lands, a stale writer still loses at a stamped `"0"`),
+`MongoResourceStorageTest` / `PostgresResourceStorageTest` (the equals-or-missing filter and predicate),
 `RestGroupWorkspaceTest` (cadence 409s, schedule kept on a lost delete), `TeamCadenceServiceTest` (claim/settle
 retries on the fresh document, prepare → claim →
 launch order, abandon on a lost claim), `NegotiationEngineTest`, `VoteTallyEngineTest`, `PhaseExecutionEngineTest`,

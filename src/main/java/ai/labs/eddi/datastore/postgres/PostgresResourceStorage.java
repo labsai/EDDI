@@ -270,12 +270,27 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-        Resource pgResource = checkInternalResource(newResource);
         // The field path is rendered as a traversal expression rather than bound as
         // a literal key, so a dotted fieldName means the same thing here as it does
         // on MongoDB (which resolves dotted paths natively in its filter).
+        updateIfMatches(newResource, fieldName, expectedValue, toTextPathExpression(fieldName) + " = ?");
+    }
+
+    @Override
+    public void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        // ->> yields SQL NULL for an absent key and for a JSON null alike — parity
+        // with MongoDB's {field: null}. Evaluated inside the one UPDATE, so of two
+        // writers that both read the field-less row only the first matches.
+        String path = toTextPathExpression(fieldName);
+        updateIfMatches(newResource, fieldName, expectedValue, "(" + path + " = ? OR " + path + " IS NULL)");
+    }
+
+    private void updateIfMatches(IResource<T> newResource, String fieldName, String expectedValue, String fieldPredicate)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        Resource pgResource = checkInternalResource(newResource);
         String sql = "UPDATE resources SET version = ?, data = ?::jsonb "
-                + "WHERE id = ?::uuid AND collection_name = ? AND " + toTextPathExpression(fieldName) + " = ?";
+                + "WHERE id = ?::uuid AND collection_name = ? AND " + fieldPredicate;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, pgResource.getVersion());
             ps.setString(2, pgResource.getJson());

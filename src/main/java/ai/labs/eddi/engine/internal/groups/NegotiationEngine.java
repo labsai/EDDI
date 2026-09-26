@@ -233,12 +233,19 @@ public final class NegotiationEngine {
         if (counterProposal) {
             added = addProposal(state, agentId, move.proposalTerms(), round, entryIndex);
         }
-        for (ParsedConcession c : move.concessions()) {
+        List<ParsedConcession> concessions = move.concessions();
+        for (int i = 0; i < concessions.size(); i++) {
             if (state.getConcessions().size() >= maxLedgerConcessions) {
-                LOGGER.warnf("Group %s: the concession ledger is full (%d) — '%s''s further concessions are not recorded",
-                        LogSanitizer.sanitize(gc.getId()), maxLedgerConcessions, LogSanitizer.sanitize(agentId));
+                int dropped = concessions.size() - i;
+                // Counted, not just logged: the outcome quotes the ledger, and a
+                // truncated ledger presented as the whole record would misstate what
+                // was conceded.
+                state.recordDroppedConcessions(dropped);
+                LOGGER.warnf("Group %s: the concession ledger is full (%d) — %d further concession(s) from '%s' not recorded",
+                        LogSanitizer.sanitize(gc.getId()), maxLedgerConcessions, dropped, LogSanitizer.sanitize(agentId));
                 break;
             }
+            ParsedConcession c = concessions.get(i);
             state.addConcession(new Concession(agentId, round, c.gaveUp(), c.inReturnFor(),
                     added != null ? added.id() : null));
         }
@@ -322,11 +329,12 @@ public final class NegotiationEngine {
                     line.put("inReturnFor", c.inReturnFor());
                     return line;
                 }).toList());
+                if (state.getDroppedConcessions() > 0) {
+                    tally.put("concessionsNotRecorded", state.getDroppedConcessions());
+                }
                 String outcome = "Agreement on proposal %s (by %s), signed by all %d participants: %s%s".formatted(
                         p.id(), p.byAgentId(), required.size(), truncate(p.terms()),
-                        state.getConcessions().isEmpty()
-                                ? ""
-                                : " — " + state.getConcessions().size() + " concession(s) on the ledger.");
+                        ledgerSummary(state));
                 gc.setDecision(new DecisionRecord(DecisionType.AGREEMENT, outcome, p.id(), tally, List.of(),
                         METHOD_NEGOTIATION, phaseName, null));
                 LOGGER.infof("Group %s: negotiation reached agreement on proposal %s",
@@ -335,6 +343,24 @@ public final class NegotiationEngine {
             }
         }
         return false;
+    }
+
+    /**
+     * The outcome's ledger clause — empty when nothing was conceded, and naming the
+     * concessions the full ledger dropped so a capped ledger is never presented as
+     * the complete record.
+     */
+    static String ledgerSummary(NegotiationState state) {
+        int recorded = state.getConcessions().size();
+        int dropped = state.getDroppedConcessions();
+        if (recorded == 0 && dropped == 0) {
+            return "";
+        }
+        String summary = " — " + recorded + " concession(s) on the ledger";
+        if (dropped > 0) {
+            summary += ", " + dropped + " further concession(s) not recorded (ledger full)";
+        }
+        return summary + ".";
     }
 
     /**
@@ -409,6 +435,10 @@ public final class NegotiationEngine {
             for (Concession c : ledger.subList(omitted, ledger.size())) {
                 sb.append("- ").append(c.byAgentId()).append(" gave up \"").append(truncate(c.gaveUp()))
                         .append("\" in return for \"").append(truncate(c.inReturnFor())).append("\"\n");
+            }
+            if (state.getDroppedConcessions() > 0) {
+                sb.append("- (").append(state.getDroppedConcessions())
+                        .append(" later concession(s) not recorded — the ledger is full)\n");
             }
         }
         return sb.toString();

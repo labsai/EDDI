@@ -551,4 +551,39 @@ class MongoResourceStorageTest {
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
     }
+    @Test
+    @DisplayName("storeIfFieldEqualsOrMissing — one atomic filter: field equals the value OR is absent/null")
+    void storeIfFieldEqualsOrMissing_filtersEqualsOrNull() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"revision\":\"1\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        when(currentCollection.replaceOne(filter.capture(), any(Document.class))).thenReturn(updateResult);
+
+        storage.storeIfFieldEqualsOrMissing(resource, "revision", "0");
+
+        String rendered = filter.getValue()
+                .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        // {revision: null} is what matches an ABSENT field in MongoDB; without it a
+        // document stored before the field existed would never match.
+        assertTrue(rendered.contains("\"$or\""), rendered);
+        assertTrue(rendered.contains("\"revision\": \"0\""), rendered);
+        assertTrue(rendered.contains("\"revision\": null"), rendered);
+        verify(currentCollection, never()).countDocuments(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeIfFieldEqualsOrMissing — a stamped mismatch is still a ResourceModifiedException")
+    void storeIfFieldEqualsOrMissing_mismatch() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"revision\":\"1\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+        var updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(currentCollection.replaceOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeIfFieldEqualsOrMissing(resource, "revision", "0"));
+    }
 }
