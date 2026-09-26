@@ -20,6 +20,49 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 #   EDDI Health:     http://localhost:7070/q/health
 ```
 
+## Scraping with authentication on
+
+`/q/metrics` requires authentication (`eddi.metrics.http-policy`, default
+`authenticated`), because the exposition describes the deployment — agent ids,
+traffic, error rates, providers. So once OIDC is on
+(`quarkus.oidc.tenant-enabled=true` — `install.sh --full`, the compose auth
+overlay, the Kubernetes auth component, `eddi.oidc.enabled` in Helm) an anonymous
+Prometheus scrape gets **401** and the `eddi` target shows DOWN. Pick one:
+
+**1. Give Prometheus a token (recommended).** Prometheus can run the OAuth2
+client-credentials flow itself and refresh the token as it expires. Create a
+confidential client for it in the `eddi` realm:
+
+- *Client authentication* **on**, *Service accounts roles* **on**, every other
+  flow off;
+- a protocol mapper of type *Audience* that includes `eddi-backend` in the access
+  token — EDDI refuses tokens without that audience;
+- the `openid` client scope (a default scope in the shipped realm) — EDDI calls
+  userinfo on every request, and Keycloak answers it only for `openid` tokens.
+
+No realm role is needed: `/q/metrics` asks for an authenticated caller, nothing
+more. Then add to the `eddi` job in `prometheus.yml`:
+
+```yaml
+    oauth2:
+      client_id: eddi-metrics
+      client_secret_file: /etc/prometheus/secrets/client-secret
+      token_url: http://keycloak:8080/realms/eddi/protocol/openid-connect/token
+      scopes: [openid]
+```
+
+and mount the client secret at that path. (The token's issuer is whatever
+Keycloak stamps — `KC_HOSTNAME` — and EDDI checks it against
+`quarkus.oidc.token.issuer`, so it validates the same way the Manager's tokens do.)
+
+**2. Open `/q/metrics` where it cannot be reached from outside.**
+`EDDI_METRICS_HTTP_POLICY=permit` (Helm: `eddi.metrics.httpPolicy=permit`) lets
+anyone who can reach the path read it. That is reasonable when only Prometheus can:
+EDDI's port is not published beyond the host, or a NetworkPolicy admits only
+Prometheus, **and** no ingress route forwards `/q/*` (the Helm chart's ingress
+routes every path by default). Otherwise it publishes the exposition to whoever
+can reach EDDI.
+
 ## Architecture
 
 ```text
@@ -248,7 +291,7 @@ template variable pair scopes the whole thing.
 ## Production Checklist
 
 - [ ] Set `QUARKUS_OTEL_SDK_DISABLED=false` and `QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT` to your trace collector
-- [ ] Configure Prometheus to scrape `/q/metrics` (see `prometheus.yml`)
+- [ ] Configure Prometheus to scrape `/q/metrics` (see `prometheus.yml`) — with OIDC on it needs a token; see [Scraping with authentication on](#scraping-with-authentication-on)
 - [ ] Import Grafana dashboard and configure alert notification channels
 - [ ] **Keep `GRAFANA_ADMIN_PASSWORD` secret** — the compose overlay has no default for it; a Grafana volume created before that change still has `admin`/`admin` until you change it (re-running the installer does)
 - [ ] **Restrict Jaeger UI access** — Jaeger 2.x has no built-in auth; put it behind a reverse proxy or restrict to internal network

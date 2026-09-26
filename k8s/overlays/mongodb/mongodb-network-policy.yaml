@@ -1,0 +1,35 @@
+# MongoDB accepts connections from the EDDI pod and nothing else.
+#
+# The production component's NetworkPolicy isolates EDDI; nothing isolated the
+# database, so any pod in the cluster could reach it on its Service. A bare
+# podSelector (no namespaceSelector) means "pods in this policy's namespace",
+# whatever kustomize renames it to. `kubectl exec` and `kubectl port-forward` do
+# not traverse pod networking, so neither is affected; a backup job that
+# connects over the network needs a policy of its own.
+#
+# Needs a CNI that enforces NetworkPolicy; without one it is inert, and
+# authentication (mongodb-secrets) is the only control.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongodb
+  labels:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mongodb
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eddi
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 27017

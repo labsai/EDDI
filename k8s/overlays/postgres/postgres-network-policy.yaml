@@ -1,0 +1,27 @@
+# PostgreSQL accepts connections from the EDDI pod and nothing else — the same
+# reasoning as k8s/overlays/mongodb/mongodb-network-policy.yaml. Needs a CNI
+# that enforces NetworkPolicy; without one it is inert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eddi
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 5432

@@ -619,15 +619,18 @@ EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
 ```bash
 # Kustomize overlays — create the vault Secret first, then apply
 bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
+# ...plus the database credentials, which are no longer shipped: mongodb-secrets
+# (MongoDB runs authenticated) or postgres-secrets — commands in the Kubernetes Guide
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
 # Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
-# Helm (renders the Secret itself, so the key is a required value)
+# Helm (renders the Secrets itself, so the key and the MongoDB password are required values)
 helm install eddi ./helm/eddi \
   --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.auth.password="$(openssl rand -hex 24)" \
   --namespace eddi --create-namespace
 ```
 

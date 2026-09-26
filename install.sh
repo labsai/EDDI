@@ -1829,6 +1829,12 @@ print_success() {
     echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(admin / GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env)${RESET}"
     echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:${PROMETHEUS_PORT}${RESET}"
     echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:${JAEGER_PORT}${RESET}  ${DIM}(trace visualization)${RESET}"
+    if [[ "$WITH_AUTH" == "true" ]]; then
+      # /q/metrics is authenticated once Keycloak is on, so the stock scrape
+      # config gets 401 — say so rather than leave an empty dashboard.
+      echo -e "  ${YELLOW}⚠️${RESET}  ${DIM}With Keycloak on, Prometheus needs a token to scrape EDDI (the target shows DOWN until then):${RESET}"
+      echo -e "     ${DIM}https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#scraping-with-authentication-on${RESET}"
+    fi
   fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then

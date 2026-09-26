@@ -16,6 +16,27 @@ data:
     scrape_configs:
       - job_name: 'eddi'
         metrics_path: '/q/metrics'
+        # With authentication on (the auth component), /q/metrics answers 401
+        # to an anonymous scrape and this target shows DOWN. Either give
+        # Prometheus a token — uncomment ONE of the blocks below — or, with
+        # /q/metrics unreachable from outside the cluster, set
+        # QUARKUS_HTTP_AUTH_PERMISSION_METRICS_POLICY=permit on EDDI.
+        # docs/monitoring/monitoring-guide.md ("Scraping with authentication
+        # on") walks through both.
+        #
+        # a) OAuth2 client credentials — Prometheus fetches and refreshes the
+        #    token itself. The client needs a service account, the
+        #    eddi-backend audience mapper and the openid scope (EDDI calls
+        #    userinfo on every request):
+        # oauth2:
+        #   client_id: eddi-metrics
+        #   client_secret_file: /etc/prometheus/secrets/client-secret
+        #   token_url: http://keycloak:8080/realms/eddi/protocol/openid-connect/token
+        #   scopes: [openid]
+        #
+        # b) A bearer token you rotate yourself:
+        # authorization:
+        #   credentials_file: /etc/prometheus/secrets/token
         kubernetes_sd_configs:
           - role: pod
             # own_namespace, not a literal name: kustomize's namespace
@@ -64,9 +85,21 @@ metadata:
     app.kubernetes.io/component: monitoring
     app.kubernetes.io/part-of: eddi
 ---
-# RBAC — ClusterRole for pod/service/endpoint read access
+# RBAC — a namespaced Role, not a ClusterRole.
+#
+# The scrape config discovers pods in its OWN namespace only
+# (kubernetes_sd_configs → namespaces.own_namespace), so read access to pods,
+# services and endpoints cluster-wide was never used — it just meant that
+# anything able to act as this ServiceAccount could enumerate every workload
+# in the cluster. kustomize's namespace transformer sets metadata.namespace on
+# both objects below and on the subject, so a renamed namespace keeps working.
+#
+# ⚠️  UPGRADING: `kubectl apply -k` does not prune, so the old cluster-scoped
+# objects stay behind until you delete them:
+#   kubectl delete clusterrolebinding eddi-prometheus
+#   kubectl delete clusterrole eddi-prometheus
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: eddi-prometheus
   labels:
@@ -78,7 +111,7 @@ rules:
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: eddi-prometheus
   labels:
@@ -86,7 +119,7 @@ metadata:
     app.kubernetes.io/part-of: eddi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: eddi-prometheus
 subjects:
   - kind: ServiceAccount
@@ -190,6 +223,17 @@ data:
         editable: false
 ---
 # Grafana Deployment
+#
+# ⚠️  CREATE THE GRAFANA ADMIN SECRET FIRST — the pod does not start without it.
+# GF_SECURITY_ADMIN_PASSWORD used to be the literal "admin", on a Service any
+# pod in the namespace can reach:
+#
+#   kubectl create secret generic grafana-admin -n eddi \
+#     --from-literal=password="$(openssl rand -base64 24)"
+#
+# Without it the pod stays in CreateContainerConfigError with
+# `secret "grafana-admin" not found`.
+#
 # Note: Uses emptyDir for storage — dashboards created in the UI and the metric
 # cache are not persistent. The datasource IS, because it is provisioned from
 # the ConfigMap above; add dashboards the same way (a ConfigMap mounted at
@@ -215,6 +259,9 @@ spec:
         app.kubernetes.io/component: monitoring
         app.kubernetes.io/part-of: eddi
     spec:
+      # Grafana never calls the Kubernetes API (Prometheus does — its
+      # ServiceAccount keeps its token for pod discovery).
+      automountServiceAccountToken: false
       containers:
         - name: grafana
           image: grafana/grafana:11.1.0
@@ -224,8 +271,14 @@ spec:
           env:
             - name: GF_SECURITY_ADMIN_USER
               value: "admin"
+            # No default and not optional: a missing Secret fails closed.
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: "admin"
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
           volumeMounts:
             - name: grafana-data
               mountPath: /var/lib/grafana
