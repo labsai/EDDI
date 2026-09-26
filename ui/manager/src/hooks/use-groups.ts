@@ -19,6 +19,7 @@ import {
   type AgentGroupConfiguration,
   type GroupConversationState,
 } from "@/lib/api/groups";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 
 const GROUPS_KEY = ["groups"] as const;
 export const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
@@ -120,10 +121,21 @@ export function useCreateGroup() {
   });
 }
 
+/**
+ * Save a group config. Resolves with the version the save CREATED.
+ *
+ * Every PUT makes a new version and the backend refuses a write to one that is
+ * no longer current, so the caller must move onto `version` — a page that kept
+ * the version it was opened with showed the pre-save document on the next
+ * refetch (the edit "reverted") and 409'd on its next save or delete.
+ *
+ * The saved document is seeded into the cache under the new version, so a page
+ * that switches to it renders the edit at once instead of a loading state.
+ */
 export function useUpdateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       id,
       version,
       config,
@@ -131,8 +143,16 @@ export function useUpdateGroup() {
       id: string;
       version: number;
       config: AgentGroupConfiguration;
-    }) => updateGroup(id, version, config),
-    onSuccess: () => {
+    }): Promise<{ location: string; version: number | null }> => {
+      const result = await updateGroup(id, version, config);
+      // `null` only when the server named no version — the save itself worked,
+      // so it is not failed over that; the caller just cannot move forward.
+      return { location: result.location, version: parseVersionFromLocation(result.location) };
+    },
+    onSuccess: (result, { id, config }) => {
+      if (result.version !== null) {
+        queryClient.setQueryData([...GROUPS_KEY, id, result.version], config);
+      }
       queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
     },
   });

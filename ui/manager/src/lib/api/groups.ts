@@ -2059,6 +2059,13 @@ export async function deleteGroupWithMembers(
   }
   if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
 
+  // The group goes FIRST. It is the one delete here that can be refused (a 409
+  // when `version` is no longer current, e.g. a page still on the version it
+  // was opened with after a save), and it used to run last: every member agent
+  // was already soft-deleted when it failed, leaving a live group of deleted
+  // agents. Refused now, it throws before any member is touched.
+  await deleteGroup(groupId, version, false);
+
   // Soft-delete each agent at its current version (best-effort)
   const memberDeletes = Array.from(agentIds).map(async (agentId) => {
     try {
@@ -2070,7 +2077,4 @@ export async function deleteGroupWithMembers(
   });
 
   await Promise.allSettled(memberDeletes);
-
-  // Soft-delete the group itself
-  await deleteGroup(groupId, version, false);
 }

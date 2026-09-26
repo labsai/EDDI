@@ -189,4 +189,40 @@ describe("deleteGroupWithMembers", () => {
       expect(path).toContain("version=5");
     }
   });
+
+  it("touches no member agent when the group delete is refused", async () => {
+    // A page still on a superseded version gets a 409 for the group. That delete
+    // used to run last, after every member had already been soft-deleted.
+    const { api } = await import("../../api-client");
+    const { deleteGroupWithMembers } = await import("../groups");
+    vi.mocked(api.get).mockReset().mockResolvedValue(5);
+    vi.mocked(api.delete)
+      .mockReset()
+      .mockImplementation(async (path: string) => {
+        if (path.includes("groupstore/groups/")) {
+          throw Object.assign(new Error("Conflict"), { status: 409 });
+        }
+        return undefined;
+      });
+
+    await expect(
+      deleteGroupWithMembers("grp1", 1, {
+        name: "Test Group",
+        description: "Test",
+        members: [
+          { agentId: "agent-a", memberType: "AGENT", displayName: "A", speakingOrder: null, role: null },
+        ],
+        moderatorAgentId: "agent-mod",
+        style: "ROUND_TABLE",
+        maxRounds: 3,
+        phases: null,
+        protocol: null,
+      }),
+    ).rejects.toThrow("Conflict");
+
+    const agentDeletes = vi
+      .mocked(api.delete)
+      .mock.calls.filter(([path]) => (path as string).includes("agentstore/agents/"));
+    expect(agentDeletes).toEqual([]);
+  });
 });
