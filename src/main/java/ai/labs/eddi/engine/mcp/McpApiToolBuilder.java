@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.core.util.Yaml;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -233,8 +236,15 @@ public final class McpApiToolBuilder {
      * local files (e.g. {@code file:///etc/passwd}) or using other non-http schemes
      * (classpath:, jar:, ftp:). Private/internal hosts are intentionally still
      * permitted so internal OpenAPI specs remain discoverable (the calling REST/MCP
-     * surface is {@code eddi-admin}/{@code eddi-editor} gated). Inline JSON/YAML
-     * content is parsed directly without any network access.
+     * surface is {@code eddi-admin}/{@code eddi-editor} gated).
+     * <p>
+     * Inline JSON/YAML content may only use local references
+     * ({@code $ref: '#/components/...'}); see {@link #rejectExternalRefs(String)}.
+     * With resolution on and no base location, swagger-parser resolves any other
+     * {@code $ref} itself — {@code ./secret.yaml} and {@code /etc/passwd} against
+     * the server's working directory, {@code http://127.0.0.1/...} over the network
+     * — and the content it read surfaced in the generated httpcalls config. So the
+     * reference, not the fetch, is refused.
      */
     public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
@@ -242,7 +252,11 @@ public final class McpApiToolBuilder {
 
         SwaggerParseResult result;
         if (looksLikeInlineSpec(specInput)) {
-            // Inline JSON or YAML content — no network/file access.
+            // Inline JSON or YAML content. Resolution stays on for the local
+            // references the builder relies on (component parameters, request
+            // bodies); anything pointing outside the document is refused first, so
+            // the resolver has nothing to fetch.
+            rejectExternalRefs(specInput);
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
             // Remote location. Enforce an http(s) scheme so the parser's fetcher
@@ -265,6 +279,53 @@ public final class McpApiToolBuilder {
         }
 
         return result.getOpenAPI();
+    }
+
+    /**
+     * Refuses an inline spec containing any {@code $ref} that is not a local JSON
+     * pointer ({@code #/...}).
+     * <p>
+     * Why not simply {@code setResolve(false)}: the builder reads parameters,
+     * request bodies and responses as resolved objects, so a spec declaring
+     * {@code $ref: '#/components/parameters/Limit'} would lose that parameter.
+     * Local references need no I/O; only external ones do, and an inline spec has
+     * no location they could legitimately be relative to.
+     * <p>
+     * A document that does not parse as YAML/JSON is left for swagger-parser to
+     * reject with its own message. Package-private for the test.
+     *
+     * @throws IllegalArgumentException
+     *             naming the first external reference found
+     */
+    static void rejectExternalRefs(String specInput) {
+        JsonNode root;
+        try {
+            // YAML is a superset of JSON, so one mapper reads both forms.
+            root = Yaml.mapper().readTree(specInput);
+        } catch (JsonProcessingException e) {
+            return;
+        }
+        Deque<JsonNode> pending = new ArrayDeque<>();
+        if (root != null) {
+            pending.push(root);
+        }
+        while (!pending.isEmpty()) {
+            JsonNode node = pending.pop();
+            if (node.isObject()) {
+                JsonNode ref = node.get("$ref");
+                if (ref != null && ref.isTextual() && !ref.asText().startsWith("#")) {
+                    throw new IllegalArgumentException("Inline OpenAPI specs may only use local references (#/...); found external $ref '"
+                            + abbreviate(ref.asText()) + "'. Inline the referenced definition, or import the spec by its http(s) URL.");
+                }
+                node.elements().forEachRemaining(pending::push);
+            } else if (node.isArray()) {
+                node.elements().forEachRemaining(pending::push);
+            }
+        }
+    }
+
+    private static String abbreviate(String value) {
+        return value.length() > 120 ? value.substring(0, 120) + "..." : value;
     }
 
     /**
