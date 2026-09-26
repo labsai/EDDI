@@ -91,8 +91,27 @@ public class VaultSecretProvider implements ISecretProvider {
     private final Instance<SealedDataRotationParticipant> rotationParticipants;
 
     private byte[] kek; // Key Encryption Key derived from master key
-    private byte[] checksumKey; // KEK-derived HMAC key for keyed secret checksums
     private boolean available = false;
+
+    /**
+     * Deployment-wide HMAC key for keyed secret checksums. Random, generated once
+     * and persisted <em>KEK-wrapped</em> (and re-wrapped on KEK rotation) so it
+     * survives rotation (see {@link #checksumKey()}); loaded lazily.
+     * Package-private for tests.
+     */
+    volatile byte[] checksumKey;
+
+    /**
+     * Production opt-out for the master-key strength gate, mirroring
+     * {@code eddi.security.allow-unauthenticated}. When {@code true}, a weak master
+     * key downgrades the production boot failure to a WARN so a brownfield
+     * deployment can boot, rotate to a strong key, and then remove the flag —
+     * rather than being wedged (a weak-but-functional key cannot be changed without
+     * a booted vault to run {@code rotate-kek}). Field-injected so the test seam
+     * constructor need not carry it. Package-private for tests.
+     */
+    @ConfigProperty(name = "eddi.vault.allow-weak-master-key", defaultValue = "false")
+    boolean allowWeakMasterKey;
 
     // ─── Metrics ───
     private Counter resolveCounter;
@@ -163,25 +182,37 @@ public class VaultSecretProvider implements ISecretProvider {
 
         // Refuse to protect real secrets with a weak or publicly-known master key.
         // Fails startup in production, warns (and continues) in development/test —
-        // the same production-only enforcement AuthStartupGuard applies to OIDC.
+        // the same production-only enforcement AuthStartupGuard applies to OIDC. The
+        // eddi.vault.allow-weak-master-key opt-out downgrades the production failure to
+        // a WARN so a brownfield deployment on a weak key can boot, rotate to a strong
+        // key, and remove the flag — instead of being wedged (the key cannot be changed
+        // without a booted vault).
         VaultMasterKeyStrength.weakness(masterKeyConfig.get()).ifPresent(reason -> {
-            if (getLaunchMode() == LaunchMode.NORMAL) {
+            boolean prod = getLaunchMode() == LaunchMode.NORMAL;
+            if (prod && !allowWeakMasterKey) {
                 throw new IllegalStateException("[VAULT] Refusing to start: " + reason + ". "
                         + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase (at least " + VaultMasterKeyStrength.MIN_LENGTH
-                        + " characters). The installer can generate one for you.");
+                        + " characters); the installer can generate one. If you must boot on the current key to migrate off it, set "
+                        + "eddi.vault.allow-weak-master-key=true, then rotate the key (POST /secretstore/secrets/admin/rotate-kek) and "
+                        + "remove the flag.");
             }
-            LOGGER.warnf("[VAULT] %s. This is tolerated in %s mode but would FAIL startup in production. "
-                    + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase.", reason, getLaunchMode().name().toLowerCase());
+            if (prod) {
+                LOGGER.warnf("[VAULT] %s. Booting anyway because eddi.vault.allow-weak-master-key=true — rotate to a strong key via "
+                        + "POST /secretstore/secrets/admin/rotate-kek and remove the flag.", reason);
+            } else {
+                LOGGER.warnf("[VAULT] %s. This is tolerated in %s mode but would FAIL startup in production. "
+                        + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase.", reason, getLaunchMode().name().toLowerCase());
+            }
         });
 
         // Initialize per-deployment salt (generates on first boot, loads on subsequent)
         saltManager.initialize();
 
         this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get(), saltManager.getSalt());
-        // Keyed-checksum key, domain-separated from the KEK's DEK-wrapping use. Derived
-        // once here so store()/matchesChecksum() never touch the KEK directly.
-        this.checksumKey = VaultChecksum.deriveKey(this.kek);
         this.available = true;
+        // The keyed-checksum key is loaded lazily (see checksumKey()), not derived from
+        // the KEK here: it must survive KEK rotation, so it is a random deployment key
+        // persisted sealed rather than a function of the rotating master key.
 
         if (saltManager.isUsingLegacySalt()) {
             LOGGER.warn("[VAULT] Using legacy fixed salt for KEK derivation. "
@@ -263,7 +294,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // read access could brute-force offline or use to link equal values across
             // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
             // and migrate to this form the next time they are written.
-            String checksum = VaultChecksum.compute(checksumKey, reference.tenantId(), plaintext);
+            String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
 
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
@@ -388,7 +419,7 @@ public class VaultSecretProvider implements ISecretProvider {
     public boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
         // Holds the keyed-checksum key, so it can verify both the current keyed form
         // and legacy bare SHA-256 rows written before the upgrade.
-        return VaultChecksum.matches(checksumKey, tenantId, storedChecksum, plaintext);
+        return VaultChecksum.matches(checksumKey(), tenantId, storedChecksum, plaintext);
     }
 
     @Override
@@ -657,6 +688,17 @@ public class VaultSecretProvider implements ISecretProvider {
                 persistence.upsertDek(encDek);
             }
 
+            // Phase 2b: Re-wrap the checksum key with the new KEK, exactly like a DEK, so
+            // it decrypts to the SAME random value after rotation and every stored h1:
+            // checksum keeps verifying. Without this, a KEK rotation would strand the
+            // checksum key and turn a legitimate same-value re-setup into a spurious
+            // "value does not match" failure. Absent (never created yet) → nothing to do.
+            String storedChecksumKey = persistence.getMetaValue(CHECKSUM_KEY_META);
+            if (storedChecksumKey != null) {
+                byte[] rawChecksumKey = unwrapChecksumKeyWith(storedChecksumKey, oldKek);
+                persistence.setMetaValue(CHECKSUM_KEY_META, wrapChecksumKey(rawChecksumKey, newKek));
+            }
+
             // Phase 3: Persist new salt AFTER DEKs are re-encrypted.
             // If this fails, DEKs are on newKek but salt in DB is still legacy.
             // The operator can retry — the legacy salt is a known constant.
@@ -664,10 +706,10 @@ public class VaultSecretProvider implements ISecretProvider {
                 saltManager.migrateSalt(newSalt);
             }
 
-            // Update our in-memory KEK to the new one, and re-derive the checksum key
-            // from it so newly written checksums use a key consistent with the new KEK.
+            // Update our in-memory KEK and drop the cached checksum key so the next use
+            // re-reads it (now wrapped with the new KEK). It unwraps to the same value.
             this.kek = newKek;
-            this.checksumKey = VaultChecksum.deriveKey(newKek);
+            this.checksumKey = null;
 
             LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
                     migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
@@ -866,6 +908,97 @@ public class VaultSecretProvider implements ISecretProvider {
      */
     LaunchMode getLaunchMode() {
         return LaunchMode.current();
+    }
+
+    /** Meta key under which the sealed deployment checksum key is persisted. */
+    private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
+    /**
+     * The deployment-wide keyed-checksum HMAC key, loaded (or created) on first
+     * use.
+     * <p>
+     * It is a <b>random</b> key, generated once and persisted <b>wrapped by the
+     * KEK</b> (like a DEK), never derived from the KEK. Wrapping — rather than
+     * deriving — is what lets it survive KEK rotation: {@link #rotateKek} re-wraps
+     * it with the new KEK just as it re-wraps the DEKs, so it unwraps to the same
+     * value before and after rotation and every {@code h1:} checksum keeps
+     * verifying. A KEK-<em>derived</em> key would change on rotation and turn a
+     * legitimate same-value re-setup into a spurious "value does not match"
+     * failure.
+     * <p>
+     * It is kept secret from a database-read attacker (the whole point of a keyed
+     * checksum) precisely because it is stored KEK-wrapped, not in the clear like
+     * the salt. Unlike a DEK-sealed key, wrapping touches no tenant DEK, so first
+     * use does not create a default-tenant DEK as a side effect.
+     */
+    private byte[] checksumKey() {
+        byte[] k = checksumKey;
+        if (k != null) {
+            return k;
+        }
+        synchronized (this) {
+            if (checksumKey == null) {
+                checksumKey = loadOrCreateChecksumKey();
+            }
+            return checksumKey;
+        }
+    }
+
+    /**
+     * Load the KEK-wrapped checksum key from the meta store, or create, wrap and
+     * persist a fresh random one. Concurrent creators converge by re-reading the
+     * meta value after writing it (last write wins), so all nodes end on one key.
+     * Falls back to a KEK-derived key only if the store is unreachable — logged,
+     * with the caveat that such a key does not survive KEK rotation.
+     */
+    private byte[] loadOrCreateChecksumKey() {
+        try {
+            String stored = persistence.getMetaValue(CHECKSUM_KEY_META);
+            if (stored != null) {
+                return unwrapChecksumKey(stored);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[VAULT] Could not read the persisted checksum key (%s); will attempt to create one", e.getClass().getSimpleName());
+        }
+        try {
+            byte[] raw = new byte[32];
+            new SecureRandom().nextBytes(raw);
+            persistence.setMetaValue(CHECKSUM_KEY_META, wrapChecksumKey(raw, kek));
+            // Re-read so racing creators on other nodes converge on the winning value
+            // rather than each keeping its own random key (which would make checksums
+            // written by one node unverifiable by another).
+            String confirmed = persistence.getMetaValue(CHECKSUM_KEY_META);
+            return confirmed != null ? unwrapChecksumKey(confirmed) : raw;
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[VAULT] Could not persist a KEK-wrapped checksum key; falling back to a KEK-derived key. "
+                    + "Checksums will NOT survive KEK rotation until the persisted key can be written.");
+            return VaultChecksum.deriveKey(kek);
+        }
+    }
+
+    /**
+     * {@code iv|ciphertext} (both base64) of the checksum key wrapped by
+     * {@code wrapKek}.
+     */
+    private static String wrapChecksumKey(byte[] rawKey, byte[] wrapKek) {
+        EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encryptDek(rawKey, wrapKek);
+        return enc.iv() + "|" + enc.ciphertext();
+    }
+
+    private byte[] unwrapChecksumKey(String serialized) {
+        return unwrapChecksumKeyWith(serialized, kek);
+    }
+
+    /**
+     * As {@link #unwrapChecksumKey} but with an explicit KEK — used during KEK
+     * rotation.
+     */
+    private static byte[] unwrapChecksumKeyWith(String serialized, byte[] kekToUse) {
+        String[] parts = serialized.split("\\|", 2);
+        if (parts.length != 2) {
+            throw new IllegalStateException("Malformed persisted checksum key");
+        }
+        return EnvelopeCrypto.decryptDek(parts[1], parts[0], kekToUse);
     }
 
     /**

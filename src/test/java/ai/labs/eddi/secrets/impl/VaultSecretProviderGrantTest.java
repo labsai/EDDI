@@ -466,4 +466,39 @@ class VaultSecretProviderGrantTest {
             assertTrue(provider.matchesChecksum(REF.tenantId(), checksum, PLAINTEXT));
         });
     }
+
+    @Test
+    @DisplayName("finding #2: a keyed checksum still verifies after KEK rotation + restart (checksum key survives)")
+    void checksumSurvivesKekRotation() throws Exception {
+        // Store a secret; its h1: checksum is written with the deployment checksum key,
+        // which is itself persisted SEALED under a tenant DEK.
+        storeSecret(List.of("*"));
+        String checksumBefore = provider.getMetadata(REF).checksum();
+        assertTrue(checksumBefore.startsWith("h1:"), checksumBefore);
+        assertTrue(provider.matchesChecksum(TENANT_ID, checksumBefore, PLAINTEXT));
+
+        // Rotate the KEK — re-wraps every DEK, including the one the checksum key is
+        // sealed under, but does not change any DEK's plaintext.
+        String newMasterKey = "rotated-master-key-98765432109876";
+        provider.rotateKek(MASTER_KEY, newMasterKey);
+
+        // A fresh provider on the NEW master key (the post-rotation restart), sharing
+        // the
+        // same persistence, must unseal the SAME checksum key and still verify the
+        // pre-rotation checksum. A KEK-derived checksum key would change here and turn
+        // a
+        // legitimate same-value re-setup into a spurious "value does not match"
+        // failure.
+        VaultSaltManager saltManager2 = mock(VaultSaltManager.class);
+        when(saltManager2.getSalt()).thenReturn(FIXED_SALT);
+        when(saltManager2.isUsingLegacySalt()).thenReturn(false);
+        VaultSecretProvider provider2 = new VaultSecretProvider(Optional.of(newMasterKey), persistence, saltManager2, new SimpleMeterRegistry());
+        provider2.initMetrics();
+        provider2.onStartup(mock(StartupEvent.class));
+
+        String checksumAfter = provider2.getMetadata(REF).checksum();
+        assertEquals(checksumBefore, checksumAfter, "the stored checksum bytes are unchanged by KEK rotation");
+        assertTrue(provider2.matchesChecksum(TENANT_ID, checksumAfter, PLAINTEXT),
+                "the same value must still match its checksum after KEK rotation + restart — proving the checksum key is stable");
+    }
 }
