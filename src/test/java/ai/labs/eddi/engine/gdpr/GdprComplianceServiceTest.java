@@ -150,8 +150,9 @@ class GdprComplianceServiceTest {
         assertEquals(15, result.auditEntriesPseudonymized());
         assertNotNull(result.completedAt());
 
-        // Verify cascade order: all stores called
-        verify(userMemoryStore).deleteAllForUser(USER_ID);
+        // Verify cascade order: all stores called (user memories twice: step 1 and
+        // the re-sweep for writes that landed while the cascade ran)
+        verify(userMemoryStore, times(2)).deleteAllForUser(USER_ID);
         verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
         verify(userConversationStore).deleteAllForUser(USER_ID);
         verify(databaseLogs).pseudonymizeByUserId(eq(USER_ID), anyString());
@@ -1739,7 +1740,7 @@ class GdprComplianceServiceTest {
 
         GdprDeletionResult result = serviceWithFailingCache.deleteUserData(USER_ID);
 
-        verify(userMemoryStore).deleteAllForUser(USER_ID);
+        verify(userMemoryStore, times(2)).deleteAllForUser(USER_ID); // step 1 + the re-sweep
         assertEquals(42, result.memoriesDeleted(),
                 "the delete succeeded, so the response must not report zero memories erased");
         assertFalse(result.failedSteps().contains("userMemories"),

@@ -59,6 +59,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.*;
 import java.util.Stack;
+import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.enterprise.event.Event;
 import static org.junit.jupiter.api.Assertions.*;
@@ -1020,5 +1021,33 @@ class ConversationServiceTest {
         snapshot.getRedoCache().push(redoStep);
 
         return snapshot;
+    }
+    /**
+     * H9b: a GDPR erasure signals the user's turns running on this node through the
+     * cooperative cancel flag, so a turn's teardown does not write the memories the
+     * cascade has just deleted back into the store.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void stopInFlightWork_cancelsOnlyTheErasedUsersTurns() throws Exception {
+        var field = ConversationService.class.getDeclaredField("inFlightConversations");
+        field.setAccessible(true);
+        var inFlight = (ConcurrentHashMap<String, IConversationMemory>) field.get(conversationService);
+        IConversationMemory erased1 = mock(IConversationMemory.class);
+        IConversationMemory erased2 = mock(IConversationMemory.class);
+        IConversationMemory other = mock(IConversationMemory.class);
+        when(erased1.getUserId()).thenReturn("erased-user");
+        when(erased2.getUserId()).thenReturn("erased-user");
+        when(other.getUserId()).thenReturn("someone-else");
+        inFlight.put("c1", erased1);
+        inFlight.put("c2", erased2);
+        inFlight.put("c3", other);
+
+        assertEquals(2, conversationService.stopInFlightWork("erased-user"));
+
+        verify(erased1).setCancelled(true);
+        verify(erased2).setCancelled(true);
+        verify(other, never()).setCancelled(anyBoolean());
+        assertEquals(0, conversationService.stopInFlightWork(null));
     }
 }

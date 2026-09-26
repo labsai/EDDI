@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
@@ -90,7 +91,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * @author ginccc
  */
 @ApplicationScoped
-public class ConversationService implements IConversationService {
+public class ConversationService implements IConversationService, UserErasureParticipant {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
@@ -456,6 +457,35 @@ public class ConversationService implements IConversationService {
         } finally {
             recordMetrics(timerConversationStart, counterConversationStart, startTime);
         }
+    }
+
+    @Override
+    public String erasureStepName() {
+        return "inFlightConversations";
+    }
+
+    /**
+     * GDPR erasure: signals every turn running on this node for {@code userId} to
+     * stop, through the same cooperative flag {@link #cancelConversation} sets. A
+     * cancelled turn skips its longTerm write-back to user memory
+     * ({@code Conversation.isTurnDiscarded}) and its snapshot is discarded, so
+     * nothing it computed outlives the erasure. Matched on the live memory's user,
+     * not on a stored lookup, so a turn whose conversation the cascade has not
+     * reached yet — or one started a moment ago — is caught too.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (IConversationMemory memory : inFlightConversations.values()) {
+            if (userId.equals(memory.getUserId())) {
+                memory.setCancelled(true);
+                signalled++;
+            }
+        }
+        return signalled;
     }
 
     @Override
