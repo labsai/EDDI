@@ -140,16 +140,24 @@ function applyColorOverrides(params: URLSearchParams): void {
 
 /**
  * Sanitize the `?apiServer=` param so it can never redirect API traffic
- * off-origin. Only a same-origin relative path is accepted (the dev proxy and
- * sub-path deployments use one). Anything absolute — a full URL, a
- * protocol-relative `//host`, or a backslash trick — is dropped with a warning,
- * so a crafted link cannot point the widget's bearer token at an attacker host.
+ * off-origin. This is an ALLOW-list, not a deny-list: the value must be a clean
+ * same-origin absolute path (a single leading `/`, as the dev proxy and sub-path
+ * deployments use). A deny-list was bypassable — `?apiServer=%09https://attacker`
+ * decodes to a leading TAB, which no scheme/`//`/`\` test matches, but the WHATWG
+ * URL parser strips before resolving, turning `${base}${path}` into the attacker
+ * origin and leaking the bearer token. So anything carrying a control character
+ * or whitespace (the smuggling vector), a backslash, or not starting with a
+ * single `/` is rejected.
  */
 export function sanitizeApiServer(raw: string | null): string | null {
   if (!raw) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//") || raw.includes("\\")) {
+  const rejected =
+    /[\u0000- \u007f\\]/.test(raw) || // control chars, whitespace, DEL, backslash
+    !raw.startsWith("/") || // must be an absolute path...
+    raw.startsWith("//"); // ...but not a protocol-relative //host
+  if (rejected) {
     console.warn(
-      "[eddi-chat] ignoring apiServer query param: only same-origin relative paths are allowed",
+      "[eddi-chat] ignoring apiServer query param: only a clean same-origin path (single leading '/') is allowed",
     );
     return null;
   }

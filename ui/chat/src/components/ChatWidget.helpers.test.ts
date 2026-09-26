@@ -68,6 +68,19 @@ describe("sanitizeApiServer", () => {
     expect(sanitizeApiServer("javascript:alert(1)")).toBe(null);
     vi.restoreAllMocks();
   });
+
+  it("ignores control-char / whitespace-prefixed absolute URLs (deny-list bypass)", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // %09 decodes to a leading TAB the URL parser strips → would resolve to the
+    // attacker origin. Also leading space and an embedded newline.
+    expect(sanitizeApiServer("\thttps://attacker.example")).toBe(null);
+    expect(sanitizeApiServer(" https://attacker.example")).toBe(null);
+    expect(sanitizeApiServer("/api\nhttps://attacker.example")).toBe(null);
+    expect(sanitizeApiServer("\n//attacker.example")).toBe(null);
+    // A value that does not start with a path separator is not a same-origin path.
+    expect(sanitizeApiServer("eddi")).toBe(null);
+    vi.restoreAllMocks();
+  });
 });
 
 describe("parseAllowedTokenOrigins", () => {
