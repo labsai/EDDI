@@ -42,8 +42,17 @@ const REMARK_PLAIN: PluggableList = [remarkGfm];
 /**
  * Links open in a new tab. A plain link navigated the widget itself away —
  * inside an iframe that is the whole chat, and the conversation was lost.
+ *
+ * Same-page anchors (`#…`, which is what GFM footnote references are) stay in
+ * the page: in a new tab they booted the widget again and started a second
+ * conversation. `node` is react-markdown's AST node, not an attribute; spread
+ * onto the element it rendered as node="[object Object]".
  */
-function MarkdownLink(props: ComponentPropsWithoutRef<"a">) {
+function MarkdownLink({
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  if (props.href?.startsWith("#")) return <a {...props} />;
   return <a {...props} target="_blank" rel="noopener noreferrer" />;
 }
 const COMPONENTS: Components = { a: MarkdownLink };

@@ -38,9 +38,12 @@ function loadHighlight(): Promise<HighlightPlugins> {
   return highlightPromise;
 }
 
-/** A `$…$` / `$$…$$` span, or a `\(…\)` / `\[…\]` one. Cheap and permissive. */
+/**
+ * A `$$…$$` span — the only math syntax enabled (see rich-math.ts). Single
+ * dollars are prices far more often than formulas.
+ */
 export function looksLikeMath(text: string): boolean {
-  return /\$[^$\s][^$]*\$|\\\(|\\\[/.test(text);
+  return /\$\$[\s\S]*?\S[\s\S]*?\$\$/.test(text);
 }
 
 /** A fenced code block. Inline code is not highlighted, so it does not count. */

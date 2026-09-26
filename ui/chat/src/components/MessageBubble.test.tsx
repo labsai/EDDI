@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MessageBubble } from "./MessageBubble";
+import { looksLikeMath } from "./markdown-plugins";
+import { markdownLink } from "@/api/sse-events";
+
+describe("looksLikeMath", () => {
+  it("is true only for a $$…$$ span", () => {
+    expect(looksLikeMath("$$x^2$$")).toBe(true);
+    expect(looksLikeMath("inline $$a+b$$ here")).toBe(true);
+    expect(looksLikeMath("It costs $5 and $10 today")).toBe(false);
+    expect(looksLikeMath("$x$")).toBe(false);
+    expect(looksLikeMath("$$ $$")).toBe(false);
+  });
+});
 import { ChatProvider } from "@/store/chat-store";
 import type { ChatMessage } from "@/types";
 
@@ -57,6 +69,36 @@ describe("MessageBubble", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it("renders a built applicationLink with a space and brackets as one link", () => {
+    renderBubble({
+      id: "17",
+      role: "agent",
+      content: markdownLink("See [docs]", "/help page(1)"),
+      timestamp: 0,
+    });
+    const link = screen.getByRole("link", { name: "See [docs]" });
+    expect(link).toHaveAttribute("href", "/help%20page(1)");
+  });
+
+  it("does not leak react-markdown's node prop onto the link", () => {
+    renderBubble({ id: "15", role: "agent", content: "[docs](https://eddi.labs.ai)", timestamp: 0 });
+    expect(screen.getByRole("link", { name: "docs" })).not.toHaveAttribute("node");
+  });
+
+  it("keeps same-page anchors and footnote references in the page", () => {
+    renderBubble({
+      id: "16",
+      role: "agent",
+      content: "See the [top](#top) and a note[^1].\n\n[^1]: The note.",
+      timestamp: 0,
+    });
+    const anchors = screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("#"));
+    expect(anchors.length).toBeGreaterThan(1);
+    for (const a of anchors) {
+      expect(a).not.toHaveAttribute("target");
+    }
+  });
+
   it("does not render an image the model put in its text", () => {
     // Markdown and raw HTML alike: a model-chosen image URL is a beacon.
     const { container } = renderBubble({
@@ -87,11 +129,26 @@ describe("MessageBubble", () => {
     const { container } = renderBubble({
       id: "11",
       role: "agent",
-      content: "Euler: $e^{i\\pi} + 1 = 0$",
+      content: "Euler: $$e^{i\\pi} + 1 = 0$$",
       timestamp: 0,
     });
     // KaTeX is loaded on demand, the first time a message needs it.
     await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
+  });
+
+  it("leaves dollar amounts alone — single dollars are not math", async () => {
+    // With single-dollar math on, "$5 and $10" rendered the span between the
+    // prices as a formula ("It costs 5and5 and 10 today").
+    const { container } = renderBubble({
+      id: "14",
+      role: "agent",
+      content: "It costs $5 and $10 today. $$x^2$$",
+      timestamp: 0,
+    });
+    // Wait for the math chunk (the $$ span loads it), then check the prices.
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
+    expect(container.textContent).toContain("It costs $5 and $10 today.");
+    expect(container.querySelectorAll(".katex")).toHaveLength(1);
   });
 
   it("highlights a fenced code block with a language", async () => {
