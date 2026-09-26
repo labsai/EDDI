@@ -80,8 +80,11 @@ src/
   only the non-streaming snapshot.
 - **The route's environment must be sent** as `?environment=` on start; the
   backend defaults a missing one to production.
-- **`input:initial` is raw even for a secret turn.** The turn output's `input`
-  (`<secret input>`) is the masked display copy — use it when rebuilding.
+- **The turn output's `input` is the masked display copy** — `<secret input>`
+  for a turn sent with `secretInput`. Use it when rebuilding: the engine now
+  scrubs `input:initial` when a secret turn ends, but conversations stored
+  before that fix still carry it raw.
+- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
   the snapshot to refresh them.
