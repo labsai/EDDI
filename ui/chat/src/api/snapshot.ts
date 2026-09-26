@@ -63,10 +63,10 @@ export function stepsToMessages(
         if (!text) continue;
         // The turn output's `input` is the masked display copy — "<secret
         // input>" for a secret turn — and is what makes a secret turn
-        // recognisable after a reload. The engine now also scrubs
-        // `input:initial` when a secret turn ends, but conversations stored
-        // before that still carry it raw, so the mask is applied here too. The
-        // session's own record covers a backend that sends neither.
+        // recognisable after a reload. The engine scrubs a secret turn when it
+        // ends and masks older stored turns on read, so `input:initial` reads
+        // the placeholder too; masking here as well covers an older backend.
+        // The session's own record covers a backend that sends neither.
         messages.push(
           makeMessage(
             "user",
