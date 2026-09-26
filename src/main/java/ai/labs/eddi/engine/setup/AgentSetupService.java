@@ -223,6 +223,7 @@ public class AgentSetupService {
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // vaultKeyName alone is enough: it names a key the vault already holds, which
         // is the whole point of provisioning a second agent against an existing one.
@@ -475,6 +476,7 @@ public class AgentSetupService {
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
         }
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // See setupAgent: vaultKeyName alone names a key the vault already holds.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
@@ -868,6 +870,24 @@ public class AgentSetupService {
                 params.put("modelName", modelId);
                 // Auth via OCI config file (~/.oci/config)
             }
+            case "huggingface" -> {
+                // HuggingFaceLanguageModelBuilder reads modelId and accessToken. The
+                // default branch below wrote modelName and apiKey, which it ignores:
+                // the agent deployed, then failed on its first turn with no model.
+                params.put("modelId", modelId);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    params.put("accessToken", apiKey);
+                }
+            }
+            case "gemini-vertex" -> {
+                // VertexGeminiLanguageModelBuilder reads modelId (modelName is not
+                // one of its parameters). Authentication is Google's Application
+                // Default Credentials, so no key is written. projectId and location
+                // are required as well and neither setup request carries them;
+                // the Manager's wizards therefore do not offer this provider, and
+                // an agent created here needs both added in the LLM configuration.
+                params.put("modelId", modelId);
+            }
             default -> {
                 params.put("modelName", modelId);
                 if (apiKey != null && !apiKey.isBlank()) {
@@ -998,7 +1018,7 @@ public class AgentSetupService {
                     continue;
                 }
                 Map<String, String> parameters = task.getParameters() != null ? task.getParameters() : Map.of();
-                String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"));
+                String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"), parameters.get("accessToken"));
                 // A reference, not a secret — see the method Javadoc.
                 // Full-pattern match, not isVaultReference: that only asks whether the
                 // value CONTAINS "${vault:", so "plaintext${vault:key}" would be
@@ -1674,6 +1694,25 @@ public class AgentSetupService {
     }
 
     // ==================== Static Utility Methods ====================
+
+    /**
+     * Refuse a provider setup cannot turn into a working agent, before anything is
+     * created or vaulted.
+     * <p>
+     * {@code gemini-vertex} needs a GCP {@code projectId} and {@code location}
+     * (langchain4j refuses to build the model without either), and neither setup
+     * request carries them. Setup used to accept it anyway: it demanded an API key
+     * the provider never reads, vaulted that key under a new name, and produced an
+     * agent that deployed and then failed on its first turn. The caller is told how
+     * to get there instead.
+     */
+    static void rejectUnprovisionableProvider(String provider) throws AgentSetupException {
+        if (provider != null && "gemini-vertex".equals(provider.trim().toLowerCase())) {
+            throw new AgentSetupException("Provider 'gemini-vertex' cannot be set up here: it requires a GCP projectId and location, "
+                    + "which the setup request does not carry. Create the agent with another provider, then switch its LLM "
+                    + "configuration to gemini-vertex and set projectId and location there.");
+        }
+    }
 
     /**
      * Check if the given provider is a local LLM (no API key needed).

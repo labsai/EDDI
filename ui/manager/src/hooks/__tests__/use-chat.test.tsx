@@ -656,6 +656,10 @@ describe("useSendMessage", () => {
       http.post("*/agents/:conversationId", () => {
         return new HttpResponse(null, { status: 409 });
       }),
+      // A 409 is read as a pause only when the conversation says so.
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+      ),
     );
 
     const { result } = renderHook(() => useSendMessage(), {

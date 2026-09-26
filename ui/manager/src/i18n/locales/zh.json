@@ -550,7 +550,10 @@
     "toolCount": "已选 {{selected}}/{{total}}",
     "specTooLarge": "该规范过大，无法在此加载",
     "specUrlInvalid": "这不是有效的 URL",
-    "specUrlScheme": "仅支持 http:// 和 https:// 网址"
+    "specUrlScheme": "仅支持 http:// 和 https:// 网址",
+    "lastToolHint": "至少必须保留一个已选工具。关闭内置工具即可全部禁用。",
+    "hfToken": "Hugging Face 令牌",
+    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -747,7 +750,8 @@
     "errorConversationEnded": "该会话已结束。",
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
-    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。"
+    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
+    "sendRejected": "您的消息未发送：{{reason}}"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -1315,7 +1319,8 @@
     "streamingTimeoutSeconds": "流式传输超时（秒）",
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
-    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。"
+    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",

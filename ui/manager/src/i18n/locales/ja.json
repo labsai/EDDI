@@ -550,7 +550,10 @@
     "toolCount": "{{total}}中 {{selected}}を選択",
     "specTooLarge": "この仕様は大きすぎるため、ここでは読み込めません",
     "specUrlInvalid": "有効な URL ではありません",
-    "specUrlScheme": "http:// と https:// の URL のみサポートされています"
+    "specUrlScheme": "http:// と https:// の URL のみサポートされています",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには組み込みツールをオフにしてください。",
+    "hfToken": "Hugging Face トークン",
+    "hfTokenHint": "アクセス制限付きまたはプライベートのリポジトリでのみ必要です。API キーと同様に保管庫に保存されます。"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -747,7 +750,8 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "sendRejected": "メッセージは送信されませんでした: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -1315,7 +1319,8 @@
     "streamingTimeoutSeconds": "ストリーミングタイムアウト（秒）",
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
-    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。"
+    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",

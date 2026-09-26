@@ -551,7 +551,10 @@
     "toolCount": "{{selected}} de {{total}} selecionadas",
     "specTooLarge": "Esta especificação é grande demais para ser carregada aqui",
     "specUrlInvalid": "Esse não é um URL válido",
-    "specUrlScheme": "Apenas URLs http:// e https:// são suportados"
+    "specUrlScheme": "Apenas URLs http:// e https:// são suportados",
+    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desative as ferramentas integradas para as desativar todas.",
+    "hfToken": "Token do Hugging Face",
+    "hfTokenHint": "Só é necessário para repositórios restritos ou privados. É guardado no cofre como uma chave de API."
   },
   "packages": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O workflow e todos os seus dados serão removidos permanentemente.",
@@ -757,7 +760,8 @@
     "errorConversationEnded": "Esta conversa terminou.",
     "errorAgentNotReady": "Este agente ainda não está implementado no ambiente selecionado.",
     "errorAgentMismatch": "Esta conversa pertence a outra versão do agente.",
-    "errorQuotaUnavailable": "Não foi possível verificar os limites de utilização neste momento. Tente novamente daqui a pouco."
+    "errorQuotaUnavailable": "Não foi possível verificar os limites de utilização neste momento. Tente novamente daqui a pouco.",
+    "sendRejected": "A sua mensagem não foi enviada: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -1329,7 +1333,8 @@
     "streamingTimeoutSeconds": "Tempo limite de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Substitui o padrão do mecanismo (120s). Aplica-se apenas durante o streaming; vazio = usar o padrão.",
     "taskPricing": "Preços de chamadas simples",
-    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0."
+    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0.",
+    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas."
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",

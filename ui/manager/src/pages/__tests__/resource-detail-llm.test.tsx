@@ -497,6 +497,30 @@ describe("LangChain Editor", () => {
     });
   });
 
+  // The backend reads an empty whitelist as "no whitelist", i.e. EVERY tool, so
+  // deselecting the last chip used to flip the task to all tools.
+  it("cannot deselect the last whitelisted tool", async () => {
+    const user = userEvent.setup();
+    renderLlmPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("tool-chip-calculator")).toBeInTheDocument();
+    });
+
+    // Mock whitelist is ["calculator", "datetime"]; drop datetime first.
+    await user.click(screen.getByTestId("tool-chip-datetime"));
+    await waitFor(() => {
+      expect(screen.getByTestId("tool-chip-datetime").getAttribute("aria-pressed")).toBe("false");
+    });
+
+    const last = screen.getByTestId("tool-chip-calculator");
+    expect(last).toBeDisabled();
+    await user.click(last);
+
+    expect(screen.getByTestId("tool-chip-calculator").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("tool-mode-specific").getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByTestId("all-tools-info")).not.toBeInTheDocument();
+  });
+
   it("unchecks enable-httpcall-tools checkbox", async () => {
     const user = userEvent.setup();
     renderLlmPage();

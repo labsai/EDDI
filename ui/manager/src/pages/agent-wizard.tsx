@@ -36,7 +36,13 @@ import {
   type CreateApiAgentRequest,
   type SetupResult,
 } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
+import {
+  MODEL_SUGGESTIONS,
+  acceptsOptionalToken,
+  isBaseUrlRequired,
+  isProvisionableBySetup,
+  supportsBaseUrl,
+} from "@/lib/model-suggestions";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -144,10 +150,14 @@ export function AgentWizardPage() {
 
   function handleProviderChange(providerId: string) {
     const config = getProviderConfig(providerId);
+    const previous = getProviderConfig(state.provider);
     update({
       provider: providerId,
       model: "",
-      apiKey: config?.needsKey === false ? "" : state.apiKey,
+      // Carried over only between two providers that both take an API key. A
+      // Jlama Hugging Face token must not become an OpenAI key, nor the other
+      // way round (it would be sent to Hugging Face as authToken).
+      apiKey: config?.needsKey && previous?.needsKey ? state.apiKey : "",
       // A provider with no endpoint hides the field, so a URL left over from
       // the previous provider would be submitted with no way to see or clear
       // it. What the user cannot see, the wizard does not send.
@@ -201,6 +211,10 @@ export function AgentWizardPage() {
           model: state.model,
           apiKey: state.apiKey || undefined,
           apiBaseUrl: state.apiBaseUrl || undefined,
+          // The LLM's OWN endpoint (Ollama, a proxy). The Model step collects it
+          // for both modes, but this request never sent it, so an API agent on
+          // Ollama was created with the backend's default URL whatever was typed.
+          llmBaseUrl: state.baseUrl || undefined,
           apiAuth: state.apiAuth || undefined,
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
@@ -775,7 +789,7 @@ function LlmStep({
               className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
               data-testid="wizard-provider"
             >
-              {LLM_PROVIDERS.map((p) => (
+              {LLM_PROVIDERS.filter((p) => isProvisionableBySetup(p.id)).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -837,6 +851,35 @@ function LlmStep({
               placeholder="sk-..."
               testId="wizard-apikey"
             />
+          </div>
+        )}
+
+        {/* Optional token (Jlama: Hugging Face access token for gated or
+            private repositories). The backend writes it to the builder's
+            authToken; without this field there was no way to set it here. */}
+        {acceptsOptionalToken(provider) && (
+          <div>
+            <label
+              htmlFor="wizard-apikey"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.hfToken", "Hugging Face token")}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({t("setupWizard.optional", "optional")})
+              </span>
+            </label>
+            <SecretKeyPicker
+              value={apiKey}
+              onChange={onApiKeyChange}
+              placeholder="hf_..."
+              testId="wizard-apikey"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(
+                "setupWizard.hfTokenHint",
+                "Only needed for gated or private repositories. It is stored in the vault like an API key."
+              )}
+            </p>
           </div>
         )}
 
@@ -1397,18 +1440,34 @@ function FeaturesStep({
                       <div className="flex flex-wrap gap-1.5" data-testid="wizard-tools-whitelist">
                         {BUILT_IN_TOOLS.map((tool) => {
                           const selected = currentTools.includes(tool);
+                          // The last selected tool cannot be deselected. An
+                          // empty whitelist is not "no tools" to the backend but
+                          // "no whitelist", i.e. EVERY tool, so emptying the
+                          // list used to silently grant all of them. Turning
+                          // built-in tools off is the way to have none.
+                          const isLastSelected = selected && currentTools.length === 1;
                           return (
                             <button
                               key={tool}
                               type="button"
                               aria-pressed={selected}
+                              disabled={isLastSelected}
+                              title={
+                                isLastSelected
+                                  ? t(
+                                      "setupWizard.lastToolHint",
+                                      "At least one tool must stay selected. Turn built-in tools off to disable them all.",
+                                    )
+                                  : undefined
+                              }
                               onClick={() => {
+                                if (isLastSelected) return;
                                 const next = selected
                                   ? currentTools.filter((item) => item !== tool)
                                   : [...currentTools, tool];
-                                onChange({ builtInToolsWhitelist: next.length > 0 ? next.join(",") : "" });
+                                onChange({ builtInToolsWhitelist: next.join(",") });
                               }}
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition-all ${
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed ${
                                 selected
                                   ? "bg-primary/15 text-primary border border-primary/30 shadow-sm"
                                   : "bg-secondary/50 text-muted-foreground border border-transparent hover:border-border hover:text-foreground"

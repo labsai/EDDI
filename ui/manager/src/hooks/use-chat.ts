@@ -29,6 +29,8 @@ import {
   parseConversationUri,
   type ConversationDescriptor,
   type SimpleConversationMemorySnapshot,
+  type SimpleConversationStep,
+  type ConversationOutput,
   type InputField,
   extractInput,
   extractOutput,
@@ -44,6 +46,17 @@ import {
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { isApiError } from "@/lib/api-client";
+import { toast } from "sonner";
+
+/**
+ * What a secret turn shows in place of its text, live and on every rebuild from
+ * a snapshot (the backend stores its own placeholder there; see
+ * displayedUserInput).
+ */
+const SECRET_BUBBLE = "●●●●●●●●";
+
+/** The placeholder EDDI writes as a secret turn's displayed input (MemoryKeys.SECRET_INPUT_PLACEHOLDER). */
+const BACKEND_SECRET_PLACEHOLDER = "<secret input>";
 
 /** An uploaded attachment being sent with a turn (context ref + display preview). */
 export interface SentAttachment extends AttachmentRef {
@@ -98,6 +111,13 @@ function revokeOrphanedPreviews(prev: ChatMessage[], next: ChatMessage[]): void 
   );
 }
 
+/**
+ * Monotonic ticket for conversation loads — see loadConversationIntoStore.
+ * Also advanced whenever the transcript is replaced (agent picked, cleared,
+ * reset), so a load already in flight can never install over the replacement.
+ */
+let latestLoadRequest = 0;
+
 // --- Zustand Store ---
 
 interface ChatState {
@@ -121,6 +141,19 @@ interface ChatState {
   isPaused: boolean;
   /** Approver-facing reason for the pause, when the backend reported one. */
   pauseReason: string | null;
+  /**
+   * Bumped whenever the transcript on screen stops being the one a send in
+   * flight belongs to: another agent picked, another conversation loaded, a
+   * new one started, the store reset. A send captures it when it starts and
+   * writes nothing once it has moved on.
+   *
+   * Without it a streamed reply kept appending to "the last agent message" of
+   * whatever the store held by then. Switch conversation or agent mid-stream
+   * and A's tokens landed in B's bubble, and A's `done` snapped B's last reply
+   * to A's text. The conversation id alone is not enough: reloading the SAME
+   * conversation rebuilds the transcript under the stream too.
+   */
+  conversationEpoch: number;
 
   // Actions
   setSelectedAgent: (agentId: string | null, agentName: string | null) => void;
@@ -165,15 +198,38 @@ export const useChatStore = create<ChatState>((set) => ({
   isSecretMode: false,
   isPaused: false,
   pauseReason: null,
+  conversationEpoch: 0,
 
+  // Everything that belonged to the previous agent's conversation goes with it.
+  // Its quick replies and a requested input field used to survive the switch,
+  // so the new agent opened offering the old one's buttons, or asking for the
+  // old one's API key. isProcessing/isThinking are reset because a send still
+  // running for the old conversation is detached (see conversationEpoch) and
+  // must not keep the new one's input locked.
   setSelectedAgent: (agentId, agentName) =>
-    set({
-      selectedAgentId: agentId,
-      selectedAgentName: agentName,
-      conversationId: null,
-      messages: [],
-      isPaused: false,
-      pauseReason: null,
+    set((s) => {
+      revokeMessagePreviews(s.messages);
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
+      return {
+        selectedAgentId: agentId,
+        selectedAgentName: agentName,
+        conversationId: null,
+        messages: [],
+        isProcessing: false,
+        isThinking: false,
+        undoAvailable: false,
+        redoAvailable: false,
+        quickReplies: [],
+        activeInputField: null,
+        isSecretMode: false,
+        isPaused: false,
+        pauseReason: null,
+        conversationEpoch: s.conversationEpoch + 1,
+      };
     }),
 
   setConversationId: (id) => set({ conversationId: id }),
@@ -219,7 +275,27 @@ export const useChatStore = create<ChatState>((set) => ({
   clearMessages: () =>
     set((s) => {
       revokeMessagePreviews(s.messages);
-      return { messages: [], conversationId: null, undoAvailable: false, redoAvailable: false, quickReplies: [], activeInputField: null, isSecretMode: false, isPaused: false, pauseReason: null };
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
+      return {
+        messages: [],
+        conversationId: null,
+        // A send still in flight belongs to the transcript being cleared; it is
+        // detached (conversationEpoch) and must not hold the next one's input.
+        isProcessing: false,
+        isThinking: false,
+        undoAvailable: false,
+        redoAvailable: false,
+        quickReplies: [],
+        activeInputField: null,
+        isSecretMode: false,
+        isPaused: false,
+        pauseReason: null,
+        conversationEpoch: s.conversationEpoch + 1,
+      };
     }),
 
   setUndoRedo: (undo, redo) => set({ undoAvailable: undo, redoAvailable: redo }),
@@ -247,6 +323,11 @@ export const useChatStore = create<ChatState>((set) => ({
   reset: () =>
     set((s) => {
       revokeMessagePreviews(s.messages);
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
       return {
         messages: [],
         conversationId: null,
@@ -261,6 +342,7 @@ export const useChatStore = create<ChatState>((set) => ({
         isSecretMode: false,
         isPaused: false,
         pauseReason: null,
+        conversationEpoch: s.conversationEpoch + 1,
       };
     }),
 }));
@@ -275,16 +357,19 @@ export function useDeployedAgents() {
     queryKey: [...CHAT_KEY, "deployedAgents"],
     queryFn: async () => {
       const descriptors = await getAgentDescriptors(500, 0, "");
-      // Deduplicate by name, keep latest version
+      // One entry per agent ID, keeping its latest version. This used to key
+      // on the NAME, so two distinct agents that happened to share one (two
+      // "Support Bot"s, a copy that kept its original's name) collapsed into a
+      // single picker entry and the other could not be chatted with at all.
       const grouped = new Map<
         string,
         AgentDescriptor & { id: string; version: number }
       >();
       for (const agent of descriptors) {
         const { id, version } = parseResourceUri(agent.resource);
-        const existing = grouped.get(agent.name);
+        const existing = grouped.get(id);
         if (!existing || version > existing.version) {
-          grouped.set(agent.name, { ...agent, id, version });
+          grouped.set(id, { ...agent, id, version });
         }
       }
       const agents = Array.from(grouped.values());
@@ -331,7 +416,14 @@ export function useStartConversation() {
   const store = useChatStore;
   return useMutation({
     mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+      // The store may move on while this runs (another agent picked, another
+      // conversation opened). The conversation is still created, but it must
+      // not be installed over whatever the user is looking at by then.
+      const epoch = store.getState().conversationEpoch;
+      const isCurrent = () => store.getState().conversationEpoch === epoch;
+
       const conversationId = await startConversation(environment, agentId);
+      if (!isCurrent()) return conversationId;
       store.getState().setConversationId(conversationId);
 
       // GET immediately to pick up any welcome message
@@ -341,9 +433,14 @@ export function useStartConversation() {
         conversationId,
         false
       );
+      if (!isCurrent()) return conversationId;
 
       // Convert welcome steps to ChatMessages — one bubble per output part
       const outputs = snapshot.conversationOutputs ?? [];
+      // A greeting can already ask for a secret ("paste your API key"). Only
+      // the newest output's request is live.
+      const inputField = extractInputField(outputs[outputs.length - 1]);
+      if (inputField) store.getState().setInputField(inputField);
       for (const output of outputs) {
         const parts = extractOutputParts(output);
         for (const part of parts) {
@@ -366,6 +463,93 @@ export function useStartConversation() {
   });
 }
 
+/**
+ * A send the backend refused WITHOUT consuming it — the transcript must not keep
+ * the optimistic user message.
+ *
+ * `paused` is decided by the conversation's actual state, not by the status
+ * code. A 409 from `say` used to be read as "awaiting approval" unconditionally,
+ * but the same status also answers "processing another turn — retry shortly",
+ * "agent version mismatch" and, once the queued-turn fix lands, "the
+ * conversation changed while your message was queued". Each of those showed
+ * the approval banner over a conversation nobody could approve.
+ */
+class RejectedSendError extends Error {
+  readonly paused: boolean;
+
+  constructor(message: string, paused: boolean) {
+    super(message);
+    this.name = "RejectedSendError";
+    this.paused = paused;
+  }
+}
+
+/**
+ * Stream error codes that mean the input was refused BEFORE the turn started,
+ * so it was never consumed. They are the codes
+ * `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` emits for the
+ * conditions the non-streaming twin answers with a status (409, 410, 404, 413,
+ * 429, 403, 503). A failure DURING a turn arrives as an opaque error without a
+ * code and keeps the error bubble, because that turn did run.
+ *
+ * Exported for tests, which pin the list against the backend's.
+ */
+export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
+  "awaiting_approval",
+  "conversation_not_found",
+  "input_too_large",
+  "conversation_ended",
+  "agent_not_ready",
+  "agent_mismatch",
+  "quota_accounting_unavailable",
+  "quota_exceeded",
+  "processing_restricted",
+  "restriction_status_unavailable",
+]);
+
+/**
+ * How long a stream detached from the transcript on screen is left to finish
+ * before it is aborted. Draining lets the turn the user already sent complete
+ * on the server (closing the stream cancels it there), but a proxy that
+ * swallows the terminal frame would otherwise keep the fetch and its mutation
+ * open for good, one more per switch.
+ */
+export const DETACHED_STREAM_GRACE_MS = 120_000;
+
+/** The `{message, code}` an SSE `error` frame carries; raw text when it is not JSON. */
+function parseStreamError(data: string): { message: string; code?: string } {
+  try {
+    const parsed = JSON.parse(data);
+    return {
+      message: parsed && typeof parsed.message === "string" ? parsed.message : data,
+      code: parsed && typeof parsed.code === "string" ? parsed.code : undefined,
+    };
+  } catch {
+    return { message: data };
+  }
+}
+
+/**
+ * Turn a 409 on a send into a {@link RejectedSendError}, reading the
+ * conversation to learn whether it is really paused. Anything else passes
+ * through untouched.
+ *
+ * A failed read keeps the old reading (paused): it is still the most common
+ * cause, and the banner links to the conversation page, which shows the real
+ * state.
+ */
+async function classifyRejectedSend(error: unknown, conversationId: string): Promise<unknown> {
+  if (!isApiError(error) || error.status !== 409) return error;
+  let paused = true;
+  try {
+    const snapshot = await readConversation("production", "", conversationId, true);
+    paused = snapshot.conversationState === "AWAITING_HUMAN";
+  } catch {
+    // keep paused
+  }
+  return new RejectedSendError(error.message, paused);
+}
+
 /** Send a message — auto-branches between streaming and non-streaming.
  *  Supports secret mode: masks user message and sends secretInput context. */
 export function useSendMessage() {
@@ -385,6 +569,10 @@ export function useSendMessage() {
   // fresh null — and the rollback below silently never ran.
   const pendingUserMessageIdRef = useRef<string | null>(null);
   return useMutation({
+    // The transcript this send belongs to, handed to onError: an error from a
+    // send whose conversation is no longer on screen must not be written into
+    // the one that is.
+    onMutate: () => ({ epoch: store.getState().conversationEpoch }),
     mutationFn: async ({
       message,
       isSecret,
@@ -400,6 +588,8 @@ export function useSendMessage() {
       if (!selectedAgentId || !conversationId) {
         throw new Error("No active conversation");
       }
+      const epoch = state.conversationEpoch;
+      const isCurrent = () => store.getState().conversationEpoch === epoch;
 
       // Build the turn context: secret-input flag + attachment_* keys.
       // A secret turn never forwards attachments — a masked turn must not leak a
@@ -421,7 +611,7 @@ export function useSendMessage() {
       state.addMessage({
         id: userMessageId,
         role: "user",
-        content: isSecret ? "●●●●●●●●" : message,
+        content: isSecret ? SECRET_BUBBLE : message,
         timestamp: Date.now(),
         attachments: !isSecret && attachments?.length
           ? attachments.map(toMessageAttachment)
@@ -434,10 +624,10 @@ export function useSendMessage() {
       // (or if the backend rejects the send with 409 in onError).
       state.setPaused(false, null);
 
-      // Clear input field state after send
-      if (isSecret) {
-        state.clearInputField();
-      }
+      // A requested input field is good for one answer. Whatever this turn
+      // replies decides whether the next one needs it again — on the streaming
+      // path too, which is the default and used to ignore the request entirely.
+      state.clearInputField();
 
       if (streamingEnabled) {
         // --- Streaming path ---
@@ -467,38 +657,84 @@ export function useSendMessage() {
         // set; it is a no-op when the previous turn ended cleanly.
         useDebugStore.getState().finalizeTurn();
 
-        const events = sendMessageStreaming(
-          "production",
-          selectedAgentId,
-          conversationId,
-          hasContext ? { input: message, context } : { input: message },
-          abort.signal,
-        );
+        // Once the user moves to another transcript this stream is detached.
+        // Bound how long it may keep draining (see DETACHED_STREAM_GRACE_MS).
+        // A store subscription rather than a check per event, because the
+        // case being bounded is exactly the one where no further event comes.
+        let detachTimer: ReturnType<typeof setTimeout> | undefined;
+        const unsubscribe = store.subscribe((s) => {
+          if (s.conversationEpoch !== epoch && detachTimer === undefined) {
+            detachTimer = setTimeout(() => abort.abort(), DETACHED_STREAM_GRACE_MS);
+          }
+        });
 
         try {
-          for await (const event of events) {
-            const isDone = handleSSEEvent(event, store, t);
-            if (isDone) {
-              // Stream is logically complete — abort the fetch so the
-              // reader.read() promise resolves immediately and the
-              // mutation can finish.
-              abort.abort();
-              break;
+          const events = sendMessageStreaming(
+            "production",
+            selectedAgentId,
+            conversationId,
+            hasContext ? { input: message, context } : { input: message },
+            abort.signal,
+          );
+
+          try {
+            for await (const event of events) {
+              if (!isCurrent()) {
+                // Detached: the user has moved to another transcript. The turn
+                // still runs to completion on the server (closing early could
+                // be read as the client giving up on it), but nothing it sends
+                // belongs on screen any more.
+                if (event.type === "done" || event.type === "error") {
+                  abort.abort();
+                  break;
+                }
+                continue;
+              }
+              if (event.type === "error") {
+                const { message: reason, code } = parseStreamError(event.data);
+                // The streaming twins of the non-streaming refusals: the input
+                // was NOT consumed, so it is rolled back like a refused status
+                // instead of staying in the transcript above an error bubble.
+                // Only awaiting_approval is a pause; the rest say why the
+                // message was not sent.
+                if (code && UNCONSUMED_STREAM_ERROR_CODES.has(code)) {
+                  useDebugStore.getState().finalizeTurn();
+                  abort.abort();
+                  throw new RejectedSendError(
+                    translateStreamError(code, t) ?? reason,
+                    code === "awaiting_approval",
+                  );
+                }
+              }
+              const isDone = handleSSEEvent(event, store, t);
+              if (isDone) {
+                // Stream is logically complete — abort the fetch so the
+                // reader.read() promise resolves immediately and the
+                // mutation can finish.
+                abort.abort();
+                break;
+              }
+            }
+          } catch (e) {
+            // AbortError is expected when we abort after "done"
+            if (e instanceof DOMException && e.name === "AbortError") {
+              // expected — swallow
+            } else {
+              throw e;
             }
           }
         } catch (e) {
-          // AbortError is expected when we abort after "done"
-          if (e instanceof DOMException && e.name === "AbortError") {
-            // expected — swallow
-          } else {
-            throw e;
-          }
+          // A refusal before the stream opens arrives as a status, not a frame.
+          throw await classifyRejectedSend(e, conversationId);
+        } finally {
+          unsubscribe();
+          if (detachTimer !== undefined) clearTimeout(detachTimer);
         }
         // Safety-net: if the stream ended without a done event
         // (e.g. connection drop), finalize it here — the debug turn too, so
         // the next turn's live status line does not open on this turn's
         // events.
-        if (store.getState().isProcessing) {
+        if (isCurrent() && store.getState().isProcessing) {
           store.getState().finishStreaming();
           useDebugStore.getState().finalizeTurn();
         }
@@ -518,21 +754,29 @@ export function useSendMessage() {
         });
 
         let snapshot;
-        if (hasContext) {
-          snapshot = await sendMessageWithContext(
-            "production",
-            selectedAgentId,
-            conversationId,
-            { input: message, context }
-          );
-        } else {
-          snapshot = await sendMessage(
-            "production",
-            selectedAgentId,
-            conversationId,
-            message
-          );
+        try {
+          if (hasContext) {
+            snapshot = await sendMessageWithContext(
+              "production",
+              selectedAgentId,
+              conversationId,
+              { input: message, context }
+            );
+          } else {
+            snapshot = await sendMessage(
+              "production",
+              selectedAgentId,
+              conversationId,
+              message
+            );
+          }
+        } catch (e) {
+          throw await classifyRejectedSend(e, conversationId);
         }
+
+        // Detached while waiting: the reply belongs to a transcript that is
+        // no longer on screen.
+        if (!isCurrent()) return;
 
         // Extract agent output parts from the last conversationOutput
         const lastOutput = snapshot.conversationOutputs?.[
@@ -576,17 +820,18 @@ export function useSendMessage() {
         }
       }
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
       const state = store.getState();
-      // A 409 means the conversation is paused awaiting human approval — the
-      // send was rejected WITHOUT being consumed. Show the localized pause
-      // banner (via isPaused) instead of a raw error bubble.
-      if (isApiError(error) && error.status === 409) {
+      // The send belonged to a transcript that is no longer on screen; the one
+      // that is must not receive its rollback, its banner or its error bubble.
+      if (context && context.epoch !== state.conversationEpoch) return;
+
+      if (error instanceof RejectedSendError) {
         // The send was rejected without being consumed. Drop the trailing empty
         // placeholder bubble (streaming or non-streaming) so no perpetual typing
-        // indicator lingers beneath the pause banner, AND the optimistic user
-        // message itself — otherwise it stays in the transcript looking sent
-        // even though the backend never received it.
+        // indicator lingers, AND the optimistic user message itself — otherwise
+        // it stays in the transcript looking sent even though the backend never
+        // received it.
         const rejectedUserMessageId = pendingUserMessageIdRef.current;
         pendingUserMessageIdRef.current = null;
         store.setState((s) => {
@@ -600,9 +845,19 @@ export function useSendMessage() {
           if (rejected) revokeMessagePreviews([rejected]);
           return { messages: msgs.filter((m) => m.id !== rejectedUserMessageId) };
         });
-        state.setPaused(true, null);
         state.setProcessing(false);
+        state.setThinking(false);
         state.setQuickReplies([]);
+        if (error.paused) {
+          // The localized pause banner (via isPaused), not an error bubble.
+          state.setPaused(true, null);
+        } else {
+          toast.error(
+            t("chat.sendRejected", "Your message was not sent: {{reason}}", {
+              reason: error.message,
+            }),
+          );
+        }
         return;
       }
       // Surface the error as a visible agent message so it's not silently
@@ -714,6 +969,15 @@ function handleSSEEvent(
               snapshot.conversationOutputs.length - 1
             ];
             newQuickReplies = extractQuickReplies(lastOutput);
+
+            // A backend-requested input field (a password, typically). Only the
+            // non-streaming path used to honour it, and streaming is the
+            // default: the key then went into the ordinary textarea, in clear,
+            // and was sent without the secretInput flag, so the backend
+            // neither masked it in the transcript nor redacted it from the
+            // audit ledger.
+            const inputField = extractInputField(lastOutput);
+            if (inputField) store.getState().setInputField(inputField);
 
             // Snap the bubble to the snapshot's canonical text. Two cases:
             // (1) structured JSON output streams no tokens — the text exists
@@ -951,13 +1215,35 @@ function handleSSEEvent(
   }
 }
 
+/**
+ * The user's input for one turn as the transcript should show it.
+ *
+ * Read from the turn's conversation OUTPUT first. That is where EDDI writes the
+ * displayed input, and for a secret turn it writes a placeholder there instead
+ * of the text. The step's `input:initial` holds the raw text whatever the flag
+ * was (it is what the pipeline ran on, and only a `scope:"secret"` property
+ * vaults it), so rebuilding bubbles from it put a pasted API key back on
+ * screen in clear after every reload, resume, undo or rerun. `input:initial`
+ * stays the fallback for an output that carries no input.
+ */
+function displayedUserInput(
+  step: SimpleConversationStep | undefined,
+  output: ConversationOutput | undefined,
+): string | undefined {
+  const shown = output?.input;
+  if (typeof shown === "string" && shown.trim()) {
+    return shown === BACKEND_SECRET_PLACEHOLDER ? SECRET_BUBBLE : shown;
+  }
+  return step ? extractInput(step) : undefined;
+}
+
 /** Helper: rebuild messages from a conversation snapshot */
 function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const outputs = snapshot.conversationOutputs ?? [];
   for (let i = 0; i < (snapshot.conversationSteps ?? []).length; i++) {
     const step = snapshot.conversationSteps[i];
-    const input = step ? extractInput(step) : undefined;
+    const input = displayedUserInput(step, outputs[i]);
     const parts = extractOutputParts(outputs[i]);
     if (input) {
       messages.push({
@@ -989,11 +1275,22 @@ export function useConversationHistory(agentId: string | null) {
   });
 }
 
-/** Monotonic ticket for conversation loads — see loadConversationIntoStore. */
-let latestLoadRequest = 0;
-
-/** Read a conversation from the backend and make it the store's active one. */
-async function loadConversationIntoStore(agentId: string, conversationId: string) {
+/**
+ * Read a conversation from the backend and make it the store's active one.
+ *
+ * `epoch` is the transcript generation the load was requested in (defaults to
+ * the current one). A load whose generation has moved on by the time its read
+ * returns is dropped: the user picked another agent, started a new
+ * conversation or opened another one meanwhile. Without this a slow read of
+ * agent A's history landed AFTER agent B had been picked and its conversation
+ * started, and installed A's conversation under B's name, so every send then
+ * went to agent A.
+ */
+async function loadConversationIntoStore(
+  agentId: string,
+  conversationId: string,
+  epoch: number = useChatStore.getState().conversationEpoch,
+) {
   // Loads can overlap: two clicks in the render gap before the list disables
   // itself, or a resume racing a history pick. The store must reflect the most
   // recently *requested* conversation, not whichever read happened to finish
@@ -1011,9 +1308,13 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
     false
   );
 
-  if (request !== latestLoadRequest) return snapshot; // superseded mid-flight
-
   const store = useChatStore;
+  // Superseded mid-flight, by a later load or by anything else that replaced
+  // the transcript (see the epoch note above).
+  if (request !== latestLoadRequest || store.getState().conversationEpoch !== epoch) {
+    return snapshot;
+  }
+
   store.getState().clearMessages();
   store.getState().setConversationId(conversationId);
 
@@ -1034,6 +1335,11 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
     snapshot.conversationState === "AWAITING_HUMAN",
     null,
   );
+  // A conversation reopened while its last reply asks for a secret must offer
+  // the masked field again, or the answer goes into the plain textarea.
+  const outputs = snapshot.conversationOutputs ?? [];
+  const inputField = extractInputField(outputs[outputs.length - 1]);
+  if (inputField) store.getState().setInputField(inputField);
 
   return snapshot;
 }
@@ -1104,6 +1410,10 @@ export function useResumeOrStartConversation() {
 
   return useMutation({
     mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+      // The transcript this open was requested for. The history fetch below is
+      // a network round trip; if the user has moved on by the time it returns,
+      // neither a resumed nor a new conversation may be installed.
+      const epoch = useChatStore.getState().conversationEpoch;
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
@@ -1116,11 +1426,12 @@ export function useResumeOrStartConversation() {
         // History is a convenience, not a precondition — fall through to a new
         // conversation rather than leaving the user with a dead chat panel.
       }
+      if (useChatStore.getState().conversationEpoch !== epoch) return null;
 
       if (resumable) {
         const conversationId = parseConversationUri(resumable.resource);
         try {
-          await loadConversationIntoStore(agentId, conversationId);
+          await loadConversationIntoStore(agentId, conversationId, epoch);
           return conversationId;
         } catch {
           // The descriptor pointed at something we cannot read (deleted,
