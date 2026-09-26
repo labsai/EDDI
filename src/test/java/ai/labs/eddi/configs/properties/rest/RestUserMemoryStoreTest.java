@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -36,13 +37,37 @@ class RestUserMemoryStoreTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestUserMemoryStore rest;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         store = mock(IUserMemoryStore.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
-        rest = new RestUserMemoryStore(store, identity, ownershipValidator);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        rest = new RestUserMemoryStore(store, identity, ownershipValidator, resourceAccessGuard);
+    }
+
+    // === group scoping of a recall (H3) ===
+
+    @Test
+    void getVisibleMemories_namingAGroupTheCallerMayNotUse_isRefusedBeforeTheStoreIsRead() throws Exception {
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
+                .requireUseAccessToEach(List.of("other-team"), "group");
+
+        assertThrows(ForbiddenException.class,
+                () -> rest.getVisibleMemories("user-1", "agent-1", List.of("other-team"), "most_recent", 50));
+
+        verify(store, never()).getVisibleEntries(any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void getVisibleMemories_checksEveryNamedGroup() throws Exception {
+        when(store.getVisibleEntries("user-1", "agent-1", List.of("g1", "g2"), "most_recent", 50)).thenReturn(List.of());
+
+        rest.getVisibleMemories("user-1", "agent-1", List.of("g1", "g2"), "most_recent", 50);
+
+        verify(resourceAccessGuard).requireUseAccessToEach(List.of("g1", "g2"), "group");
     }
 
     // === getAllMemories ===

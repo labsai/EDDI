@@ -3,6 +3,12 @@
  */
 package ai.labs.eddi.modules.nlp.impl;
 
+import java.util.Set;
+import jakarta.annotation.security.RolesAllowed;
+import io.quarkus.security.ForbiddenException;
+import ai.labs.eddi.modules.nlp.IRestSemanticParser;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -47,6 +53,9 @@ class RestSemanticParserTest {
     @Mock
     private AsyncResponse asyncResponse;
 
+    @Mock
+    private ResourceAccessGuard resourceAccessGuard;
+
     private RestSemanticParser restSemanticParser;
 
     @BeforeEach
@@ -56,7 +65,7 @@ class RestSemanticParserTest {
         Map<String, Provider<ILifecycleTask>> lifecycleTasks = new HashMap<>();
         lifecycleTasks.put("ai.labs.parser", parserProvider);
 
-        restSemanticParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks);
+        restSemanticParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, resourceAccessGuard);
     }
 
     @SuppressWarnings("unchecked")
@@ -69,6 +78,26 @@ class RestSemanticParserTest {
     @Nested
     @DisplayName("parse")
     class Parse {
+
+        @Test
+        @DisplayName("refuses a caller without VIEW on the parser configuration before any work is queued (H2f)")
+        void requiresViewOnTheConfiguration() {
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
+                    .requireAccess("aabbccdd11223344eeff5566", AccessLevel.VIEW, "parser configuration");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse));
+
+            verify(runtime, never()).submitCallable(any(), any());
+        }
+
+        @Test
+        @DisplayName("the endpoint is limited to authoring roles, like the parser store (H2f)")
+        void endpointDeclaresAuthoringRoles() {
+            RolesAllowed roles = IRestSemanticParser.class.getAnnotation(RolesAllowed.class);
+            assertNotNull(roles, "a parse endpoint with no roles admits any authenticated principal");
+            assertEquals(Set.of("eddi-admin", "eddi-editor"), Set.of(roles.value()));
+        }
 
         @Test
         @DisplayName("should set timeout on async response")

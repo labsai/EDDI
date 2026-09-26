@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
@@ -49,7 +50,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestAgentAdministration implements IRestAgentAdministration {
+public class RestAgentAdministration implements IRestAgentAdministration, IDeploymentStatusReader {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
@@ -434,8 +435,43 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         return Response.ok(Map.of("status", status), MediaType.APPLICATION_JSON).build();
     }
 
+    /**
+     * The caller's view of the deployed-agent set: only the agents they may
+     * {@link AccessLevel#USE}, each descriptor redacted for them.
+     * <p>
+     * This backs {@code GET /administration/{env}/deploymentstatus} and,
+     * in-process, the MCP {@code list_agents} and {@code discover_agents} tools —
+     * all of them reachable by a viewer. It used to serialise every deployed
+     * agent's raw descriptor, grant list and access index included, which is the
+     * audience of a private share disclosed to anybody who asked, and with
+     * workspaces enforced it listed agents the caller could not even start a
+     * conversation with.
+     * <p>
+     * Redaction applies with workspaces off as well: the grant list is recorded
+     * whenever authentication is on, and
+     * {@link ResourceAccessGuard#redactUnlessOwner} answers the owner-or-admin
+     * question structurally in that state. Engine code that needs the full set
+     * reads {@link #readAllDeploymentStatuses} instead.
+     */
     @Override
     public List<AgentDeploymentStatus> getDeploymentStatuses(Deployment.Environment environment) {
+        List<AgentDeploymentStatus> visible = new LinkedList<>();
+        for (AgentDeploymentStatus status : readAllDeploymentStatuses(environment)) {
+            // Decided against the CURRENT descriptor, not the deployed version's: sharing
+            // writes land on the current version, so an older one can carry a previous
+            // era's owner and grants.
+            AccessLevel level = resourceAccessGuard.currentLevel(status.getAgentId());
+            if (level == null || !level.includes(AccessLevel.USE)) {
+                continue;
+            }
+            resourceAccessGuard.redactUnlessOwner(status.getDescriptor(), level);
+            visible.add(status);
+        }
+        return visible;
+    }
+
+    @Override
+    public List<AgentDeploymentStatus> readAllDeploymentStatuses(Deployment.Environment environment) {
         RuntimeUtilities.checkNotNull(environment, "environment");
 
         try {

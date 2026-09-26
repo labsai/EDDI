@@ -56,6 +56,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.SecureRandom;
 import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
@@ -135,6 +136,23 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      */
     private static final Pattern CONNECTION_REFERENCE_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
 
+    /**
+     * Separates the display slug from the machine part of an archive key. The slug
+     * never contains it ({@link #slugifyForFilename} collapses runs of hyphens and
+     * trims them from both ends) and neither does an agent id (hex, or a UUID's
+     * single hyphens), so the part after the last occurrence is unambiguous.
+     */
+    private static final String ARCHIVE_KEY_SEPARATOR = "--";
+
+    /**
+     * The machine part of an archive key: {@code <agentId>-<version>-<token>}. The
+     * agent id is recovered from the key rather than trusted from anywhere else, so
+     * the download can be checked against the agent it exports.
+     */
+    private static final Pattern ARCHIVE_KEY_PATTERN = Pattern.compile("^(.+)-(\\d+)-([0-9a-f]{32})$");
+
+    private static final SecureRandom ARCHIVE_TOKEN_RANDOM = new SecureRandom();
+
     private final ResourceAccessGuard resourceAccessGuard;
     private final BackupMetrics metrics;
     private final IConnectionStore connectionStore;
@@ -167,10 +185,29 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.scheduleStore = scheduleStore;
     }
 
+    /**
+     * Downloads a finished archive.
+     * <p>
+     * <b>Checked against the agent it exports.</b> This used to serve any file in
+     * {@code tmp/archives/} to any authenticated caller who named it, and the name
+     * was {@code <slug>-<agentId>-<version>.zip} — every part of it readable from a
+     * listing — so a complete dump of an agent somebody else had just exported sat
+     * one guessable GET away for the whole retention window, with no VIEW check at
+     * all. The key now carries a 128-bit random token (so it cannot be guessed) and
+     * the agent id is parsed back out of it and checked for VIEW, exactly as the
+     * export itself is. A name that does not have that shape is simply not an
+     * archive this endpoint produced, and answers like a missing one.
+     */
     @Override
     public Response getAgentZipArchive(String agentFilename) {
         try {
             agentFilename = sanitizeFileName(agentFilename);
+
+            String exportedAgentId = agentIdOfArchive(agentFilename);
+            if (exportedAgentId == null) {
+                throw new FileNotFoundException(agentFilename);
+            }
+            resourceAccessGuard.requireAccess(exportedAgentId, AccessLevel.VIEW, "agent");
 
             Path archiveDir = archiveDirectory();
             Path zipFilePath = archiveDir.resolve(agentFilename).normalize();
@@ -180,7 +217,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             }
 
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile())))
-                    .header("Content-Disposition", "attachment; filename=\"" + agentFilename + "\"")
+                    .header("Content-Disposition", "attachment; filename=\"" + downloadNameOf(agentFilename) + "\"")
                     .build();
         } catch (FileNotFoundException e) {
             // An archive that is not there is a 404, not a 500. sneakyThrow'ing the
@@ -627,11 +664,45 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         if (agentDocumentDescriptor != null && !isNullOrEmpty(agentDocumentDescriptor.getName())) {
             String slug = slugifyForFilename(agentDocumentDescriptor.getName());
             if (!slug.isEmpty()) {
-                zipFilename = slug + "-";
+                zipFilename = slug + ARCHIVE_KEY_SEPARATOR;
             }
         }
-        zipFilename += agentId + "-" + agentVersion + ".zip";
+        zipFilename += agentId + "-" + agentVersion + "-" + newArchiveToken() + ".zip";
         return zipFilename;
+    }
+
+    /** 128 random bits, hex — what makes an archive key unguessable. */
+    private static String newArchiveToken() {
+        byte[] bytes = new byte[16];
+        ARCHIVE_TOKEN_RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    /**
+     * The agent id an archive key names, or {@code null} when the name is not a key
+     * {@link #prepareZipFilename} produces (including keys written before the token
+     * was added, which are no longer downloadable).
+     */
+    static String agentIdOfArchive(String filename) {
+        if (filename == null || !filename.endsWith(".zip")) {
+            return null;
+        }
+        String stem = filename.substring(0, filename.length() - ".zip".length());
+        int separator = stem.lastIndexOf(ARCHIVE_KEY_SEPARATOR);
+        String key = separator >= 0 ? stem.substring(separator + ARCHIVE_KEY_SEPARATOR.length()) : stem;
+        Matcher matcher = ARCHIVE_KEY_PATTERN.matcher(key);
+        return matcher.matches() ? matcher.group(1) : null;
+    }
+
+    /**
+     * The name a browser should save an archive under: the key without its token,
+     * and with the slug separator folded back to a single hyphen —
+     * {@code My-Agent-<agentId>-<version>.zip}, the name archives always had.
+     */
+    static String downloadNameOf(String filename) {
+        String stem = filename.substring(0, filename.length() - ".zip".length());
+        int tokenStart = stem.lastIndexOf('-');
+        return stem.substring(0, tokenStart).replace(ARCHIVE_KEY_SEPARATOR, "-") + ".zip";
     }
 
     /**

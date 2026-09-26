@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.LegacyTarget;
@@ -42,7 +42,7 @@ class ChannelTargetRouterDeepBranchTest {
     void setUp() throws Exception {
         var channelStore = mock(IChannelIntegrationStore.class);
         var descriptorStore = mock(IDocumentDescriptorStore.class);
-        var agentAdmin = mock(IRestAgentAdministration.class);
+        var agentAdmin = mock(IDeploymentStatusReader.class);
         var agentStore = mock(IAgentStore.class);
         var secretResolver = mock(SecretResolver.class);
         var cacheFactory = mock(ICacheFactory.class);
@@ -50,7 +50,7 @@ class ChannelTargetRouterDeepBranchTest {
         doReturn(threadTargetLock).when(cacheFactory).getCache(anyString(), any(Duration.class));
 
         doReturn(List.of()).when(descriptorStore).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
-        doReturn(List.of()).when(agentAdmin).getDeploymentStatuses(any());
+        doReturn(List.of()).when(agentAdmin).readAllDeploymentStatuses(any());
 
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, cacheFactory);
         // Prevent refresh from running during tests

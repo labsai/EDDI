@@ -12,7 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
@@ -59,7 +59,7 @@ public class ChannelTargetRouter {
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
-    private final IRestAgentAdministration agentAdmin;
+    private final IDeploymentStatusReader agentAdmin;
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
@@ -110,7 +110,7 @@ public class ChannelTargetRouter {
     @Inject
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
-            IRestAgentAdministration agentAdmin,
+            IDeploymentStatusReader agentAdmin,
             IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
@@ -609,7 +609,7 @@ public class ChannelTargetRouter {
         // 2. Load legacy ChannelConnector entries (backward compat)
         var newLegacyMap = new HashMap<String, LegacyTarget>();
         try {
-            List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(
+            List<AgentDeploymentStatus> statuses = agentAdmin.readAllDeploymentStatuses(
                     Deployment.Environment.production);
             for (AgentDeploymentStatus status : statuses) {
                 if (status.getDescriptor() == null || status.getDescriptor().isDeleted()) {
