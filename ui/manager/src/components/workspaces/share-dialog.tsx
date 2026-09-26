@@ -156,15 +156,19 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
     [resourceId, afterChange, t]
   );
 
+  /** Resolves to null once applied, or to the error message — the confirm panel stays up on a failure. */
   const handleVisibility = useCallback(
-    async (visibility: ResourceVisibility, cascade: boolean) => {
+    async (visibility: ResourceVisibility, cascade: boolean): Promise<string | null> => {
       setBusy(true);
       try {
         const result = await setResourceVisibility(resourceId, visibility, cascade);
         await afterChange(result, "visibility");
         toast.success(t("workspaces.share.visibilityUpdated", "Visibility updated"));
+        return null;
       } catch (e) {
-        toast.error(getErrorMessage(e));
+        const message = getErrorMessage(e);
+        toast.error(message);
+        return message;
       } finally {
         setBusy(false);
       }
@@ -497,11 +501,13 @@ function VisibilityChooser({
 }: {
   current: ResourceVisibility;
   busy: boolean;
-  onChange: (v: ResourceVisibility, cascade: boolean) => Promise<void> | void;
+  onChange: (v: ResourceVisibility, cascade: boolean) => Promise<string | null>;
 }) {
   const { t } = useTranslation();
   const [proposed, setProposed] = useState<ResourceVisibility | null>(null);
   const [cascade, setCascade] = useState(true);
+  /** Why the last apply failed — shown in the still-open panel so a retry is one click. */
+  const [applyError, setApplyError] = useState<string | null>(null);
   const options: { value: ResourceVisibility; icon: typeof Lock; label: string; hint: string }[] = [
     {
       value: "private",
@@ -542,6 +548,7 @@ function VisibilityChooser({
                 // re-cascade it over resources that differ on purpose.
                 setProposed(selected ? null : opt.value);
                 setCascade(true);
+                setApplyError(null);
               }}
               aria-pressed={selected}
               data-testid={`visibility-${opt.value}`}
@@ -600,12 +607,20 @@ function VisibilityChooser({
                   "Only this resource changes. Anyone who can now see it may still be unable to open what it references.",
                 )}
           </p>
+          {applyError && (
+            <p className="text-xs text-destructive" data-testid="visibility-apply-error">
+              {applyError}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button
               variant="ghost"
               size="sm"
               disabled={busy}
-              onClick={() => setProposed(null)}
+              onClick={() => {
+                setProposed(null);
+                setApplyError(null);
+              }}
               data-testid="visibility-cancel"
             >
               {t("common.cancel", "Cancel")}
@@ -615,8 +630,11 @@ function VisibilityChooser({
               disabled={busy}
               onClick={async () => {
                 const target = proposed;
-                await onChange(target, cascade);
-                setProposed((open) => (open === target ? null : open));
+                const error = await onChange(target, cascade);
+                // Closed only once the change is applied: a failed PUT leaves
+                // the proposal, and the reason, where the operator can retry.
+                setApplyError(error);
+                if (error === null) setProposed((open) => (open === target ? null : open));
               }}
               data-testid="visibility-apply"
             >
