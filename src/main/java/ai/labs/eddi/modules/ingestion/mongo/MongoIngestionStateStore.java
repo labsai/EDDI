@@ -504,7 +504,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         return new IngestionRun(
                 document.getString(FIELD_RUN_ID),
                 document.getString(FIELD_SOURCE_ID),
-                IngestionRun.Status.valueOf(document.getString(FIELD_STATUS)),
+                IngestionRun.Status.parse(document.getString(FIELD_STATUS)),
                 toInstant(document.getDate(FIELD_STARTED_AT)),
                 toInstant(document.getDate(FIELD_FINISHED_AT)),
                 intOrZero(document, FIELD_DOCS_SEEN),

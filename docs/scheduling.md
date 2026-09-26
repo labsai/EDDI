@@ -273,6 +273,20 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
 
+> **A RAG ingestion fire starts a run; it does not wait for it.** The fire claims
+> the source's run and hands it to a worker of its own, then logs `COMPLETED` —
+> a crawl outlasts the scheduler's lease, and running it inside the fire meant
+> the scheduler cancelled it mid-crawl. When the run later **fails**, its worker
+> writes a second entry for the same fire with status `FAILED` and the run's
+> error, so a crawl that fails every night shows up in the fire log (and in
+> `admin/failed`). That entry does **not** raise the schedule's `failCount`, so
+> a failing crawl never retries early and never dead-letters; the run's own
+> history, under the knowledge base's source, has the detail. A fire that finds
+> a run still going logs `COMPLETED` with "already running". On a graceful
+> shutdown, runs in flight on that instance are closed as `CANCELLED`, so the
+> next fire or "Run now" is not refused until they would have been reaped. See
+> [rag.md](rag.md#ingestion-sources).
+
 ### Fire Logs and Erasure
 
 A fire log carries the `conversationId` of the turn it started, and it is only

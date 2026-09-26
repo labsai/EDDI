@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.Deflater;
@@ -307,9 +309,143 @@ class DocumentExtractorsTest {
                     "the outer level alone must be within the budget, or this proves nothing");
 
             var failure = assertThrows(UnreadableDocumentException.class,
-                    () -> extractor.extract(pdfWithStream(twice), oneMegabyte));
+                    () -> extractor.extract(pdfWithStream(twice, "[/FlateDecode /FlateDecode]"), oneMegabyte));
 
             assertTrue(failure.getMessage().contains("expands"), failure.getMessage());
+        }
+
+        // --- The review's bypasses, as loadable PDFs. Each is refused with the
+        // pre-filter on, and — the part that matters — with it off, by the budget
+        // on what PDFBox itself decodes. A 1 MB per-stream bound means a 2 MB
+        // document budget here.
+
+        @Test
+        @DisplayName("a stream whose keyword is followed by spaces is still found and still bounded")
+        void whitespaceAfterTheStreamKeyword() {
+            // PDFBox skips spaces before the line break; the scan accepted only a line
+            // break, so "stream \n" hid a stream PDFBox then decoded in full.
+            byte[] pdf = loadablePdf(zlib(content(8 * 1024 * 1024)), "/FlateDecode", " \n", 1);
+
+            assertRefusedBoth(pdf);
+        }
+
+        @Test
+        @DisplayName("RunLength, which the scan could not measure, is bounded")
+        void runLength() {
+            var runs = new ByteArrayOutputStream();
+            for (int i = 0; i < 40_000; i++) {
+                runs.write(129);
+                runs.write('q');
+            }
+            runs.write(128);
+
+            assertRefusedBoth(loadablePdf(runs.toByteArray(), "/RunLengthDecode", "\n", 1));
+        }
+
+        @Test
+        @DisplayName("ASCIIHex in front of Flate is bounded")
+        void asciiHexThenFlate() {
+            byte[] compressed = zlib(content(8 * 1024 * 1024));
+            var hex = new StringBuilder();
+            for (byte b : compressed) {
+                hex.append(String.format("%02x", b));
+            }
+            hex.append('>');
+
+            assertRefusedBoth(loadablePdf(hex.toString().getBytes(StandardCharsets.US_ASCII),
+                    "[/ASCIIHexDecode /FlateDecode]", "\n", 1));
+        }
+
+        @Test
+        @DisplayName("one stream referenced many times from a page is counted every time it is decoded")
+        void repeatedReferenceToOneStream() {
+            // Each decode is within the per-stream bound; PDFBox decodes every
+            // element of a /Contents array at once, so twenty references to one
+            // 60 MB stream were an OutOfMemoryError from a 61 KB file.
+            byte[] pdf = loadablePdf(zlib(content(900 * 1024)), "/FlateDecode", "\n", 5);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdf, oneMegabyte));
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("an ordinary loadable PDF under the budget is read")
+        void aSmallLoadablePdfIsRead() {
+            byte[] page = zlib("BT /F1 12 Tf 72 700 Td (hello there) Tj ET\n".getBytes(StandardCharsets.US_ASCII));
+
+            assertTrue(extractor.extract(loadablePdf(page, "/FlateDecode", "\n", 3), oneMegabyte, false)
+                    .contains("hello there"));
+        }
+
+        @Test
+        @DisplayName("the budget is not spent outside an extraction")
+        void theBudgetOnlyCountsWhereItWasOpened() {
+            // The filters are replaced process-wide, so every other use of PDFBox
+            // passes through them; with no budget open they must count nothing.
+            extractor.extract(OfficeFixtures.pdf("first"), oneMegabyte);
+
+            assertTrue(extractor.extract(OfficeFixtures.pdf("second"), oneMegabyte).contains("second"));
+            assertTrue(OfficeFixtures.pdf("x".repeat(10)).length > 0, "writing a PDF still works");
+        }
+
+        @Test
+        @DisplayName("an image stream larger than the per-stream bound is not refused by the pre-filter")
+        void largeImagesAreNotRefused() {
+            // Text extraction never decodes images, so a large Flate image — an A2
+            // scan, a CAD drawing — says nothing about what reading the text costs.
+            byte[] image = zlib(content(4 * 1024 * 1024));
+            var out = new ByteArrayOutputStream();
+            out.writeBytes(("%PDF-1.4\n5 0 obj\n<< /Type /XObject /Subtype /Image /Width 2048 /Height 2048 "
+                    + "/BitsPerComponent 8 /ColorSpace /DeviceGray /Length " + image.length
+                    + " /Filter /FlateDecode >>\nstream\n").getBytes(StandardCharsets.US_ASCII));
+            out.writeBytes(image);
+            out.writeBytes("\nendstream\nendobj\n".getBytes(StandardCharsets.US_ASCII));
+
+            PdfStreamBudget.requireWithin(out.toByteArray(), 1024 * 1024, Instant.now().plusSeconds(30));
+        }
+
+        private void assertRefusedBoth(byte[] pdf) {
+            var withScan = assertThrows(UnreadableDocumentException.class, () -> extractor.extract(pdf, oneMegabyte));
+            assertTrue(withScan.getMessage().contains("compressed stream"), withScan.getMessage());
+            var budgetOnly = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdf, oneMegabyte, false));
+            assertTrue(budgetOnly.getMessage().contains("while it is read"), budgetOnly.getMessage());
+        }
+
+        /** Page content, a no-op operator repeated to the size wanted. */
+        private byte[] content(int bytes) {
+            return "q Q\n".repeat(bytes / 4).getBytes(StandardCharsets.US_ASCII);
+        }
+
+        /**
+         * A real, loadable one-page PDF whose content stream is {@code data},
+         * referenced {@code refs} times.
+         */
+        private byte[] loadablePdf(byte[] data, String filter, String afterKeyword, int refs) {
+            var out = new ByteArrayOutputStream();
+            List<Integer> offsets = new ArrayList<>();
+            out.writeBytes("%PDF-1.4\n".getBytes(StandardCharsets.US_ASCII));
+            offsets.add(out.size());
+            out.writeBytes("1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n".getBytes(StandardCharsets.US_ASCII));
+            offsets.add(out.size());
+            out.writeBytes("2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n".getBytes(StandardCharsets.US_ASCII));
+            offsets.add(out.size());
+            out.writeBytes(("3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents ["
+                    + "4 0 R ".repeat(refs) + "]>>endobj\n").getBytes(StandardCharsets.US_ASCII));
+            offsets.add(out.size());
+            out.writeBytes(("4 0 obj<</Length " + data.length + "/Filter " + filter + ">>stream" + afterKeyword)
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.writeBytes(data);
+            out.writeBytes("\nendstream endobj\n".getBytes(StandardCharsets.US_ASCII));
+            int xref = out.size();
+            var trailer = new StringBuilder("xref\n0 5\n0000000000 65535 f \n");
+            for (int offset : offsets) {
+                trailer.append(String.format("%010d 00000 n \n", offset));
+            }
+            trailer.append("trailer<</Size 5/Root 1 0 R>>\nstartxref\n").append(xref).append("\n%%EOF\n");
+            out.writeBytes(trailer.toString().getBytes(StandardCharsets.US_ASCII));
+            return out.toByteArray();
         }
 
         @Test
@@ -351,8 +487,12 @@ class DocumentExtractorsTest {
          * bytes before PDFBox is given them.
          */
         private byte[] pdfWithStream(byte[] data) {
+            return pdfWithStream(data, "/FlateDecode");
+        }
+
+        private byte[] pdfWithStream(byte[] data, String filter) {
             var out = new ByteArrayOutputStream();
-            out.writeBytes(("%PDF-1.4\n1 0 obj\n<< /Length " + data.length + " /Filter /FlateDecode >>\nstream\n")
+            out.writeBytes(("%PDF-1.4\n1 0 obj\n<< /Length " + data.length + " /Filter " + filter + " >>\nstream\n")
                     .getBytes(StandardCharsets.US_ASCII));
             out.writeBytes(data);
             out.writeBytes("\nendstream\nendobj\n%%EOF\n".getBytes(StandardCharsets.US_ASCII));

@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -28,9 +29,12 @@ import java.time.ZoneId;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
+import java.util.function.Consumer;
 
 /**
  * Runs a knowledge base's ingestion sources, on demand or on a cron, and keeps
@@ -101,6 +105,23 @@ public class RagSourceIngestionService {
     }
 
     /**
+     * How many previews may crawl at once across this instance. Small on purpose:
+     * each one holds a request thread and sends traffic to somebody else's site.
+     */
+    private static final int MAX_CONCURRENT_PREVIEWS = 3;
+
+    private final Semaphore previewSlots = new Semaphore(MAX_CONCURRENT_PREVIEWS);
+
+    /**
+     * The runs this instance's workers are carrying, by run id, so a shutdown can
+     * close them instead of leaving each {@code RUNNING} until it is reaped.
+     */
+    private final Map<String, InFlight> inFlight = new ConcurrentHashMap<>();
+
+    private record InFlight(String sourceKey, Thread worker) {
+    }
+
+    /**
      * Starts a run on a virtual thread and returns immediately.
      *
      * <p>
@@ -110,15 +131,17 @@ public class RagSourceIngestionService {
      * @return the reserved run id, or empty when a run is already in flight for
      *         this source
      */
-    /**
-     * How many previews may crawl at once across this instance. Small on purpose:
-     * each one holds a request thread and sends traffic to somebody else's site.
-     */
-    private static final int MAX_CONCURRENT_PREVIEWS = 3;
-
-    private final Semaphore previewSlots = new Semaphore(MAX_CONCURRENT_PREVIEWS);
-
     public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        return runAsync(ragConfigId, knowledgeBase, source, report -> {
+        });
+    }
+
+    /**
+     * As {@link #runAsync(String, RagConfiguration, IngestionSource)}, telling
+     * {@code onFinished} what the run did once it is over.
+     */
+    public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
+                                     Consumer<IngestionReport> onFinished) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         // Reserved here, not inside the worker: two requests arriving together both
         // used to be answered "started", and whichever worker lost the claim crawled
@@ -136,7 +159,7 @@ public class RagSourceIngestionService {
         // closed. Throwable rather than RuntimeException so an Error is logged instead
         // of disappearing into a dead thread.
         try {
-            startWorker(ragConfigId, knowledgeBase, source, sourceKey, runId);
+            startWorker(ragConfigId, knowledgeBase, source, sourceKey, runId, onFinished);
         } catch (RuntimeException e) {
             // The reservation is claimed but nothing will work on it, and a claimed run
             // blocks the source until it is reaped.
@@ -147,20 +170,71 @@ public class RagSourceIngestionService {
     }
 
     private void startWorker(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
-                             String sourceKey, String runId) {
+                             String sourceKey, String runId, Consumer<IngestionReport> onFinished) {
 
-        Thread.ofVirtual().name("rag-ingestion-" + sourceKey).start(() -> {
+        Thread worker = Thread.ofVirtual().name("rag-ingestion-" + sourceKey).unstarted(() -> {
+            IngestionReport report = null;
             try {
-                IngestionReport report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST, runId);
+                report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST, runId);
                 LOGGER.infof("Ingestion of source '%s' finished: %s, %d ingested, %d unchanged, %d tombstoned",
                         LogSanitizer.sanitize(source.getName()), report.outcome(),
                         report.documentsIngested(), report.documentsUnchanged(), report.documentsTombstoned());
             } catch (Throwable t) {
                 LOGGER.errorf(t, "Ingestion of source '%s' threw", LogSanitizer.sanitize(source.getName()));
+                report = IngestionReport.failed(runId, source.effectiveId(), "The run threw: " + t);
             } finally {
+                inFlight.remove(runId);
                 cleanUpAfterRun(ragConfigId, knowledgeBase, source);
+                try {
+                    onFinished.accept(report);
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Could not report the outcome of ingestion run %s", LogSanitizer.sanitize(runId));
+                }
             }
         });
+        inFlight.put(runId, new InFlight(sourceKey, worker));
+        try {
+            worker.start();
+        } catch (RuntimeException e) {
+            inFlight.remove(runId);
+            throw e;
+        }
+    }
+
+    /**
+     * Closes the runs this instance was carrying when it shuts down.
+     *
+     * <p>
+     * A worker is a virtual thread that simply stops with the JVM, leaving its run
+     * {@code RUNNING} until the next claim reaps it — its time budget plus a
+     * quarter of an hour, so by default twenty-five minutes in which "Run now"
+     * answers 409 and every scheduled fire reports the run as already going. On a
+     * rolling restart that was every crawl in flight. Each is closed here as
+     * {@code CANCELLED}, and its worker interrupted; a worker that wakes up after
+     * this finds its run no longer active and stops before its next embedding.
+     */
+    void onShutdown(@Observes ShutdownEvent event) {
+        cancelInFlightRuns();
+    }
+
+    int cancelInFlightRuns() {
+        int cancelled = 0;
+        for (var run : Map.copyOf(inFlight).entrySet()) {
+            try {
+                stateStore.finishRun(new IngestionRun(run.getKey(), run.getValue().sourceKey(),
+                        IngestionRun.Status.CANCELLED, null, Instant.now(), 0, 0, 0, 0, 0, 0, 0.0,
+                        "Stopped because the server shut down"));
+                cancelled++;
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Could not close ingestion run %s at shutdown; it will be reaped",
+                        LogSanitizer.sanitize(run.getKey()));
+            }
+            run.getValue().worker().interrupt();
+        }
+        if (cancelled > 0) {
+            LOGGER.infof("Closed %d ingestion run(s) that were in flight at shutdown", cancelled);
+        }
+        return cancelled;
     }
 
     /**
@@ -351,6 +425,16 @@ public class RagSourceIngestionService {
      *         run
      */
     public IngestionReport processScheduledFire(String ragConfigId, Integer version, String sourceId) {
+        return processScheduledFire(ragConfigId, version, sourceId, report -> {
+        });
+    }
+
+    /**
+     * As above, telling {@code onFinished} what the started run did once it is over
+     * — how the fire log learns that a crawl it started failed.
+     */
+    public IngestionReport processScheduledFire(String ragConfigId, Integer version, String sourceId,
+                                                Consumer<IngestionReport> onFinished) {
         RagConfiguration knowledgeBase;
         try {
             knowledgeBase = ragStore.read(ragConfigId, version == null ? 1 : version);
@@ -376,7 +460,7 @@ public class RagSourceIngestionService {
         } catch (IllegalArgumentException e) {
             return IngestionReport.failed(null, source.effectiveId(), e.getMessage());
         }
-        return runAsync(ragConfigId, knowledgeBase, source)
+        return runAsync(ragConfigId, knowledgeBase, source, onFinished)
                 .map(runId -> IngestionReport.started(runId, source.effectiveId()))
                 .orElseGet(() -> IngestionReport.alreadyRunning(source.effectiveId()));
     }

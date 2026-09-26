@@ -36,8 +36,10 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -74,6 +76,16 @@ public class IngestionPipeline {
      */
     /** Cap on third-party text copied into vector metadata. */
     private static final int MAX_TITLE_LENGTH = 300;
+
+    /**
+     * The state row that marks a source whose state was cleared, until the orphan
+     * sweep has run. Not a URL and not a file id, so no document can collide with
+     * it.
+     */
+    static final String SWEEP_MARKER = "eddi:orphan-sweep";
+
+    /** Runs since a purge beyond which the sweep declines to guess. */
+    private static final int SWEEP_RUN_LIMIT = 1000;
 
     /** Added to a run's time budget before it counts as abandoned. */
     private static final Duration STALE_RUN_MARGIN = Duration.ofMinutes(15);
@@ -247,9 +259,9 @@ public class IngestionPipeline {
         // failure, an OutOfMemoryError, or a StackOverflowError from a pathological
         // page are each enough.
         try {
-            // Asked before anything is recorded: whether this run starts from no state
-            // at all — the first run, or the first after a purge or a rename.
-            boolean freshStart = mode == Mode.INGEST && stateStore.listDocuments(sourceKey, 1).isEmpty();
+            if (mode == Mode.INGEST) {
+                markForSweepIfFresh(source, sourceKey, runId);
+            }
             SourceRun sourceRun = source.isUpload()
                     ? readUploadedFiles(sourceKey, source, collector)
                     : crawl(source, collector);
@@ -258,9 +270,6 @@ public class IngestionPipeline {
             // Added to, not assigned: a file retired as unreadable during the run is
             // already counted.
             collector.tombstoned += reconcileDeletions(source, sourceKey, runId, mode, sourceRun, collector);
-            if (freshStart) {
-                sweepOrphans(source, sourceKey, runId, sourceRun, collector);
-            }
 
             IngestionReport report = collector.toReport(summary, null, startedAt);
             finish(mode, runId, sourceKey, report, statusFor(collector));
@@ -328,7 +337,12 @@ public class IngestionPipeline {
         // again — so nothing would ever come back for them.
         EmbeddingStore<TextSegment> store = collector.store();
         List<String> removedIds = new ArrayList<>();
+        boolean sweptOrphans = false;
         for (DocumentState document : gone) {
+            if (SWEEP_MARKER.equals(document.documentId())) {
+                sweptOrphans = sweepOrphans(source, sourceKey, runId, collector);
+                continue;
+            }
             try {
                 store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId())
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
@@ -343,42 +357,93 @@ public class IngestionPipeline {
                         + "and the next run tries again", LogSanitizer.sanitize(source.getName()));
             }
         }
-        stateStore.markTombstoned(sourceKey, removedIds);
+        stateStore.markTombstoned(sourceKey, sweptOrphans ? withMarker(removedIds) : removedIds);
         return removedIds.size();
     }
 
+    private static List<String> withMarker(List<String> removedIds) {
+        List<String> ids = new ArrayList<>(removedIds);
+        ids.add(SWEEP_MARKER);
+        return ids;
+    }
+
     /**
-     * After a run that started from no state, removes every chunk of this source it
-     * did not write itself.
+     * When this run starts from no state at all — the first run, or the first after
+     * a purge or a rename — records the marker the orphan sweep waits on.
+     *
+     * <p>
+     * A read or write failure here only means no sweep: it is housekeeping, and
+     * failing the run over it would stop the run that rebuilds the knowledge base.
+     */
+    private void markForSweepIfFresh(IngestionSource source, String sourceKey, String runId) {
+        try {
+            if (stateStore.listDocuments(sourceKey, 1).isEmpty()) {
+                stateStore.recordIngested(sourceKey, SWEEP_MARKER, SWEEP_MARKER, null, null, runId);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not check whether source '%s' starts from no state; chunks it no longer has "
+                    + "from before a purge will not be swept this time", LogSanitizer.sanitize(source.getName()));
+        }
+    }
+
+    /**
+     * Removes the chunks of this source that no run since its state was cleared
+     * wrote — once the sweep marker has been missed as often as any document must
+     * be before it is tombstoned.
      *
      * <p>
      * A purge forgets which documents a source has ingested but leaves their
-     * vectors answering, so retrieval has no gap while the next run rebuilds. That
-     * run re-embeds every document it finds, and replacing a document removes its
+     * vectors answering, so retrieval has no gap while the next run rebuilds. Every
+     * document a run finds is re-embedded, and replacing a document removes its
      * older chunks — but a document that had disappeared from the source before the
      * purge is never found again, and with its state row gone nothing would ever
      * reconcile it: its chunks stayed retrievable for good, attributed to a source
-     * that no longer claims them. Here, and only here, every chunk the source owns
-     * that this run did not write is one of those.
+     * that no longer claims them.
      *
      * <p>
-     * Only after a run that covered the whole source and read every document it
-     * found: a document that failed to embed, or that the server would not serve
-     * this time, still has only its old chunks, and they are the ones to keep.
+     * The marker is a state row no crawl ever sees, so it is "missed" by every
+     * complete run and reaches {@code tombstoneAfterMissedRuns} exactly as a
+     * vanished page would. Waiting for it gives a page that was only briefly absent
+     * after the purge the same grace any other page gets: once it comes back it is
+     * re-embedded by a run since the purge and survives the sweep. The sweep then
+     * keeps every chunk written by a run since the state was cleared — the purge
+     * took the older run history with it, so the source's run history is exactly
+     * those runs — and removes the rest.
+     *
+     * <p>
+     * Only on a run that read every document it found: a document that failed to
+     * embed, or that the server would not serve, still has only its old chunks, and
+     * they are the ones to keep. Otherwise the marker stays live and the next such
+     * run sweeps.
+     *
+     * @return whether the sweep ran, so the marker can be retired
      */
-    private void sweepOrphans(IngestionSource source, String sourceKey, String runId, SourceRun sourceRun,
-                              Collector collector) {
-        if (!sourceRun.coveredWholeSource() || collector.failed > 0 || collector.superseded) {
-            return;
+    private boolean sweepOrphans(IngestionSource source, String sourceKey, String runId, Collector collector) {
+        if (collector.failed > 0 || collector.superseded) {
+            return false;
         }
+        Set<String> runsSinceClear = new HashSet<>();
+        runsSinceClear.add(runId);
         try {
+            List<IngestionRun> history = stateStore.listRuns(sourceKey, SWEEP_RUN_LIMIT);
+            if (history.size() >= SWEEP_RUN_LIMIT) {
+                LOGGER.warnf("Not sweeping source '%s': more than %d runs since its state was cleared, so the list "
+                        + "of runs whose chunks to keep might be incomplete", LogSanitizer.sanitize(source.getName()),
+                        SWEEP_RUN_LIMIT);
+                return false;
+            }
+            history.forEach(run -> runsSinceClear.add(run.runId()));
             collector.store().removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)
-                    .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
+                    .and(metadataKey(METADATA_RUN_ID).isNotIn(runsSinceClear)));
+            return true;
         } catch (UnsupportedFeatureException e) {
             collector.replaceUnsupported = true;
+            return true;
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not remove chunks that source '%s' no longer has from before its state was "
-                    + "cleared; they stay retrievable", LogSanitizer.sanitize(source.getName()));
+                    + "cleared; they stay retrievable and the next complete run tries again",
+                    LogSanitizer.sanitize(source.getName()));
+            return false;
         }
     }
 

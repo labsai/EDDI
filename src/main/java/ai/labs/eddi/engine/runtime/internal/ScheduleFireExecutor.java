@@ -389,7 +389,8 @@ public class ScheduleFireExecutor {
             var report = ragSourceIngestionService.processScheduledFire(
                     RagIngestionSchedules.ragConfigId(md),
                     RagIngestionSchedules.ragConfigVersion(md),
-                    RagIngestionSchedules.sourceId(md));
+                    RagIngestionSchedules.sourceId(md),
+                    finished -> logFailedRun(schedule, instanceId, attemptNumber, startedAt, finished));
             cost = report.costUsd();
             if (report.isSuccess() || isBenignOutcome(report)) {
                 // ALREADY_RUNNING and SKIPPED are outcomes, not failures. A run can
@@ -437,6 +438,23 @@ public class ScheduleFireExecutor {
 
         return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, errorMessage, cost,
                 interrupted);
+    }
+
+    /**
+     * A second fire-log entry, written by the run's worker when the run it started
+     * fails — so a crawl that fails every night shows up in the schedule's fire log
+     * as a failure, not only in the source's run history. It does not raise the
+     * schedule's failCount: that belongs to the claim the fire already released.
+     */
+    private void logFailedRun(ScheduleConfiguration schedule, String instanceId, int attemptNumber,
+                              Instant startedAt, IngestionReport finished) {
+        if (finished == null || finished.isSuccess() || isBenignOutcome(finished)) {
+            return;
+        }
+        LOGGER.errorf("[SCHEDULE] Ingestion run started by schedule '%s' (id=%s) failed: %s", schedule.getName(),
+                schedule.getId(), finished.message());
+        logIngestionFire(schedule, instanceId, attemptNumber, startedAt, ScheduleConfiguration.FireStatus.FAILED.name(),
+                "The run this fire started failed: " + finished.message(), finished.costUsd(), false);
     }
 
     private ScheduleFireLog logIngestionFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber,

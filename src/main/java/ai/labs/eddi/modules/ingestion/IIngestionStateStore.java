@@ -351,7 +351,24 @@ public interface IIngestionStateStore {
              * stamped by this claim would outrank the run that follows it and fence it out
              * of every write. {@link #listRuns} skips it.
              */
-            MAINTENANCE
+            MAINTENANCE;
+
+            /**
+             * Reads a stored status, tolerating one this build does not know. A row written
+             * by a newer build — as {@code MAINTENANCE} was new to the build before it —
+             * reads as {@code FAILED} instead of failing the whole run history with an
+             * exception during a rolling upgrade or after a rollback.
+             */
+            public static Status parse(String stored) {
+                if (stored == null) {
+                    return FAILED;
+                }
+                try {
+                    return valueOf(stored);
+                } catch (IllegalArgumentException e) {
+                    return FAILED;
+                }
+            }
         }
 
         /**

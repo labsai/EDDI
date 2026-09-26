@@ -214,6 +214,15 @@ public class WebCrawler {
             frontier.releaseDeferred(candidate.canonicalId());
         }
 
+        if (stopReason == StopReason.PAGE_LIMIT && counters.sitemapPages > 0) {
+            // Sitemap pages are queued at depth 0, so maxDepth does not narrow them. A
+            // source that stayed under maxPages by depth alone can now run into it —
+            // and a crawl that stops at a limit concludes nothing about deletions.
+            LOGGER.warnf("Crawl of %s stopped at maxPages (%d) with %d pages queued from its sitemap; deletions "
+                    + "are not reconciled for a crawl that stops at a limit. Raise maxPages, or narrow the scope "
+                    + "with pathPrefix or excludePatterns", LogSanitizer.sanitize(request.seedUrl()),
+                    request.limits().maxPages(), counters.sitemapPages);
+        }
         CrawlSummary summary = counters.summarize(start, stopReason);
         LOGGER.debugf("Crawl of %s finished: %s", LogSanitizer.sanitize(request.seedUrl()), summary);
         return summary;
@@ -454,6 +463,7 @@ public class WebCrawler {
                 if (!canonical.isEmpty() && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
                     frontier.queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0, false));
+                    counters.sitemapPages++;
                 }
             }
         }
@@ -824,6 +834,8 @@ public class WebCrawler {
         private int errors;
         private int unreachable;
         private int fetchAttempts;
+        /** In-scope pages queued from sitemaps, for the page-limit warning. */
+        private int sitemapPages;
         private long bytesDownloaded;
 
         CrawlSummary summarize(Instant start, StopReason stopReason) {

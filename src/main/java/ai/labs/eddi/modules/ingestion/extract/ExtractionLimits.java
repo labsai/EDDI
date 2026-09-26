@@ -76,6 +76,16 @@ public record ExtractionLimits(int maxCharacters, int maxParts, int maxRowsPerSh
                 maxDuration);
     }
 
+    /**
+     * Everything one PDF may decode in total while it is read — every stream, every
+     * reference to it, every stage of a filter chain. Twice the per-stream bound,
+     * so one stream at the limit still leaves room for the fonts and pages around
+     * it.
+     */
+    public long maxDecodedBytes() {
+        return 2 * maxUncompressedBytes;
+    }
+
     /** The same limits with a different time budget. */
     public ExtractionLimits withMaxDuration(Duration duration) {
         return new ExtractionLimits(maxCharacters, maxParts, maxRowsPerSheet, maxColumnsPerSheet,

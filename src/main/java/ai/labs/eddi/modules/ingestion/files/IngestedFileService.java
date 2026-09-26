@@ -20,10 +20,12 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -54,6 +56,13 @@ public class IngestedFileService {
      * with the number of sources ever uploaded to.
      */
     private static final int LOCK_STRIPES = 64;
+
+    /**
+     * How long the upload-time probe may spend finding text in one file. It runs on
+     * the request thread, and a genuine document shows text on its first pages well
+     * within this; the full extraction budget belongs to the run.
+     */
+    static final Duration UPLOAD_PROBE_DURATION = Duration.ofSeconds(10);
 
     private final Object[] sourceLocks = Stream.generate(Object::new).limit(LOCK_STRIPES).toArray();
 
@@ -145,7 +154,12 @@ public class IngestedFileService {
                 // Read now, as a run would read it, and refused if it yields nothing.
                 // A scanned PDF used to be stored, listed as waiting to be indexed, and
                 // skipped as blank by every run, with nothing anywhere saying why.
-                extractors.requireText(content, mimeType, ExtractionLimits.defaults());
+                //
+                // On the request thread, so on a short leash: the probe stops at the
+                // first characters of text, and a file that cannot show any within
+                // UPLOAD_PROBE_DURATION is refused rather than holding the worker.
+                extractors.requireText(content, mimeType,
+                        ExtractionLimits.defaults().withMaxDuration(UPLOAD_PROBE_DURATION));
             } catch (UnreadableDocumentException e) {
                 rejected.add(new RejectedFile(fileName, e.getMessage()));
                 continue;
@@ -204,9 +218,18 @@ public class IngestedFileService {
                 // Another instance may have stored in the same window. A new file that
                 // took the source past a limit is taken back out; nothing was replaced,
                 // so nothing is lost by it.
+                //
+                // Only if the stored file is still the one written here: another
+                // instance uploading the same name in the same window saw a
+                // replacement, skipped this check and told its caller "stored" — its
+                // file must not be deleted by this one. (Two instances adding
+                // different files to a source with one slot left can both see it full
+                // and both take theirs back; the uploader then retries. Liveness, not
+                // safety, and only across instances.)
                 Map<String, Long> after = sizesOf(sourceKey);
                 long total = after.values().stream().mapToLong(Long::longValue).sum();
-                if (after.size() > limits.maxFilesOrDefault() || total > limits.maxTotalBytesOrDefault()) {
+                if ((after.size() > limits.maxFilesOrDefault() || total > limits.maxTotalBytesOrDefault())
+                        && stillOurs(sourceKey, stored)) {
                     fileStore.delete(sourceKey, fileId);
                     return new RejectedFile(fileName, "Other files were uploaded to this source at the same "
                             + "time and it is now full. Delete some files, or raise the limit in the source's "
@@ -216,6 +239,20 @@ public class IngestedFileService {
             accepted.add(stored);
             return null;
         }
+    }
+
+    /**
+     * Whether the file under this name still holds the bytes stored here. By
+     * content hash: the stores do not hand back the upload time they persisted, so
+     * the hash is the one field both sides can compare. Two instances storing
+     * identical bytes under one name, into a full source, in the same instant, are
+     * indistinguishable — there the delete can still take the file the other
+     * reported stored.
+     */
+    private boolean stillOurs(String sourceKey, IIngestedFileStore.StoredFile stored) {
+        return fileStore.find(sourceKey, stored.fileId())
+                .map(current -> Objects.equals(current.contentHash(), stored.contentHash()))
+                .orElse(false);
     }
 
     private Map<String, Long> sizesOf(String sourceKey) {
