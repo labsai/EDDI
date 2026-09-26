@@ -47,6 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -55,6 +56,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -154,6 +156,113 @@ class RestImportServiceMergeSharedExtensionTest {
         verify(documentDescriptorStore).setDescriptor(eq(LOCAL_DICT_ID), eq(1), argThat((DocumentDescriptor d) -> d == originalDescriptor
                 && "Original name".equals(d.getName())
                 && d.getResource().toString().endsWith(LOCAL_DICT_ID + "?version=4")));
+    }
+
+    @Test
+    @DisplayName("a merge that cannot read a resource before its first update aborts before writing it, and rolls back the rest")
+    void unreadableResourceAbortsTheMergeBeforeItsUpdate() throws Exception {
+        assertMergeAbortsBeforeUpdatingAnUnreadableDictionary(true);
+    }
+
+    @Test
+    @DisplayName("a store read that yields nothing counts as unreadable, too")
+    void emptyReadAbortsTheMergeBeforeItsUpdate() throws Exception {
+        assertMergeAbortsBeforeUpdatingAnUnreadableDictionary(false);
+    }
+
+    private void assertMergeAbortsBeforeUpdatingAnUnreadableDictionary(boolean readThrows) throws Exception {
+        String dictOriginB = "dddd11112222333344445556";
+        String localDictB = "eeee11112222333344445556";
+        stubWorkflowsWithOwnDictionaries(List.of(WORKFLOW_1, WORKFLOW_2), List.of(DICT_ORIGIN_ID, dictOriginB));
+
+        // Dictionary A is readable and merged by the first workflow.
+        var originalA = new DictionaryConfiguration();
+        var dictionaryStore = mock(IDictionaryStore.class);
+        when(dictionaryStore.read(LOCAL_DICT_ID, 1)).thenReturn(originalA);
+        // Dictionary B cannot be read: nothing would restore it.
+        if (readThrows) {
+            when(dictionaryStore.read(localDictB, 1)).thenThrow(new IResourceStore.ResourceStoreException("read timed out"));
+        } else {
+            when(dictionaryStore.read(localDictB, 1)).thenReturn(null);
+        }
+
+        var currentA = new AtomicInteger(1);
+        List<Object> writtenA = new ArrayList<>();
+        var restDictionaryStore = mock(IRestDictionaryStore.class);
+        when(restDictionaryStore.updateRegularDictionary(eq(LOCAL_DICT_ID), anyInt(), any())).thenAnswer(i -> {
+            if ((int) i.getArgument(1) != currentA.get()) {
+                throw new WebApplicationException(Response.status(409).build());
+            }
+            currentA.incrementAndGet();
+            writtenA.add(i.getArgument(2));
+            return Response.ok().build();
+        });
+
+        when(documentDescriptorStore.findByOriginId(DICT_ORIGIN_ID)).thenAnswer(i -> List.of(localDescriptorAt(LOCAL_DICT_ID, currentA.get())));
+        when(documentDescriptorStore.findByOriginId(dictOriginB)).thenAnswer(i -> List.of(localDescriptorAt(localDictB, 1)));
+        when(documentDescriptorStore.getCurrentResourceId(anyString())).thenAnswer(i -> resourceId(i.getArgument(0), 1));
+        when(documentDescriptorStore.readDescriptor(anyString(), anyInt())).thenAnswer(i -> new DocumentDescriptor());
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("cccc11112222333344445551", 1),
+                resourceId("cccc11112222333344445552", 1));
+        var agentStore = mock(IAgentStore.class);
+
+        InternalServerErrorException failure;
+        try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+            CDI cdi = mock(CDI.class);
+            cdiMock.when(CDI::current).thenReturn(cdi);
+            stubBean(cdi, IWorkflowStore.class, workflowStore);
+            stubBean(cdi, IAgentStore.class, agentStore);
+            stubBean(cdi, IDictionaryStore.class, dictionaryStore);
+            stubBean(cdi, IRestDictionaryStore.class, restDictionaryStore);
+            stubBean(cdi, CapabilityRegistryService.class, mock(CapabilityRegistryService.class));
+
+            failure = assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+        }
+
+        // B was never written: an update with no snapshot would survive the rollback.
+        verify(restDictionaryStore, never()).updateRegularDictionary(eq(localDictB), anyInt(), any());
+        // A, merged before the abort, is written back to its pre-import content.
+        assertEquals(2, writtenA.size(), "the merge update and its restore");
+        assertSame(originalA, writtenA.get(1), "the rollback restores what the merge had already updated");
+        // Nothing past the abort ran.
+        verify(agentStore, never()).create(any());
+        assertTrue(failure.getMessage().contains(localDictB) && failure.getMessage().contains("could not be read"),
+                failure.getMessage());
+    }
+
+    private static DocumentDescriptor localDescriptorAt(String localId, int version) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + localId + "?version=" + version));
+        return descriptor;
+    }
+
+    private void stubWorkflowsWithOwnDictionaries(List<String> workflowIds, List<String> dictOriginIds) throws Exception {
+        doAnswer(inv -> {
+            File dir = inv.getArgument(1);
+            dir.mkdirs();
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+            for (int n = 0; n < workflowIds.size(); n++) {
+                String workflowId = workflowIds.get(n);
+                String dictOrigin = dictOriginIds.get(n);
+                File workflowDir = new File(new File(dir, workflowId), "1");
+                workflowDir.mkdirs();
+                String dictUri = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + dictOrigin + "?version=1";
+                Files.writeString(new File(workflowDir, workflowId + ".workflow.json").toPath(),
+                        "{\"workflowSteps\":[{\"config\":{\"uri\":\"" + dictUri + "\"}}]}");
+                Files.writeString(new File(workflowDir, dictOrigin + ".regulardictionary.json").toPath(), "DICTJSON");
+            }
+            return null;
+        }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(workflowIds.stream()
+                .map(id -> URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + id + "?version=1")).toList());
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
+        when(jsonSerialization.deserialize(eq("DICTJSON"), eq(DictionaryConfiguration.class))).thenAnswer(i -> new DictionaryConfiguration());
+        when(jsonSerialization.deserialize(anyString(), eq(WorkflowConfiguration.class))).thenAnswer(i -> new WorkflowConfiguration());
     }
 
     private static DocumentDescriptor localDescriptorAt(int version) {

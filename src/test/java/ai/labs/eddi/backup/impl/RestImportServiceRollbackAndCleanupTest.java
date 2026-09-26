@@ -475,7 +475,10 @@ class RestImportServiceRollbackAndCleanupTest {
             when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
 
             try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
-                stubCdi(cdiMock, workflowStore, agentStore, mock(IPromptSnippetStore.class), restSnippetStore);
+                // Readable, so the merge can snapshot the snippet it overwrites.
+                var snippetStore = mock(IPromptSnippetStore.class);
+                when(snippetStore.read(NEW_SNIPPET_ID, 1)).thenReturn(new PromptSnippet());
+                stubCdi(cdiMock, workflowStore, agentStore, snippetStore, restSnippetStore);
 
                 importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge",
                         WORKFLOW_ORIGIN_ID + "," + ARCHIVE_SNIPPET_ID, null, null);

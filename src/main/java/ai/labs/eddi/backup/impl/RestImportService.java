@@ -1031,9 +1031,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * archive's own content, and restoring that would leave the import in place.
      * Later updates only move the version the single compensation restores over,
      * which is read when the compensation runs.
+     * <p>
+     * A first update whose pre-import content cannot be read is not attempted: it
+     * would land with nothing to restore, so a later failure would leave exactly
+     * this resource half-promoted. The merge fails instead, and the transaction's
+     * rollback undoes what it had already written. An unreadable descriptor does
+     * not stop it - the content still restores, only the descriptor's name and
+     * origin id stay as the merge left them, which is logged.
      *
      * @return the URI of the version the update produced, or {@code null} when the
      *         store did not answer 200 - the caller then creates a resource instead
+     * @throws IllegalStateException
+     *             when the resource's current content cannot be read before its
+     *             first update in this merge
      */
     private <T> URI updateTracked(Class<?> storeClass, String resourceUri, String localId, Integer localVersion, T document,
                                   RestUpdate<T> restUpdate, ImportTransaction transaction) {
@@ -1043,6 +1053,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (tracked == null) {
             previous = readForRollback(storeClass, localId, localVersion);
             previousDescriptor = readCurrentDescriptorForRollback(localId);
+            if (previousDescriptor == null) {
+                LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",
+                        storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
+            }
         }
 
         Response response = restUpdate.update(localId, localVersion, document);
@@ -1054,28 +1068,38 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             tracked.latestImportedVersion = newVersion;
         } else {
             var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
-            if (previous == null) {
-                LOGGER.warnf("Merge updated %s '%s' without a readable previous version; a failed import cannot restore it",
-                        storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
-            } else {
-                T original = previous;
-                DocumentDescriptor originalDescriptor = previousDescriptor;
-                transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
-                        update.latestImportedVersion, original, originalDescriptor, restUpdate));
-            }
+            T original = previous;
+            DocumentDescriptor originalDescriptor = previousDescriptor;
+            transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
+                    update.latestImportedVersion, original, originalDescriptor, restUpdate));
         }
         return URI.create(resourceUri + localId + IRestVersionInfo.versionQueryParam + newVersion);
     }
 
+    /**
+     * The content a first merge update is about to replace - what its compensation
+     * writes back. Never {@code null}: a resource that cannot be read is not
+     * updated at all (see {@link #updateTracked}).
+     */
     private <T> T readForRollback(Class<?> storeClass, String id, Integer version) {
+        T previous;
         try {
             IResourceStore<T> store = resolveStore(storeClass);
-            return store.read(id, version);
+            previous = store.read(id, version);
         } catch (Exception e) {
-            LOGGER.debugf("Could not read %s '%s' v%s before a merge update: %s", storeClass.getSimpleName(),
-                    LogSanitizer.sanitize(id), version, LogSanitizer.sanitize(e.getMessage()));
-            return null;
+            throw unrestorableUpdate(storeClass, id, version, e);
         }
+        if (previous == null) {
+            throw unrestorableUpdate(storeClass, id, version, null);
+        }
+        return previous;
+    }
+
+    private static IllegalStateException unrestorableUpdate(Class<?> storeClass, String id, Integer version, Exception cause) {
+        // Sanitized here: the import's catch-all logs this message as it is.
+        return new IllegalStateException("Merge aborted: " + storeClass.getSimpleName() + " '" + LogSanitizer.sanitize(id) + "' v"
+                + version + " could not be read before updating it, so a failed import could not restore it"
+                + (cause == null ? "" : " (" + LogSanitizer.sanitize(cause.getMessage()) + ")"), cause);
     }
 
     private DocumentDescriptor readCurrentDescriptorForRollback(String id) {

@@ -496,6 +496,11 @@ ever grows, so the version the failed import wrote stays readable. A resource so
 changed while the import ran is not overwritten by the rollback; the conflict is logged at
 `WARN` instead.
 
+A merge reads each existing resource before it first overwrites it, because that snapshot is
+what the rollback writes back. If the read fails, the merge stops there — before overwriting
+that resource — and fails with `500` naming it, and everything it had already written is
+rolled back as above. Retry once the store is readable again.
+
 ### Archive limits
 
 An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,

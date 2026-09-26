@@ -71,6 +71,12 @@ selection and rollback, and the delete version predicate.
     restored over the latest imported version. With one compensation per update, the
     second one's "previous" was the archive's own content, the first one's restore hit
     a version conflict, and the rollback silently left the import in place.
+  - A resource whose current content **cannot be read** before its first update is no
+    longer updated with a WARN and no compensation — that update would have survived
+    the rollback. The merge fails before writing it (500, naming the resource), and the
+    rollback undoes what it had already written. An unreadable *descriptor* does not
+    stop the merge: the content still restores, only the name and origin id stay as the
+    merge left them, which is logged at `WARN`.
 - **M-P5 — delete racing an update.** Deleting by id alone erased a version an update
   had just committed (never archived, so gone for good), and the delete's tombstone
   lost the insert race to the update's non-deleted history row, so the resource looked
