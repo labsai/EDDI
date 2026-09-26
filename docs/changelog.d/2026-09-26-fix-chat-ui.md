@@ -14,10 +14,18 @@
 - A requested `inputField` is read from the streaming `done` frame too, not only the non-streaming snapshot, so the password field appears on the default transport and the key is sent with `secretInput`.
 - Only `subType: "password"` is masked and flagged secret; `text` and `email` are ordinary fields (`SecretInput` used to mask every subType).
 - A refused secret goes back into the composer **masked, with secret mode on** instead of being dropped.
-- Rebuilt transcripts (undo, redo, reload) mask a secret turn from the turn output's `input` (`<secret input>`). This needed one backend change: see below.
+- Rebuilt transcripts (undo, redo, reload) mask a secret turn from the turn output's `input` (`<secret input>`). That only works because of the engine fix below.
 
 **Backend changes the Chat UI findings required**
-- [`ConversationMemoryUtilities.convertSimpleConversationMemory`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryUtilities.java) now keeps the exact `input` key in non-detailed `conversationOutputs`. It is the display copy of the user's message and reads `<secret input>` for a secret turn, while `input:initial` in the steps stays raw. Without it, the only copy of the input on the wire was the plaintext. The change is additive; readers that look up specific keys are unaffected. The Manager's `snapshotToMessages` (from `fix/manager-chat`) reads this key, so the change also makes its secret masking work with `returnDetailed=false`.
+- **A client-flagged secret input leaked for any agent with a parser.** `Conversation.storeUserInputInMemory` wrote `<secret input>` as the displayed `input`, but `InputParserTask` — the first task of practically every workflow — overwrote it with the normalized plaintext, and `input:initial` was never masked. Only a `scope:"secret"` property scrubbed them. So a key sent with `secretInput` stayed in the stored step, in every snapshot, in the audit ledger (`TurnAuditBuffer` redacts only when `input:initial` reads as the placeholder), and in the streaming `done` frame once the `input` key was exposed. [`Conversation.scrubSecretClientInput`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java) now runs when the turn stops (completed, stopped, paused or failed), before the audit flush:
+  - it sets `input:initial` and `input:normalized` to the placeholder;
+  - it clears the parsed expressions and intents derived from the secret;
+  - it re-asserts `<secret input>` as the displayed `input`;
+  - it removes the raw and normalized text (8+ characters) from every other datum and output of the step;
+  - the audit ledger records the placeholder and redacts both forms (`TurnAuditBuffer.addSecretInputForms`).
+
+  Tasks still see the plaintext while the turn runs. A conversation property the designer captured the input into is deliberately kept (the wizard pattern; the `secret` scope vaults it instead). A task that runs after a HITL resume of the turn sees the placeholder. Test: `ConversationSecretClientInputTest`, with the real `InputParserTask` in the workflow.
+- [`ConversationMemoryUtilities.convertSimpleConversationMemory`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryUtilities.java) now keeps the exact `input` key in non-detailed `conversationOutputs`. Its contract is "the masked display copy": `<secret input>` for a turn flagged `secretInput`, the normalized text otherwise. It is additive; readers look up specific keys. The Manager's `snapshotToMessages` (from `fix/manager-chat`) reads this key, and the engine fix above is what makes that correct too.
 - [`RestAgentManagement.loadConversationMemory`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java) re-runs the last step only when the caller asked for a language. A load without `?language=` compared the stored `lang` against null and re-ran the step on every widget load.
 
 **Conversation lifecycle**
@@ -25,10 +33,10 @@
 - Start and restart share one `openConversation`, which re-checks the conversation generation after every await. The first load had no such check, so a restart during its welcome read could get the old greeting and id.
 
 **Rendering**
-- Links open in a new tab (`rel="noopener noreferrer"`). A link used to navigate the widget, or the whole iframe, away.
+- Links open in a new tab (`rel="noopener noreferrer"`). A link used to navigate the widget, or the whole iframe, away. Same-page anchors and GFM footnote references stay in the page.
 - `<img>` is removed from the sanitize schema. A model-chosen image URL is a beacon, and only EDDI's own CSP blocked it; an embedding page's CSP might not.
-- `image` output items are rendered by the widget, http(s) or same-origin only. `applicationLink` becomes a link and `button` shows its label. All three used to be dropped silently.
-- KaTeX and syntax highlighting (advertised in the README, never wired) now work. Both are **loaded on first use** from their own chunks (`markdown-plugins.ts`), so the main bundle stays about the same (645 → 652 kB). The KaTeX fonts go to `fonts/`, which the Maven build already copies and prunes.
+- `image` output items are rendered by the widget, http(s) or same-origin only. `applicationLink` becomes a link (label escaped, destination wrapped in `<…>`) and `button` shows its label. All three used to be dropped silently.
+- KaTeX and syntax highlighting (advertised in the README, never wired) now work. Math is `$$…$$` only (`singleDollarTextMath: false`): with single-dollar math, a reply quoting "$5 and $10" rendered the span between the prices as a formula. Both are **loaded on first use** from their own chunks (`markdown-plugins.ts`), so the main bundle stays about the same (645 → 652 kB). The KaTeX fonts go to `fonts/`, which the Maven build already copies and prunes.
 - `MessageBubble` takes its flags as props instead of subscribing to the store, so a streamed token no longer re-renders and re-parses every bubble.
 
 **Smaller items**
@@ -44,10 +52,12 @@
 
 ### Refuted / not changed
 - **"A double-clicked restart starts two conversations."** Refuted as stated. Every restart control unmounts synchronously on the first click (`CLEAR_MESSAGES` clears the `conversationId` the action bar and banners depend on), so no second click can reach one. The related real race, a restart during the first load's in-flight read, is fixed by the generation checks above.
+- **Managed restart racing the first load (review).** Not reachable from the UI: every restart control needs the `conversationId` or state that the first managed load sets only when it completes, so no restart can start while it is in flight.
 - Designer-configured images from external hosts are still blocked by EDDI's own `img-src 'self' data:` CSP when EDDI serves the widget. That is a deployment choice and is left alone.
 - The descriptor endpoint is editor-only, so an end user with only `eddi-user` still sees the configured `title` instead of the agent name. A user-readable name endpoint would be a backend feature and is a follow-up.
 
 ```decision-log
 | 2026-09-26 | Chat UI: KaTeX and highlight.js are loaded on first use, not bundled | Wiring the advertised features statically tripled the widget bundle (645 → 1086 kB) | Static imports; dropping the features from the README |
-| 2026-09-26 | Simple snapshots carry the turn output's `input` key | A reloaded transcript could only print `input:initial`, which is raw for a secret turn | Scrubbing `input:initial` after the pipeline (changes what rerun and the audit see) |
+| 2026-09-26 | A client-flagged secret input is scrubbed when its turn ends, and the turn output's `input` is the masked display copy on the wire | The parser overwrote the placeholder with the normalized plaintext, so exposing `input` alone would have leaked a copy | Exposing `input` without the engine fix; scrubbing properties the designer captured the input into (breaks the wizard pattern) |
+| 2026-09-26 | Chat UI math is `$$…$$` only | Single-dollar math turned dollar amounts into formulas | remark-math defaults |
 ```

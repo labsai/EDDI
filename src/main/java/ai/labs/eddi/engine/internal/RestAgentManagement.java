@@ -78,8 +78,8 @@ public class RestAgentManagement implements IRestAgentManagement {
             // Re-render only when the caller ASKED for a language that differs from
             // the stored one. A load without ?language= used to compare the stored
             // value against null, so any conversation that had ever carried a lang
-            // property re-ran its last step on every load — repeating its cost and
-            // its side effects each time the widget opened.
+            // property re-ran its last step on every load — another model call,
+            // and its cost, each time the widget opened.
             Property languageProperty = extractLanguageProperty(memorySnapshot);
             if (!userConversationResult.isNewlyCreatedConversation() && !isNullOrEmpty(language)
                     && (languageProperty != null && languageProperty.getValueString() != null

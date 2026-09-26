@@ -61,11 +61,12 @@ export function stepsToMessages(
       if (key === INPUT_INITIAL) {
         const text = typeof entry.value === "string" ? entry.value.trim() : "";
         if (!text) continue;
-        // `input:initial` is the RAW message, always — Conversation stores it
-        // unmasked even for a secret turn. The masked display copy is the turn
-        // output's `input` ("<secret input>"), which is what makes a secret
-        // turn recognisable after a reload. The session's own record still
-        // covers a backend that does not send that key.
+        // The turn output's `input` is the masked display copy — "<secret
+        // input>" for a secret turn — and is what makes a secret turn
+        // recognisable after a reload. The engine now also scrubs
+        // `input:initial` when a secret turn ends, but conversations stored
+        // before that still carry it raw, so the mask is applied here too. The
+        // session's own record covers a backend that sends neither.
         messages.push(
           makeMessage(
             "user",
