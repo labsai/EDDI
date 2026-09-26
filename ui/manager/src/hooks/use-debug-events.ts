@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { AuditEntry } from "@/lib/api/audit";
 
 // ==================== Types ====================
 
@@ -53,7 +54,14 @@ export interface PipelineEvent {
 }
 
 export interface PipelineTurn {
+  /** Position in the list being shown (0-based). NOT a conversation step. */
   turnIndex: number;
+  /**
+   * The conversation step (audit `stepIndex`) this turn is, when known. Set for
+   * turns rebuilt from the audit trail; unset for live turns, whose step is
+   * resolved against the audit entries by {@link resolveAuditStepIndex}.
+   */
+  stepIndex?: number;
   events: PipelineEvent[];
   totalDurationMs: number;
   startTime: number;
@@ -133,6 +141,12 @@ interface DebugState {
   isDebugOpen: boolean;
   activeTab: DebugTab;
   selectedTurnIndex: number | null; // null = current/latest
+  /**
+   * The conversation the recorded turns belong to. The store is global and
+   * nothing used to clear it, so after switching conversation (or agent) the
+   * debugger kept showing — and adding to — the previous conversation's turns.
+   */
+  boundConversationId: string | null;
   showActivity: boolean; // inline activity cards in chat
 
   // Actions
@@ -145,6 +159,8 @@ interface DebugState {
   setActiveTab: (tab: DebugTab) => void;
   setSelectedTurn: (index: number | null) => void;
   toggleShowActivity: () => void;
+  /** Point the debugger at a conversation; switching away clears the turns. */
+  bindConversation: (conversationId: string | null) => void;
   reset: () => void;
 }
 
@@ -193,6 +209,7 @@ export const useDebugStore = create<DebugState>((set) => ({
   isDebugOpen: loadDebugPref(),
   activeTab: "pipeline",
   selectedTurnIndex: null,
+  boundConversationId: null,
   showActivity: loadActivityPref(),
 
   addEvent: (event) =>
@@ -263,6 +280,27 @@ export const useDebugStore = create<DebugState>((set) => ({
       return { showActivity: next };
     }),
 
+  bindConversation: (conversationId) =>
+    set((s) => {
+      if (s.boundConversationId === conversationId) return s;
+      // null → X is the conversation being created for the turn that is
+      // already recording: keep that turn. Any other change is a different
+      // conversation, whose turns must not be mixed with these.
+      if (s.boundConversationId === null) {
+        return { ...s, boundConversationId: conversationId };
+      }
+      // Only the FINISHED turns are dropped. The in-flight turn belongs to
+      // whatever is streaming right now, which the chat store owns and which is
+      // the conversation being switched to (the chat drawer can start a turn
+      // before this panel mounts and binds).
+      return {
+        ...s,
+        boundConversationId: conversationId,
+        turns: [],
+        selectedTurnIndex: null,
+      };
+    }),
+
   reset: () =>
     set({
       turns: [],
@@ -313,4 +351,57 @@ const INTERNAL_INFRA_TASKS = new Set([
 /** The one shared predicate for "is this pipeline task plumbing?". */
 export function isInternalTask(taskType: string): boolean {
   return INTERNAL_INFRA_TASKS.has(taskType.toLowerCase());
+}
+
+/**
+ * Which audit step a LIVE turn is, or undefined when it cannot be told.
+ *
+ * Live turns used to be matched to audit entries by `turnIndex` — a count of
+ * turns seen in THIS session, starting at 0 — against the audit's
+ * `stepIndex`, the conversation's own step number (step 0 is the
+ * CONVERSATION_START greeting). The two agree almost never: every turn showed
+ * the costs and model of a different turn, and a live turn with no `stepIndex`
+ * picked the first matching entry from ANY step.
+ *
+ * The backend measures each task's duration once and sends the same number to
+ * the stream (`task_complete.durationMs`) and to the audit ledger
+ * (`AuditEntry.durationMs`), so the multiset of (taskType, durationMs) pairs
+ * fingerprints a turn. The step whose entries account for every completed task
+ * of the live turn is the one; ties go to the newest step. No match — the
+ * ledger has not caught up yet, say — returns undefined rather than a guess.
+ */
+export function resolveAuditStepIndex(
+  events: PipelineEvent[],
+  auditEntries: AuditEntry[]
+): number | undefined {
+  const live = new Map<string, number>();
+  for (const e of events) {
+    if (e.type !== "task_complete" || e.durationMs == null) continue;
+    const k = `${e.taskType}|${e.durationMs}`;
+    live.set(k, (live.get(k) ?? 0) + 1);
+  }
+  if (live.size === 0) return undefined;
+
+  const bySteps = new Map<number, Map<string, number>>();
+  for (const a of auditEntries) {
+    const step = a.stepIndex;
+    if (step == null) continue;
+    const m = bySteps.get(step) ?? new Map<string, number>();
+    const k = `${a.taskType}|${a.durationMs}`;
+    m.set(k, (m.get(k) ?? 0) + 1);
+    bySteps.set(step, m);
+  }
+
+  let best: number | undefined;
+  for (const [step, counts] of bySteps) {
+    let covers = true;
+    for (const [k, n] of live) {
+      if ((counts.get(k) ?? 0) < n) {
+        covers = false;
+        break;
+      }
+    }
+    if (covers && (best === undefined || step > best)) best = step;
+  }
+  return best;
 }

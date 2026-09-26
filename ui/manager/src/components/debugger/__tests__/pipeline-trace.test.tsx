@@ -9,6 +9,7 @@ import { useDebugStore, type PipelineEvent, type PipelineTurn } from "@/hooks/us
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import { userEvent } from "@/test/test-utils";
+import { formatUsd } from "@/lib/utils";
 
 function renderTrace(conversationId: string | null = "conv-1") {
   const queryClient = new QueryClient({
@@ -357,4 +358,74 @@ describe("PipelineTrace", () => {
     expect(screen.getByText("chat")).toBeInTheDocument();
     expect(screen.getByText("respond")).toBeInTheDocument();
   });
+
+  // Live turns were matched to audit entries by turnIndex (a count of turns
+  // seen this session) against the audit stepIndex (the conversation's own
+  // step number), so a turn showed another turn's costs and model.
+  it("attaches a live turn to the audit step with the same task durations, not to step turnIndex", async () => {
+    const entry = (stepIndex: number, taskType: string, taskIndex: number, durationMs: number, cost: number) => ({
+      id: `${stepIndex}-${taskIndex}`,
+      conversationId: "conv-align",
+      agentId: "a",
+      agentVersion: 1,
+      userId: null,
+      environment: "production",
+      stepIndex,
+      taskId: taskType,
+      taskType,
+      taskIndex,
+      durationMs,
+      input: null,
+      output: null,
+      llmDetail: null,
+      toolCalls: null,
+      actions: null,
+      cost,
+      timestamp: new Date(1000 + stepIndex).toISOString(),
+      hmac: null,
+      agentSignature: null,
+    });
+    server.use(
+      http.get("*/auditstore/:conversationId", () =>
+        HttpResponse.json([
+          // Step 0 is the turn a turnIndex of 0 used to pick.
+          entry(0, "ai.labs.parser", 0, 3, 0),
+          entry(0, "ai.labs.llm", 1, 100, 0.9),
+          // The live turn is actually the conversation's step 4.
+          entry(4, "ai.labs.parser", 0, 42, 0),
+          entry(4, "ai.labs.llm", 1, 250, 0.0123),
+        ])
+      )
+    );
+    useDebugStore.setState({ turns: [mockTurn] });
+    renderTrace("conv-align");
+
+    await waitFor(() =>
+      expect(screen.getAllByText(formatUsd(0.0123)).length).toBeGreaterThan(0)
+    );
+    expect(screen.queryByText(formatUsd(0.9))).not.toBeInTheDocument();
+  });
+
+  it("shows no audit data for a live turn whose step the ledger does not have yet", async () => {
+    server.use(
+      http.get("*/auditstore/:conversationId", () =>
+        HttpResponse.json([
+          {
+            id: "x", conversationId: "conv-lag", agentId: "a", agentVersion: 1, userId: null,
+            environment: "production", stepIndex: 0, taskId: "llm", taskType: "ai.labs.llm",
+            taskIndex: 1, durationMs: 100, input: null, output: null, llmDetail: null,
+            toolCalls: null, actions: null, cost: 0.9, timestamp: new Date(1000).toISOString(),
+            hmac: null, agentSignature: null,
+          },
+        ])
+      )
+    );
+    useDebugStore.setState({ turns: [mockTurn] });
+    renderTrace("conv-lag");
+    await waitFor(() => expect(screen.getAllByTestId("task-bar").length).toBeGreaterThan(0));
+    // Give the audit query a chance to land, then check nothing was borrowed.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(formatUsd(0.9))).not.toBeInTheDocument();
+  });
 });
+

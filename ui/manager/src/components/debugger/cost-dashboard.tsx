@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
+import type { AuditEntry } from "@/lib/api/audit";
+import { getWholeAuditTrail } from "@/lib/audit-pages";
 import { useConversationCosts } from "@/hooks/use-tool-metrics";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { Coins, Clock, Activity, Database, ArrowUp, ArrowDown } from "lucide-react";
@@ -17,12 +18,14 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
   const { t } = useTranslation();
   const { data: costs, isError: costsError } = useConversationCosts(conversationId, isActive);
 
-  const { data: auditEntries } = useQuery({
+  const { data: audit } = useQuery({
     queryKey: ["audit", "costDash", conversationId],
-    queryFn: () => getAuditTrail(conversationId!, 0, 200),
+    queryFn: () => getWholeAuditTrail(conversationId!),
     enabled: !!conversationId,
     staleTime: 10_000,
   });
+  const auditEntries = audit?.entries;
+  const partial = audit ? !audit.complete : false;
 
   const tokenMetrics = useMemo(() => {
     if (!auditEntries?.length) return null;
@@ -58,6 +61,17 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
 
   return (
     <div className="flex flex-col gap-3 p-3" data-testid="cost-dashboard">
+      {partial && (
+        <p
+          className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600"
+          data-testid="cost-dashboard-partial"
+        >
+          {t(
+            "costDashboard.partial",
+            "This conversation has more audit entries than the debugger loads. Totals cover the most recent ones only."
+          )}
+        </p>
+      )}
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-4 gap-2">
         <StatCard

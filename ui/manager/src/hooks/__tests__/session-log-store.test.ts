@@ -268,25 +268,17 @@ describe("useSessionLogStore", () => {
     connection.close();
   });
 
-  it("skips REST seed when entries are already present", async () => {
+  // P1: the stream only carries what happens while it is open, so a reopen
+  // (last viewer left and came back) or a reconnect after a drop must re-fetch
+  // the ring buffer — seeding only an EMPTY buffer left a silent gap.
+  it("reseeds on every open and fills the gap without duplicating what is shown", async () => {
     const { getRecentLogs } = await import("@/lib/api/logs");
     const mockGetRecentLogs = vi.mocked(getRecentLogs);
+    const shown = logLine(5000, "Pre-existing");
+    const missed = logLine(6000, "Logged while the stream was closed");
 
-    // Pre-populate store
-    useSessionLogStore.setState({
-      entries: [{
-        timestamp: 5000,
-        level: "INFO",
-        loggerName: "pre",
-        message: "Pre-existing",
-        environment: undefined,
-        agentId: undefined,
-        agentVersion: undefined,
-        conversationId: undefined,
-        userId: undefined,
-        instanceId: undefined,
-      }],
-    });
+    useSessionLogStore.setState({ entries: [shown] });
+    mockGetRecentLogs.mockResolvedValueOnce([missed, shown]);
 
     const connection = _connectForTesting();
     const es = connection.getEventSource();
@@ -294,8 +286,36 @@ describe("useSessionLogStore", () => {
 
     await es.onopen?.();
 
-    // Should NOT have called getRecentLogs since entries were not empty
-    expect(mockGetRecentLogs).not.toHaveBeenCalled();
+    expect(mockGetRecentLogs).toHaveBeenCalledTimes(1);
+    expect(
+      useSessionLogStore.getState().entries.map((e) => e.message)
+    ).toEqual(["Logged while the stream was closed", "Pre-existing"]);
+
+    connection.close();
+  });
+
+  // Every (re)connect replays up to 50 ring-buffer lines before going live
+  // (RestLogAdmin.streamLogs). They used to be prepended blindly — duplicated,
+  // and on top of newer lines.
+  it("drops lines the stream replays on reconnect and keeps newest-first order", () => {
+    const older = logLine(1000, "older");
+    const newer = logLine(2000, "newer");
+    useSessionLogStore.setState({ entries: [newer, older] });
+
+    const connection = _connectForTesting();
+    const es = connection.getEventSource();
+    if (!es) return;
+
+    // The replay arrives oldest-first, after both lines are already shown.
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(older) }));
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(newer) }));
+    // A replayed line the buffer had NOT seen lands in time order, not on top.
+    const between = logLine(1500, "between");
+    es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(between) }));
+
+    expect(
+      useSessionLogStore.getState().entries.map((e) => e.message)
+    ).toEqual(["newer", "between", "older"]);
 
     connection.close();
   });
@@ -389,6 +409,21 @@ describe("useSessionLogStore", () => {
     });
   });
 });
+
+function logLine(timestamp: number, message: string) {
+  return {
+    timestamp,
+    level: "INFO",
+    loggerName: "test",
+    message,
+    environment: undefined,
+    agentId: undefined,
+    agentVersion: undefined,
+    conversationId: undefined,
+    userId: undefined,
+    instanceId: undefined,
+  };
+}
 
 /** The live EventSource, read through the testing hook without re-counting. */
 function _sourceOf() {

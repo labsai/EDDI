@@ -6,7 +6,7 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 
 import { toast } from "sonner";
@@ -202,3 +202,77 @@ describe("ConversationMonitoringPage — purge ended", () => {
     expect(purgeUrl).not.toContain("deleteOlderThanDays=0");
   });
 });
+
+// The body of /end carries each conversation's state and the backend acts on
+// it. It used to be the last poll's state — up to ten seconds old — so a
+// conversation that had paused for approval meanwhile was ended as if it were
+// running, and its pending approval was never cleaned up.
+describe("ConversationMonitoringPage — bulk end uses the current state", () => {
+  async function selectFirstAndConfirm(user: ReturnType<typeof userEvent.setup>) {
+    await chooseAgent(user);
+    await screen.findByTestId("active-conversation-list");
+    await user.click(screen.getByTestId("select-conv-active-1"));
+    await user.click(screen.getByTestId("end-selected"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "End selected" }));
+    return dialog;
+  }
+
+  it("re-reads the list and sends the state it has now", async () => {
+    let reads = 0;
+    let endBody: unknown = null;
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () => {
+        reads++;
+        return HttpResponse.json(
+          reads === 1
+            ? [ACTIVE_ROWS[0]]
+            : [{ ...ACTIVE_ROWS[0], conversationState: "READY" }]
+        );
+      }),
+      http.post("*/conversationstore/conversations/end", async ({ request }) => {
+        endBody = await request.json();
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    await selectFirstAndConfirm(userEvent.setup());
+
+    await waitFor(() => expect(endBody).not.toBeNull());
+    expect(endBody).toEqual([
+      expect.objectContaining({ conversationId: "conv-active-1", conversationState: "READY" }),
+    ]);
+  });
+
+  it("does not end a conversation that paused for approval since the dialog was opened", async () => {
+    let reads = 0;
+    let ended = false;
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () => {
+        reads++;
+        return HttpResponse.json(
+          reads === 1
+            ? [ACTIVE_ROWS[0]]
+            : [{ ...ACTIVE_ROWS[0], conversationState: "AWAITING_HUMAN" }]
+        );
+      }),
+      http.post("*/conversationstore/conversations/end", () => {
+        ended = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const dialog = await selectFirstAndConfirm(userEvent.setup());
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(ended).toBe(false);
+    // The dialog stays open and now warns about the pending approval.
+    expect(dialog).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(dialog).getByText(/Awaiting Human and will have its pending approval cancelled/)).toBeInTheDocument()
+    );
+  });
+});
+

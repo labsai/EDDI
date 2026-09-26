@@ -57,18 +57,17 @@ export function OrphansPage() {
 
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const {
     data: report,
     isFetching: isScanning,
     refetch: scan,
+    dataUpdatedAt,
   } = useOrphanScan(includeDeleted);
 
   const purge = usePurgeOrphans();
 
   const handleScan = useCallback(() => {
-    setSelected(new Set());
     scan();
   }, [scan]);
 
@@ -82,7 +81,6 @@ export function OrphansPage() {
           })
         );
         setShowPurgeConfirm(false);
-        setSelected(new Set());
         scan();
       },
       onError: () => toast.error(t("common.error")),
@@ -101,40 +99,6 @@ export function OrphansPage() {
       },
       {}
     );
-  }, [report]);
-
-  // Toggle selection
-  const toggleSelect = useCallback((uri: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(uri)) next.delete(uri);
-      else next.add(uri);
-      return next;
-    });
-  }, []);
-
-  const toggleGroup = useCallback(
-    (orphans: OrphanInfo[]) => {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        const allSelected = orphans.every((o) => next.has(o.resourceUri));
-        for (const o of orphans) {
-          if (allSelected) next.delete(o.resourceUri);
-          else next.add(o.resourceUri);
-        }
-        return next;
-      });
-    },
-    []
-  );
-
-  const selectAll = useCallback(() => {
-    if (!report?.orphans) return;
-    setSelected((prev) => {
-      const allSelected = report.orphans.every((o) => prev.has(o.resourceUri));
-      if (allSelected) return new Set();
-      return new Set(report.orphans.map((o) => o.resourceUri));
-    });
   }, [report]);
 
   // Copy URI to clipboard
@@ -284,46 +248,32 @@ export function OrphansPage() {
                         })}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {t("orphans.lastScanned", "Last scanned")}: {new Date().toLocaleTimeString()}
+                    {t("orphans.lastScanned", "Last scanned")}:{" "}
+                    {/* When the scan ran, not when this re-rendered. */}
+                    <span data-testid="orphans-last-scanned">
+                      {new Date(dataUpdatedAt).toLocaleTimeString()}
+                    </span>
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Select all / Delete selected */}
+                {/* The backend purges every orphan or none (and re-checks each one
+                    is still unreferenced right before deleting it). There used to
+                    be per-row checkboxes and a "Delete N selected" button here that
+                    opened the purge-ALL confirmation — a selection the server never
+                    receives. A client-side per-resource delete would skip that
+                    re-check, so the selection is gone rather than faked. */}
                 {report.totalOrphans > 0 && isScanComplete(report) && (
                   <>
-                    <button
-                      onClick={selectAll}
-                      className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                      data-testid="select-all-btn"
-                    >
-                      {selected.size === report.orphans.length
-                        ? t("orphans.deselectAll", "Deselect All")
-                        : t("orphans.selectAll", "Select All")}
-                    </button>
-                    {selected.size > 0 && (
-                      <button
-                        onClick={() => setShowPurgeConfirm(true)}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
-                        data-testid="delete-selected-btn"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {t("orphans.deleteSelected", {
-                          count: selected.size,
-                          defaultValue: `Delete ${selected.size} selected`,
-                        })}
-                      </button>
-                    )}
-
                     {/* Purge all */}
                     {showPurgeConfirm ? (
                       <div className="flex items-center gap-2">
                         <span className="max-w-md text-sm font-medium text-destructive">
-                          {t("orphans.confirmPurgeAll", {
+                          {t("orphans.confirmPurge", {
                             count: report.orphans.length,
                             defaultValue:
-                              "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
+                              "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
                           })}
                         </span>
                         <button
@@ -343,16 +293,14 @@ export function OrphansPage() {
                         </button>
                       </div>
                     ) : (
-                      selected.size === 0 && (
-                        <button
-                          onClick={() => setShowPurgeConfirm(true)}
-                          className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
-                          data-testid="purge-button"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          {t("orphans.purge", "Purge All")}
-                        </button>
-                      )
+                      <button
+                        onClick={() => setShowPurgeConfirm(true)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+                        data-testid="purge-button"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {t("orphans.purge", "Purge All")}
+                      </button>
                     )}
                   </>
                 )}
@@ -365,7 +313,6 @@ export function OrphansPage() {
             Object.entries(orphansByType).map(([type, orphans]) => {
               const config = getExtensionTypeConfig(type);
               const TypeIcon = config.icon;
-              const groupAllSelected = orphans.every((o) => selected.has(o.resourceUri));
 
               return (
                 <div
@@ -375,13 +322,6 @@ export function OrphansPage() {
                   {/* Group header */}
                   <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
                     <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={groupAllSelected}
-                        onChange={() => toggleGroup(orphans)}
-                        className="h-4 w-4 rounded border-input bg-background accent-primary"
-                        data-testid={`group-checkbox-${type}`}
-                      />
                       <TypeIcon className={`h-4 w-4 ${config.color}`} />
                       <h3 className="text-sm font-semibold text-foreground">
                         {config.label}
@@ -401,19 +341,8 @@ export function OrphansPage() {
                       return (
                         <div
                           key={`${orphan.resourceUri}-${idx}`}
-                          className={`flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30 ${
-                            selected.has(orphan.resourceUri) ? "bg-primary/5" : ""
-                          }`}
+                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
                         >
-                          {/* Checkbox */}
-                          <input
-                            type="checkbox"
-                            checked={selected.has(orphan.resourceUri)}
-                            onChange={() => toggleSelect(orphan.resourceUri)}
-                            className="h-4 w-4 shrink-0 rounded border-input bg-background accent-primary"
-                            data-testid={`orphan-checkbox-${idx}`}
-                          />
-
                           {/* Type icon */}
                           <TypeIcon className={`h-4 w-4 shrink-0 ${config.color} opacity-50`} />
 

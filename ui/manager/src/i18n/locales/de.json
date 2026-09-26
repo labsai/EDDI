@@ -656,7 +656,9 @@
     "endSuccess_one": "{{count}} Gespräch beendet",
     "endSuccess_other": "{{count}} Gespräche beendet",
     "purgeSuccess_one": "{{count}} beendete Gespräch bereinigt",
-    "purgeSuccess_other": "{{count}} beendete Gespräche bereinigt"
+    "purgeSuccess_other": "{{count}} beendete Gespräche bereinigt",
+    "endStateUnavailable": "Der aktuelle Status der Konversationen konnte nicht erneut geprüft werden, daher wurde nichts beendet. Bitte erneut versuchen.",
+    "endStateChanged": "Eine ausgewählte Konversation wartet jetzt auf Freigabe. Prüfen Sie die Auswahl und bestätigen Sie erneut."
   },
   "conversationDetail": {
     "backToConversations": "Zurück zu Gesprächen",
@@ -1549,7 +1551,8 @@
     "stateReady": "Bereit",
     "stateActive": "Aktiv",
     "stateError": "Fehler",
-    "stateEnded": "Beendet"
+    "stateEnded": "Beendet",
+    "loadOlder": "Ältere Einträge laden"
   },
   "secrets": {
     "loadError": "Secrets konnten nicht geladen werden",
@@ -1834,7 +1837,11 @@
       "weeklyMonday": "Wöchentlich (Mo 00:00)",
       "monthly": "Monatlich (1., 00:00)"
     },
-    "totalCappedHint": "Der Server hat eine volle Seite zurückgegeben, es kann also mehr Zeitpläne geben als hier angezeigt."
+    "totalCappedHint": "Der Server hat eine volle Seite zurückgegeben, es kann also mehr Zeitpläne geben als hier angezeigt.",
+    "systemManaged": "System",
+    "systemManagedHint": "Von EDDI verwaltet (Wissensbasis-Ingestion, Gedächtniskonsolidierung oder Team-Kadenz). Ändern Sie ihn dort, wo er definiert ist, nicht hier.",
+    "persistentConversationIdLocked": "Wird beim Anlegen des Zeitplans festgelegt. Der Server behält die Konversation bei, an die die Ausführungen bisher angehängt wurden.",
+    "failedScheduleGone": "Zeitplan existiert nicht mehr"
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -1895,7 +1902,8 @@
     "tokenDistribution": "Token-Verteilung",
     "totalCost": "Gesamtkosten",
     "totalTokens": "Tokens gesamt",
-    "turns": "Runden"
+    "turns": "Runden",
+    "partial": "Diese Konversation hat mehr Audit-Einträge, als der Debugger lädt. Die Summen umfassen nur die neuesten."
   },
   "memoryInspector": {
     "error": "Speicherdaten konnten nicht geladen werden",
@@ -3240,7 +3248,8 @@
     "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
     "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
     "syncIdentical": "Bereits aktuell – nichts zu schreiben",
-    "previewFailed": "Vorschau fehlgeschlagen"
+    "previewFailed": "Vorschau fehlgeschlagen",
+    "noPreviewReturned": "Die Quelle hat für diesen Agenten keine Vorschau geliefert."
   },
   "sync": {
     "actionCreate": "Neu",
@@ -3542,10 +3551,7 @@
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."
   },
   "orphans": {
-    "confirmPurgeAll": "ALLE {{count}} verwaisten Ressourcen dauerhaft löschen? Der Server löscht alle — Ihre Auswahl wird nicht angewendet. Dies kann nicht rückgängig gemacht werden.",
-    "deleteSelected": "{{count}} ausgewählte löschen",
     "description": "Finden und bereinigen Sie Ressourcen, die von keinem Agenten oder Workflow referenziert werden.",
-    "deselectAll": "Alle abwählen",
     "includeDeleted": "Soft-gelöschte einschließen",
     "lastScanned": "Zuletzt gescannt",
     "noOrphans": "Keine verwaisten Ressourcen gefunden",
@@ -3556,13 +3562,13 @@
     "scanPromptDesc": "Finden Sie Erweiterungskonfigurationen (Regeln, API-Aufrufe, LLMs, Ausgaben), die von keinem Workflow oder Agenten referenziert werden. Bereinigen Sie ungenutzte Ressourcen, um Ihre Plattform aufgeräumt zu halten.",
     "scanPromptTitle": "Plattform scannen",
     "scanning": "Ressourcen werden gescannt…",
-    "selectAll": "Alle auswählen",
     "softDeleted": "Gelöscht",
     "title": "Verwaiste Ressourcen",
     "found_one": "{{count}} verwaiste Ressource gefunden",
     "found_other": "{{count}} verwaiste Ressourcen gefunden",
     "scanIncomplete": "Dieser Scan wurde nicht abgeschlossen",
-    "scanIncompleteBody": "Ressourcen, die noch verwendet werden, können als verwaist aufgeführt sein. Das Bereinigen ist gesperrt, bis ein Scan vollständig durchläuft."
+    "scanIncompleteBody": "Ressourcen, die noch verwendet werden, können als verwaist aufgeführt sein. Das Bereinigen ist gesperrt, bis ein Scan vollständig durchläuft.",
+    "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden."
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",

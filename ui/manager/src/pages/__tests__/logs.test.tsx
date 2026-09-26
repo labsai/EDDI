@@ -51,15 +51,10 @@ vi.mock("@/lib/api/conversations", () => ({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function renderLogs() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
+let currentClient: QueryClient | null = null;
 
-  return render(
+function logsTree(queryClient: QueryClient) {
+  return (
     <MemoryRouter initialEntries={["/manage/logs"]}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
@@ -68,6 +63,17 @@ function renderLogs() {
       </QueryClientProvider>
     </MemoryRouter>
   );
+}
+
+function renderLogs() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  currentClient = queryClient;
+  return render(logsTree(queryClient));
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────
@@ -252,4 +258,30 @@ describe("LogsPage", () => {
     renderLogs();
     expect(screen.getByText("Connecting to stream...")).toBeInTheDocument();
   });
+
+  // Rows used to be keyed by timestamp + list index. Every new line shifts
+  // every index, so React remounted the whole list once per log line — which,
+  // among other things, collapsed any stack trace the operator had opened.
+  it("keeps an expanded stack trace open when a new line arrives", async () => {
+    const base = vi.mocked(useLogStream)();
+    const user = userEvent.setup();
+    const { rerender } = renderLogs();
+
+    await user.click(screen.getByTestId("stacktrace-toggle"));
+    expect(screen.getByText("Hide stacktrace")).toBeInTheDocument();
+
+    vi.mocked(useLogStream).mockReturnValue({
+      ...base,
+      entries: [
+        { timestamp: 1700000003000, level: "INFO", message: "A newer line", loggerName: "main" },
+        ...base.entries,
+      ],
+    });
+    rerender(logsTree(currentClient!));
+
+    expect(screen.getByText("A newer line")).toBeInTheDocument();
+    expect(screen.getByText("Hide stacktrace")).toBeInTheDocument();
+    vi.mocked(useLogStream).mockReturnValue(base);
+  });
 });
+
