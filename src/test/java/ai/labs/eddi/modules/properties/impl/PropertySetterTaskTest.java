@@ -502,7 +502,7 @@ class PropertySetterTaskTest {
         }
 
         @Test
-        @DisplayName("fromObjectPath with String value — templates and stores as Property")
+        @DisplayName("fromObjectPath with String value — stores as Property")
         void fromObjectPathStringValue() throws Exception {
             var memory = mock(IConversationMemory.class);
             var currentStep = mock(IWritableConversationStep.class);
@@ -547,6 +547,60 @@ class PropertySetterTaskTest {
             var captor = ArgumentCaptor.forClass(Property.class);
             verify(conversationProperties).put(eq("extracted"), captor.capture());
             assertEquals("theValue", captor.getValue().getValueString());
+        }
+
+        @Test
+        @DisplayName("fromObjectPath String value is data — never rendered as a template (C4b)")
+        void fromObjectPathStringValueIsNotTemplated() throws Exception {
+            // The documented pattern "fromObjectPath": "memory.current.input" hands user
+            // text to
+            // this path. Rendering it would evaluate the user's "{vars.x}" with server
+            // data.
+            String userText = "{vars.apiKey}";
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            when(currentStep.getLatestData("expressions:parsed")).thenReturn(null);
+            when(currentStep.getAllData("context")).thenReturn(null);
+
+            var actionsData = mock(IData.class);
+            when(currentStep.getLatestData("actions")).thenReturn(actionsData);
+            when(actionsData.getResult()).thenReturn(List.of("extract"));
+
+            var conversationProperties = mock(IConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+
+            var templateDataObjects = new HashMap<String, Object>();
+            templateDataObjects.put("memory", Map.of("current", Map.of("input", userText)));
+            when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);
+            when(templatingEngine.processTemplate(anyString(), anyMap()))
+                    .thenAnswer(inv -> userText.equals(inv.getArgument(0)) ? "LEAKED-SECRET" : inv.getArgument(0));
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("captured");
+            instruction.setFromObjectPath("memory.current.input");
+            instruction.setScope(Property.Scope.conversation);
+            instruction.setOverride(true);
+
+            var setOnActions = new SetOnActions();
+            setOnActions.setActions(List.of("extract"));
+            setOnActions.setSetProperties(List.of(instruction));
+
+            var propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
+            when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+            var previousSteps = mock(IConversationStepStack.class);
+            when(memory.getPreviousSteps()).thenReturn(previousSteps);
+            when(previousSteps.size()).thenReturn(0);
+
+            task.execute(memory, propertySetter);
+
+            var captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties).put(eq("captured"), captor.capture());
+            assertEquals(userText, captor.getValue().getValueString());
+            verify(templatingEngine, never()).processTemplate(eq(userText), anyMap());
         }
 
         @Test

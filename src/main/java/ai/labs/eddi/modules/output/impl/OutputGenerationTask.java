@@ -105,8 +105,8 @@ public class OutputGenerationTask implements ILifecycleTask {
                 Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
                 outputs.forEach((action, outputEntries) -> outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
-                    selectAndStoreOutput(currentStep, action, outputValues);
-                    storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction());
+                    selectAndStoreOutput(currentStep, action, outputValues, false);
+                    storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction(), false);
                 }));
             }
         }
@@ -116,6 +116,16 @@ public class OutputGenerationTask implements ILifecycleTask {
         return outputLanguage == null || outputLanguage.equalsIgnoreCase(retrieveContextLanguageFromLongTermMemory(conversationProperties));
     }
 
+    /**
+     * Output supplied as {@code context} — by the caller of a turn, or by an
+     * httpcall's {@code postResponse} build instructions — is stored
+     * {@link IData#isVerbatim() verbatim}: it is data, so the templating task must
+     * not render it. A chat client could otherwise send {@code {vars.apiKey}} or
+     * {@code {#for i in 2000000000}} as "output" and have the server evaluate it.
+     * postResponse output has already been rendered once, with the HTTP response
+     * substituted in; a second pass would evaluate whatever the upstream API put
+     * into its response.
+     */
     private void storeContextOutput(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
@@ -123,7 +133,7 @@ public class OutputGenerationTask implements ILifecycleTask {
             String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(MEMORY_OUTPUT_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
                 List<OutputValue> outputList = convertOutputMap(convertObjectToListOfMapsWithObjects(context.getValue()));
-                selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList);
+                selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList, true);
             }
         });
     }
@@ -141,7 +151,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                 }
 
                 List<QuickReply> quickReplies = convertQuickReplyMap(convertObjectToListOfMapsWithStrings(context.getValue()));
-                storeQuickReplies(currentStep, quickReplies, quickRepliesKey);
+                storeQuickReplies(currentStep, quickReplies, quickRepliesKey, true);
             }
         });
     }
@@ -167,7 +177,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                 .toList();
     }
 
-    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues) {
+    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues, boolean verbatim) {
         List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
@@ -183,6 +193,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                     var outputKey = createOutputKey(action, outputValues, randomValue.getType(), index);
                     var outputData = dataFactory.createData(outputKey, randomValue, possibleValueAlternatives);
                     outputData.setPublic(true);
+                    outputData.setVerbatim(verbatim);
                     currentStep.storeData(outputData);
                     currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, Collections.singletonList(randomValue));
                 }
@@ -190,15 +201,16 @@ public class OutputGenerationTask implements ILifecycleTask {
         });
 
         if (!quickReplies.isEmpty()) {
-            storeQuickReplies(currentStep, quickReplies, action);
+            storeQuickReplies(currentStep, quickReplies, action, verbatim);
         }
     }
 
-    private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies, String action) {
+    private void storeQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies, String action, boolean verbatim) {
         if (!quickReplies.isEmpty()) {
             String outputQuickReplyKey = StringUtilities.joinStrings(":", MEMORY_QUICK_REPLIES_IDENTIFIER, action);
             var outputQuickReplies = dataFactory.createData(outputQuickReplyKey, quickReplies);
             outputQuickReplies.setPublic(true);
+            outputQuickReplies.setVerbatim(verbatim);
             currentStep.storeData(outputQuickReplies);
             currentStep.addConversationOutputList(MEMORY_QUICK_REPLIES_IDENTIFIER, quickReplies);
         }

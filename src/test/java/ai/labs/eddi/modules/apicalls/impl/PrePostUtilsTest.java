@@ -375,6 +375,44 @@ class PrePostUtilsTest {
         }
 
         @Test
+        @DisplayName("fromObjectPath value is data — an upstream \"{vars.x}\" is stored literally, never rendered (C4b)")
+        void fromObjectPathValueIsNotTemplated() throws Exception {
+            String upstream = "{vars.apiKey}";
+            when(templatingEngine.processTemplate(eq(upstream), any())).thenReturn("LEAKED-SECRET");
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("fromApi");
+            instruction.setFromObjectPath("httpResponse.name");
+            instruction.setScope(Property.Scope.conversation);
+            templateData.put("httpResponse", Map.of("name", upstream));
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData);
+
+            var captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties).put(eq("fromApi"), captor.capture());
+            assertEquals(upstream, captor.getValue().getValueString());
+            verify(templatingEngine, never()).processTemplate(eq(upstream), any());
+        }
+
+        @Test
+        @DisplayName("control: an authored valueString is still templated")
+        void valueStringIsStillTemplated() throws Exception {
+            when(templatingEngine.processTemplate(eq("{properties.x}"), any())).thenReturn("rendered");
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("authored");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("{properties.x}");
+            instruction.setScope(Property.Scope.conversation);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            var captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties).put(eq("authored"), captor.capture());
+            assertEquals("rendered", captor.getValue().getValueString());
+        }
+
+        @Test
         @DisplayName("empty propertyValue (not String) stores empty string")
         void emptyPropertyValue() throws Exception {
             var instruction = new PropertyInstruction();
