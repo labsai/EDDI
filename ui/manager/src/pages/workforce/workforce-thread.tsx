@@ -863,9 +863,14 @@ function WorkforceThread() {
     sendingRef.current = false;
     setSendError(null);
     setInputPrefill("");
+    // Bound to the thread it was pressed on: if the reader moves to another
+    // advisor while this is in flight, the new conversation is still registered
+    // for THIS advisor, but it must not land in the other one's view.
+    const key = initKeyRef.current;
+    const isCurrent = () => initKeyRef.current === key;
     try {
-      await startFreshConversation();
-      setInitError(null);
+      await startFreshConversation(isCurrent);
+      if (isCurrent()) setInitError(null);
     } catch (err) {
       console.error("Failed to start a new conversation:", err);
       toast.error(

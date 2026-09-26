@@ -269,9 +269,13 @@ interface GroupStreamStore {
   abortStream: (groupId: string) => void;
   /**
    * Stop the discussion: cancel it on the server, then close the stream.
-   * See {@link GroupStreamStore} `cancelStream` for the outcome values.
+   * See {@link CancelOutcome} for the outcome values.
+   *
+   * `gcId` names a discussion this tab is NOT streaming — one whose connection
+   * dropped, or one adopted from the stored list after a reload. It is used only
+   * when there is no live stream to cancel.
    */
-  cancelStream: (groupId: string) => Promise<CancelOutcome>;
+  cancelStream: (groupId: string, gcId?: string) => Promise<CancelOutcome>;
   resetStream: (groupId: string) => void;
 }
 
@@ -361,6 +365,22 @@ export function deliveredRowCount(transcript: TranscriptEntry[]): number {
   let count = 0;
   for (const entry of transcript) if (!isOpenPlaceholder(entry)) count++;
   return count;
+}
+
+/**
+ * Whether the stored copy of the stream's discussion holds at least what the
+ * stream delivered — the point at which a stopped stream can give way to it
+ * without rows vanishing on screen until the next poll.
+ */
+export function persistedHasCaughtUp(
+  conversation: { id: string; transcript?: TranscriptEntry[] | null } | null | undefined,
+  stream: Pick<GroupStreamState, "conversationId" | "transcript">,
+): boolean {
+  return (
+    !!conversation &&
+    conversation.id === stream.conversationId &&
+    (conversation.transcript?.length ?? 0) >= deliveredRowCount(stream.transcript)
+  );
 }
 
 /**
@@ -506,9 +526,14 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    * the cancel fails, the discussion is still running and the stream is still
    * the best view of it. The caller reports a thrown error.
    */
-  cancelStream: async (groupId) => {
+  cancelStream: async (groupId, knownGcId) => {
     const current = get().streams[groupId];
-    if (!current?.isStreaming && !current?.cancelRequested) return "nothingToCancel";
+    if (!current?.isStreaming && !current?.cancelRequested) {
+      // No live stream. A discussion can still be running on the server — the
+      // connection dropped, or the board adopted it after a reload — and it
+      // needs a Stop just as much.
+      return knownGcId ? cancelAndClose(groupId, knownGcId, get().update) : "nothingToCancel";
+    }
     const gcId = current.conversationId;
     if (!gcId) {
       // Nothing to address yet. consumeStream sends the cancel as soon as
@@ -559,6 +584,8 @@ async function cancelAndClose(groupId: string, gcId: string, update: UpdateFn): 
     outcome = "alreadyEnded";
   }
   // Only close the stream this cancel was about: a newer one may own the slot.
+  // A discussion followed without a stream has no entry, and gets none.
+  if (!useGroupStreamStore.getState().streams[groupId]) return outcome;
   const controller = abortControllers.get(groupId);
   let closed = false;
   update(groupId, (s) => {
@@ -569,6 +596,9 @@ async function cancelAndClose(groupId: string, gcId: string, update: UpdateFn): 
       ...settleTerminal(s),
       isStreaming: false,
       cancelRequested: false,
+      // Whatever the connection did, the run is over now: "the live connection
+      // was lost, keeps updating while it runs" would be false.
+      interrupted: false,
       ...(outcome === "cancelled"
         ? { state: "CANCELLED" as GroupConversationState, cancelInfo: { reason: undefined, cancelledBy: undefined } }
         : {}),
@@ -735,9 +765,9 @@ export function useGroupDiscussionStream(groupId?: string) {
     if (key) useGroupStreamStore.getState().abortStream(key);
   }, [key]);
 
-  const cancelStream = useCallback(async (): Promise<CancelOutcome> => {
+  const cancelStream = useCallback(async (gcId?: string): Promise<CancelOutcome> => {
     if (!key) return "nothingToCancel";
-    return useGroupStreamStore.getState().cancelStream(key);
+    return useGroupStreamStore.getState().cancelStream(key, gcId);
   }, [key]);
 
   const resetStream = useCallback(() => {

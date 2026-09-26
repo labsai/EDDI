@@ -95,8 +95,11 @@ describe("WorkforceBoard — lifecycle", () => {
         cancelled.push(String(params.gcId));
         return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
       }),
+      // The stored document follows the cancel, as the backend's does.
       http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
-        HttpResponse.json(conversationDoc(String(params.gcId))),
+        HttpResponse.json(
+          conversationDoc(String(params.gcId), { state: cancelled.length ? "CANCELLED" : "IN_PROGRESS" }),
+        ),
       ),
     );
     renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
@@ -247,5 +250,75 @@ describe("WorkforceBoard — lifecycle", () => {
     expect((await screen.findAllByText("Renamed Panel")).length).toBeGreaterThan(0);
     // Never the FIRST version, not even while the lookup is in flight.
     expect(versionsRead).toEqual(["4"]);
+  });
+
+  /**
+   * A discussion running with no stream in this tab — the connection dropped,
+   * or the board adopted it after a reload — used to have no Stop at all, and
+   * "+ New" started a second run beside it without asking.
+   */
+  it("offers Stop for a running discussion this tab is not streaming, and cancels it by id", async () => {
+    let cancelled = false;
+    const ids: string[] = [];
+    server.use(
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.gcId), { state: cancelled ? "CANCELLED" : "IN_PROGRESS" })),
+      ),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", ({ params }) => {
+        cancelled = true;
+        ids.push(String(params.gcId));
+        return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
+      }),
+    );
+    renderPage("/workforce/grp1?version=1&conversation=gc-remote", <WorkforceBoard />, "/workforce/:boardId");
+
+    // "+ New" asks first rather than starting a second run beside it.
+    await screen.findByTestId("board-stop-btn");
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /keep running/i }));
+    expect(ids).toEqual([]);
+
+    await userEvent.click(screen.getByTestId("board-stop-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /cancel discussion/i }));
+
+    await waitFor(() => expect(ids).toEqual(["gc-remote"]));
+    await waitFor(() => expect(screen.queryByTestId("board-stop-btn")).not.toBeInTheDocument());
+  });
+
+  /**
+   * "Stop and start new" pressed before `group_start` named the conversation:
+   * the cancel waits for the id, and the new discussion must still follow it
+   * rather than leave the user on the run they chose to leave.
+   */
+  it("starts the new discussion once a pending cancel lands", async () => {
+    let deliverStart: () => void = () => {};
+    const cancelled: string[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            deliverStart = () =>
+              controller.enqueue(frame("group_start", { groupConversationId: "gc-late", question: "Ship it?" }));
+          },
+        });
+        return new HttpResponse(body, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", ({ params }) => {
+        cancelled.push(String(params.gcId));
+        return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
+      }),
+    );
+    renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+    await startDiscussion();
+    await screen.findByTestId("board-stop-btn");
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /stop and start new/i }));
+    expect(cancelled).toEqual([]);
+
+    deliverStart();
+
+    await waitFor(() => expect(cancelled).toEqual(["gc-late"]));
+    await waitFor(() => expect(screen.getByText("Ready for discussion")).toBeInTheDocument());
   });
 });

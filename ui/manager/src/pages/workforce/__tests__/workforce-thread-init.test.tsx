@@ -138,4 +138,37 @@ describe("WorkforceThread — opening a thread", () => {
     expect(screen.queryByText("Answer from the first advisor")).not.toBeInTheDocument();
     expect(read).toHaveBeenCalledWith("production", "agent2", "conv-a2");
   });
+
+  it("keeps a New conversation started on one advisor out of the next advisor's thread", async () => {
+    const { registerThread } = mockThreads({ agent1: "conv-a1", agent2: "conv-a2" });
+    vi.spyOn(chatApi, "readConversation").mockImplementation(async (_e: any, _a: any, id: any) =>
+      id === "conv-a1"
+        ? ({ conversationSteps: [step("hi one", "Answer from the first advisor")] } as any)
+        : id === "conv-a2"
+          ? ({ conversationSteps: [step("hi two", "Answer from the second advisor")] } as any)
+          : ({ conversationSteps: [step("", "Welcome from the fresh first-advisor thread")] } as any),
+    );
+    let resolveStart: (id: string) => void = () => {};
+    vi.spyOn(chatApi, "startConversation").mockImplementation(
+      () => new Promise<string>((resolve) => (resolveStart = resolve)),
+    );
+    renderAt("/workforce/board1/thread/agent1");
+    expect(await screen.findByText("Answer from the first advisor")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("thread-new-conversation"));
+    await userEvent.click(screen.getByRole("button", { name: "go" }));
+    expect(await screen.findByText("Answer from the second advisor")).toBeInTheDocument();
+
+    resolveStart("conv-fresh-a1");
+    // Still registered for the advisor it was started for…
+    await waitFor(() =>
+      expect(registerThread).toHaveBeenCalledWith(
+        expect.objectContaining({ memberId: "agent1", conversationId: "conv-fresh-a1" }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    // …but nothing of it lands in the second advisor's view.
+    expect(screen.getByText("Answer from the second advisor")).toBeInTheDocument();
+    expect(screen.queryByText("Welcome from the fresh first-advisor thread")).not.toBeInTheDocument();
+  });
 });

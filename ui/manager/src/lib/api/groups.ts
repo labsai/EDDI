@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
+import { repairNegotiationArbitration } from "../hitl-config";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -758,6 +759,13 @@ export function normalizeGroupConfig<T extends AgentGroupConfiguration>(config: 
         dynamicAgents: { ...dynamic, lifecyclePolicy: canonical },
       };
     }
+  }
+
+  // A NEGOTIATION group materialized before the Arbitration prompt was carried
+  // stores that phase with no prompt; the next save from any editor heals it.
+  const phases = repairNegotiationArbitration(normalized.style, normalized.phases);
+  if (phases !== normalized.phases) {
+    normalized = { ...normalized, phases: phases ?? null };
   }
 
   return normalized;
