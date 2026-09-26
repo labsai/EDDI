@@ -158,7 +158,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     // Re-setting the identical string leaves the DOM untouched, and an
     // unchanged region is not re-announced. Alternate an invisible suffix so
     // the same message twice in a row still speaks.
-    setLive((prev) => (prev === text ? `${text}​` : text));
+    setLive((prev) => (prev === text ? `${text}\u200B` : text));
   }, []);
 
   /** Post a problem into the transcript and speak it. */

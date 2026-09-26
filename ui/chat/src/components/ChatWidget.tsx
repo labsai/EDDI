@@ -431,6 +431,7 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         snapshot.conversationOutputs.forEach((output: any) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
@@ -932,7 +933,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo]);
 
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
@@ -973,7 +974,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo]);
 
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
@@ -1114,7 +1115,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, processSnapshot]);
+  }, [dispatch, state.conversationId, processSnapshot]);
 
   /* ─── Stop generating ───────────────────────── */
   const handleStop = useCallback(async () => {
