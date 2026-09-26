@@ -688,7 +688,11 @@ public class RestConversationStore implements IRestConversationStore {
             throw new BadRequestException("A list of conversations to end is required");
         }
         try {
+            // Authorize the whole batch before ending anything, so a list that mixes
+            // agents the caller may and may not edit is refused as a whole rather
+            // than half-applied.
             Set<String> checkedAgents = new HashSet<>();
+            List<String> toEnd = new LinkedList<>();
             for (ConversationStatus conversationStatus : conversationStatuses) {
                 String conversationId = conversationStatus == null ? null : conversationStatus.getConversationId();
                 if (isNullOrEmpty(conversationId)) {
@@ -708,10 +712,12 @@ public class RestConversationStore implements IRestConversationStore {
                 if (checkedAgents.add(snapshot.getAgentId())) {
                     resourceAccessGuard.requireAccess(snapshot.getAgentId(), AccessLevel.EDIT, "agent");
                 }
-                if (snapshot.getConversationState() == ConversationState.ENDED) {
-                    continue;
+                if (snapshot.getConversationState() != ConversationState.ENDED) {
+                    toEnd.add(conversationId);
                 }
+            }
 
+            for (String conversationId : toEnd) {
                 // The HITL-aware end for every state: it reads the previous state
                 // server-side, and only a conversation that really was AWAITING_HUMAN
                 // gets its timer disarmed, bookmark cleared and cancellation audited.

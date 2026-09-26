@@ -789,6 +789,20 @@ class RestConversationStoreTest {
         }
 
         @Test
+        @DisplayName("a batch mixing an allowed and a forbidden agent is refused as a whole — nothing is ended")
+        void mixedBatch_refusedAsWhole() throws Exception {
+            storedConversation("conv-mine", "agent-mine", ConversationState.READY);
+            storedConversation("conv-foreign", "agent-foreign", ConversationState.READY);
+            doThrow(new ForbiddenException("no edit"))
+                    .when(resourceAccessGuard).requireAccess("agent-foreign", AccessLevel.EDIT, "agent");
+
+            assertThrows(ForbiddenException.class, () -> restConversationStore.endActiveConversations(
+                    List.of(statusOf("conv-mine", null), statusOf("conv-foreign", null))));
+
+            verify(conversationService, never()).endConversation(anyString(), anyString());
+        }
+
+        @Test
         @DisplayName("unknown conversations are skipped rather than failing the batch")
         void unknownConversationSkipped() throws Exception {
             storedConversation("conv-1", "agent-1", ConversationState.READY);
