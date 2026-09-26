@@ -40,20 +40,44 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-All snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
+Snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
 
 ```
 Template Data Map:
 ├── context       → input context variables
 ├── properties    → conversation properties  
 ├── memory        → conversation step data
-├── snippets      → ← ALL snippets auto-injected here
+├── snippets      → ← the snippets this agent may use (see below)
 │   ├── cautious_mode       → "IMPORTANT: You must..."
 │   ├── persona_formal      → "Use formal language..."
 │   └── compliance_gdpr     → "You must comply with..."
 ├── userInfo      → authenticated user
 └── conversationLog → formatted history
 ```
+
+### Which snippets an agent sees
+
+With [workspaces](workspaces.md) off (the default) there is one shared workspace
+and every snippet is available to every agent.
+
+With workspaces enforced, a render gets only the snippets the **agent** could
+use — decided exactly as for a user holding the agent owner's identity and the
+agent's space: snippets in the agent's space, the owner's own snippets, snippets
+granted to the owner or the space, published snippets, and legacy (unowned)
+snippets while `eddi.workspaces.legacy-visibility=shared`. Another team's
+private or space-visible snippets never reach the prompt. The same scoping
+applies to the counterweight preset snippets (`counterweight-cautious`,
+`counterweight-strict`).
+
+If several visible snippets share a name, the closest one wins: the agent's own
+space first, then the owner's snippets, then grants, then published, then legacy.
+Within a tier the **oldest** snippet wins, so creating a same-named snippet later
+never takes over a name an agent already uses. Each ambiguous name is logged once
+as a warning; rename one of the snippets to make the choice explicit. Without
+enforcement a duplicated name likewise resolves to the oldest snippet.
+
+A change to an agent's own owner or space takes up to the cache TTL below to
+affect which snippets it sees.
 
 ### Caching
 

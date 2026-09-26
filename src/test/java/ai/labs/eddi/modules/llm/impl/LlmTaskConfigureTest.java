@@ -92,7 +92,7 @@ class LlmTaskConfigureTest {
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         var mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());

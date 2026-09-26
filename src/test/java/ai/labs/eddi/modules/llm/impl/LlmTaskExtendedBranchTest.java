@@ -99,7 +99,7 @@ class LlmTaskExtendedBranchTest {
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());
@@ -259,7 +259,7 @@ class LlmTaskExtendedBranchTest {
             when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
             // Return non-empty snippets
-            when(mockSnippetService.getAll()).thenReturn(Map.of("snippet1", "value1"));
+            when(mockSnippetService.getForAgent(any())).thenReturn(Map.of("snippet1", "value1"));
 
             var task = createTask(Map.of("apiKey", "key"));
             llmTask.execute(memory, new LlmConfiguration(List.of(task)));
@@ -471,7 +471,7 @@ class LlmTaskExtendedBranchTest {
             ims.initMetrics();
 
             var snippetService = mock(PromptSnippetService.class);
-            when(snippetService.getAll()).thenReturn(Collections.emptyMap());
+            when(snippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
             var ioTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,

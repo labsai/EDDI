@@ -109,7 +109,7 @@ class LlmTaskDeepBranchTest {
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());
@@ -494,7 +494,7 @@ class LlmTaskDeepBranchTest {
             var ims = new IdentityMaskingService(
                     new SimpleMeterRegistry());
             ims.initMetrics();
-            when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+            when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
             var jsonTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,

@@ -103,10 +103,10 @@ class LlmTaskSummaryCredentialIsolationTest {
     void setUp() throws Exception {
         openMocks(this);
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Map.of());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Map.of());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,

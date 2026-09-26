@@ -47,7 +47,7 @@ class MemoryItemConverterNamespacesTest {
     @Test
     @DisplayName("I6 — snippets and vars are part of the template data model")
     void snippetsAndVarsAreInjected() {
-        when(promptSnippetService.getAll()).thenReturn(Map.of("cautious_mode", "Be careful."));
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("cautious_mode", "Be careful."));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "gpt-5"));
 
         var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
@@ -59,6 +59,19 @@ class MemoryItemConverterNamespacesTest {
                 "{vars.x} must resolve outside LlmTask too");
     }
 
+    @Test
+    @DisplayName("C4c — snippets are looked up for the conversation's agent, never unscoped")
+    void snippetsAreScopedToTheConversationsAgent() {
+        when(promptSnippetService.getForAgent("agent-1")).thenReturn(Map.of("tone", "Be precise."));
+
+        var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
+        Map<String, Object> result = converter.convert(memory);
+
+        assertEquals(Map.of("tone", "Be precise."), result.get("snippets"));
+        verify(promptSnippetService).getForAgent("agent-1");
+        verify(promptSnippetService, never()).getAll();
+    }
+
     /**
      * The point of I6 is that a real template resolves the namespaces, so this
      * renders one through the production Qute engine over the production converter
@@ -68,7 +81,7 @@ class MemoryItemConverterNamespacesTest {
     @Test
     @DisplayName("I6 — a Qute template rendered over the converter output resolves {snippets.x} and {vars.x}")
     void aQuteTemplateResolvesTheNamespaces() throws Exception {
-        when(promptSnippetService.getAll()).thenReturn(Map.of("cautious_mode", "Be careful."));
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("cautious_mode", "Be careful."));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default_model", "gpt-5"));
 
         var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
@@ -103,7 +116,7 @@ class MemoryItemConverterNamespacesTest {
     @Test
     @DisplayName("I6 — empty namespaces are omitted rather than rendered as empty maps")
     void emptyNamespacesAreOmitted() {
-        when(promptSnippetService.getAll()).thenReturn(Map.of());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of());
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
         var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
@@ -116,7 +129,7 @@ class MemoryItemConverterNamespacesTest {
     @Test
     @DisplayName("a client-supplied context variable named 'vars'/'snippets' is NOT clobbered by the namespaces")
     void contextVariablesKeepPrecedenceOverTheNamespaces() {
-        when(promptSnippetService.getAll()).thenReturn(Map.of("cautious_mode", "Be careful."));
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("cautious_mode", "Be careful."));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "gpt-5"));
 
         var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
@@ -140,7 +153,7 @@ class MemoryItemConverterNamespacesTest {
     @Test
     @DisplayName("I6 — a failing snippet/variable lookup must not break the turn")
     void resolutionFailureDoesNotBreakTheTurn() {
-        when(promptSnippetService.getAll()).thenThrow(new IllegalStateException("store down"));
+        when(promptSnippetService.getForAgent(any())).thenThrow(new IllegalStateException("store down"));
         when(globalVariableResolver.getTemplateData()).thenThrow(new IllegalStateException("store down"));
 
         var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");

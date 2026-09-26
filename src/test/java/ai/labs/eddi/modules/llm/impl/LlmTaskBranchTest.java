@@ -93,7 +93,7 @@ class LlmTaskBranchTest {
         var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());
@@ -148,7 +148,7 @@ class LlmTaskBranchTest {
         @Test
         @DisplayName("non-empty snippets are injected into template data")
         void snippetsInjected() throws Exception {
-            when(mockSnippetService.getAll()).thenReturn(Map.of("cautious", "Be careful"));
+            when(mockSnippetService.getForAgent(any())).thenReturn(Map.of("cautious", "Be careful"));
             var memory = setupMemory(List.of("action1"));
             var templateData = new HashMap<String, Object>();
             when(memoryItemConverter.convert(memory)).thenReturn(templateData);
