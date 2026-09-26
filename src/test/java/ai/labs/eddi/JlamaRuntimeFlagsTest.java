@@ -63,7 +63,14 @@ class JlamaRuntimeFlagsTest {
     private static final Path DEMO_DOCKERFILE = Path.of("src", "main", "docker", "Dockerfile.demo");
     private static final Path POM = Path.of("pom.xml");
     private static final Path MISE = Path.of("mise.toml");
-    private static final Path README = Path.of("README.md");
+    /**
+     * The documents that show a contributor how to start dev mode. CONTRIBUTING.md
+     * carries the flag too but is left out: it is in no `backend` path filter, and
+     * BuildQualityGatesTest refuses a root document that a test grades but a
+     * CONTRIBUTING-only PR would skip.
+     */
+    private static final List<Path> DEV_MODE_DOCS = List.of(Path.of("README.md"), Path.of("AGENTS.md"),
+            Path.of("docs", "getting-started.md"), Path.of("docs", "developer-quickstart.md"));
 
     /** The flag, taken from production code so the two cannot drift apart. */
     private static final String FLAG = JlamaRuntimeSupport.REQUIRED_JVM_FLAG;
@@ -199,24 +206,32 @@ class JlamaRuntimeFlagsTest {
     }
 
     /**
-     * The README's dev-mode commands are what most contributors copy, and they
-     * started {@code quarkus:dev} without the flag while {@code mise run dev}
-     * passed it — so the same checkout ran Jlama at full speed or at scalar speed
-     * depending on which instructions its owner followed.
+     * The documents that tell a contributor how to start dev mode are what most of
+     * them copy, and they started {@code quarkus:dev} without the flag while
+     * {@code mise run dev} passed it — so the same checkout ran Jlama at full speed
+     * or at scalar speed depending on which instructions its owner followed.
+     * <p>
+     * A command is a {@code mvnw} invocation whose goals begin with
+     * {@code quarkus:dev} (optionally after {@code compile}); prose that merely
+     * names the goal is not one.
      */
     @Test
-    @DisplayName("every README command that starts quarkus:dev passes the flag")
-    void readmeDevCommandsPassTheFlag() {
-        List<String> devCommands = read(README).lines()
-                .filter(line -> line.contains("mvnw") && line.contains("quarkus:dev"))
-                .toList();
+    @DisplayName("every documented command that starts quarkus:dev passes the flag")
+    void documentedDevCommandsPassTheFlag() {
+        Pattern devCommand = Pattern.compile("mvnw(?:\\.cmd)?(?: compile)? quarkus:dev");
+        for (Path doc : DEV_MODE_DOCS) {
+            List<String> devCommands = read(doc).lines()
+                    .filter(line -> devCommand.matcher(line).find())
+                    .toList();
 
-        assertTrue(devCommands.size() >= 3,
-                "expected README.md's Linux and Windows dev-mode commands and its command table to start quarkus:dev;"
-                        + " found " + devCommands.size());
-        for (String command : devCommands) {
-            assertTrue(command.contains("-Djvm.args=" + FLAG),
-                    "README.md must pass -Djvm.args=" + FLAG + " wherever it starts quarkus:dev. Line was: " + command);
+            assertTrue(!devCommands.isEmpty(),
+                    doc + " no longer shows a quarkus:dev command; drop it from DEV_MODE_DOCS rather than let this"
+                            + " check grade nothing there");
+            for (String command : devCommands) {
+                assertTrue(command.contains("-Djvm.args=" + FLAG),
+                        doc + " must pass -Djvm.args=" + FLAG + " wherever it starts quarkus:dev. Line was: "
+                                + command);
+            }
         }
     }
 

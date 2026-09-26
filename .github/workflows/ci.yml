@@ -335,43 +335,82 @@ jobs:
           # decides what runs, not what is allowed.
           DIFF=$(git diff "origin/${BASE}...HEAD" -- docs/changelog.md)
 
-          # An entry is any '## ' heading, dated or not: scripts/changelog_common.py
-          # splits the live file at every one of them, and an undated heading just
-          # inherits the date of the entry above it. Counting only dated headings
-          # let an entry through by leaving the date off. '| YYYY-MM-DD |' is a row
-          # in the Decision Log or Regression Notes table. Both are fixed insertion
-          # points in a shared file.
-          count() { printf '%s\n' "$DIFF" | grep -cE "$1" || true; }
-          ADDED_HEADING='^\+ {0,3}##([[:space:]]|$)'
-          REMOVED_HEADING='^- {0,3}##([[:space:]]|$)'
-          ADDED_ROW='^\+\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|'
-          REMOVED_ROW='^-\| *[0-9]{4}-[0-9]{2}-[0-9]{2} *\|'
-
-          # A setext heading — a text line underlined with '---' or '===' — is a
-          # heading too, and the pattern above cannot see it. Counted as a pair of
-          # lines carrying the same sign: the underline, and the paragraph line
-          # directly above it. A '---' under a blank line, a list item, a table
-          # row, a fence or another rule is a thematic break (the separator every
-          # entry ends with), not a heading, so those are excluded. No regex
-          # intervals in here: ubuntu-latest's awk is mawk.
-          setext() {
-            printf '%s\n' "$DIFF" | awk -v sign="$1" '
+          # What counts, on each side of the diff:
+          #   - any '## ' heading, dated or not: scripts/changelog_common.py splits
+          #     the live file at every one of them, and an undated heading just
+          #     inherits the date of the entry above it. Counting only dated
+          #     headings let an entry through by leaving the date off.
+          #   - a setext heading: a text line underlined with '---' or '==='.
+          #     Counted as a pair of lines carrying the same sign. A '---' under a
+          #     blank line, a list item, a table row, a fence or another rule is a
+          #     thematic break (the separator every entry ends with), not a
+          #     heading, so those are excluded.
+          #   - a '| YYYY-MM-DD |' row of the Decision Log or Regression Notes.
+          # Headings and rows are fixed insertion points in a shared file.
+          #
+          # Lines inside a fenced code block are examples, not structure. The
+          # collator skips them (changelog_common.fence_mask), so this does too:
+          # it follows ``` / ~~~ fences through the lines that exist on the side
+          # being counted (that side's lines plus context), starting each hunk
+          # outside a fence. A fence opened above a hunk's first context line is
+          # not visible here; git's default three lines of context make that rare.
+          # No regex intervals in here: ubuntu-latest's awk is mawk.
+          #
+          # shapes SIGN            prints "<headings> <setext pairs> <rows>"
+          # shapes SIGN list       prints the matching lines instead
+          shapes() {
+            printf '%s\n' "$DIFF" | awk -v sign="$1" -v list="${2:-}" '
+              /^@@/ { started = 1; fence = ""; above = ""; aboveSign = ""; next }
+              !started { next }
               {
+                s = substr($0, 1, 1)
                 line = substr($0, 2)
-                if (substr($0, 1, 1) == sign && substr(prev, 1, 1) == sign &&
-                    line ~ /^ ? ? ?(=+|-+)[ \t]*$/ &&
-                    above !~ /^[ \t]*$/ &&
-                    above !~ /^    / &&
-                    above !~ /^ ? ? ?(#|>|\||```|~~~)/ &&
-                    above !~ /^ ? ? ?[-*+]([ \t]|$)/ &&
-                    above !~ /^ ? ? ?[0-9]+[.)]([ \t]|$)/ &&
-                    above !~ /^ ? ? ?([-*_=][ \t]*)+$/) {
-                  n++
+                if (s != sign && s != " ") next
+
+                t = line
+                sub(/^[ \t]+/, "", t)
+                run = ""
+                if (match(t, /^(```+|~~~+)/)) {
+                  run = substr(t, 1, RLENGTH)
+                  rest = substr(t, RLENGTH + 1)
                 }
-                prev = $0
+                if (fence != "") {
+                  if (run != "" && substr(run, 1, 1) == substr(fence, 1, 1) &&
+                      length(run) >= length(fence) && rest ~ /^[ \t]*$/) {
+                    fence = ""
+                  }
+                  above = ""; aboveSign = ""
+                  next
+                }
+                if (run != "") {
+                  fence = run
+                  above = ""; aboveSign = ""
+                  next
+                }
+
+                if (s == sign) {
+                  if (line ~ /^ ? ? ?##([ \t]|$)/) {
+                    headings++
+                    if (list) print $0
+                  } else if (aboveSign == sign &&
+                      line ~ /^ ? ? ?(=+|-+)[ \t]*$/ &&
+                      above !~ /^[ \t]*$/ &&
+                      above !~ /^    / &&
+                      above !~ /^ ? ? ?(#|>|\|)/ &&
+                      above !~ /^ ? ? ?[-*+]([ \t]|$)/ &&
+                      above !~ /^ ? ? ?[0-9]+[.)]([ \t]|$)/ &&
+                      above !~ /^ ? ? ?([-*_=][ \t]*)+$/) {
+                    setext++
+                    if (list) print sign above " / " $0
+                  } else if (line ~ /^\| *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *\|/) {
+                    rows++
+                    if (list) print $0
+                  }
+                }
                 above = line
+                aboveSign = s
               }
-              END { print n + 0 }'
+              END { if (!list) print headings + 0, setext + 0, rows + 0 }'
           }
 
           # Added MINUS removed, per shape. An edit to an existing heading or
@@ -380,20 +419,18 @@ jobs:
           # Counting '+' alone failed a typo fix in a past entry and then told
           # the author to "move it into a new file", advice that made no sense
           # for a correction.
-          ENTRIES_NET=$(( $(count "$ADDED_HEADING") - $(count "$REMOVED_HEADING") ))
-          SETEXT_NET=$(( $(setext +) - $(setext -) ))
-          ROWS_NET=$(( $(count "$ADDED_ROW") - $(count "$REMOVED_ROW") ))
+          read -r ADDED_H ADDED_S ADDED_R <<< "$(shapes +)"
+          read -r REMOVED_H REMOVED_S REMOVED_R <<< "$(shapes -)"
+          ENTRIES_NET=$(( ADDED_H - REMOVED_H ))
+          SETEXT_NET=$(( ADDED_S - REMOVED_S ))
+          ROWS_NET=$(( ADDED_R - REMOVED_R ))
 
           if [ "$ENTRIES_NET" -le 0 ] && [ "$SETEXT_NET" -le 0 ] && [ "$ROWS_NET" -le 0 ]; then
             echo "### ✅ No changelog entries added in place" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          ENTRIES=$(printf '%s\n' "$DIFF" | grep -E "$ADDED_HEADING" || true)
-          ROWS=$(printf '%s\n' "$DIFF" | grep -E "$ADDED_ROW" || true)
-          if [ "$SETEXT_NET" -gt 0 ]; then
-            ENTRIES=$(printf '%s\n%s' "$ENTRIES" "(plus ${SETEXT_NET} heading(s) underlined with --- or ===)")
-          fi
+          ADDED=$(shapes + list)
 
           {
             echo "### ❌ Changelog entry added directly to docs/changelog.md"
@@ -407,7 +444,7 @@ jobs:
             echo "insertion points, so every branch that writes there conflicts with every other one."
             echo ""
             echo '```diff'
-            printf '%s\n%s\n' "$ENTRIES" "$ROWS" | grep -v '^$' | head -20
+            printf '%s\n' "$ADDED" | head -20
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
