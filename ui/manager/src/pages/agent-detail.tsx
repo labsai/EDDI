@@ -382,7 +382,9 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // Named, not defaulted: this branch deploys to production, and
+                  // the drawer's "New conversation" must start there too.
+                  drawerStore.open(id!, agentDisplayName, "production");
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
@@ -423,7 +425,11 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // The environment the conversation is started in, so the
+                  // drawer's "New conversation" lands there as well. Left to
+                  // the default it restarted a test-only agent in production,
+                  // where it is not deployed.
+                  drawerStore.open(id!, agentDisplayName, chatEnvironment);
                   if (isChatReachable) {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();

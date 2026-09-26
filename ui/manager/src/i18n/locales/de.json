@@ -550,7 +550,10 @@
     "toolCount": "{{selected}} von {{total}} ausgewählt",
     "specTooLarge": "Diese Spezifikation ist zu groß, um hier geladen zu werden",
     "specUrlInvalid": "Das ist keine gültige URL",
-    "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt"
+    "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt",
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Schalten Sie die integrierten Werkzeuge aus, um alle zu deaktivieren.",
+    "hfToken": "Hugging-Face-Token",
+    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert."
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -747,7 +750,8 @@
     "errorConversationEnded": "Dieses Gespräch ist beendet.",
     "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
     "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
-    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut."
+    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut.",
+    "sendRejected": "Ihre Nachricht wurde nicht gesendet: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -1315,7 +1319,8 @@
     "streamingTimeoutSeconds": "Streaming-Timeout (Sekunden)",
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
-    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet."
+    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
