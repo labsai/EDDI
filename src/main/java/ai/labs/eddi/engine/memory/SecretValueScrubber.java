@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,7 +54,7 @@ public final class SecretValueScrubber {
      * any other type are not inspected and yield {@code null}.
      */
     public static Object scrubValue(Object value, String plaintext, String placeholder) {
-        return plaintext == null || plaintext.isEmpty() ? null : scrubSorted(value, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : scrubSorted(value, List.of(plaintext), Set.of(), placeholder, false);
     }
 
     /**
@@ -64,7 +65,7 @@ public final class SecretValueScrubber {
      */
     public static Object scrubAll(Object value, Collection<String> plaintexts, String placeholder) {
         List<String> sorted = longestFirst(plaintexts);
-        return sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, false);
+        return sorted.isEmpty() ? null : scrubSorted(value, sorted, Set.of(), placeholder, false);
     }
 
     /**
@@ -72,7 +73,7 @@ public final class SecretValueScrubber {
      * removed from its value, or {@code null} when it does not carry it.
      */
     public static Context scrubContext(Context context, String plaintext, String placeholder) {
-        return plaintext == null || plaintext.isEmpty() ? null : (Context) scrubSorted(context, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : (Context) scrubSorted(context, List.of(plaintext), Set.of(), placeholder, false);
     }
 
     /**
@@ -87,8 +88,26 @@ public final class SecretValueScrubber {
      *         the plaintexts
      */
     public static Object scrubDeep(Object value, Collection<String> plaintexts, String placeholder) {
+        return scrubDeep(value, plaintexts, Set.of(), placeholder);
+    }
+
+    /**
+     * {@link #scrubDeep(Object, Collection, String)}, additionally replacing any
+     * string (or number) that is EXACTLY one of {@code exactValues} — never a
+     * substring of one.
+     * <p>
+     * For values too short to search for: replacing every "4711" inside a turn's
+     * output would destroy it, but a property, list element or map value that IS
+     * the short secret is the secret, and used to survive the end-of-turn scrub
+     * into the stored properties, the user memory store and the audit trail.
+     *
+     * @return the scrubbed copy, or {@code null} when {@code value} carries none of
+     *         the plaintexts and none of the exact values
+     */
+    public static Object scrubDeep(Object value, Collection<String> plaintexts, Collection<String> exactValues, String placeholder) {
         List<String> sorted = longestFirst(plaintexts);
-        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true);
+        Set<String> exact = usable(exactValues);
+        return value == null || (sorted.isEmpty() && exact.isEmpty()) ? null : scrubSorted(value, sorted, exact, placeholder, true);
     }
 
     /**
@@ -101,10 +120,18 @@ public final class SecretValueScrubber {
      *             if the scrubbed form cannot be read back as {@code type}
      */
     public static <T> T scrubTyped(T value, Class<T> type, Collection<String> plaintexts, String placeholder) {
-        if (value == null || longestFirst(plaintexts).isEmpty()) {
+        return scrubTyped(value, type, plaintexts, Set.of(), placeholder);
+    }
+
+    /**
+     * {@link #scrubTyped(Object, Class, Collection, String)} with the exact-match
+     * values of {@link #scrubDeep(Object, Collection, Collection, String)}.
+     */
+    public static <T> T scrubTyped(T value, Class<T> type, Collection<String> plaintexts, Collection<String> exactValues, String placeholder) {
+        if (value == null || (longestFirst(plaintexts).isEmpty() && usable(exactValues).isEmpty())) {
             return null;
         }
-        Object cleaned = scrubDeep(TREE_MAPPER.convertValue(value, Object.class), plaintexts, placeholder);
+        Object cleaned = scrubDeep(TREE_MAPPER.convertValue(value, Object.class), plaintexts, exactValues, placeholder);
         return cleaned == null ? null : TREE_MAPPER.convertValue(cleaned, type);
     }
 
@@ -119,25 +146,40 @@ public final class SecretValueScrubber {
                 .toList();
     }
 
+    private static Set<String> usable(Collection<String> values) {
+        if (values == null || values.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> usable = new HashSet<>();
+        values.stream().filter(v -> v != null && !v.isEmpty()).forEach(usable::add);
+        return usable;
+    }
+
     /**
      * The walk shared by every entry point.
      *
      * @param plaintexts
      *            longest first
+     * @param exact
+     *            values replaced only where a string or number equals them whole
      * @param deep
      *            whether objects outside strings, numbers, lists, maps and contexts
      *            are scrubbed through their JSON form
      */
-    private static Object scrubSorted(Object value, List<String> plaintexts, String placeholder, boolean deep) {
+    private static Object scrubSorted(Object value, List<String> plaintexts, Set<String> exact, String placeholder, boolean deep) {
         if (value instanceof String text) {
+            if (exact.contains(text)) {
+                return placeholder;
+            }
             String cleaned = replaceAll(text, plaintexts, placeholder);
             return cleaned.equals(text) ? null : cleaned;
         }
         if (value instanceof Number number) {
-            return plaintexts.contains(String.valueOf(number)) ? placeholder : null;
+            String rendered = String.valueOf(number);
+            return plaintexts.contains(rendered) || exact.contains(rendered) ? placeholder : null;
         }
         if (value instanceof Context context) {
-            Object cleaned = scrubSorted(context.getValue(), plaintexts, placeholder, deep);
+            Object cleaned = scrubSorted(context.getValue(), plaintexts, exact, placeholder, deep);
             if (cleaned == null) {
                 return null;
             }
@@ -149,7 +191,7 @@ public final class SecretValueScrubber {
             List<Object> copy = new ArrayList<>(list);
             boolean changed = false;
             for (int i = 0; i < copy.size(); i++) {
-                Object cleaned = scrubSorted(copy.get(i), plaintexts, placeholder, deep);
+                Object cleaned = scrubSorted(copy.get(i), plaintexts, exact, placeholder, deep);
                 if (cleaned != null) {
                     copy.set(i, cleaned);
                     changed = true;
@@ -163,7 +205,7 @@ public final class SecretValueScrubber {
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 String cleanedKey = replaceAll(key, plaintexts, placeholder);
-                Object cleaned = scrubSorted(entry.getValue(), plaintexts, placeholder, deep);
+                Object cleaned = scrubSorted(entry.getValue(), plaintexts, exact, placeholder, deep);
                 copy.put(cleanedKey, cleaned != null ? cleaned : entry.getValue());
                 changed |= cleaned != null || !cleanedKey.equals(key);
             }
@@ -178,13 +220,13 @@ public final class SecretValueScrubber {
             tree = TREE_MAPPER.convertValue(value, Object.class);
         } catch (IllegalArgumentException e) {
             String rendered = String.valueOf(value);
-            if (plaintexts.stream().anyMatch(rendered::contains)) {
+            if (plaintexts.stream().anyMatch(rendered::contains) || exact.contains(rendered)) {
                 LOGGER.warnf("A %s carrying a secret could not be converted for scrubbing; replaced it whole", value.getClass().getSimpleName());
                 return placeholder;
             }
             return null;
         }
-        return tree == null ? null : scrubSorted(tree, plaintexts, placeholder, true);
+        return tree == null ? null : scrubSorted(tree, plaintexts, exact, placeholder, true);
     }
 
     private static String replaceAll(String text, List<String> plaintexts, String placeholder) {

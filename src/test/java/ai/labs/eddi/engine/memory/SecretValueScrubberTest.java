@@ -136,4 +136,19 @@ class SecretValueScrubberTest {
 
         assertEquals(Set.of(SECRET, "12345678", "true"), found);
     }
+
+    @Test
+    @DisplayName("S4: exact values replace a string or number that IS the value, never a substring")
+    void exactValues() {
+        Object cleaned = SecretValueScrubber.scrubDeep(Map.of("pin", "4711", "code", 4711, "note", "order 14711", "list", List.of("4711", "x")),
+                List.of(), List.of("4711"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals("<p>", map.get("pin"));
+        assertEquals("<p>", map.get("code"));
+        assertEquals("order 14711", map.get("note"));
+        assertEquals(List.of("<p>", "x"), map.get("list"));
+        assertNull(SecretValueScrubber.scrubDeep("order 14711", List.of(), List.of("4711"), "<p>"), "no whole-value match, nothing to do");
+    }
 }
