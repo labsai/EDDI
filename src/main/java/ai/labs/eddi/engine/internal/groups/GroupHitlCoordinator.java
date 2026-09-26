@@ -65,7 +65,7 @@ import java.util.concurrent.ExecutorService;
  * stores it, never invokes a method on it before the facade's own constructor
  * (and therefore full field initialization) completes.
  * <p>
- * {@code activeTokens} and the virtual-thread {@link ExecutorService} are
+ * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
  * other collaborators (e.g. {@link TaskForceEngine}) read/write the same map,
  * and the facade keeps the {@code @PreDestroy} shutdown hook for the executor.
@@ -85,7 +85,7 @@ public class GroupHitlCoordinator {
     private final IScheduleStore scheduleStore;
     private final AuditLedgerService auditLedgerService;
     private final GroupSigningGuard signingGuard;
-    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens;
+    private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls;
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
     private final GroupConversationService groupConversationService;
@@ -95,7 +95,7 @@ public class GroupHitlCoordinator {
 
     public GroupHitlCoordinator(IAgentGroupStore groupStore, IGroupConversationStore conversationStore,
             IScheduleStore scheduleStore, AuditLedgerService auditLedgerService, GroupSigningGuard signingGuard,
-            ConcurrentHashMap<String, DiscussionControlToken> activeTokens, ExecutorService executorService,
+            ConcurrentHashMap<String, DiscussionControlToken> discussionControls, ExecutorService executorService,
             CallerIdentityContext callerIdentityContext, GroupConversationService groupConversationService,
             Counter counterGroupHitlPause, Counter counterGroupHitlResume, Counter counterGroupFailure) {
         this.groupStore = groupStore;
@@ -103,7 +103,7 @@ public class GroupHitlCoordinator {
         this.scheduleStore = scheduleStore;
         this.auditLedgerService = auditLedgerService;
         this.signingGuard = signingGuard;
-        this.activeTokens = activeTokens;
+        this.discussionControls = discussionControls;
         this.executorService = executorService;
         this.callerIdentityContext = callerIdentityContext;
         this.groupConversationService = groupConversationService;
@@ -130,10 +130,10 @@ public class GroupHitlCoordinator {
 
     /**
      * Cross-pod terminal-override check for a phase boundary (#27/#45). Group
-     * control is per-pod (activeTokens is process-local), so a cancel/ABORT landing
-     * on another pod flips only the persisted state — the running leg never sees it
-     * and its next whole-document write would resurrect the running state and
-     * clobber concurrent transcript writes. Re-reads the persisted state at the
+     * control is per-pod (discussionControls is process-local), so a cancel/ABORT
+     * landing on another pod flips only the persisted state — the running leg never
+     * sees it and its next whole-document write would resurrect the running state
+     * and clobber concurrent transcript writes. Re-reads the persisted state at the
      * boundary: if another writer moved it to a terminal state, the leg stops and
      * honors it (notifying the listener on a cancel). Best-effort: a store read
      * failure keeps the leg running (the local token path still applies).
@@ -277,7 +277,7 @@ public class GroupHitlCoordinator {
      * block.
      */
     public void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
-        convertPauseToCancelIfSignalled(gc, listener, activeTokens.get(gc.getId()));
+        convertPauseToCancelIfSignalled(gc, listener, discussionControls.get(gc.getId()));
     }
 
     /**
@@ -291,7 +291,7 @@ public class GroupHitlCoordinator {
      * the remove take cancelDiscussion's DB-CAS path instead.
      */
     public void removeTokenAndConvertIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
-        var removed = activeTokens.remove(gc.getId());
+        var removed = discussionControls.remove(gc.getId());
         if (removed != null && removed.isCancelled()
                 && (gc.getState() == GroupConversationState.AWAITING_APPROVAL
                         || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT)) {
@@ -425,7 +425,7 @@ public class GroupHitlCoordinator {
         // fresh pause (token present, pause just committed) reported success yet
         // left the pause intact — stripped of its finite timeout, silently
         // degrading a bounded policy to WAIT_INDEFINITELY.
-        var token = activeTokens.get(conversationId);
+        var token = discussionControls.get(conversationId);
         if (token != null) {
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
                 token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
@@ -454,7 +454,7 @@ public class GroupHitlCoordinator {
                 || state == GroupConversationState.FAILED
                 || state == GroupConversationState.REJECTED
                 || state == GroupConversationState.CLOSED) {
-            LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
+            LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", LogSanitizer.sanitize(conversationId), state);
             return false;
         }
         boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL
@@ -468,7 +468,8 @@ public class GroupHitlCoordinator {
         } catch (IResourceStore.ResourceModifiedException e) {
             // CAS lost — leave the schedule alone: whoever won the race (a fresh
             // pause / approve / timeout) owns the schedule now. Report 409.
-            LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting", conversationId);
+            LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting",
+                    LogSanitizer.sanitize(conversationId));
             return false;
         }
         // Cancel won: delete the timeout schedule only now (MAJOR-3).
@@ -670,7 +671,7 @@ public class GroupHitlCoordinator {
         // cancelled. With the token present here, that cancel takes the SIGNAL path
         // (setSignal) and executeDiscussion's top-of-phase isCancelled() check stops
         // before any member-agent work runs.
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
@@ -1250,7 +1251,7 @@ public class GroupHitlCoordinator {
         // actually ENQUEUED below — a submit failure rolls the pause back, and a
         // rolled-back attempt must not pollute the resume metric or the EU-AI-Act
         // audit trail (the same rule resumeDiscussion follows).
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
         deleteGroupHitlTimeoutSchedule(groupConversationId);
 
         final int startFromPhase = pending.phaseIdx();

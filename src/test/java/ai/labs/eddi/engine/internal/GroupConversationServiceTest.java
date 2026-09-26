@@ -1068,7 +1068,7 @@ class GroupConversationServiceTest {
     /** Reflective access to the private control-token map. */
     @SuppressWarnings("unchecked")
     private Map<String, ?> activeTokens() throws Exception {
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         return (Map<String, ?>) field.get(service);
     }

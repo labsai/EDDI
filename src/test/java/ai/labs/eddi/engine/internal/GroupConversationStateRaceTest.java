@@ -230,7 +230,7 @@ class GroupConversationStateRaceTest {
     @SuppressWarnings("unchecked")
     void deleteOfRunningDiscussion_cancelsTheLeg() throws Exception {
         persisted.set(GroupConversationState.IN_PROGRESS);
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         var tokens = (ConcurrentHashMap<String, DiscussionControlToken>) field.get(service);
         var leg = new DiscussionControlToken();
