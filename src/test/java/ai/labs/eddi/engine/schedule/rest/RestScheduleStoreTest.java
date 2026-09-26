@@ -1778,11 +1778,6 @@ class RestScheduleStoreTest {
     }
 
     /**
-     * A guard that admits every agent — a bare mock's void
-     * {@code requireAgentUseAccess} does nothing. These tests exercise schedule
-     * semantics; the USE gate has its own.
-     */
-    /**
      * Workspaces off: everyone sees everything and the USE/EDIT gates pass. The
      * workspace-scoped rules have their own tests with a denying guard.
      */

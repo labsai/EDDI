@@ -12,8 +12,8 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
   continuation endpoints and the MCP `discuss_with_group`, `start_group_discussion` and
   `continue_group_discussion` tools now call `requireUseAccess(groupId, "group")`. A discussion fans
   out to every member at the owner's cost, and member turns run below the agent USE gate, so the
-  group gate is the only one a borrower meets. Streaming answers a refusal with a terminal
-  `group_error` event.
+  group gate is the only one a borrower meets. Streaming refuses with a plain 403 before the stream
+  opens; no event is written.
 - **H2a + NEW (schedules).** A schedule that runs as a real user belongs to that user **(always)**:
   the rule `requireOwnUserId` already applied to update and fire now covers list, read, fire logs,
   delete, enable, disable, retry and dismiss, so an editor can no longer list, disable or delete
@@ -78,6 +78,16 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
   is neither admin nor approver, so access revoked during a pause cannot drive the run to the end.
 - **`/v1`.** A refused exact id match stops at "unknown" instead of falling through to name/slug
   matching.
+- **`/v1` model-id collisions.** Two ready agents with the same name slug and the same last six id
+  characters used to share one model id, and only the first was kept: the other was never listed and
+  could not be addressed by it, and once the first was refused a usable agent became unreachable.
+  Every agent in such a collision is now listed as `<slug>-<full agentId>`, and the short id
+  resolves only when the caller may use exactly one of them (ambiguous when both are usable, unknown
+  when neither is). Nobody in a collision keeps the short id, because which one did would depend on
+  listing order and a new namesake could take over conversations stored under it. Model ids of
+  agents that do not collide are unchanged.
+- **Failed exports leave no archive behind.** `ZipArchive` deletes the target when writing it fails,
+  so a truncated ZIP no longer sits under its download key until the retention sweep.
 - `requireOwnUserId` now exempts every `system:` identity, the same test the listing and `mayAccess`
   use.
 - Streaming discuss refuses a missing USE grant with a plain 403 before the stream opens, the same

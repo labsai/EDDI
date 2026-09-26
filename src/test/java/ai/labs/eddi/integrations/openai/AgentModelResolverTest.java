@@ -421,6 +421,66 @@ class AgentModelResolverTest {
                 "the private namesake must not take part in the uniqueness decision, nor be named in an error");
     }
 
+    // ─── short-id collisions ───
+
+    /** Two ids that share their last six characters with AGENT_ID_SUPPORT. */
+    private static final String COLLIDING_A = "11aaaaaaaaaaaaaaaaa3f9c1";
+    private static final String COLLIDING_B = "22bbbbbbbbbbbbbbbba3f9c1";
+
+    @Test
+    void collidingShortIds_eachAgentIsListedUnderADistinctId() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        givenAgent(AGENT_ID_SALES, "Sales");
+
+        List<String> ids = resolver(OpenAiTestFixtures.config(b -> b.exposeStatelessVariants = false))
+                .listModels().stream().map(ModelObject::id).toList();
+
+        assertEquals(List.of("support-11aaaaaaaaaaaaaaaaa3f9c1", "support-22bbbbbbbbbbbbbbbba3f9c1", "sales-b4e2d7"),
+                ids, "colliding agents get <slug>-<agentId>; a non-colliding agent keeps its short id");
+    }
+
+    @Test
+    void collidingShortIds_theUsableAgentStaysReachable_whenItsNamesakeIsDenied() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        var resolver = resolverDenying(COLLIDING_A);
+
+        assertEquals(List.of("support-22bbbbbbbbbbbbbbbba3f9c1", "support-22bbbbbbbbbbbbbbbba3f9c1:stateless"),
+                resolver.listModels().stream().map(ModelObject::id).toList());
+        assertEquals(COLLIDING_B, resolver.resolve("support-22bbbbbbbbbbbbbbbba3f9c1").agentId());
+        var byShortId = resolver.resolve("support-a3f9c1");
+        assertEquals(COLLIDING_B, byShortId.agentId(),
+                "the short id stored before the collision must still reach the one agent the caller may use");
+        assertEquals("support-22bbbbbbbbbbbbbbbba3f9c1", byShortId.canonicalModelId());
+        assertThrows(AgentModelResolver.UnknownModelException.class,
+                () -> resolver.resolve("support-11aaaaaaaaaaaaaaaaa3f9c1"));
+    }
+
+    @Test
+    void collidingShortIds_areAmbiguous_whenBothAgentsAreUsable() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+
+        var e = assertThrows(AgentModelResolver.AmbiguousModelException.class,
+                () -> resolver().resolve("support-a3f9c1"));
+        assertTrue(e.getMessage().contains("support-11aaaaaaaaaaaaaaaaa3f9c1")
+                && e.getMessage().contains("support-22bbbbbbbbbbbbbbbba3f9c1"), e.getMessage());
+    }
+
+    @Test
+    void collidingShortIds_withNoUsableAgent_answerLikeAnUnknownModel() throws Exception {
+        givenAgent(COLLIDING_A, "Support");
+        givenAgent(COLLIDING_B, "Support");
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(any());
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
+        resolver.initCache();
+
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("support-a3f9c1"));
+        assertTrue(resolver.listModels().isEmpty());
+    }
+
     /**
      * A guard that admits every agent: a bare mock's void requireAgentUseAccess
      * does nothing. The /v1 USE gate has its own tests.

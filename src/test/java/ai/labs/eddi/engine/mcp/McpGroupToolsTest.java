@@ -957,6 +957,7 @@ class McpGroupToolsTest {
 
         assertTrue(result.contains("Access denied"), result);
         verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+        verify(groupConversationService, times(1)).readGroupConversation("gc1");
     }
 
     @Test

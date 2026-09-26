@@ -99,11 +99,15 @@ public class McpGroupTools {
      * coarse gate — without this, any caller holding the baseline MCP role could
      * read, append to, re-run or close ANOTHER user's group conversation, while the
      * equivalent REST endpoints all enforce {@code requireOwnerOrAdmin} (403).
+     *
+     * @return the conversation the check was made against, so a caller that needs
+     *         more of it reads the same state rather than loading it again
      */
-    private void requireConversationOwner(String groupConversationId)
+    private GroupConversation requireConversationOwner(String groupConversationId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
         ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+        return gc;
     }
 
     /**
@@ -561,8 +565,9 @@ public class McpGroupTools {
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
                                             @ToolArg(description = "The follow-up question for the group") String question) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        GroupConversation owned;
         try {
-            requireConversationOwner(groupConversationId);
+            owned = requireConversationOwner(groupConversationId);
         } catch (ForbiddenException e) {
             return accessDenied("continue_group_discussion", groupConversationId);
         } catch (Exception e) {
@@ -571,7 +576,7 @@ public class McpGroupTools {
         }
         try {
             // A continuation re-runs every member: re-check USE on the group itself.
-            String groupId = groupConversationService.readGroupConversation(groupConversationId).getGroupId();
+            String groupId = owned.getGroupId();
             try {
                 resourceAccessGuard.requireUseAccess(groupId, "group");
             } catch (ForbiddenException e) {

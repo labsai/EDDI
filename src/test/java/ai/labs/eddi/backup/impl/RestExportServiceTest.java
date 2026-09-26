@@ -543,14 +543,15 @@ class RestExportServiceTest {
         @Test
         @DisplayName("the agent id is recovered from any key shape, including UUID ids and dotted slugs")
         void agentIdIsRecoverable() {
-            String token = "0123456789abcdef0123456789abcdef";
+            // Any 32 lower-case hex characters stand for the random part of a key.
+            String archiveNonce = "f".repeat(32);
             assertEquals("123e4567-e89b-12d3-a456-426614174000",
-                    RestExportService.agentIdOfArchive("Bot.v2--123e4567-e89b-12d3-a456-426614174000-3-" + token + ".zip"));
+                    RestExportService.agentIdOfArchive("Bot.v2--123e4567-e89b-12d3-a456-426614174000-3-" + archiveNonce + ".zip"));
             assertEquals("123e4567-e89b-12d3-a456-426614174000",
-                    RestExportService.agentIdOfArchive("123e4567-e89b-12d3-a456-426614174000-3-" + token + ".zip"));
+                    RestExportService.agentIdOfArchive("123e4567-e89b-12d3-a456-426614174000-3-" + archiveNonce + ".zip"));
             // The pre-token format, and anything else not produced by prepareZipFilename.
             assertNull(RestExportService.agentIdOfArchive("My-Agent-abc123-2.zip"));
-            assertNull(RestExportService.agentIdOfArchive("abc123-2-" + token + ".tar"));
+            assertNull(RestExportService.agentIdOfArchive("abc123-2-" + archiveNonce + ".tar"));
         }
     }
 

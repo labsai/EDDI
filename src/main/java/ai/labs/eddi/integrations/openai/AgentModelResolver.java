@@ -35,7 +35,16 @@ import java.util.regex.Pattern;
  * agentId>} — for example {@code customer-support-a3f9c1}. The suffix exists
  * because descriptor names are <em>not</em> unique: a bare slug would make
  * resolution non-deterministic as soon as two agents are both called "Support".
- * The composite is readable in a model dropdown and collision-free.
+ * The composite is readable in a model dropdown and collision-free in practice.
+ * <p>
+ * <b>When it does collide</b> — two ready agents with the same slug and the
+ * same last six id characters — every agent in the collision is listed under
+ * {@code <slug>-<full agentId>} instead, so each one stays addressable, and the
+ * short id becomes an alias that resolves only when exactly one of them is
+ * usable by the caller. No agent in a collision keeps the short id as its own:
+ * which agent kept it would depend on listing order, and a newly deployed
+ * namesake could then silently take over conversations Open WebUI had stored
+ * under it. Agents that do not collide keep their short id unchanged.
  * <p>
  * Each agent is additionally exposed with a {@value #STATELESS_SUFFIX} suffix
  * (when enabled). That variant runs one throwaway conversation per request —
@@ -200,7 +209,8 @@ public class AgentModelResolver {
      * <p>
      * Resolution order — first match wins:
      * <ol>
-     * <li>the canonical model id</li>
+     * <li>the canonical model id — or a short id shared by colliding agents, which
+     * resolves only when the caller may use exactly one of them</li>
      * <li>the bare agentId</li>
      * <li>the descriptor name, case-insensitively — only when unique</li>
      * <li>the bare slug — only when unique</li>
@@ -238,6 +248,16 @@ public class AgentModelResolver {
         // quietly land on some other agent whose display name happens to equal it.
         Entry entry = catalogue.byModelId().get(id.toLowerCase(Locale.ROOT));
         if (entry == null) {
+            // A short id shared by colliding agents: an exact match too, so it never
+            // falls through to name matching either.
+            List<Entry> colliding = catalogue.byCollidingId().get(id.toLowerCase(Locale.ROOT));
+            if (colliding != null) {
+                List<Entry> candidates = usable(colliding);
+                if (candidates.isEmpty()) {
+                    throw unknownModel(id);
+                }
+                return toResolved(requireUnique(candidates, id, "model id"), raw, stateless);
+            }
             entry = catalogue.byAgentId().get(id);
         }
         if (entry != null) {
@@ -315,15 +335,19 @@ public class AgentModelResolver {
         Map<String, Entry> byAgentId = new LinkedHashMap<>();
         Map<String, List<Entry>> byName = new LinkedHashMap<>();
         Map<String, List<Entry>> bySlug = new LinkedHashMap<>();
+        Map<String, List<Entry>> byCollidingId = new LinkedHashMap<>();
 
         List<IAgent> agents;
         try {
             agents = agentFactory.getAllLatestAgents(config.getEnvironment());
         } catch (Exception e) {
             LOGGER.errorf("Could not list deployed agents for the OpenAI model catalogue: %s", e.getMessage());
-            return new Catalogue(byModelId, byAgentId, byName, bySlug);
+            return new Catalogue(byModelId, byAgentId, byName, bySlug, byCollidingId);
         }
 
+        // Short id (lower-cased) -> the agents that would carry it, so collisions are
+        // known before any id is assigned.
+        Map<String, List<Entry>> byShortId = new LinkedHashMap<>();
         for (IAgent agent : agents) {
             if (agent == null || agent.getDeploymentStatus() != Status.READY) {
                 continue;
@@ -345,18 +369,37 @@ public class AgentModelResolver {
                 continue;
             }
 
-            String slug = slugify(displayName);
-            String modelId = slug + "-" + idSuffix(agentId);
-            Entry entry = new Entry(agentId, displayName, modelId, created);
+            String shortId = slugify(displayName) + "-" + idSuffix(agentId);
+            byShortId.computeIfAbsent(shortId.toLowerCase(Locale.ROOT), k -> new ArrayList<>())
+                    .add(new Entry(agentId, displayName, shortId, created));
+        }
 
-            byModelId.putIfAbsent(modelId.toLowerCase(Locale.ROOT), entry);
-            byAgentId.putIfAbsent(agentId, entry);
-            byName.computeIfAbsent(displayName.toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(entry);
-            bySlug.computeIfAbsent(slug, k -> new ArrayList<>()).add(entry);
+        for (var shortIdGroup : byShortId.entrySet()) {
+            List<Entry> group = shortIdGroup.getValue();
+            boolean collides = group.size() > 1;
+            List<Entry> assigned = new ArrayList<>(group.size());
+            for (Entry candidate : group) {
+                Entry entry = collides
+                        ? new Entry(candidate.agentId(), candidate.displayName(),
+                                slugify(candidate.displayName()) + "-" + candidate.agentId().toLowerCase(Locale.ROOT),
+                                candidate.createdEpochSeconds())
+                        : candidate;
+                assigned.add(entry);
+                byModelId.putIfAbsent(entry.modelId().toLowerCase(Locale.ROOT), entry);
+                byAgentId.putIfAbsent(entry.agentId(), entry);
+                byName.computeIfAbsent(entry.displayName().toLowerCase(Locale.ROOT), k -> new ArrayList<>()).add(entry);
+                bySlug.computeIfAbsent(slugify(entry.displayName()), k -> new ArrayList<>()).add(entry);
+            }
+            if (collides) {
+                LOGGER.warnf("OpenAI model id '%s' is shared by %d deployed agents; each is listed under "
+                        + "<slug>-<agentId> instead, and the short id resolves only when the caller may use "
+                        + "exactly one of them", shortIdGroup.getKey(), group.size());
+                byCollidingId.put(shortIdGroup.getKey(), List.copyOf(assigned));
+            }
         }
 
         LOGGER.debugf("OpenAI model catalogue rebuilt: %d ready agent(s)", byModelId.size());
-        return new Catalogue(byModelId, byAgentId, byName, bySlug);
+        return new Catalogue(byModelId, byAgentId, byName, bySlug, byCollidingId);
     }
 
     /**
@@ -422,6 +465,7 @@ public class AgentModelResolver {
     private record Catalogue(Map<String, Entry> byModelId,
             Map<String, Entry> byAgentId,
             Map<String, List<Entry>> byName,
-            Map<String, List<Entry>> bySlug) {
+            Map<String, List<Entry>> bySlug,
+            Map<String, List<Entry>> byCollidingId) {
     }
 }

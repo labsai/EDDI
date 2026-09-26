@@ -117,3 +117,10 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # range (not quoted here -- the rule would match this file too).
 22c380c2878ab9c2227b39b17fb34ce20991b758:src/test/java/ai/labs/eddi/engine/audit/TurnAuditBufferTest.java:generic-api-key:25
 22c380c2878ab9c2227b39b17fb34ce20991b758:src/test/java/ai/labs/eddi/engine/runtime/internal/ConversationHitlCoverageTest.java:generic-api-key:211
+
+# PR #840 (fix/workspace-authz-scoping): a 32-character hex stand-in for the random
+# part of an export archive key, in RestExportServiceTest, assigned to a local whose
+# name matches generic-api-key. Not a credential. A later commit of the same PR
+# replaced it with a low-entropy value under another name; this entry covers the
+# commit that introduced it, which stays in the scan range.
+062e1d4d540cddae5675c64d84eece16e09688c1:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
