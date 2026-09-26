@@ -31,15 +31,39 @@ that started them, so switching conversation or agent mid-stream wrote A's
 tokens into B's bubble. The store now carries a `conversationEpoch`, bumped by
 `setSelectedAgent`, `clearMessages` and `reset`. A send or start captures it and
 writes nothing once it has moved on: tokens, `done`, the non-streaming reply, the
-error bubble and the 409 rollback. A detached stream is drained, not aborted, so
-the server-side turn still completes. `setSelectedAgent` also drops the previous
-agent's quick replies, requested input field and the processing lock.
+error bubble and the 409 rollback. `setSelectedAgent` also drops the previous
+agent's quick replies, requested input field and the processing lock, and each
+replacement closes the live debug turn, so the old conversation's tool calls no
+longer show in the new one's status line.
+
+- *Loads are bound too.* `loadConversationIntoStore` (history pick, resume,
+  Continue in Chat) captures the epoch when it is requested and installs nothing
+  if it has moved by the time the read returns. The load ticket also advances on
+  every replacement, and the resume path re-checks after its history fetch.
+  Without this the epoch made things worse. A slow read of agent A's
+  conversation that returned after agent B had been picked and its conversation
+  started would replace B's conversation with A's, under B's name, and every
+  send then went to agent A. The same happened for a history row still loading
+  when "New conversation" was clicked.
+- *Detached streams are bounded.* A detached stream is drained so the turn the
+  user already sent can finish (closing the stream cancels it on the server). It
+  is aborted once `DETACHED_STREAM_GRACE_MS` (120 s) has passed since the switch.
+  Otherwise a proxy that swallows the terminal frame would keep one fetch and
+  one pending mutation open per switch. The trade-off is that a turn still
+  running two minutes after the user left it is cancelled.
 
 **Pause handling (Medium, `awaiting_approval`; compatible with #841).**
-- The streaming `awaiting_approval` error code is handled like the non-streaming
-  409. The optimistic message and placeholder are rolled back and the pause
-  banner is shown, instead of an error appended to the transcript.
-- A 409 is no longer read as "paused" on its own. The same status also answers
+- The streaming endpoint reports its pre-turn refusals as `error` frames with a
+  code, not as statuses. All of those codes are now handled like the refused
+  status they mirror: `awaiting_approval`, `conversation_not_found`,
+  `input_too_large`, `conversation_ended`, `agent_not_ready`, `agent_mismatch`,
+  `quota_accounting_unavailable`, `quota_exceeded`, `processing_restricted` and
+  `restriction_status_unavailable`. The optimistic message and placeholder are
+  rolled back. `awaiting_approval` shows the pause banner; the others toast why
+  the message was not sent. The list is pinned by a test that reads the codes out
+  of `RestAgentEngineStreaming.java`. A failure during a turn carries no code
+  and keeps the error bubble, because that turn ran.
+- A refused **409 status** is no longer read as "paused" on its own. The same status also answers
   "processing another turn", "agent version mismatch" and, with #841, "the
   conversation changed while your message was queued". The chat now reads the
   conversation state. It shows the banner only for `AWAITING_HUMAN`, and
@@ -80,6 +104,14 @@ explains how to turn built-in tools off (new keys `setupWizard.lastToolHint`,
   can carry them. The agent wizard and operator activation therefore no longer
   offer it (`isProvisionableBySetup` in [`model-suggestions.ts`](../../ui/manager/src/lib/model-suggestions.ts)).
   A Vertex agent is created with another provider and switched in the LLM editor.
+  Setup itself (REST and MCP) now refuses `gemini-vertex` before anything is
+  created or vaulted, with a message naming `projectId`/`location` and the way
+  round. Previously it demanded an API key the provider never reads, vaulted it
+  as an orphan secret, and created an agent that failed on its first turn.
+- An operator stored with `gemini-vertex` reopens its activation form on the first
+  offered provider, with that provider's default model and no carried key,
+  instead of a select with no matching option. The agent wizard has no stored
+  state that could hold the value.
 
 **L5.** The API-agent request never sent `llmBaseUrl`, so an API agent on Ollama
 got the default URL whatever was typed. It is sent now.
@@ -97,7 +129,9 @@ key-taking providers, so a Jlama token never becomes an OpenAI key.
   Agent Studio saving. Touching the same lines here would only conflict.
 - **Undo/redo** (`useUndoConversation`/`useRedoConversation`) is owned by
   `fix/manager-api-contract` and is untouched. `snapshotToMessages`, which they
-  call, now masks secret turns for them too.
+  call, now masks secret turns for them too. Undo, redo and rerun are not yet
+  bound to the conversation epoch, so their `replaceMessages` can still land on
+  a transcript switched in the meantime. That is a follow-up for that branch.
 - **#839 / #845:** the Manager chat never resumes a pause (it links to the review
   page), and every chat request declares its body length. Neither needed a change.
 - **Follow-ups:** the operator chat (`use-operator-chat.ts`, `operator-history.tsx`)
@@ -108,7 +142,8 @@ key-taking providers, so a Jlama token never becomes an OpenAI key.
 
 **Tests:** `use-chat-stream-binding`, `use-chat-rejected-send`,
 `use-chat-secret-input`, `chat-drawer-binding`, `chat-panel-continue`,
-`agent-card-undeploy`, `agent-wizard-providers`, `agent-detail-chat`, new cases in
-`resource-detail-llm` and `model-suggestions`, and `AgentSetupServiceBranchCoverageTest`
-(huggingface, gemini-vertex). The two existing 409 tests now mock the paused
+`agent-card-undeploy`, `agent-wizard-providers`, `agent-detail-chat`,
+`use-chat-load-race`, new cases in `resource-detail-llm`, `model-suggestions` and
+`operator-activation`, and `AgentSetupServiceBranchCoverageTest` (huggingface,
+gemini-vertex parameters and refusal). The two existing 409 tests now mock the paused
 state they assert.

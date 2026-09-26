@@ -111,6 +111,13 @@ function revokeOrphanedPreviews(prev: ChatMessage[], next: ChatMessage[]): void 
   );
 }
 
+/**
+ * Monotonic ticket for conversation loads — see loadConversationIntoStore.
+ * Also advanced whenever the transcript is replaced (agent picked, cleared,
+ * reset), so a load already in flight can never install over the replacement.
+ */
+let latestLoadRequest = 0;
+
 // --- Zustand Store ---
 
 interface ChatState {
@@ -202,6 +209,11 @@ export const useChatStore = create<ChatState>((set) => ({
   setSelectedAgent: (agentId, agentName) =>
     set((s) => {
       revokeMessagePreviews(s.messages);
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
       return {
         selectedAgentId: agentId,
         selectedAgentName: agentName,
@@ -263,6 +275,11 @@ export const useChatStore = create<ChatState>((set) => ({
   clearMessages: () =>
     set((s) => {
       revokeMessagePreviews(s.messages);
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
       return {
         messages: [],
         conversationId: null,
@@ -306,6 +323,11 @@ export const useChatStore = create<ChatState>((set) => ({
   reset: () =>
     set((s) => {
       revokeMessagePreviews(s.messages);
+      latestLoadRequest++;
+      // The live status line belongs to the transcript being replaced; move
+      // any leftover events into the turn history instead of showing them
+      // under the next conversation until its first send.
+      useDebugStore.getState().finalizeTurn();
       return {
         messages: [],
         conversationId: null,
@@ -462,6 +484,38 @@ class RejectedSendError extends Error {
   }
 }
 
+/**
+ * Stream error codes that mean the input was refused BEFORE the turn started,
+ * so it was never consumed. They are the codes
+ * `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` emits for the
+ * conditions the non-streaming twin answers with a status (409, 410, 404, 413,
+ * 429, 403, 503). A failure DURING a turn arrives as an opaque error without a
+ * code and keeps the error bubble, because that turn did run.
+ *
+ * Exported for tests, which pin the list against the backend's.
+ */
+export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
+  "awaiting_approval",
+  "conversation_not_found",
+  "input_too_large",
+  "conversation_ended",
+  "agent_not_ready",
+  "agent_mismatch",
+  "quota_accounting_unavailable",
+  "quota_exceeded",
+  "processing_restricted",
+  "restriction_status_unavailable",
+]);
+
+/**
+ * How long a stream detached from the transcript on screen is left to finish
+ * before it is aborted. Draining lets the turn the user already sent complete
+ * on the server (closing the stream cancels it there), but a proxy that
+ * swallows the terminal frame would otherwise keep the fetch and its mutation
+ * open for good, one more per switch.
+ */
+export const DETACHED_STREAM_GRACE_MS = 120_000;
+
 /** The `{message, code}` an SSE `error` frame carries; raw text when it is not JSON. */
 function parseStreamError(data: string): { message: string; code?: string } {
   try {
@@ -603,6 +657,17 @@ export function useSendMessage() {
         // set; it is a no-op when the previous turn ended cleanly.
         useDebugStore.getState().finalizeTurn();
 
+        // Once the user moves to another transcript this stream is detached.
+        // Bound how long it may keep draining (see DETACHED_STREAM_GRACE_MS).
+        // A store subscription rather than a check per event, because the
+        // case being bounded is exactly the one where no further event comes.
+        let detachTimer: ReturnType<typeof setTimeout> | undefined;
+        const unsubscribe = store.subscribe((s) => {
+          if (s.conversationEpoch !== epoch && detachTimer === undefined) {
+            detachTimer = setTimeout(() => abort.abort(), DETACHED_STREAM_GRACE_MS);
+          }
+        });
+
         try {
           const events = sendMessageStreaming(
             "production",
@@ -627,14 +692,18 @@ export function useSendMessage() {
               }
               if (event.type === "error") {
                 const { message: reason, code } = parseStreamError(event.data);
-                // The streaming twin of the 409: the backend refused the input
-                // because the conversation is paused for approval, and it was
-                // NOT consumed. Treated exactly like the 409 (rollback + pause
-                // banner) rather than as an error appended to the transcript.
-                if (code === "awaiting_approval") {
+                // The streaming twins of the non-streaming refusals: the input
+                // was NOT consumed, so it is rolled back like a refused status
+                // instead of staying in the transcript above an error bubble.
+                // Only awaiting_approval is a pause; the rest say why the
+                // message was not sent.
+                if (code && UNCONSUMED_STREAM_ERROR_CODES.has(code)) {
                   useDebugStore.getState().finalizeTurn();
                   abort.abort();
-                  throw new RejectedSendError(reason, true);
+                  throw new RejectedSendError(
+                    translateStreamError(code, t) ?? reason,
+                    code === "awaiting_approval",
+                  );
                 }
               }
               const isDone = handleSSEEvent(event, store, t);
@@ -657,6 +726,9 @@ export function useSendMessage() {
         } catch (e) {
           // A refusal before the stream opens arrives as a status, not a frame.
           throw await classifyRejectedSend(e, conversationId);
+        } finally {
+          unsubscribe();
+          if (detachTimer !== undefined) clearTimeout(detachTimer);
         }
         // Safety-net: if the stream ended without a done event
         // (e.g. connection drop), finalize it here — the debug turn too, so
@@ -1203,11 +1275,22 @@ export function useConversationHistory(agentId: string | null) {
   });
 }
 
-/** Monotonic ticket for conversation loads — see loadConversationIntoStore. */
-let latestLoadRequest = 0;
-
-/** Read a conversation from the backend and make it the store's active one. */
-async function loadConversationIntoStore(agentId: string, conversationId: string) {
+/**
+ * Read a conversation from the backend and make it the store's active one.
+ *
+ * `epoch` is the transcript generation the load was requested in (defaults to
+ * the current one). A load whose generation has moved on by the time its read
+ * returns is dropped: the user picked another agent, started a new
+ * conversation or opened another one meanwhile. Without this a slow read of
+ * agent A's history landed AFTER agent B had been picked and its conversation
+ * started, and installed A's conversation under B's name, so every send then
+ * went to agent A.
+ */
+async function loadConversationIntoStore(
+  agentId: string,
+  conversationId: string,
+  epoch: number = useChatStore.getState().conversationEpoch,
+) {
   // Loads can overlap: two clicks in the render gap before the list disables
   // itself, or a resume racing a history pick. The store must reflect the most
   // recently *requested* conversation, not whichever read happened to finish
@@ -1225,9 +1308,13 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
     false
   );
 
-  if (request !== latestLoadRequest) return snapshot; // superseded mid-flight
-
   const store = useChatStore;
+  // Superseded mid-flight, by a later load or by anything else that replaced
+  // the transcript (see the epoch note above).
+  if (request !== latestLoadRequest || store.getState().conversationEpoch !== epoch) {
+    return snapshot;
+  }
+
   store.getState().clearMessages();
   store.getState().setConversationId(conversationId);
 
@@ -1323,6 +1410,10 @@ export function useResumeOrStartConversation() {
 
   return useMutation({
     mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+      // The transcript this open was requested for. The history fetch below is
+      // a network round trip; if the user has moved on by the time it returns,
+      // neither a resumed nor a new conversation may be installed.
+      const epoch = useChatStore.getState().conversationEpoch;
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
@@ -1335,11 +1426,12 @@ export function useResumeOrStartConversation() {
         // History is a convenience, not a precondition — fall through to a new
         // conversation rather than leaving the user with a dead chat panel.
       }
+      if (useChatStore.getState().conversationEpoch !== epoch) return null;
 
       if (resumable) {
         const conversationId = parseConversationUri(resumable.resource);
         try {
-          await loadConversationIntoStore(agentId, conversationId);
+          await loadConversationIntoStore(agentId, conversationId, epoch);
           return conversationId;
         } catch {
           // The descriptor pointed at something we cannot read (deleted,
