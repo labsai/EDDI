@@ -941,7 +941,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
             }
-            LOGGER.infof("Requeued dead-lettered schedule %s", scheduleId);
+            LOGGER.infof("Requeued dead-lettered schedule %s", sanitize(scheduleId));
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
         } catch (SQLException e) {
@@ -975,7 +975,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
             }
-            LOGGER.infof("Dismissed dead-lettered schedule %s", scheduleId);
+            LOGGER.infof("Dismissed dead-lettered schedule %s", sanitize(scheduleId));
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
         } catch (SQLException e) {
