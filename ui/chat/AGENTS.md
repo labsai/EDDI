@@ -81,9 +81,10 @@ src/
 - **The route's environment must be sent** as `?environment=` on start; the
   backend defaults a missing one to production.
 - **The turn output's `input` is the masked display copy** — `<secret input>`
-  for a turn sent with `secretInput`. Use it when rebuilding: the engine now
-  scrubs `input:initial` when a secret turn ends, but conversations stored
-  before that fix still carry it raw.
+  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
+  a secret turn when it ends and masks older stored ones on read, so
+  `input:initial` also reads `<secret input>`; the client-side mask is a
+  second line of defence, not the only one.
 - **Math is `$$…$$` only.** Single dollars are prices, not formulas.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read

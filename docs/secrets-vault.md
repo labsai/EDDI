@@ -307,10 +307,19 @@ When the **client flags input as secret** (via the `secretInput` context key):
 1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
 2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
 3. The actual plaintext still flows through lifecycle data for the whole turn, so tasks — the parser, `PropertySetterTask` — can use or vault it
-4. When the turn ends (completed, stopped, paused or failed), `Conversation.scrubSecretClientInput()` replaces `input:initial` and `input:normalized` with `<secret input>`, clears the parsed expressions and intents derived from it, re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn), and removes the raw and normalized text (8+ characters) from every other datum and output of the step. The audit ledger records the placeholder and redacts both forms
-5. So the stored step, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**
+4. When the turn ends (completed, stopped, paused or failed), `Conversation.scrubSecretClientInput()`:
+   - replaces `input:initial` and `input:normalized` with `<secret input>`;
+   - clears the parsed expressions and intents derived from the input;
+   - re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn);
+   - removes the raw and normalized text (8+ characters) from every other datum and output of the step, and from the pending tool-call batch of a tool-call pause — the transcript the model saw, the gated call's arguments and the redacted arguments an approver is shown.
 
-**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern). Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead. A task that runs after a HITL resume of the turn sees the placeholder.
+   The audit ledger records the placeholder and redacts both forms, for the turn and for a resume of it.
+5. So, for turns run on this version, the stored step, the pending approval, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**.
+6. **Turns stored before this version** still hold the raw `input:initial` and the parser's normalized copy in the database. They are masked **on read**: every secret turn carries `context.secretInput == "true"`, and conversation reads (REST, MCP, the `done` frame) replace `input`, `input:initial`, `input:normalized` and `expressions:parsed` for such a turn. The stored document itself is not rewritten, and the audit entries of those old turns are unchanged.
+
+**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern). Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead.
+
+**HITL resume sees the placeholder.** Everything after a pause of a secret turn — a RULE pause (`PAUSE_CONVERSATION`) or a tool-call pause — runs after the scrub. A tool approved on resume executes with `<secret input>` where the secret was, and a property setter that runs after the resume reads `<secret input>` from `{memory.current.input}`. `PropertySetterTask` does not store or vault that placeholder: it logs a warning and leaves the property unset. Capture a secret input **before** any rule that pauses the turn.
 
 When the **client sends a credential as context** — for example the caller's token for a
 downstream API — it marks that context entry `"secret": true`. The value works for that one
