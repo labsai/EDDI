@@ -83,6 +83,11 @@ python scripts/collate-changelog.py --check   # validate, change nothing
 python scripts/collate-changelog.py           # collate locally
 ```
 
+CI's `Changelog Discipline` job runs the `--check` form on every pull request,
+so a fragment the nightly job would refuse fails the PR that adds it. The same
+job fails a PR that adds any `## ` heading (dated or not, or a `---`-underlined
+one) or a dated register row to `changelog.md` itself.
+
 The job **skips while a collation PR is still open**, because that PR has
 already claimed these fragments and a second one proposing the same entries
 would conflict with it. So if this directory stops emptying, look for an
