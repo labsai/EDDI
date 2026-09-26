@@ -495,6 +495,7 @@ class StreamingLegacyChatExecutor {
             }
 
             if (timedOut) {
+                incrementStreamTimeout();
                 metadata.put("streamingTimeout", true);
                 if (!responseText.isEmpty()) {
                     // Partial response available — return it with a warning
@@ -561,6 +562,18 @@ class StreamingLegacyChatExecutor {
             return null;
         }
         return response.aiMessage().text();
+    }
+
+    /**
+     * L3: EDDI's streaming backstop fired. The provider's own timeout may report
+     * the failure through the telemetry listener much later — or, for a stream that
+     * simply stalls, never — so the abandonment is counted where EDDI decides it,
+     * at the moment it happens.
+     */
+    private void incrementStreamTimeout() {
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.stream.timeouts", "path", "legacy").increment();
+        }
     }
 
     private void incrementNoPartials() {

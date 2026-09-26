@@ -119,7 +119,7 @@ public class ObservableChatModel implements ChatModel {
         // EDDI's listener ONLY. The delegate's listeners are deliberately excluded:
         // doChat forwards to delegate.chat(), which dispatches them itself, so
         // including them here would fire every provider-registered listener twice.
-        this.listeners = telemetryListener == null ? List.of() : List.of(telemetryListener);
+        this.listeners = telemetryListener == null ? List.of() : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType));
     }
 
     @Override
