@@ -112,6 +112,14 @@ class ComplianceStartupChecksTest {
     }
 
     @Test
+    @DisplayName("the independent audit key alone satisfies a signing requirement")
+    void auditHmacKeyAloneSatisfiesSigningRequired() {
+        var checks = new ComplianceStartupChecks(Optional.of(List.of("/cert.pem")), Optional.of(List.of("/cert.pem.key")), Optional.empty(), true,
+                Optional.empty(), true, true, Optional.of("audit-only-secret-123"));
+        assertDoesNotThrow(() -> checks.onStartup(null));
+    }
+
+    @Test
     @DisplayName("missing vault key only warns when signing is not required")
     void missingVaultKeyOnlyWarnsByDefault() {
         var checks = checks(Optional.of(List.of("/cert.pem")), Optional.empty(), true, Optional.empty(), true, false);

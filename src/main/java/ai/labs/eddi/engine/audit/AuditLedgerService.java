@@ -181,7 +181,12 @@ public class AuditLedgerService {
     };
     private final int maxQueueSize;
 
-    private byte[] hmacKey;
+    /**
+     * The signing and verification keys. Null until {@link #init()} when the
+     * service was built outside CDI, which derives one from the master key exactly
+     * as this service always did.
+     */
+    private AuditKeyring keyring;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
     /**
      * Tracks {@link #queue}'s length. {@link ConcurrentLinkedQueue#size()} is an
@@ -244,6 +249,26 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
+            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            AgentSigningService agentSigningService, ObjectMapper objectMapper, AuditKeyring keyring) {
+        this(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, deadLetterPath, agentSigningEnabled, defaultTenantId, maxQueueSize,
+                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, natsConnectionInstance, agentSigningService, objectMapper);
+        this.keyring = keyring;
+    }
+
+    /**
+     * Without a keyring: {@link #init()} derives one from {@code masterKeyConfig},
+     * with no independent key, no retired keys and no vault pin.
+     */
+    public AuditLedgerService(IAuditStore auditStore, boolean enabled,
+            int flushIntervalSeconds,
+            Optional<String> masterKeyConfig,
+            String deadLetterPath,
+            boolean agentSigningEnabled,
+            String defaultTenantId,
+            int maxQueueSize,
+            boolean recoverLegacyTimestamps,
+            int recoverLegacyMaxRows,
             MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.recoverLegacyTimestamps = recoverLegacyTimestamps;
@@ -357,11 +382,13 @@ public class AuditLedgerService {
             return;
         }
 
-        if (masterKeyConfig.isPresent() && !masterKeyConfig.get().isBlank()) {
-            this.hmacKey = AuditHmac.deriveHmacKey(masterKeyConfig.get());
+        if (keyring == null) {
+            keyring = AuditKeyring.fromMasterKey(masterKeyConfig.filter(key -> !key.isBlank()).orElse(null));
+        }
+        if (keyring.signingKey() != null) {
             LOGGER.info("Audit Ledger: HMAC integrity signing enabled.");
         } else {
-            LOGGER.info("Audit Ledger: HMAC signing disabled (no vault master key).");
+            LOGGER.info("Audit Ledger: HMAC signing disabled (no vault master key and no eddi.audit.hmac-key).");
         }
 
         checkDeadLetterSinkReachable();
@@ -556,8 +583,9 @@ public class AuditLedgerService {
 
             // Compute HMAC if key is available
             AuditEntry signed;
-            if (hmacKey != null) {
-                String hmac = AuditHmac.computeHmac(scrubbed, hmacKey);
+            AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+            if (signingKey != null) {
+                String hmac = AuditHmac.computeHmac(scrubbed, signingKey);
                 signed = scrubbed.withHmac(hmac);
             } else {
                 signed = scrubbed;
@@ -1265,7 +1293,7 @@ public class AuditLedgerService {
      * evidence.
      */
     public boolean isSigningEnabled() {
-        return hmacKey != null;
+        return keyring != null && keyring.signingKey() != null;
     }
 
     /**
@@ -1299,16 +1327,17 @@ public class AuditLedgerService {
         if (entry == null) {
             return AuditVerificationStatus.INVALID;
         }
-        if (hmacKey == null) {
+        if (!isSigningEnabled()) {
             return AuditVerificationStatus.SIGNING_DISABLED;
         }
         if (entry.hmac() == null || entry.hmac().isBlank()) {
             return AuditVerificationStatus.UNSIGNED;
         }
-        return switch (AuditHmac.verify(entry, hmacKey, recoveryBudget)) {
+        return switch (AuditHmac.verify(entry, keyring.verificationKeys(), recoveryBudget)) {
             case MATCH -> AuditVerificationStatus.VALID;
             case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
             case MISMATCH -> AuditVerificationStatus.INVALID;
+            case UNKNOWN_KEY -> AuditVerificationStatus.UNKNOWN_KEY;
         };
     }
 
@@ -1474,7 +1503,8 @@ public class AuditLedgerService {
     }
 
     byte[] getHmacKey() {
-        return hmacKey;
+        AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+        return signingKey != null ? signingKey.hmacKey() : null;
     }
 
     // ==================== Private Helpers ====================

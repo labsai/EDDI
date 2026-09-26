@@ -42,5 +42,14 @@ public enum AuditVerificationStatus {
      * {@link #UNSIGNED}: the entry may well be signed, we just cannot check it
      * here.
      */
-    SIGNING_DISABLED
+    SIGNING_DISABLED,
+
+    /**
+     * The entry names the key that signed it, and this deployment does not hold
+     * that key — typically a retired audit key that is not listed in
+     * {@code eddi.audit.hmac-previous-keys}. Unlike {@link #INVALID} this is not
+     * evidence of tampering; the entry simply cannot be checked here. Counted with
+     * the invalid entries in a verification report, since it is not proven intact.
+     */
+    UNKNOWN_KEY
 }
