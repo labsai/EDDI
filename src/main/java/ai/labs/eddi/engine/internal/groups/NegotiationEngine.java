@@ -64,6 +64,28 @@ public final class NegotiationEngine {
      */
     static final int MAX_QUOTED_TERMS_CHARS = 600;
 
+    /**
+     * M-G1: concessions one BARGAIN turn may put on the ledger. The ledger is
+     * quoted into every later PROPOSAL/BARGAIN/SYNTHESIS turn, and a model can emit
+     * any number of array entries in one reply — without a cap a single turn grew
+     * every later prompt without bound.
+     */
+    static final int MAX_CONCESSIONS_PER_MOVE = 5;
+
+    /**
+     * M-G1: concessions the ledger holds in total. Past it, new concessions are
+     * dropped (WARN) — the earliest ones are the record the outcome quotes, so they
+     * are kept rather than rotated out.
+     */
+    static final int MAX_LEDGER_CONCESSIONS = 50;
+
+    /**
+     * M-G1: concession lines quoted into one turn's input — the newest, with a
+     * count of the older ones omitted. Bounds the prompt even for a ledger stored
+     * before the caps above existed.
+     */
+    static final int MAX_RENDERED_CONCESSIONS = 20;
+
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build();
@@ -152,7 +174,12 @@ public final class NegotiationEngine {
                 // The rule IS the structure: a concession that does not name what
                 // was received in return is not recorded.
                 if (gaveUp != null && !gaveUp.isBlank() && inReturnFor != null && !inReturnFor.isBlank()) {
-                    concessions.add(new ParsedConcession(gaveUp, inReturnFor));
+                    // Stored bounded, not just quoted bounded: the ledger is persisted
+                    // on the discussion document and rides the decision's tally.
+                    concessions.add(new ParsedConcession(truncate(gaveUp), truncate(inReturnFor)));
+                    if (concessions.size() >= MAX_CONCESSIONS_PER_MOVE) {
+                        break;
+                    }
                 }
             }
         }
@@ -202,6 +229,11 @@ public final class NegotiationEngine {
             added = addProposal(state, agentId, move.proposalTerms(), round, entryIndex);
         }
         for (ParsedConcession c : move.concessions()) {
+            if (state.getConcessions().size() >= MAX_LEDGER_CONCESSIONS) {
+                LOGGER.warnf("Group %s: the concession ledger is full (%d) — '%s''s further concessions are not recorded",
+                        LogSanitizer.sanitize(gc.getId()), MAX_LEDGER_CONCESSIONS, LogSanitizer.sanitize(agentId));
+                break;
+            }
             state.addConcession(new Concession(agentId, round, c.gaveUp(), c.inReturnFor(),
                     added != null ? added.id() : null));
         }
@@ -352,7 +384,12 @@ public final class NegotiationEngine {
         if (state.getConcessions().isEmpty()) {
             sb.append("- (empty)\n");
         } else {
-            for (Concession c : state.getConcessions()) {
+            List<Concession> ledger = state.getConcessions();
+            int omitted = Math.max(0, ledger.size() - MAX_RENDERED_CONCESSIONS);
+            if (omitted > 0) {
+                sb.append("- (").append(omitted).append(" earlier concession(s) omitted)\n");
+            }
+            for (Concession c : ledger.subList(omitted, ledger.size())) {
                 sb.append("- ").append(c.byAgentId()).append(" gave up \"").append(truncate(c.gaveUp()))
                         .append("\" in return for \"").append(truncate(c.inReturnFor())).append("\"\n");
             }

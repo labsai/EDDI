@@ -384,15 +384,64 @@ public final class StanceSummaryEngine {
         return cut.strip() + "…";
     }
 
-    /** Renders one member's contributions as summarizer input, newest last. */
-    private static String renderForSummarizer(List<TranscriptEntry> entries) {
-        var sb = new StringBuilder();
-        for (var e : entries) {
+    /**
+     * G3: the most one contribution contributes to summarizer input. A member's
+     * turn can be arbitrarily long (a task result, a pasted document); the stance
+     * is one sentence, and its lead paragraphs carry the position.
+     */
+    static final int MAX_SUMMARIZER_ENTRY_CHARS = 2_000;
+
+    /**
+     * G3: the whole summarizer input for one member. It used to be every
+     * contribution the member made this discussion, concatenated — growing with the
+     * discussion, re-sent at every boundary the member spoke at, and eventually
+     * past the summarizer's context window, where every call fails (and bills). The
+     * newest contributions are kept: a stance is where the member stands NOW.
+     */
+    static final int MAX_SUMMARIZER_INPUT_CHARS = 8_000;
+
+    /**
+     * Renders one member's contributions as summarizer input, newest last, bounded
+     * by {@link #MAX_SUMMARIZER_INPUT_CHARS} (oldest dropped first, with a marker
+     * saying how many) and {@link #MAX_SUMMARIZER_ENTRY_CHARS} per contribution.
+     */
+    static String renderForSummarizer(List<TranscriptEntry> entries) {
+        var blocks = new ArrayList<String>();
+        int used = 0;
+        int omitted = 0;
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            var e = entries.get(i);
             if (e.content() == null || e.content().isBlank()) {
                 continue;
             }
-            sb.append("[").append(e.phaseName() == null ? "" : e.phaseName()).append("] ")
-                    .append(e.content().strip()).append("\n\n");
+            if (used >= MAX_SUMMARIZER_INPUT_CHARS) {
+                omitted++;
+                continue;
+            }
+            String content = e.content().strip();
+            if (content.length() > MAX_SUMMARIZER_ENTRY_CHARS) {
+                content = content.substring(0, MAX_SUMMARIZER_ENTRY_CHARS) + " […]";
+            }
+            String block = "[" + (e.phaseName() == null ? "" : e.phaseName()) + "] " + content;
+            int room = MAX_SUMMARIZER_INPUT_CHARS - used;
+            if (block.length() > room) {
+                if (room < 200) {
+                    // Too little left for a meaningful slice — count it as omitted.
+                    omitted++;
+                    used = MAX_SUMMARIZER_INPUT_CHARS;
+                    continue;
+                }
+                block = block.substring(0, room) + " […]";
+            }
+            blocks.add(0, block);
+            used += block.length();
+        }
+        var sb = new StringBuilder();
+        if (omitted > 0) {
+            sb.append("[").append(omitted).append(" earlier contribution(s) omitted]\n\n");
+        }
+        for (String block : blocks) {
+            sb.append(block).append("\n\n");
         }
         return sb.toString().strip();
     }

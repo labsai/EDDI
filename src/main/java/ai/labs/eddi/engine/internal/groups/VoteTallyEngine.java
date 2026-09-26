@@ -174,14 +174,23 @@ public final class VoteTallyEngine {
                 String statement = node.path("statement").isTextual() ? node.path("statement").asText() : null;
                 return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.copyOf(votes), confidence, statement);
             }
+            // M-G2: a ballot in the contract's own shape that names no option — an
+            // empty "votes" array, a null "vote" — is a deliberate non-vote. It used
+            // to fall through to the text scan below, which then counted whatever
+            // option the free-text "statement" happened to mention as this member's
+            // vote.
+            if (node.has("votes") || node.has("vote")) {
+                return null;
+            }
         }
 
         // Tier 2: exactly ONE option's text appears in the reply. Two or more is
         // ambiguous — refusing to pick by position is the point of this tier.
+        // M-G2: matched as a whole word/phrase, never as a substring — "No" is not
+        // a vote for option "No" when it only occurs inside "not" or "know".
         String scanned = null;
-        String lower = content.toLowerCase(Locale.ROOT);
         for (String option : options) {
-            if (lower.contains(option.toLowerCase(Locale.ROOT))) {
+            if (mentionsAsWord(content, option)) {
                 if (scanned != null) {
                     return null;
                 }
@@ -192,6 +201,18 @@ public final class VoteTallyEngine {
             return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.of(scanned), null, null);
         }
         return null;
+    }
+
+    /**
+     * Whether {@code option} occurs in {@code content} as a whole word or phrase,
+     * case-insensitively: not preceded or followed by a letter or digit.
+     */
+    static boolean mentionsAsWord(String content, String option) {
+        if (content == null || option == null || option.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("(?<![\\p{L}\\p{N}])" + Pattern.quote(option.strip()) + "(?![\\p{L}\\p{N}])",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(content).find();
     }
 
     /**
@@ -310,10 +331,9 @@ public final class VoteTallyEngine {
         if (canonical != null) {
             return canonical;
         }
-        String lower = reply.toLowerCase(Locale.ROOT);
         String scanned = null;
         for (String option : options) {
-            if (lower.contains(option.toLowerCase(Locale.ROOT))) {
+            if (mentionsAsWord(reply, option)) {
                 if (scanned != null) {
                     return null;
                 }

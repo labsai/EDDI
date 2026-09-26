@@ -353,4 +353,51 @@ class NegotiationEngineTest {
         assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD, nestedGroup), "mod",
                 "Bargaining"), "both AGENT participants signed — the GROUP member is not on the required list");
     }
+
+    // =================================================================
+    // M-G1: the ledger is bounded
+    // =================================================================
+
+    private static String concessionsJson(int count, int textLength) {
+        var sb = new StringBuilder("{\"concessions\": [");
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"gaveUp\": \"g").append(i).append("x".repeat(textLength))
+                    .append("\", \"inReturnFor\": \"r").append(i).append("\"}");
+        }
+        return sb.append("]}").toString();
+    }
+
+    @Test
+    @DisplayName("M-G1: one BARGAIN turn records at most MAX_CONCESSIONS_PER_MOVE concessions, each stored bounded")
+    void ledger_perMoveCapAndTextBound() {
+        var move = NegotiationEngine.parseBargain(concessionsJson(40, 5_000));
+
+        assertNotNull(move);
+        assertEquals(NegotiationEngine.MAX_CONCESSIONS_PER_MOVE, move.concessions().size(),
+                "a single reply used to put every array entry it carried on the persisted ledger");
+        assertTrue(move.concessions().get(0).gaveUp().length() <= NegotiationEngine.MAX_QUOTED_TERMS_CHARS + 1,
+                "stored bounded, not only quoted bounded");
+    }
+
+    @Test
+    @DisplayName("M-G1: the ledger stops growing at MAX_LEDGER_CONCESSIONS; the prompt quotes only the newest lines")
+    void ledger_totalCapAndBoundedRendering() {
+        var gc = gc();
+        int turns = NegotiationEngine.MAX_LEDGER_CONCESSIONS / NegotiationEngine.MAX_CONCESSIONS_PER_MOVE + 5;
+        for (int t = 0; t < turns; t++) {
+            NegotiationEngine.applyRepeat(gc, List.of(bargain("a" + (t % 2 + 1),
+                    concessionsJson(NegotiationEngine.MAX_CONCESSIONS_PER_MOVE, 10))), t, t);
+        }
+
+        assertEquals(NegotiationEngine.MAX_LEDGER_CONCESSIONS, gc.getNegotiation().getConcessions().size());
+
+        String rendered = NegotiationEngine.appendStateIfRelevant("INPUT", gc, bargainPhase());
+        long lines = rendered.lines().filter(l -> l.contains(" gave up ")).count();
+        assertEquals(NegotiationEngine.MAX_RENDERED_CONCESSIONS, lines, "every later turn's prompt stays bounded");
+        assertTrue(rendered.contains("(" + (NegotiationEngine.MAX_LEDGER_CONCESSIONS - NegotiationEngine.MAX_RENDERED_CONCESSIONS)
+                + " earlier concession(s) omitted)"), rendered);
+    }
 }

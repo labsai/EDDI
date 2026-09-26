@@ -29,6 +29,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -586,13 +587,25 @@ public class PhaseExecutionEngine {
         }
     }
 
-    /** Immutable-record merge: a new decision keeps dissents already collected. */
-    private static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
+    /**
+     * Immutable-record merge: a new decision keeps dissents already collected.
+     * <p>
+     * M-G3: MERGED, not either-or. The earlier dissents were carried only when the
+     * new decision had none of its own, so a vote with a minority report replaced a
+     * preceding dissent round's positions wholesale — the opposite of what
+     * {@link #recordDissents} promises ("adds to the minority view rather than
+     * being the only source of it"). Earlier dissents come first; an identical
+     * dissent (same member, same position) is kept once.
+     */
+    static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
         DecisionRecord existing = gc.getDecision();
-        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()
-                && (decision.dissents() == null || decision.dissents().isEmpty())) {
+        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()) {
+            var merged = new LinkedHashSet<Dissent>(existing.dissents());
+            if (decision.dissents() != null) {
+                merged.addAll(decision.dissents());
+            }
             decision = new DecisionRecord(decision.type(), decision.outcome(), decision.winner(), decision.tally(),
-                    existing.dissents(), decision.method(), decision.decidedAtPhase(), decision.raw());
+                    List.copyOf(merged), decision.method(), decision.decidedAtPhase(), decision.raw());
         }
         gc.setDecision(decision);
     }
