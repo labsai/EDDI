@@ -109,9 +109,15 @@ variables), `{snippets.*}`, `{properties.*}`, or `{#for i in 2000000000}` and
 ### Compatibility
 
 - **Shapes:**
-  - No change to stored config, ZIP, REST or MCP shapes.
+  - No change to stored config or ZIP shapes.
   - Stored conversation snapshots gain an optional `verbatim: true` on result
     entries. Older documents load unchanged.
+  - The same additive field appears wherever the raw snapshot is served:
+    `GET /conversationstore/conversations/{conversationId}`,
+    `GET /agents/{conversationId}/approval-status?detail=full` and the MCP
+    `get_approval_status` tool with `detail=full`. It is omitted while false.
+    The simple conversation views and every other REST and MCP response are
+    unchanged.
 - **Behaviour:**
   - Context-supplied output and `fromObjectPath` strings containing `{...}` are
     now delivered literally. Neither behaviour was documented.
