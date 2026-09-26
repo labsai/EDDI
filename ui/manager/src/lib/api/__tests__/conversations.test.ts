@@ -463,4 +463,17 @@ describe("getDetailedConversation", () => {
     const result = await getDetailedConversation("conv1");
     expect(result).toBeDefined();
   });
+
+  it("asks for EVERY step — the backend defaults returnCurrentStepOnly to true", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/agents/:conversationId", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ conversationSteps: [], conversationProperties: {} });
+      }),
+    );
+    await getDetailedConversation("conv1");
+    expect(params!.get("returnDetailed")).toBe("true");
+    expect(params!.get("returnCurrentStepOnly")).toBe("false");
+  });
 });

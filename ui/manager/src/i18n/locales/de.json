@@ -260,6 +260,7 @@
     "openExternalChat": "In neuem Tab öffnen",
     "emptyDescription": "Erstellen Sie mit dem Wizard in wenigen Minuten einen fertig konfigurierten Agent.",
     "liveIn": "Aktiv in {{environment}}",
+    "liveInVersion": "Aktiv in {{environment}} mit Version {{version}}",
     "chatIn": "In {{environment}} chatten",
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
@@ -3117,7 +3118,7 @@
     "value": "Wert",
     "deleteAll": "Alle löschen",
     "deleteAllTitle": "Alle Eigenschaften löschen",
-    "deleteAllDesc": "Alle Eigenschaften dieses Nutzers werden unwiderruflich gelöscht.",
+    "deleteAllDesc": "Dadurch werden ALLE globalen Eigenschaften dieses Nutzers unwiderruflich gelöscht: jeder globale Eintrag im Nutzergedächtnis, auch die von Agenten gespeicherten, nicht nur die hier aufgeführten Zeilen.",
     "deleted": "Eigenschaften gelöscht",
     "noResults": "Keine Eigenschaften gefunden",
     "showingCount": "{{count}} Eigenschaften"

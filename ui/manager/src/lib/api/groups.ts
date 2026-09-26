@@ -1233,6 +1233,22 @@ export const MAX_GROUP_ATTACHMENTS_TOTAL_BYTES = 32 * 1024 * 1024;
 export const MAX_GROUP_QUESTION_CHARS = 50_000;
 
 /**
+ * The `userId` field of a discussion request body — present only when a caller
+ * names a user explicitly.
+ *
+ * Omitted, the backend resolves the owner itself: the signed-in caller when auth
+ * is on (`OwnershipValidator.validateAndResolveUserId`), `anonymous` when it is
+ * off. This used to fall back to the literal `"manager-user"`, and no caller ever
+ * passed a user, so with auth on every NON-admin got a 403 ("you cannot start a
+ * conversation as another user") and could not start, follow up or continue a
+ * discussion at all — while an admin's discussions were recorded as owned by
+ * "manager-user" rather than by the admin.
+ */
+function userIdField(userId?: string): { userId?: string } {
+  return userId ? { userId } : {};
+}
+
+/**
  * Body of a start/continue discussion request. `attachments` is only accepted by
  * the START endpoints — see {@link streamGroupContinue}.
  */
@@ -1243,7 +1259,7 @@ function discussBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     question,
-    userId: userId || "manager-user",
+    ...userIdField(userId),
   };
   // Omit rather than send [] — the backend treats absent and empty the same, and
   // an omitted key keeps the request byte-identical to the pre-attachment one.
@@ -1323,7 +1339,7 @@ export function followupGroupMember(
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
     `/groups/${groupId}/conversations/${gcId}/followup`,
-    { question, targetAgentId, userId: userId || "manager-user" },
+    { question, targetAgentId, ...userIdField(userId) },
   );
 }
 
@@ -1753,7 +1769,7 @@ export async function* streamGroupContinue(
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
     `/groups/${groupId}/conversations/${gcId}/continue/stream`,
-    { question, userId: userId || "manager-user" },
+    { question, ...userIdField(userId) },
     signal,
   );
   yield* readGroupSSE(response);

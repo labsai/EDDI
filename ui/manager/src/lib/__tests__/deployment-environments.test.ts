@@ -3,6 +3,8 @@ import {
   deployedEnvironments,
   isAnyEnvironmentBusy,
   preferredChatEnvironment,
+  withAnyDeployedVersion,
+  isLiveAtRequestedVersion,
 } from "../deployment-environments";
 import type { EnvironmentStatus } from "@/lib/api/agents";
 
@@ -85,5 +87,58 @@ describe("preferredChatEnvironment", () => {
     // Matches the backend's own @DefaultValue("production") rather than
     // inventing a third behaviour for a case the caller should not reach.
     expect(preferredChatEnvironment([])).toBe("production");
+  });
+});
+
+describe("withAnyDeployedVersion", () => {
+  const notLive: EnvironmentStatus[] = [
+    { environment: "production", status: "NOT_FOUND" },
+    { environment: "test", status: "NOT_FOUND" },
+  ];
+
+  it("adopts an older READY version and says which", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a1", agentVersion: 3, status: "READY" }] },
+      "a1",
+    );
+    expect(merged).toEqual([
+      { environment: "production", status: "READY", deployedVersion: 3 },
+      { environment: "test", status: "NOT_FOUND" },
+    ]);
+    expect(deployedEnvironments(merged)).toEqual(["production"]);
+    expect(isLiveAtRequestedVersion(merged![0])).toBe(false);
+  });
+
+  it("never lets another agent's deployment stand in", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a12", agentVersion: 1, status: "READY" }] },
+      "a1",
+    );
+    expect(deployedEnvironments(merged)).toEqual([]);
+  });
+
+  it("keeps a version-exact READY and ignores older ERROR rows", () => {
+    const merged = withAnyDeployedVersion(
+      [
+        { environment: "production", status: "READY" },
+        { environment: "test", status: "NOT_FOUND" },
+      ],
+      {
+        production: [{ environment: "production", agentId: "a1", agentVersion: 1, status: "READY" }],
+        test: [{ environment: "test", agentId: "a1", agentVersion: 1, status: "ERROR" }],
+      },
+      "a1",
+    );
+    expect(merged).toEqual([
+      { environment: "production", status: "READY" },
+      { environment: "test", status: "NOT_FOUND" },
+    ]);
+    expect(isLiveAtRequestedVersion(merged![0])).toBe(true);
+  });
+
+  it("passes undefined through while statuses load", () => {
+    expect(withAnyDeployedVersion(undefined, {}, "a1")).toBeUndefined();
   });
 });

@@ -19,7 +19,7 @@ import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
-import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import type {
   BatchSyncExecution,
   DocumentDescriptor,
@@ -51,7 +51,7 @@ export function SyncPage() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
   // Local agents for target dropdown
-  const { data: agentPages } = useInfiniteAgentDescriptors();
+  const { data: agentPages } = useAllAgentDescriptors();
   const localAgents = useMemo(
     () => groupAgentsByName(agentPages?.pages.flat() ?? []),
     [agentPages]

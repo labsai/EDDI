@@ -260,6 +260,7 @@
     "deployAndChat": "डिप्लॉय करें और चैट करें",
     "openExternalChat": "नए टैब में खोलें",
     "liveIn": "{{environment}} में सक्रिय",
+    "liveInVersion": "{{environment}} में संस्करण {{version}} सक्रिय",
     "chatIn": "{{environment}} में चैट करें",
     "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
     "deployToProduction": "प्रोडक्शन में तैनात करें",
@@ -2951,7 +2952,7 @@
     "value": "मान",
     "deleteAll": "सभी हटाएं",
     "deleteAllTitle": "सभी गुण हटाएं",
-    "deleteAllDesc": "इस उपयोगकर्ता के सभी गुण स्थायी रूप से हटा दिए जाएंगे।",
+    "deleteAllDesc": "इससे इस उपयोगकर्ता के सभी वैश्विक गुण स्थायी रूप से हट जाएंगे: हर वैश्विक उपयोगकर्ता-स्मृति प्रविष्टि, जिसमें एजेंटों द्वारा सहेजी गई प्रविष्टियां भी शामिल हैं, न कि केवल यहां सूचीबद्ध पंक्तियां।",
     "deleted": "गुण हटाए गए",
     "noResults": "कोई गुण नहीं मिले",
     "showingCount": "{{count}} गुण"

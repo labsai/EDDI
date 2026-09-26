@@ -83,10 +83,28 @@ describe("descriptor handlers are not shadowed", () => {
     );
     expect(firstTwo).toHaveLength(2);
 
+    // `index` is a PAGE index, as on the backend (skip = index * limit): page 1
+    // of size 2 is the third row. The stub used to treat it as a row offset,
+    // which is exactly the bug it let the Agents list ship with.
     const lastOne = await getJson<Descriptor[]>(
-      "/rulestore/rulesets/descriptors?limit=2&index=2",
+      "/rulestore/rulesets/descriptors?limit=2&index=1",
     );
     expect(lastOne).toHaveLength(1);
+
+    const pastTheEnd = await getJson<Descriptor[]>(
+      "/rulestore/rulesets/descriptors?limit=2&index=2",
+    );
+    expect(pastTheEnd).toHaveLength(0);
+  });
+
+  it("pages agent descriptors by page index, not row offset", async () => {
+    const page0 = await getJson<Descriptor[]>("/agentstore/agents/descriptors?limit=3&index=0");
+    const page1 = await getJson<Descriptor[]>("/agentstore/agents/descriptors?limit=3&index=1");
+    expect(page0).toHaveLength(3);
+    expect(page1).toHaveLength(3);
+    // Disjoint pages: a row-offset slice would overlap page 0 by two rows.
+    const names0 = new Set(page0.map((d) => d.resource));
+    expect(page1.some((d) => names0.has(d.resource))).toBe(false);
   });
 
   it("still answers a filter as an id lookup", async () => {

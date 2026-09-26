@@ -109,9 +109,8 @@ describe("useToolHistory", () => {
       { wrapper: createWrapper() },
     );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(Array.isArray(result.current.data)).toBe(true);
-    expect(result.current.data![0]).toHaveProperty("toolName");
-    expect(result.current.data![0]).toHaveProperty("durationMs");
+    expect(result.current.data!.toolCalls[0]).toHaveProperty("toolName");
+    expect(result.current.data!.toolCalls[0]).toHaveProperty("executionTimeMs");
   });
 
   it("is disabled when conversationId is null even if enabled", () => {

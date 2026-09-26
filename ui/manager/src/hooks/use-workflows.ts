@@ -22,7 +22,10 @@ export function useWorkflowDescriptors(limit = 100, index = 0, filter = "") {
   });
 }
 
-/** Infinite-scroll workflow list with offset-based pagination */
+/**
+ * Infinite-scroll workflow list. The page param is a page INDEX (the backend
+ * skips `index * limit` rows) — see useInfiniteAgentDescriptors.
+ */
 export function useInfiniteWorkflowDescriptors(filter = "") {
   return useInfiniteQuery({
     queryKey: [...WORKFLOWS_KEY, "descriptors-infinite", { filter }],
@@ -30,7 +33,7 @@ export function useInfiniteWorkflowDescriptors(filter = "") {
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.length === PAGE_SIZE) {
-        return allPages.length * PAGE_SIZE;
+        return allPages.length;
       }
       return undefined;
     },

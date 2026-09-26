@@ -260,6 +260,7 @@
     "deployAndChat": "デプロイしてチャット",
     "openExternalChat": "新しいタブで開く",
     "liveIn": "{{environment}} で稼働中",
+    "liveInVersion": "{{environment}} でバージョン {{version}} が稼働中",
     "chatIn": "{{environment}} でチャット",
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
@@ -2951,7 +2952,7 @@
     "value": "値",
     "deleteAll": "すべて削除",
     "deleteAllTitle": "すべてのプロパティを削除",
-    "deleteAllDesc": "このユーザーのすべてのプロパティが完全に削除されます。",
+    "deleteAllDesc": "このユーザーのすべてのグローバルプロパティが完全に削除されます。ここに表示されている行だけでなく、エージェントが保存したものを含む、すべてのグローバルなユーザーメモリエントリが対象です。",
     "deleted": "プロパティを削除しました",
     "noResults": "プロパティが見つかりません",
     "showingCount": "{{count}}件のプロパティ"

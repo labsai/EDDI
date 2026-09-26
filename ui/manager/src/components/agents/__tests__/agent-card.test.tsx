@@ -237,4 +237,34 @@ describe("AgentCard", () => {
     });
     expect(screen.getByTestId("env-chip-error-production")).toBeInTheDocument();
   });
+
+  /**
+   * Saving bumps the agent to a new version while production keeps serving the
+   * old one. The card asked only about its own version and said "Not deployed"
+   * about an agent that was live for every user.
+   */
+  it("shows an agent still live at an older version as live, naming that version", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json(
+          params.env === "production"
+            ? [{ environment: "production", agentId: "agent-test-1", agentVersion: 0, status: "READY" }]
+            : [],
+        ),
+      ),
+    );
+    renderWithProviders(<AgentCard {...defaultProps} agent={{ ...mockAgent, version: 2 }} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("env-chip-production")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("env-chip-version-production")).toHaveTextContent("v0");
+    // The toggle still acts on THIS version, which is not deployed.
+    expect(screen.getByTestId("agent-deploy-toggle-agent-test-1")).toHaveTextContent(
+      "Deploy to production",
+    );
+  });
 });

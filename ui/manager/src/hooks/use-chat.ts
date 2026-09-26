@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { create } from "zustand";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Environment } from "@/lib/constants";
-import { deployedEnvironments } from "@/lib/deployment-environments";
+import { ENVIRONMENTS, type Environment } from "@/lib/constants";
+import { deployedEnvironments, withAnyDeployedVersion } from "@/lib/deployment-environments";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import {
   startConversation,
@@ -39,6 +39,8 @@ import {
 import {
   getAgentDescriptors,
   getDeploymentStatuses,
+  listDeploymentStatuses,
+  type AgentDeploymentSummary,
   type AgentDescriptor,
   parseResourceUri,
 } from "@/lib/api/agents";
@@ -300,9 +302,22 @@ export function useDeployedAgents() {
       // sockets on a single picker refresh. Per-agent failures resolve to "no
       // environments" and drop out below, exactly as the previous allSettled
       // did — one unreachable agent must not empty the picker.
+      // One environment-wide listing each, so an agent still live at an older
+      // version (every save bumps the version) is not dropped from the picker.
+      // A failed listing just means no fallback for that environment.
+      const listings = await Promise.all(
+        ENVIRONMENTS.map((env) => listDeploymentStatuses(env).catch(() => undefined)),
+      );
+      const deployed = Object.fromEntries(
+        ENVIRONMENTS.map((env, i) => [env, listings[i]]),
+      ) as Partial<Record<Environment, AgentDeploymentSummary[] | undefined>>;
       const results = await mapWithConcurrency(agents, 8, async (agent) => {
         try {
-          const statuses = await getDeploymentStatuses(agent.id, agent.version);
+          const statuses = withAnyDeployedVersion(
+            await getDeploymentStatuses(agent.id, agent.version),
+            deployed,
+            agent.id,
+          );
           return { agent, environments: deployedEnvironments(statuses) };
         } catch {
           return { agent, environments: [] as Environment[] };
@@ -563,6 +578,9 @@ export function useSendMessage() {
         // Extract quick replies
         const qr = extractQuickReplies(lastOutput);
         state.setQuickReplies(qr);
+        // A turn just landed, so there is now something to undo. Undo used to
+        // stay disabled after every send until the conversation was reloaded.
+        state.setUndoRedo(...undoRedoFlags(snapshot));
         state.setProcessing(false);
 
         // A pause commits as AWAITING_HUMAN. Its pendingMessage is already
@@ -708,6 +726,10 @@ function handleSSEEvent(
           // supplies the rendered reason.
           if (snapshot.conversationState === "AWAITING_HUMAN") {
             store.getState().setPaused(true, null);
+          }
+          // Same as the non-streaming path: the finished turn is undoable.
+          if (snapshot && typeof snapshot === "object") {
+            store.getState().setUndoRedo(...undoRedoFlags(snapshot));
           }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
@@ -979,6 +1001,27 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
   return messages;
 }
 
+/**
+ * The `[undo, redo]` availability a snapshot reports.
+ *
+ * The backend computes `undoAvailable` from the FULL memory (more than one step:
+ * step 0 is the conversation start and cannot be undone), so it is correct even
+ * on the current-step-only snapshot a send returns. The step count is only a
+ * fallback for a backend that omits the flag — and it is `> 1`, not `> 0`: the
+ * old `> 0` offered Undo on a fresh conversation, whose only step the backend
+ * then refused with a 409. Exported for tests.
+ */
+export function undoRedoFlags(
+  snapshot: Pick<SimpleConversationMemorySnapshot, "undoAvailable" | "redoAvailable"> & {
+    conversationSteps?: unknown[] | null;
+  },
+): [boolean, boolean] {
+  return [
+    snapshot.undoAvailable ?? (snapshot.conversationSteps?.length ?? 0) > 1,
+    snapshot.redoAvailable ?? false,
+  ];
+}
+
 /** Fetch conversation history for the selected agent. */
 export function useConversationHistory(agentId: string | null) {
   return useQuery({
@@ -1019,10 +1062,7 @@ async function loadConversationIntoStore(agentId: string, conversationId: string
 
   const messages = snapshotToMessages(snapshot);
   store.getState().replaceMessages(messages);
-  store.getState().setUndoRedo(
-    snapshot.conversationSteps.length > 0,
-    snapshot.redoAvailable ?? false
-  );
+  store.getState().setUndoRedo(...undoRedoFlags(snapshot));
   // Re-establish the pause state when loading a conversation that is still
   // AWAITING_HUMAN — otherwise a paused conversation opened from history
   // would show an enabled input with no banner until a send is rejected 409.
@@ -1136,44 +1176,42 @@ export function useResumeOrStartConversation() {
   });
 }
 
-/** Undo the last conversation step. */
-export function useUndoConversation() {
+/**
+ * Undo or redo one step, then re-read the conversation.
+ *
+ * The backend answers these with an empty 200 (moved) or a 409 (nothing to
+ * move, or a concurrent turn / HITL pause got there first) — never with a
+ * snapshot. So the transcript and both flags come from a fresh read either way:
+ * after a 409 the server's view is exactly what the user needs to see, because
+ * the buttons were evidently out of date.
+ */
+async function moveStepAndReload(move: "undo" | "redo"): Promise<boolean> {
   const store = useChatStore;
-  return useMutation({
-    mutationFn: async () => {
-      const { selectedAgentId, conversationId } = store.getState();
-      if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
+  const { selectedAgentId, conversationId } = store.getState();
+  if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
 
-      const snapshot = await undoConversationApi("production", selectedAgentId, conversationId);
-      const messages = snapshotToMessages(snapshot);
-      store.getState().replaceMessages(messages);
-      store.getState().setUndoRedo(
-        snapshot.conversationSteps.length > 0,
-        snapshot.redoAvailable ?? false
-      );
-      return snapshot;
-    },
-  });
+  const moved = move === "undo"
+    ? await undoConversationApi("production", selectedAgentId, conversationId)
+    : await redoConversationApi("production", selectedAgentId, conversationId);
+
+  const snapshot = await readConversation("production", selectedAgentId, conversationId, false);
+  // The user may have switched conversation while the two requests ran. The
+  // read belongs to the old one and must not overwrite the new transcript.
+  if (store.getState().conversationId !== conversationId) return moved;
+  store.getState().replaceMessages(snapshotToMessages(snapshot));
+  store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+  store.getState().setPaused(snapshot.conversationState === "AWAITING_HUMAN", null);
+  return moved;
 }
 
-/** Redo a previously undone step. */
-export function useRedoConversation() {
-  const store = useChatStore;
-  return useMutation({
-    mutationFn: async () => {
-      const { selectedAgentId, conversationId } = store.getState();
-      if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
+/** Undo the last conversation step. Resolves `false` when the backend had nothing to undo. */
+export function useUndoConversation() {
+  return useMutation({ mutationFn: () => moveStepAndReload("undo") });
+}
 
-      const snapshot = await redoConversationApi("production", selectedAgentId, conversationId);
-      const messages = snapshotToMessages(snapshot);
-      store.getState().replaceMessages(messages);
-      store.getState().setUndoRedo(
-        snapshot.conversationSteps.length > 0,
-        snapshot.redoAvailable ?? false
-      );
-      return snapshot;
-    },
-  });
+/** Redo a previously undone step. Resolves `false` when the backend had nothing to redo. */
+export function useRedoConversation() {
+  return useMutation({ mutationFn: () => moveStepAndReload("redo") });
 }
 
 /** End the current conversation. */
@@ -1213,10 +1251,7 @@ export function useRerunConversation() {
       );
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
-      store.getState().setUndoRedo(
-        snapshot.conversationSteps.length > 0,
-        snapshot.redoAvailable ?? false
-      );
+      store.getState().setUndoRedo(...undoRedoFlags(snapshot));
       return snapshot;
     },
   });

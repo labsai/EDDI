@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
+import { getDescriptorVersions } from "./descriptors";
 
 export { type AgentDescriptor as WorkflowDescriptor };
 
@@ -69,36 +70,20 @@ export function deleteWorkflow(
 /**
  * Get all versions of a specific workflow (for version picker).
  *
- * The GET descriptors endpoint does NOT support includePreviousVersions;
- * we use the currentversion endpoint to resolve the latest version.
+ * Resolves the latest version via `currentversion`, then reads each version's
+ * descriptor by id and version — see `getDescriptorVersions` for why the store
+ * listing cannot answer this.
  */
 export async function getWorkflowVersions(
   id: string
 ): Promise<AgentDescriptor[]> {
-  // Resolve the latest version number
   const currentVersion = await api.get<number>(
-    `/workflowstore/workflows/${id}/currentversion`
+    `/workflowstore/workflows/${encodeURIComponent(id)}/currentversion`
   );
-  const latest = currentVersion ?? 1;
-
-  // Fetch descriptor for each version in parallel
-  const descriptors = await Promise.all(
-    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-      try {
-        const results = await api.get<AgentDescriptor[]>(
-          `/workflowstore/workflows/descriptors?filter=${id}&version=${v}`
-        );
-        return results;
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const flat = descriptors.flat();
+  const flat = await getDescriptorVersions(id, currentVersion ?? 1);
   if (flat.length === 0) {
     return api.get<AgentDescriptor[]>(
-      `/workflowstore/workflows/descriptors?filter=${id}`
+      `/workflowstore/workflows/descriptors?filter=${encodeURIComponent(id)}`
     );
   }
   return flat;

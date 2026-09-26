@@ -17,6 +17,7 @@ import {
   useSendMessage,
   useResumeOrStartConversation,
   pickResumableConversation,
+  undoRedoFlags,
 } from "@/hooks/use-chat";
 import type { ConversationDescriptor } from "@/lib/api/conversations";
 
@@ -420,6 +421,32 @@ describe("useLoadConversation", () => {
   });
 });
 
+/**
+ * The backend's undo/redo contract: an EMPTY 200 when the step moved, a 409
+ * when there was nothing to move — never a snapshot. The hook must re-read the
+ * conversation for the transcript and the flags. The old hook parsed the POST
+ * body as a snapshot, threw a TypeError on `undefined` after the server had
+ * already undone the step, and left the transcript unchanged.
+ */
+function snapshotAfterMove(steps: Array<{ input: string; output: string }>, flags: { undoAvailable: boolean; redoAvailable: boolean }) {
+  return {
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv1",
+    conversationState: "READY",
+    environment: "production",
+    conversationSteps: [
+      { conversationStep: [{ key: "actions", value: ["CONVERSATION_START"] }] },
+      ...steps.map((s) => ({ conversationStep: [{ key: "input:initial", value: s.input }] })),
+    ],
+    conversationOutputs: [
+      { "output:text:welcome": "Welcome!" },
+      ...steps.map((s) => ({ "output:text:respond": s.output })),
+    ],
+    ...flags,
+  };
+}
+
 describe("useUndoConversation", () => {
   beforeEach(() => {
     useChatStore.getState().reset();
@@ -427,22 +454,22 @@ describe("useUndoConversation", () => {
     useChatStore.getState().setConversationId("conv1");
   });
 
-  it("undoes the last conversation step", async () => {
+  it("re-reads the conversation after the backend's empty 200", async () => {
     let undoCalled = false;
     server.use(
       http.post("*/agents/:convId/undo", () => {
         undoCalled = true;
-        return HttpResponse.json({
-          agentId: "agent1",
-          agentVersion: 3,
-          conversationId: "conv1",
-          conversationState: "READY",
-          conversationSteps: [],
-          conversationOutputs: [],
-          redoAvailable: true,
-        });
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get("*/agents/:convId", ({ request }) => {
+        // The whole conversation, not just the current step.
+        expect(new URL(request.url).searchParams.get("returnCurrentStepOnly")).toBe("false");
+        return HttpResponse.json(
+          snapshotAfterMove([], { undoAvailable: false, redoAvailable: true }),
+        );
       }),
     );
+    useChatStore.getState().addMessage({ id: "u1", role: "user", content: "Undone turn", timestamp: 1 });
 
     const { result } = renderHook(() => useUndoConversation(), {
       wrapper: createWrapper(),
@@ -451,6 +478,54 @@ describe("useUndoConversation", () => {
     result.current.mutate();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(undoCalled).toBe(true);
+    expect(result.current.data).toBe(true);
+
+    const state = useChatStore.getState();
+    expect(state.messages.map((m) => m.content)).toEqual(["Welcome!"]);
+    expect(state.undoAvailable).toBe(false);
+    expect(state.redoAvailable).toBe(true);
+  });
+
+  it("resyncs on 409 instead of failing — the buttons were stale", async () => {
+    server.use(
+      http.post("*/agents/:convId/undo", () => new HttpResponse(null, { status: 409 })),
+      http.get("*/agents/:convId", () =>
+        HttpResponse.json(
+          snapshotAfterMove([{ input: "Hi", output: "Hello" }], { undoAvailable: true, redoAvailable: false }),
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useUndoConversation(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toBe(false);
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(["Welcome!", "Hi", "Hello"]);
+    expect(useChatStore.getState().undoAvailable).toBe(true);
+  });
+
+  it("does not overwrite a conversation the user switched to meanwhile", async () => {
+    server.use(
+      http.post("*/agents/:convId/undo", () => {
+        useChatStore.getState().setConversationId("conv-other");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get("*/agents/:convId", () =>
+        HttpResponse.json(snapshotAfterMove([], { undoAvailable: false, redoAvailable: true })),
+      ),
+    );
+    useChatStore.getState().addMessage({ id: "u1", role: "user", content: "Keep me", timestamp: 1 });
+
+    const { result } = renderHook(() => useUndoConversation(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(["Keep me"]);
   });
 
   it("throws when no active conversation", async () => {
@@ -471,29 +546,18 @@ describe("useRedoConversation", () => {
     useChatStore.getState().setConversationId("conv1");
   });
 
-  it("redoes a previously undone step", async () => {
+  it("re-reads the conversation after the backend's empty 200", async () => {
     let redoCalled = false;
     server.use(
       http.post("*/agents/:convId/redo", () => {
         redoCalled = true;
-        return HttpResponse.json({
-          agentId: "agent1",
-          agentVersion: 3,
-          conversationId: "conv1",
-          conversationState: "READY",
-          conversationSteps: [
-            {
-              conversationStep: [
-                { key: "input:initial", value: "Hello" },
-              ],
-            },
-          ],
-          conversationOutputs: [
-            { "output:text:greet": "Hi there!" },
-          ],
-          redoAvailable: false,
-        });
+        return new HttpResponse(null, { status: 200 });
       }),
+      http.get("*/agents/:convId", () =>
+        HttpResponse.json(
+          snapshotAfterMove([{ input: "Hello", output: "Hi there!" }], { undoAvailable: true, redoAvailable: false }),
+        ),
+      ),
     );
 
     const { result } = renderHook(() => useRedoConversation(), {
@@ -503,6 +567,10 @@ describe("useRedoConversation", () => {
     result.current.mutate();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(redoCalled).toBe(true);
+    const state = useChatStore.getState();
+    expect(state.messages.map((m) => m.content)).toEqual(["Welcome!", "Hello", "Hi there!"]);
+    expect(state.undoAvailable).toBe(true);
+    expect(state.redoAvailable).toBe(false);
   });
 
   it("throws when no active conversation", async () => {
@@ -513,6 +581,17 @@ describe("useRedoConversation", () => {
 
     result.current.mutate();
     await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+});
+
+describe("undoRedoFlags", () => {
+  it("prefers the backend's flags", () => {
+    expect(undoRedoFlags({ undoAvailable: true, redoAvailable: true, conversationSteps: [] })).toEqual([true, true]);
+  });
+
+  it("falls back to MORE than one step — step 0 is the start and cannot be undone", () => {
+    expect(undoRedoFlags({ conversationSteps: [{}] })).toEqual([false, false]);
+    expect(undoRedoFlags({ conversationSteps: [{}, {}] })).toEqual([true, false]);
   });
 });
 
@@ -592,6 +671,31 @@ describe("useSendMessage", () => {
     const userMessages = state.messages.filter(m => m.role === "user");
     expect(userMessages.length).toBeGreaterThanOrEqual(1);
     expect(userMessages[0]!.content).toBe("Hello");
+  });
+
+  it("enables Undo once a turn lands — it used to stay off until a reload", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          // current-step-only snapshot, but the flags are computed server-side
+          // from the full memory
+          conversationSteps: [{ conversationStep: [{ key: "input:initial", value: "Hello" }] }],
+          conversationOutputs: [{ "output:text:respond": "Hi" }],
+          undoAvailable: true,
+          redoAvailable: false,
+        }),
+      ),
+    );
+    useChatStore.getState().setUndoRedo(false, true);
+
+    const { result } = renderHook(() => useSendMessage(), {
+      wrapper: createWrapper(),
+    });
+
+    result.current.mutate({ message: "Hello" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(useChatStore.getState().undoAvailable).toBe(true);
+    expect(useChatStore.getState().redoAvailable).toBe(false);
   });
 
   it("masks user message in secret mode", async () => {

@@ -1,4 +1,4 @@
-import { api, apiErrorFromResponse } from "../api-client";
+import { api, apiErrorFromResponse, isApiError } from "../api-client";
 import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 import type { Environment } from "@/lib/constants";
@@ -265,26 +265,47 @@ export function endConversation(conversationId: string): Promise<void> {
   return api.post(`/agents/${conversationId}/endConversation`);
 }
 
-/** Undo the last conversation step. */
+/**
+ * POST an undo/redo and report whether the backend actually performed it.
+ *
+ * `RestAgentEngine.undo`/`redo` answer an EMPTY 200 when the step moved and a
+ * 409 when there was nothing to move (or a concurrent turn / a HITL pause got
+ * there first). They never return a snapshot. This used to be typed as one, so
+ * the hook read `.conversationSteps` off `undefined` and threw — after the
+ * server had already undone the step — leaving the transcript unchanged while
+ * every further click undid another turn. The caller re-reads the conversation
+ * instead of trusting a body.
+ */
+async function postStepMove(conversationId: string, move: "undo" | "redo"): Promise<boolean> {
+  try {
+    await api.post<void>(`/agents/${encodeURIComponent(conversationId)}/${move}`);
+    return true;
+  } catch (err) {
+    if (isApiError(err) && err.status === 409) return false;
+    throw err;
+  }
+}
+
+/**
+ * Undo the last conversation step. Resolves `true` when the backend moved the
+ * step, `false` on its 409 "nothing to undo". Re-read the conversation either
+ * way — a 409 can mean someone else changed it.
+ */
 export function undoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string
-): Promise<SimpleConversationMemorySnapshot> {
-  return api.post<SimpleConversationMemorySnapshot>(
-    `/agents/${conversationId}/undo`
-  );
+): Promise<boolean> {
+  return postStepMove(conversationId, "undo");
 }
 
-/** Redo a previously undone step. */
+/** Redo a previously undone step. Same contract as {@link undoConversation}. */
 export function redoConversation(
   _environment: string,
   _agentId: string,
   conversationId: string
-): Promise<SimpleConversationMemorySnapshot> {
-  return api.post<SimpleConversationMemorySnapshot>(
-    `/agents/${conversationId}/redo`
-  );
+): Promise<boolean> {
+  return postStepMove(conversationId, "redo");
 }
 
 /** Rerun the last conversation step (retry after error). */

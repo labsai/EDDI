@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
+import { auditToolCalls, getAuditTrail, type AuditEntry, type AuditToolCall } from "@/lib/api/audit";
 import { cn, formatDuration } from "@/lib/utils";
 import {
   MessageSquareCode,
@@ -123,7 +123,7 @@ function PromptDetail({
   const modelResponse = llm?.modelResponse as string | undefined;
   const modelName = llm?.modelName as string | undefined;
   const tokenUsage = llm?.tokenUsage as Record<string, number> | undefined;
-  const toolCalls = entry.toolCalls;
+  const toolCalls = auditToolCalls(entry);
 
   // Parse compiled prompt into message segments
   const messages = useMemo(() => {
@@ -191,7 +191,7 @@ function PromptDetail({
       )}
 
       {/* Tool calls */}
-      {toolCalls && toolCalls.length > 0 && (
+      {toolCalls.length > 0 && (
         <ToolCallsSection toolCalls={toolCalls} />
       )}
 
@@ -335,7 +335,7 @@ function MessageCard({ role, content }: { role: string; content: string }) {
 function ToolCallsSection({
   toolCalls,
 }: {
-  toolCalls: Array<Record<string, unknown>>;
+  toolCalls: AuditToolCall[];
 }) {
   const { t } = useTranslation();
   return (

@@ -261,6 +261,7 @@
     "openExternalChat": "Abrir em nova aba",
     "count_many": "{{count}} agentes",
     "liveIn": "Ativo em {{environment}}",
+    "liveInVersion": "Ativo em {{environment}} na versão {{version}}",
     "chatIn": "Conversar em {{environment}}",
     "openExternalChatIn": "Abrir o chat de {{environment}} numa nova aba",
     "deployToProduction": "Implantar em produção",
@@ -2984,7 +2985,7 @@
     "value": "Valor",
     "deleteAll": "Eliminar tudo",
     "deleteAllTitle": "Eliminar todas as propriedades",
-    "deleteAllDesc": "Todas as propriedades deste utilizador serão permanentemente eliminadas.",
+    "deleteAllDesc": "Isto elimina permanentemente TODAS as propriedades globais deste utilizador: todas as entradas globais da memória do utilizador, incluindo as guardadas por agentes, e não apenas as linhas aqui listadas.",
     "deleted": "Propriedades eliminadas",
     "noResults": "Nenhuma propriedade encontrada",
     "showingCount": "{{count}} propriedades"

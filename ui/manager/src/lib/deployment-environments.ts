@@ -11,7 +11,7 @@
  * exports only components (fast refresh).
  */
 import { ENVIRONMENTS, type Environment } from "@/lib/constants";
-import type { EnvironmentStatus } from "@/lib/api/agents";
+import type { AgentDeploymentSummary, EnvironmentStatus } from "@/lib/api/agents";
 
 /** The environments where `statuses` says the agent is live, in ENVIRONMENTS order. */
 export function deployedEnvironments(
@@ -37,4 +37,40 @@ export function isAnyEnvironmentBusy(statuses: EnvironmentStatus[] | undefined):
  */
 export function preferredChatEnvironment(live: readonly Environment[]): Environment {
   return live.includes("production") ? "production" : (live[0] ?? "production");
+}
+
+/**
+ * Fill in environments where the asked-for version is not live but an older
+ * version of the same agent is.
+ *
+ * The per-version status endpoint answers only for the exact version asked, and
+ * every save bumps the version — so an agent still serving v3 in production
+ * showed "Not deployed" the moment someone saved v4, on the card, the detail
+ * page and the chat picker alike. `deployed` is the per-environment result of
+ * `listDeploymentStatuses` (same order as `statuses`' environments, entries may
+ * be missing when that call failed); only a READY or IN_PROGRESS older version
+ * is adopted, and it carries `deployedVersion` so callers can tell "live at this
+ * version" from "live at another one". A version-exact READY/IN_PROGRESS always
+ * wins.
+ */
+export function withAnyDeployedVersion(
+  statuses: EnvironmentStatus[] | undefined,
+  deployed: Partial<Record<Environment, AgentDeploymentSummary[] | undefined>>,
+  agentId: string,
+): EnvironmentStatus[] | undefined {
+  if (!statuses) return statuses;
+  return statuses.map((s) => {
+    if (s.status === "READY" || s.status === "IN_PROGRESS") return s;
+    const other = deployed[s.environment]?.find(
+      (d) => d.agentId === agentId && (d.status === "READY" || d.status === "IN_PROGRESS"),
+    );
+    return other
+      ? { environment: s.environment, status: other.status, deployedVersion: other.agentVersion }
+      : s;
+  });
+}
+
+/** True when `status` is live at exactly the version that was asked about. */
+export function isLiveAtRequestedVersion(status: EnvironmentStatus | undefined): boolean {
+  return status?.status === "READY" && status.deployedVersion === undefined;
 }

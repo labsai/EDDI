@@ -261,6 +261,7 @@
     "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes.",
     "count_many": "{{count}} agents",
     "liveIn": "Actif en {{environment}}",
+    "liveInVersion": "Actif en {{environment}} en version {{version}}",
     "chatIn": "Discuter en {{environment}}",
     "openExternalChatIn": "Ouvrir le chat {{environment}} dans un nouvel onglet",
     "deployToProduction": "Déployer en production",
@@ -2984,7 +2985,7 @@
     "value": "Valeur",
     "deleteAll": "Tout supprimer",
     "deleteAllTitle": "Supprimer toutes les propriétés",
-    "deleteAllDesc": "Toutes les propriétés de cet utilisateur seront définitivement supprimées.",
+    "deleteAllDesc": "Cette action supprime définitivement TOUTES les propriétés globales de cet utilisateur : chaque entrée globale de la mémoire utilisateur, y compris celles enregistrées par des agents, et pas seulement les lignes affichées ici.",
     "deleted": "Propriétés supprimées",
     "noResults": "Aucune propriété trouvée",
     "showingCount": "{{count}} propriétés"

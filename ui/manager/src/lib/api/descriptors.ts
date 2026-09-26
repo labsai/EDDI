@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
+import { mapWithConcurrency } from "../concurrency";
 
 export interface PatchInstruction<T> {
   operation: "SET" | "DELETE";
@@ -41,6 +42,39 @@ export function getDescriptor(
   return api.get<AgentDescriptor>(
     `/descriptorstore/descriptors/${encodeURIComponent(id)}?${params.toString()}`
   );
+}
+
+/** How many per-version descriptor reads a version list keeps in flight. */
+const VERSION_READ_CONCURRENCY = 6;
+
+/**
+ * The descriptor of every version `1..latest` of one resource, oldest first,
+ * for version pickers, Compare and rollback.
+ *
+ * Each version is read by id AND version through the descriptor store, which
+ * resolves older versions from history. The per-store `…/descriptors` listing
+ * cannot do this: it has no `version` parameter and lists only the current
+ * collection, so asking it "filter=id&version=v" for v = 1..N returned the
+ * latest descriptor N times — every picker offered only the newest version (under
+ * N duplicate keys) and Compare diffed vN against vN.
+ *
+ * A version that cannot be read (a gap, a permission change) is skipped rather
+ * than failing the whole list. Bounded concurrency: an agent at v200 is 200
+ * reads, and an unbounded fan-out would stall the browser's connection pool.
+ */
+export async function getDescriptorVersions(
+  id: string,
+  latest: number,
+): Promise<AgentDescriptor[]> {
+  const versions = Array.from({ length: Math.max(0, latest) }, (_, i) => i + 1);
+  const results = await mapWithConcurrency(versions, VERSION_READ_CONCURRENCY, async (v) => {
+    try {
+      return await getDescriptor(id, v);
+    } catch {
+      return null;
+    }
+  });
+  return results.filter((d): d is AgentDescriptor => d != null && typeof d.resource === "string");
 }
 
 /** Read descriptors for a given resource type */

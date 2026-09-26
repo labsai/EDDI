@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
+  auditToolCalls,
   getAuditTrail,
   getAuditTrailByAgent,
   getEntryCount,
@@ -67,5 +68,37 @@ describe("audit API", () => {
       expect(result).toBeDefined();
       expect(typeof result).toBe("number");
     });
+  });
+});
+
+describe("auditToolCalls", () => {
+  it("reads the backend's `{calls: [...]}` map and pairs each result with its call", () => {
+    const calls = auditToolCalls({
+      toolCalls: {
+        calls: [
+          { type: "tool_call", tool: "weather", arguments: '{"city":"Vienna"}', llmTaskId: "t1" },
+          { type: "budget_exceeded", tool: "weather" },
+          { type: "tool_call", tool: "search", arguments: '{"q":"x"}' },
+          { type: "tool_result", tool: "weather", result: "sunny" },
+          { type: "tool_result", tool: "search", result: "3 hits" },
+        ],
+      },
+    });
+    expect(calls).toEqual([
+      { tool: "weather", arguments: '{"city":"Vienna"}', result: "sunny", llmTaskId: "t1" },
+      { tool: "search", arguments: '{"q":"x"}', result: "3 hits" },
+    ]);
+  });
+
+  it("tolerates a bare array and untyped `{name}` entries", () => {
+    expect(auditToolCalls({ toolCalls: [{ name: "legacy", arguments: {} }] })).toEqual([
+      { tool: "legacy", arguments: {} },
+    ]);
+  });
+
+  it("returns [] for null, a missing entry, or a map without calls", () => {
+    expect(auditToolCalls({ toolCalls: null })).toEqual([]);
+    expect(auditToolCalls(undefined)).toEqual([]);
+    expect(auditToolCalls({ toolCalls: { other: 1 } })).toEqual([]);
   });
 });

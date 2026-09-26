@@ -260,6 +260,7 @@
     "deployAndChat": "ปรับใช้และแชท",
     "openExternalChat": "เปิดในแท็บใหม่",
     "liveIn": "ใช้งานอยู่ใน {{environment}}",
+    "liveInVersion": "ใช้งานอยู่ใน {{environment}} ที่เวอร์ชัน {{version}}",
     "chatIn": "แชทใน {{environment}}",
     "openExternalChatIn": "เปิดแชท {{environment}} ในแท็บใหม่",
     "deployToProduction": "ดีพลอยไปยังโปรดักชัน",
@@ -2951,7 +2952,7 @@
     "value": "ค่า",
     "deleteAll": "ลบทั้งหมด",
     "deleteAllTitle": "ลบคุณสมบัติทั้งหมด",
-    "deleteAllDesc": "คุณสมบัติทั้งหมดของผู้ใช้นี้จะถูกลบอย่างถาวร",
+    "deleteAllDesc": "การดำเนินการนี้จะลบคุณสมบัติส่วนกลางทั้งหมดของผู้ใช้นี้อย่างถาวร: ทุกรายการหน่วยความจำผู้ใช้ส่วนกลาง รวมถึงรายการที่เอเจนต์บันทึกไว้ ไม่ใช่เฉพาะแถวที่แสดงที่นี่",
     "deleted": "คุณสมบัติถูกลบแล้ว",
     "noResults": "ไม่พบคุณสมบัติ",
     "showingCount": "{{count}} คุณสมบัติ"
