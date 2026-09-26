@@ -166,6 +166,7 @@ The storage backend (GridFS or PostgreSQL) is selected automatically based on th
 |---|---|
 | `201` | File stored successfully |
 | `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, or the store rejected the file |
+| `413` / `411` | The request body passed the HTTP body limit, or arrived without a `Content-Length`. The limit is `eddi.http.limits.default-max-body-size`, raised automatically to fit an attachment at `eddi.attachments.max-size-bytes` base64-encoded — so raising the attachment limit raises it too. See [configuration-reference.md](configuration-reference.md#security--authentication) |
 | `500` | Storage or I/O error |
 
 ---

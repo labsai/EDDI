@@ -319,7 +319,18 @@ import archive, which used to be the way around it. Omit `cron` for a source tha
 someone asks.
 
 The cron is read in **UTC**, which is written onto the schedule rather than left to the deployment's
-`eddi.schedule.default-timezone`, so the first run and every later one are computed the same way.
+`eddi.schedule.default-timezone`, so the first run and every later one are computed the same way. It
+is held to the deployment's `eddi.schedule.min-interval-seconds` like every other schedule: a cron
+that fires more often is refused with a 400 naming the source.
+
+**A scheduled run is started by its fire, not run inside it.** The fire claims the run and hands it to
+its own worker, exactly as **Run now** does, and returns. The scheduler cancels a fire it has waited
+a lease for (five minutes by default) while a crawl's default budget is ten, so a crawl run inside the
+fire was interrupted mid-run and never reconciled a deletion. The fire log therefore records that the
+run started; if the run later fails, a second `FAILED` entry for the same fire says so (it does not
+count towards the schedule's retries or dead-lettering — see [scheduling.md](scheduling.md#fire-logging)).
+What the run did in detail is in the source's run history. Runs in flight when an instance shuts
+down gracefully are closed as `CANCELLED` rather than left to be reaped.
 
 #### Every field
 
@@ -358,11 +369,36 @@ then recorded as a failure.
 against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
 rather than adding to them. Pages that disappear from the source lose their vectors after
 `tombstoneAfterMissedRuns` consecutive *complete* runs miss them; a run that stopped at a limit
-concludes nothing. ETag and Last-Modified from the previous run are sent back, so an unchanged page
-costs one 304.
+concludes nothing.
 
-`robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
-`respectRobots` off only for a site you own.
+**Conditional requests are made only where a 304 hides nothing.** ETag and Last-Modified from the
+previous run are sent back for a page at `maxDepth`, whose links the crawl would not follow anyway, so
+such a page that has not changed costs one 304. A page above that depth is downloaded in full,
+because a 304 has no body and so no links: its children were never reached, a crawl that otherwise
+covered the site called them missing, and a couple of runs later every page below an unchanged parent
+had lost its vectors. Whether a downloaded page is re-embedded is still decided by its content hash —
+an unchanged page costs a download, never an embedding — and the validators it came with replace the
+stored ones, so a server that rotates its ETag without changing the text is revalidated with the ETag
+it issued last.
+
+**A page is stored under the URL that served it.** A `<link rel="canonical">` is honoured as
+de-duplication, not as identity: a page naming another page on the same host (and inside the scope)
+as canonical defers to it — that page is fetched and stored under its own URL, with its own content —
+and is stored itself only if the page it names produced nothing. The links of a deferring page are
+still followed, so the second page of a listing that names the first as canonical still leads to the
+entries it lists. (Taking the canonical as the identity let any page store its content under another
+page's id.)
+
+`robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. When robots.txt
+names no sitemap — or is not read, because `respectRobots` is off — the conventional `/sitemap.xml`
+on the seed's host is tried instead, unless robots.txt disallows it. A sitemap index is followed to
+the sitemaps it lists; every sitemap read counts against the same cap of 20. Turn `respectRobots` off
+only for a site you own.
+
+Pages listed in a sitemap are queued at depth 0, so `maxDepth` does not narrow them: a source that
+stayed under `maxPages` by depth alone can reach the page limit once its site's sitemap is read — and
+a crawl that stops at a limit reconciles no deletions. Such a crawl logs a warning naming the sitemap;
+raise `maxPages`, or narrow the scope with `pathPrefix` or `excludePatterns`.
 
 **When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
 it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
@@ -391,15 +427,42 @@ delete, the document stays live and the next run tries again, rather than being 
 chunks still retrievable.
 
 **One run at a time per source.** A run is claimed before the request is answered, so a second "run
-now" while one is in flight gets a 409 rather than a second crawl into the same store. Purging is
-refused while a run is in flight, because it would delete the very row that guarantees this. A run
-whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
-of one configured for hours.
+now" while one is in flight gets a 409 rather than a second crawl into the same store. A purge takes
+the same claim, so it is refused with a 409 while a run is in flight — decided by the claim itself,
+not by a check made first, which let a run start between the check and the purge. A run whose process
+died is reaped — for that source only, so a short-budget source cannot reap the live run of one
+configured for hours.
+
+**A run that loses its source stops.** If the source's state is cleared under a run — the source was
+removed, or the knowledge base renamed — or the run is reaped, it notices before its next embedding
+and stops, instead of carrying on to the end of its crawl writing chunks and state rows for a source
+that has just been cleared. When it has stopped, what it wrote in the meantime is settled: a removed
+source's content is removed again, and a renamed knowledge base's state is cleared again.
+
+**A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
+Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
+finds. A document that had disappeared before the purge is never found again, and with its state gone
+nothing would reconcile it, so the first run after a purge (a run that starts from no state at all)
+leaves a marker in the state. The marker is missed by every complete run, exactly like a vanished
+page, and once it has been missed `tombstoneAfterMissedRuns` times a run removes every chunk of the
+source that no run since the purge wrote. A page only briefly absent after the purge therefore gets
+the same grace as any other: once it is back it is re-embedded and survives. The sweep runs only on a
+complete run that read every document it found: a document the server would not serve (a timeout, a
+5xx, a 429, a 401 or 403) or that failed to embed still has only its old chunks, so such a run leaves
+them alone and the next run without one sweeps. A failure that answered the question does not hold it
+back — a 404 or 410 says the page is gone, and an uploaded file with no readable text has had its old
+version retired already — so one dead link does not keep every orphan retrievable.
 
 **Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
 new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name
 are left where they are.
+
+**Removing a source takes what the knowledge base learned from it.** Dropping a source from
+`sources[]`, changing its `type`, or deleting the last version of the knowledge base removes its chunks
+from the vector store and forgets its state — for a crawl as much as for uploaded files. A crawl used
+to be skipped on the theory that its documents come back on the next run; a removed source has no next
+run, so its chunks stayed retrievable with nothing left to list or delete them.
 
 **Ingestion schedules are minted by EDDI, not by clients.** A schedule whose metadata declares
 `ragIngestion` is refused by the schedule API on create and update, firing one by hand requires EDIT on
@@ -428,7 +491,7 @@ source** is what extracts its text and embeds it — the same verb every other s
 | Field | Default | What it does |
 | --- | --- | --- |
 | `maxFiles` | `500` | Files this source may hold |
-| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why |
+| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why. That 60 MB applies to this upload only — every other endpoint is held to `eddi.http.limits.default-max-body-size` (25 MB) |
 | `maxTotalBytes` | `500 MB` | Size of everything the source holds |
 
 **The files are kept, not just their embeddings.** That is what makes this a source rather than a
@@ -446,11 +509,26 @@ say which is current.
 per run rather than a download and a full parse, and improving an extractor does not silently re-embed
 every file in the knowledge base.
 
+**A file is read when it is uploaded, and refused if it yields no text.** The upload runs the same
+extraction a run will, stopped after the first few characters, so an encrypted PDF, a scan with no text
+layer, a damaged file or one whose name claims a format its content is not (a text file renamed
+`.pdf`) is refused with the reason, rather than stored, listed as waiting to be indexed and skipped by
+every run with nothing saying why. A file over `maxFileBytes` is refused on the size the request
+declares, before its bytes are read. The probe runs on the upload request, so it gets 10 seconds per
+file rather than a run's 60; a file that cannot show text in that time is refused. Images are never
+decoded by it, so a large image does not count against a PDF.
+
+**A replacement that cannot be read retires the version it replaced.** If a file stored before these
+checks — or one that changes under an extractor — turns out unreadable or empty when a run reads it,
+the run reports it as failed and removes the previous version's chunks: the stored file is all an
+upload source has, so reading it and failing is a definitive answer, not a page that failed to load.
+Keeping the old text left a document the operator had replaced answering questions for good.
+
 #### What can be read
 
 | Format | Extensions | What comes out |
 | --- | --- | --- |
-| PDF | `.pdf` | Text, page by page. An encrypted PDF is refused; a scan with no text layer yields nothing rather than failing |
+| PDF | `.pdf` | Text, page by page. An encrypted PDF is refused, and so is a scan with no text layer — at upload, with a message saying so |
 | Word | `.docx` | Paragraphs, with headings kept as Markdown headings and numbered paragraphs as list items |
 | Excel | `.xlsx` | One Markdown table per sheet, under the sheet's name. Dates and currency are stored as numbers with a display format applied elsewhere, so a date reads as its serial |
 | PowerPoint | `.pptx` | One section per slide, in the order the presentation's own index lists them — not the part numbering, which survives a reorder — headed `## Slide N` |
@@ -470,7 +548,7 @@ produces an empty document.
 #### Limits, and why each one is there
 
 An uploaded file is not the operator's own data in any useful sense — it is whatever somebody dragged
-into a browser — so extraction is bounded in five ways:
+into a browser — so extraction is bounded in these ways:
 
 - **100,000 characters** per document (`settings.maxContentLength`, shared with the crawl), so one file
   cannot fill a knowledge base. A document that hits it is logged by name — it is embedded truncated,
@@ -485,6 +563,18 @@ into a browser — so extraction is bounded in five ways:
   that runs inside the upload request.
 - **DTDs and external entities are refused** outright, so an Office file cannot expand entities into
   gigabytes (the billion-laughs attack) or reach out to a URL while being parsed.
+- **A PDF may decode at most 128 MB in total, and gets 60 seconds.** PDFBox decodes a compressed stream
+  whole into memory with no limit of its own, and deflate expands about a thousandfold. So every
+  filter PDFBox uses is wrapped, while a document is read, in one that counts what it writes: the count
+  covers every stream, every stage of a filter chain, every time a stream is referenced (one stream
+  named twenty times in a page's `/Contents` is decoded twenty times at once), and encrypted streams
+  after decryption. Past twice `maxUncompressedBytes` — 128 MB — the document is refused. Before that,
+  a cheap scan of the raw bytes refuses one stream that alone expands past 64 MB, without letting
+  PDFBox allocate anything; it decodes each stream's declared filter chain (Flate, LZW, RunLength,
+  ASCIIHex, ASCII85) and passes over image streams, which text extraction never decodes. A page's
+  program is checked against the deadline as it runs, and a page that lays out far more glyphs than
+  the character cap could ever keep is stopped rather than held in memory whole — keeping the text it
+  laid out up to that point, so a dense first page is not mistaken for a scan.
 - **An archive naming the same part twice is refused.** A real Office file never does, and two entries
   under one name means two readers can disagree about the contents.
 
@@ -510,14 +600,21 @@ Deleting removes the vectors **before** the file, and immediately rather than at
 operator who removes a document because it should not have been there is told it is gone, and a source
 with no cron has no next run to make that true. Where the vector store cannot delete by metadata, the
 answer carries a `warning` saying the text is still retrievable — the Manager shows it rather than
-reporting a clean success.
+reporting a clean success. Where the store accepts the delete and then fails it, the answer is `503`
+and **the file is kept**, so the delete can be tried again once the store recovers; deleting the file
+anyway stranded its chunks for good, since nothing would ever reconcile a document that is gone.
 
 A delete takes the source's **run claim**, the same one a run takes, and answers `409` if it cannot get
 it. Merely checking for a run first is not enough: one that starts between the check and the delete
 lists the file, loads the bytes that are about to go, embeds them, and records the document as
 ingested — clearing the tombstone the delete just wrote. The file would be gone and its content still
-retrievable, for a source with no cron indefinitely. A delete therefore appears in the run history as a
-run that tombstoned one document.
+retrievable, for a source with no cron indefinitely. The claim is released as a maintenance claim,
+which the run history does not list: it used to appear as a successful run that saw nothing, and push
+the source's real last run out of sight.
+
+Uploads to one source are measured against its limits one file at a time, against a fresh listing and
+under a lock, so two uploads arriving together cannot both fill the same headroom. Across instances a
+new file that finds the source over its limit once stored is taken back out.
 
 **Removing an upload source takes its files *and* what the knowledge base learned from them.** Dropping
 it from `sources[]`, changing its `type` to `web`, or deleting the last version of the knowledge base

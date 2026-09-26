@@ -252,6 +252,19 @@ class RestRagIngestionFilesTest {
     }
 
     @Test
+    @DisplayName("a delete whose chunks the store failed to remove keeps the file and says to try again")
+    void aFailedRemovalIsNotASuccess() {
+        when(ingestedFileService.delete(anyString(), any(), any(), anyString()))
+                .thenReturn(IngestedFileService.DeleteOutcome.REMOVAL_FAILED);
+
+        Response response = rest.deleteSourceFile(KB_ID, UPLOAD_SOURCE, "f1", 1);
+
+        assertEquals(503, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertTrue(String.valueOf(body.get("error")).contains("kept"), body.toString());
+    }
+
+    @Test
     @DisplayName("a delete that loses the race for the source's claim is a 409")
     void aDeleteThatLosesTheClaimIsAConflict() {
         when(ingestedFileService.delete(anyString(), any(), any(), anyString()))

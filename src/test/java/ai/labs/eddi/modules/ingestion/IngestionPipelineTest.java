@@ -52,6 +52,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -128,6 +129,16 @@ class IngestionPipelineTest {
         source.setId("src-1");
         source.setName(SOURCE_NAME);
         source.setWeb(web);
+        return source;
+    }
+
+    /**
+     * A crawl one link deep: the seed's links are followed, and what they reach is
+     * a leaf.
+     */
+    private static IngestionSource leafSource() {
+        var source = source();
+        source.getWeb().setMaxDepth(1);
         return source;
     }
 
@@ -459,19 +470,22 @@ class IngestionPipelineTest {
         @DisplayName("a tombstoned page is not revalidated with its old ETag")
         void tombstonedPageIsNotRevalidated() {
             // Sending the stored ETag earns a 304, and a 304 never re-embeds — the same
-            // permanent loss by a different route.
-            FakeSite first = new FakeSite().pageWithValidators(SITE + "/", pageWith("Content."), "\"v1\"", null);
-            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            // permanent loss by a different route. The page is a leaf, the only kind a
+            // crawl revalidates at all.
+            FakeSite first = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .pageWithValidators(SITE + "/leaf", pageWith("Content."), "\"v1\"", null);
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
 
-            FakeSite gone = new FakeSite().status(SITE + "/", 404);
-            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
-            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            FakeSite gone = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf")).status(SITE + "/leaf", 404);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+            pipelineFor(gone).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
 
-            FakeSite back = new FakeSite().conditional(SITE + "/", pageWith("Content."), "\"v1\"");
-            pipelineFor(back).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            FakeSite back = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .conditional(SITE + "/leaf", pageWith("Content."), "\"v1\"");
+            pipelineFor(back).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
 
             var command = back.requests().stream()
-                    .filter(request -> request.url().equals(SITE + "/"))
+                    .filter(request -> request.url().equals(SITE + "/leaf"))
                     .findFirst().orElseThrow();
             assertEquals(null, command.ifNoneMatch(),
                     "a tombstoned document must be fetched in full, not revalidated");
@@ -825,26 +839,327 @@ class IngestionPipelineTest {
     }
 
     @Nested
+    @DisplayName("a run that loses its source")
+    class Superseded {
+
+        @Test
+        @DisplayName("a run whose source is purged under it stops embedding")
+        void stopsWhenItsSourceIsPurged() {
+            // It used to carry on to the end of its crawl, embedding into the store and
+            // inserting state rows for a source that had just been cleared — a removed
+            // source's chunks stayed retrievable, a renamed knowledge base's next run
+            // found its documents "unchanged" in a store that did not have them.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/b\">b</a>"
+                            + "<a href=\"" + SITE + "/c\">c</a>" + "<p>Index text.</p></body></html>")
+                    .page(SITE + "/b", pageWith("B."))
+                    .page(SITE + "/c", pageWith("C."));
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+            doAnswer(invocation -> {
+                // The source is purged while the first document is being embedded.
+                stateStore.purgeSource(sourceKey);
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f})).toList());
+            }).when(embeddingModel).embedAll(any());
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            verify(embeddingModel, times(1)).embedAll(any());
+            assertTrue(embeddingStore.segmentsOf(SITE + "/b").isEmpty());
+            assertTrue(embeddingStore.segmentsOf(SITE + "/c").isEmpty());
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertTrue(report.message().contains("stopped"), report.message());
+        }
+    }
+
+    @Nested
+    @DisplayName("maintenance claims")
+    class MaintenanceClaims {
+
+        @Test
+        @DisplayName("a released claim never shows up as the source's last run")
+        void aReleasedClaimIsNotARun() {
+            // Deleting a file takes the run slot, and released it as a COMPLETED run
+            // with zeroes everywhere: the source's "last run" became an empty success
+            // and the real one, with its errors, was pushed out of sight.
+            var pipeline = uploadPipeline();
+            var source = uploadSource();
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source);
+            fileStore.store(sourceKey, "broken.pdf", "application/pdf", "nope".getBytes(StandardCharsets.UTF_8));
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            String claim = pipeline.claimForMaintenance(KB_RESOURCE_ID, source).orElseThrow();
+            pipeline.releaseClaim(KB_RESOURCE_ID, source, claim);
+
+            var history = stateStore.listRuns(sourceKey, 10);
+            assertEquals(1, history.size());
+            assertEquals(1, history.getFirst().documentsFailed(), "the real run, with its failure, is still on top");
+            assertTrue(stateStore.activeRun(sourceKey).isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("after a purge")
+    class AfterAPurge {
+
+        private IngestionSource sweptAfter(int runs) {
+            var source = source();
+            source.setSettings(tombstoneAfter(runs));
+            return source;
+        }
+
+        @Test
+        @DisplayName("a page that left before the purge is swept once missed as often as any page must be")
+        void orphansAreSweptAfterTheGracePeriod() {
+            // A purge forgets the documents but leaves their vectors answering. A
+            // document gone from the site before the purge was then never found
+            // again, and with its state row gone nothing reconciled it: its chunks
+            // stayed retrievable for good.
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .page(SITE + "/gone", pageWith("Will vanish."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."));
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
+                    "not before the grace every other page gets");
+
+            IngestionReport report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2),
+                    Mode.INGEST);
+
+            assertTrue(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
+                    "a page that left the site before the purge must not stay retrievable");
+            assertFalse(embeddingStore.segmentsOf(SITE + "/keep").isEmpty());
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(), "chunks written by an earlier run since the "
+                    + "purge are kept");
+            assertEquals(0, report.documentsTombstoned(), "the sweep marker is not a document");
+        }
+
+        @Test
+        @DisplayName("a page only briefly absent after a purge keeps its content")
+        void aBrieflyAbsentPageSurvives() {
+            // The sweep used to run on the first run after a purge, so a page that
+            // was down for that one run lost its chunks — where any other page gets
+            // tombstoneAfterMissedRuns runs of grace.
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .page(SITE + "/flaky", pageWith("Usually here."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            // Blank for one run — a maintenance page — which is not a failure, so the
+            // run is complete and failure-free: exactly the run the old sweep acted on.
+            FakeSite blank = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .page(SITE + "/flaky", "<html><body></body></html>");
+            pipelineFor(blank).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(),
+                    "one run without the page is not enough to remove it");
+
+            for (int i = 0; i < 3; i++) {
+                pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+            assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(), "back, and kept through the sweep");
+        }
+
+        @Test
+        @DisplayName("a store that cannot say whether the state is empty skips the sweep, not the run")
+        void aFailingStateReadDoesNotFailTheRun() {
+            stateStore = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized List<IIngestionStateStore.DocumentState> listDocuments(String sourceId,
+                                                                                           int limit) {
+                    throw new IngestionStateStoreException("database unwell", null);
+                }
+            };
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome());
+            assertEquals(1, report.documentsIngested());
+        }
+
+        @Test
+        @DisplayName("a run that could not read everything sweeps nothing")
+        void anIncompleteRunKeepsOldChunks() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .page(SITE + "/flaky", pageWith("Sometimes down."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            FakeSite down = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/flaky\">f</a></body></html>")
+                    .status(SITE + "/flaky", 503);
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(down).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            }
+
+            assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(),
+                    "a page the server would not serve this time still has only its old chunks");
+        }
+
+        @Test
+        @DisplayName("a dead link does not hold the sweep back")
+        void aDeadLinkStillSweeps() {
+            // The sweep waited for a run with no failure at all, and a 404 counts as
+            // one. One dead link on a site therefore kept every orphan from before the
+            // purge retrievable for good — the defect the sweep exists to fix.
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a><a href=\"" + SITE + "/dead\">d</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .page(SITE + "/gone", pageWith("Will vanish."))
+                    .page(SITE + "/dead", pageWith("Will be a 404."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/dead\">d</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .status(SITE + "/dead", 404);
+            IngestionReport report = null;
+            for (int i = 0; i < 3; i++) {
+                report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+
+            assertEquals(1, report.documentsFailed(), "the dead link is still reported");
+            assertTrue(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(),
+                    "a page that left before the purge must not stay retrievable because another one 404s");
+            assertTrue(embeddingStore.segmentsOf(SITE + "/dead").isEmpty(),
+                    "nor the dead page itself, whose only chunks predate the purge");
+            assertFalse(embeddingStore.segmentsOf(SITE + "/keep").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a document that failed to embed keeps its old chunks through the sweep")
+        void anEmbeddingFailureHoldsTheSweepBack() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/stuck\">s</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .page(SITE + "/stuck", pageWith("Provider refuses this one."))
+                    .page(SITE + "/gone", pageWith("Will vanish."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+
+            doAnswer(invocation -> {
+                List<TextSegment> segments = invocation.getArgument(0);
+                if (segments.stream().anyMatch(segment -> segment.text().contains("Provider refuses"))) {
+                    throw new RuntimeException("provider returned 429");
+                }
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/stuck\">s</a></body></html>")
+                    .page(SITE + "/stuck", pageWith("Provider refuses this one."));
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            }
+
+            assertFalse(embeddingStore.segmentsOf(SITE + "/stuck").isEmpty(),
+                    "a page that did not embed has only its chunks from before the purge, and keeps them");
+        }
+
+        @Test
+        @DisplayName("an ordinary run, with state, sweeps nothing")
+        void aRunWithStateSweepsNothing() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/a\">a</a></body></html>")
+                    .page(SITE + "/a", pageWith("A."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            // Unchanged documents keep chunks written by the first run, which are not
+            // this run's and must survive it.
+            assertFalse(embeddingStore.segmentsOf(SITE + "/a").isEmpty());
+            assertFalse(embeddingStore.segmentsOf(SITE).isEmpty(), "the index page, stored as its canonical URL");
+        }
+    }
+
+    @Nested
     @DisplayName("conditional fetching")
     class Conditional {
 
         @Test
         @DisplayName("stored validators are sent on the next run and a 304 costs nothing")
         void usesStoredValidators() {
-            FakeSite first = new FakeSite()
-                    .pageWithValidators(SITE + "/", pageWith("Content."), "\"v1\"", null);
-            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            FakeSite first = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .pageWithValidators(SITE + "/leaf", pageWith("Content."), "\"v1\"", null);
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
             int afterFirst = embeddingStore.segments().size();
 
-            FakeSite second = new FakeSite().conditional(SITE + "/", pageWith("Content."), "\"v1\"");
-            IngestionReport report = pipelineFor(second).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            FakeSite second = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .conditional(SITE + "/leaf", pageWith("Content."), "\"v1\"");
+            IngestionReport report = pipelineFor(second).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(),
+                    Mode.INGEST);
 
-            assertEquals(1, report.documentsUnchanged());
+            assertEquals(2, report.documentsUnchanged(), "the index by its hash, the leaf by its 304");
             assertEquals(afterFirst, embeddingStore.segments().size());
             var command = second.requests().stream()
-                    .filter(request -> request.url().equals(SITE + "/"))
+                    .filter(request -> request.url().equals(SITE + "/leaf"))
                     .findFirst().orElseThrow();
             assertEquals("\"v1\"", command.ifNoneMatch(), "the ETag from the last run must be sent back");
+        }
+
+        @Test
+        @DisplayName("a page downloaded again and unchanged takes the server's new validators")
+        void refreshesStaleValidators() {
+            // The first ingest's ETag was kept for ever. A server that rotated it
+            // without changing the text then answered every conditional request with
+            // a full 200 — the validator sent back was one it no longer recognised.
+            FakeSite first = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .pageWithValidators(SITE + "/leaf", pageWith("Content."), "\"v1\"", null);
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            FakeSite rotated = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .pageWithValidators(SITE + "/leaf", pageWith("Content."), "\"v2\"", null);
+            IngestionReport report = pipelineFor(rotated).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(),
+                    Mode.INGEST);
+            assertEquals(0, report.documentsIngested(), "the text did not change, so nothing is re-embedded");
+
+            FakeSite third = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .conditional(SITE + "/leaf", pageWith("Content."), "\"v2\"");
+            pipelineFor(third).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            var command = third.requests().stream()
+                    .filter(request -> request.url().equals(SITE + "/leaf"))
+                    .findFirst().orElseThrow();
+            assertEquals("\"v2\"", command.ifNoneMatch(), "the validator the server issued last must be sent");
+        }
+
+        @Test
+        @DisplayName("an unchanged parent never hides its children, however many runs go by")
+        void unchangedParentKeepsItsChildren() {
+            // A parent revalidated with a 304 has no body and so no links. Its
+            // children were never reached, the crawl still "covered" the site, and
+            // after tombstoneAfterMissedRuns runs every one of them lost its vectors.
+            var source = source();
+            source.setSettings(tombstoneAfter(1));
+            FakeSite first = new FakeSite()
+                    .pageWithValidators(SITE + "/", linkTo(SITE + "/child"), "\"p1\"", null)
+                    .page(SITE + "/child", pageWith("Child content."));
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+
+            FakeSite unchanged = new FakeSite()
+                    .conditional(SITE + "/", linkTo(SITE + "/child"), "\"p1\"")
+                    .page(SITE + "/child", pageWith("Child content."));
+            pipelineFor(unchanged).run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            IngestionReport report = pipelineFor(unchanged).run(KB_RESOURCE_ID, knowledgeBase(), source,
+                    Mode.INGEST);
+
+            assertEquals(0, report.documentsTombstoned());
+            assertFalse(embeddingStore.segmentsOf(SITE + "/child").isEmpty(),
+                    "a child of an unchanged page must stay retrievable");
         }
     }
 
@@ -1108,21 +1423,20 @@ class IngestionPipelineTest {
         }
 
         @Test
-        @DisplayName("a file that stops being readable keeps the vectors it already has")
-        void anUnreadableFileIsNotAMissingFile() {
-            // Ingested first, so it HAS vectors to lose. A file that was never
-            // readable has no state row, and nothing could tombstone it whatever
-            // this run concluded — which is a test that cannot fail.
+        @DisplayName("a replacement that cannot be read takes the old version's text out of retrieval")
+        void anUnreadableReplacementRetiresTheOldText() {
+            // The old version was kept — the error was recorded as "could not look" —
+            // so re-uploading a document as a broken copy left the previous text
+            // answering questions for good while the file list showed only the new
+            // file. The stored file is all an upload source has; reading it and
+            // failing is a definitive answer.
             var ingested = fileStore.store(SOURCE_KEY, "report.pdf", "text/plain",
                     "Quarterly results".getBytes(StandardCharsets.UTF_8));
             var source = uploadSource();
-            source.setSettings(tombstoneAfter(1));
             var pipeline = uploadPipeline();
             pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
             assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty());
 
-            // Replaced with something that claims to be a PDF and is not: the file
-            // is there, and this run learns nothing about its contents.
             fileStore.store(SOURCE_KEY, "report.pdf", "application/pdf",
                     "not really a pdf".getBytes(StandardCharsets.UTF_8));
             fileStore.store(SOURCE_KEY, "readable.md", "text/markdown",
@@ -1132,11 +1446,32 @@ class IngestionPipelineTest {
 
             assertEquals(1, report.documentsIngested());
             assertEquals(1, report.documentsFailed());
-            // Counting it as absent would delete vectors the file never lost, and
-            // would do it again on every run while the file sits there.
-            assertEquals(0, report.documentsTombstoned());
-            assertFalse(embeddingStore.segmentsOf(ingested.fileId()).isEmpty(),
-                    "a file that became unreadable must not lose what it already contributed");
+            assertEquals(1, report.documentsTombstoned());
+            assertTrue(embeddingStore.segmentsOf(ingested.fileId()).isEmpty(),
+                    "text the file no longer contains must not stay retrievable");
+
+            IngestionReport again = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source, Mode.INGEST);
+            assertEquals(1, again.documentsFailed(), "still unreadable, and still said so");
+            assertEquals(0, again.documentsTombstoned(), "but not retired a second time");
+        }
+
+        @Test
+        @DisplayName("a stored file with no text — a scan — is reported, and retires what it replaced")
+        void aFileWithNoTextIsAFailure() {
+            // Skipped as blank on every run before, silently: it stayed "not indexed"
+            // for good, and a scan uploaded over an indexed file left the old text
+            // answering.
+            var ingested = fileStore.store(SOURCE_KEY, "scan.txt", "text/plain",
+                    "Readable at first".getBytes(StandardCharsets.UTF_8));
+            var pipeline = uploadPipeline();
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            fileStore.store(SOURCE_KEY, "scan.txt", "text/plain", "   \n\n  ".getBytes(StandardCharsets.UTF_8));
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), Mode.INGEST);
+
+            assertEquals(1, report.documentsFailed());
+            assertEquals(0, report.documentsSkipped(), "a file is not a navigation page; an empty one is a failure");
+            assertTrue(embeddingStore.segmentsOf(ingested.fileId()).isEmpty());
         }
 
         @Test
@@ -1231,10 +1566,10 @@ class IngestionPipelineTest {
 
             // By the file's own id, which is what the vectors are keyed by — the
             // display name is not an identity.
-            boolean removed = pipeline.forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(),
+            var removed = pipeline.forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(),
                     stored.fileId());
 
-            assertTrue(removed);
+            assertEquals(IngestionPipeline.ForgetOutcome.REMOVED, removed);
             // Deferring this to the next run means a source with no cron keeps
             // answering from a document the operator was told was deleted.
             assertTrue(embeddingStore.segments().isEmpty());
@@ -1246,10 +1581,11 @@ class IngestionPipelineTest {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
             when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
 
-            boolean removed = uploadPipeline()
+            var removed = uploadPipeline()
                     .forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), "secret.md");
 
-            assertFalse(removed, "the caller has to be able to tell the operator the chunks are still there");
+            assertEquals(IngestionPipeline.ForgetOutcome.UNSUPPORTED, removed,
+                    "the caller has to be able to tell the operator the chunks are still there");
         }
 
         @Test
@@ -1274,11 +1610,11 @@ class IngestionPipelineTest {
             assertTrue(report.tombstoningSkipped());
             assertEquals(0, report.documentsTombstoned());
         }
+    }
 
-        private static IngestionSource.IngestionSettings tombstoneAfter(int runs) {
-            var settings = new IngestionSource.IngestionSettings();
-            settings.setTombstoneAfterMissedRuns(runs);
-            return settings;
-        }
+    private static IngestionSource.IngestionSettings tombstoneAfter(int runs) {
+        var settings = new IngestionSource.IngestionSettings();
+        settings.setTombstoneAfterMissedRuns(runs);
+        return settings;
     }
 }
