@@ -820,26 +820,21 @@ public class Conversation implements IConversation {
     /**
      * The groups a {@code group}-visibility property is written with when it
      * carries none itself: those of the recalled entry it replaced (a property set
-     * by a property instruction is a new object and has lost them), else the groups
-     * of this turn — its {@code groupId} context, or for a resume, which has no
-     * context of its own, the latest {@code context:groupId} of the conversation.
+     * by a property instruction is a new object and has lost them), else the
+     * {@code groupId} context of THIS turn.
+     * <p>
+     * Deliberately not the {@code context:groupId} of an earlier step: a step
+     * written before the reserved-context-key fix may hold a client-set value, and
+     * trusting it would tag the user's memories with a group the client merely
+     * named. A resume (which has no context of its own) therefore writes a
+     * brand-new group property without groups until it can use the verified group
+     * resolver of the reserved-context-keys change.
      */
     private List<String> fallbackGroupIds(Property baseline) {
         if (baseline != null && baseline.getGroupIds() != null && !baseline.getGroupIds().isEmpty()) {
             return baseline.getGroupIds();
         }
-        if (!turnGroupIds.isEmpty()) {
-            return turnGroupIds;
-        }
-        IData<Object> groupContext = conversationMemory.getAllSteps().getLatestData(KEY_CONTEXT + ":groupId");
-        if (groupContext != null && groupContext.getResult() != null) {
-            Object result = groupContext.getResult();
-            Object value = result instanceof Context context ? context.getValue() : result;
-            if (value != null && !String.valueOf(value).isBlank()) {
-                return List.of(String.valueOf(value));
-            }
-        }
-        return List.of();
+        return turnGroupIds;
     }
 
     /**

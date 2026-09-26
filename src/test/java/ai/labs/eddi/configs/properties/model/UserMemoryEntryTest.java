@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -258,6 +259,15 @@ class UserMemoryEntryTest {
         var entry = UserMemoryEntry.fromProperty(prop, "u", "a", "c", Visibility.self, List.of("g3"));
 
         assertEquals(List.of("g3"), entry.groupIds(), "a group entry written with no groups can never be recalled");
+    }
+
+    @Test
+    void propertyInstruction_ignoresConfiguredGroupIds() throws Exception {
+        // Group ids are recall metadata; property.json must not be able to name them.
+        var instruction = new ObjectMapper().readValue("{\"name\":\"goal\",\"groupIds\":[\"other-team\"]}", PropertyInstruction.class);
+
+        assertNull(instruction.getGroupIds());
+        assertFalse(new ObjectMapper().writeValueAsString(instruction).contains("groupIds"));
     }
 
     @Test

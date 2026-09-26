@@ -718,7 +718,7 @@ public class ConversationService implements IConversationService {
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -925,7 +925,7 @@ public class ConversationService implements IConversationService {
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, notifySkipped, processingTurn);
+                    turnBuilder, true, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1353,10 +1353,11 @@ public class ConversationService implements IConversationService {
 
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
-                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn)
+                                                     boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
+                                                     ProcessingTurn processingTurn)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, turnBuilder, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
     }
 
     private static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {

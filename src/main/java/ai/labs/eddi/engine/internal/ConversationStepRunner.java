@@ -108,7 +108,7 @@ class ConversationStepRunner {
     }
 
     IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                             Map<String, String> loggingContext, TurnBuilder turnBuilder,
+                                             Map<String, String> loggingContext, TurnBuilder turnBuilder, boolean rebuildWhenSuperseded,
                                              Consumer<IConversationMemory> skipNotifier, ConversationService.ProcessingTurn processingTurn)
             throws Exception {
         // Built here, on the request thread, so a conversation that cannot run at all
@@ -146,7 +146,8 @@ class ConversationStepRunner {
             public Void call() {
                 try {
                     return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                            identityBoundExecution, memory -> bindIdentity.apply(turnBuilder.build(memory)), skipNotifier);
+                            identityBoundExecution,
+                            rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier);
                 } finally {
                     // C11: the single guaranteed exit point of a turn. The completion
                     // consumer releases first on the happy path, but a watchdog timeout,
@@ -190,9 +191,11 @@ class ConversationStepRunner {
 
     /**
      * @param rebuildTurn
-     *            rebuilds the (identity-bound) turn over a reloaded memory; may be
-     *            {@code null}, in which case the turn always runs on the memory it
-     *            was submitted with
+     *            rebuilds the (identity-bound) turn over a reloaded memory, or
+     *            {@code null} for a turn that must not be rebuilt: a rerun, which
+     *            re-executes the step the caller SAW. Rebuilt over a newer memory
+     *            it would re-execute a different turn's step — its tool calls and
+     *            LLM spend included — so a superseded rerun is reported as skipped.
      */
     Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
                              Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
@@ -241,7 +244,16 @@ class ConversationStepRunner {
         // discarded. Rebuild the turn over the current document instead.
         IConversationMemory conversationMemory = submittedMemory;
         Callable<Void> executeConversation = submittedExecution;
-        IConversationMemory reloaded = rebuildTurn != null ? reloadIfSuperseded(conversationId, submittedMemory, loggingContext) : null;
+        IConversationMemory reloaded = reloadIfSuperseded(conversationId, submittedMemory, loggingContext);
+        if (reloaded != null && rebuildTurn == null) {
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            LOGGER.infof("Skipping queued rerun of conversation %s: another turn committed while it was queued, so the step "
+                    + "it would re-execute is no longer the last one", sanitize(conversationId));
+            if (skipNotifier != null) {
+                skipNotifier.accept(reloaded);
+            }
+            return null;
+        }
         if (reloaded != null) {
             try {
                 executeConversation = rebuildTurn.build(reloaded);
@@ -529,7 +541,15 @@ class ConversationStepRunner {
     void reportStoreConflict(Map<String, String> loggingContext, String conversationId,
                              ConcurrentConversationModificationException e) {
         conversationService.contextLogger.setLoggingContext(loggingContext);
-        if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED) {
+        ConversationState storedState;
+        try {
+            storedState = conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException readFailure) {
+            // A store blip must not escape the completion callback — the caller still
+            // refreshes the cache after this — so report it as the conflict it may be.
+            storedState = null;
+        }
+        if (storedState == ConversationState.ENDED) {
             // E4: the store refuses to write a running turn over a conversation that was
             // ended meanwhile. That is the end winning, not a lost update — nothing to
             // retry, and nothing for the conflict meter.

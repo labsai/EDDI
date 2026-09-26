@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
@@ -377,6 +378,25 @@ class ConversationLongTermPersistenceTest {
         assertEquals(Property.Visibility.group, entry.getValue().visibility());
         assertEquals(List.of("group-7"), entry.getValue().groupIds(),
                 "recall matches on groupIds — an entry written with none can never be recalled by the group");
+    }
+
+    @Test
+    @DisplayName("M-E2: an earlier step's context:groupId is not trusted as the group of a new memory")
+    void earlierStepGroupContextIsNotTrusted() throws Exception {
+        // An earlier step may carry a client-set groupId (written before reserved
+        // context keys were enforced). This turn names no group.
+        memory.getCurrentStep().storeData(new Data<>("context:groupId", new Context(Context.ContextType.string, "forged")));
+        IExecutableWorkflow workflow = workflowThat(() -> {
+            Property shared = new Property("team_goal", "ship it", Scope.longTerm);
+            shared.setVisibility(Property.Visibility.group);
+            memory.getConversationProperties().put("team_goal", shared);
+        });
+
+        turnWith(workflow).say("remember our goal", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals(List.of(), entry.getValue().groupIds());
     }
 
     @Test
