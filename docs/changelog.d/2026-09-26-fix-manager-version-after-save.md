@@ -60,7 +60,11 @@ so the edit appeared to revert on the next refetch and the next action failed.
   page's version when the section is still showing placeholder data from another
   version (so a stale placeholder can no longer overwrite a newer version).
   Failures are toasted, and `isPending` counts queued saves as well as the one
-  in flight. Before, a quick second edit 409'd and was silently dropped.
+  in flight. A 409 (another client wrote a newer version) also drops the chain
+  and invalidates the agent queries: a failed save refetches nothing by itself,
+  so every later save would repeat the 409 until something else refreshed the
+  page. Any other failure keeps the chain, because the version the last save
+  created is still current and the page may not have caught up to it yet. Before, a quick second edit 409'd and was silently dropped.
   `useUpdateAgent` seeds the new version in the cache. Picking the latest version
   in the agent-detail picker now means "follow the latest" rather than pinning
   its number.

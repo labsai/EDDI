@@ -26,6 +26,8 @@ let seq = 0;
 let current: number;
 let docs: Record<number, Agent>;
 let puts: number[];
+/** The 1-based PUT that answers 500, as a transient server error would. */
+let failPut: number | undefined;
 let client: QueryClient;
 
 beforeEach(() => {
@@ -35,6 +37,7 @@ beforeEach(() => {
   current = 1;
   docs = { 1: { description: "d", capabilities: [] } };
   puts = [];
+  failPut = undefined;
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const version = (request: Request) => Number(new URL(request.url).searchParams.get("version"));
   server.use(
@@ -45,6 +48,7 @@ beforeEach(() => {
     http.put("*/agentstore/agents/:id", async ({ request, params }) => {
       const v = version(request);
       puts.push(v);
+      if (puts.length === failPut) return HttpResponse.json({ message: "Boom" }, { status: 500 });
       if (v !== current) return HttpResponse.json({ message: "Conflict" }, { status: 409 });
       current += 1;
       docs[current] = (await request.json()) as Agent;
@@ -168,6 +172,47 @@ describe("useAgentSectionSave", () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     expect(vi.mocked(toast.error).mock.calls[0]![0]).toMatch(/409/);
+  });
+
+  it("drops the chain and refetches after a conflict, so the page can move onto the newer version", async () => {
+    const page = docs[1]!;
+    const { result, rerender } = renderSaver(1, page);
+    act(() => result.current.mutate({ agent: { ...page, a2aEnabled: true } }));
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    // The page caught up to the save's version, and its copy is fresh again.
+    client.setQueryData([...agentKeys.all, agentId, 2], docs[2]);
+    rerender({ v: 2, a: docs[2]! });
+
+    // Another client writes v3; this page does not know.
+    docs[3] = { ...docs[2]!, description: "elsewhere" };
+    current = 3;
+    act(() => result.current.mutate({ agent: { ...docs[2]!, capabilities: [{ skill: "x" }] as Agent["capabilities"] } }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(puts).toEqual([1, 2]);
+
+    // Without this the page's queries stay fresh and every later save 409s again.
+    expect(client.getQueryState([...agentKeys.all, agentId, 2])?.isInvalidated).toBe(true);
+  });
+
+  it("keeps the chain after a failure that was not a conflict", async () => {
+    // The second of three edits from one render hits a transient 500. The
+    // version the first created is still current, so the third must go there,
+    // not to the page's superseded version 1.
+    failPut = 2;
+    const page = docs[1]!;
+    const { result } = renderSaver(1, page);
+
+    act(() => {
+      result.current.mutate({ agent: { ...page, a2aEnabled: true } });
+      result.current.mutate({ agent: { ...page, description: "lost to the 500" } });
+      result.current.mutate({ agent: { ...page, capabilities: [{ skill: "x" }] as Agent["capabilities"] } });
+    });
+
+    await waitFor(() => expect(current).toBe(3));
+    expect(puts).toEqual([1, 2, 2]);
+    expect(docs[3]).toMatchObject({ a2aEnabled: true, capabilities: [{ skill: "x" }], description: "d" });
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(toast.error).mock.calls[0]![0]).toMatch(/500/);
   });
 
   it("hands a failure to the caller's onError instead of toasting", async () => {

@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useUpdateAgent } from "./use-agents";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { getAgent, type Agent } from "@/lib/api/agents";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { agentKeys } from "@/lib/query-keys";
@@ -84,7 +84,8 @@ function setPending(state: AgentSaveState, delta: number) {
  *    actually holds — the last save's, or the cached copy of the page's version
  *    when the `agent` on screen is a placeholder from another one — so an edit
  *    never quietly undoes another;
- *  - a failure is reported, not swallowed;
+ *  - a failure is reported, not swallowed, and a conflict (409) also drops the
+ *    chain and refetches, so the page moves onto the version that superseded it;
  *  - `isPending` covers queued saves as well as the one in flight.
  *
  * `mutate` has `useUpdateAgent`'s call shape so a section switches over by
@@ -125,6 +126,23 @@ export function useAgentSectionSave(agentId: string, version: number, agent: Age
               : { base: chained ? last.base : version, saved: created, agent: document };
           options?.onSuccess?.();
         } catch (err) {
+          if (isApiError(err) && err.status === 409) {
+            // The version this save addressed is no longer current: another
+            // write created a newer one. The chain is dead, and until the page
+            // learns the newer version every save repeats the 409 — a failed
+            // save refetches nothing by itself (`useUpdateAgent` invalidates
+            // only on success). So drop the chain and refetch; a page following
+            // the latest version moves onto it and the next save goes there,
+            // merged onto the document that version actually holds.
+            //
+            // Only on a conflict. After any other failure (a 500, a dropped
+            // connection) the version the last save created is still current
+            // and the page may not have caught up to it yet; dropping the chain
+            // then would send the next edit to the page's older version and
+            // turn one failed save into two.
+            state.lastSave = null;
+            void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+          }
           if (options?.onError) options.onError(err);
           else toast.error(getErrorMessage(err));
         } finally {
