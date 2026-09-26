@@ -1081,6 +1081,12 @@ public class VaultSecretProvider implements ISecretProvider {
                 // A pinned value sealed in the gap between the two deletes would name a
                 // generation the next DEK reuses; clear once more now the DEKs are gone.
                 persistence.deleteMetaValuesWithPrefix(SYSTEM_VALUE_META_PREFIX);
+            } else if (persistence.findDek(SYSTEM_TENANT).isEmpty()) {
+                // No system DEK, so no system value can be opened. This is what an
+                // adoption interrupted between the delete of the DEKs and the second clear
+                // leaves behind; without this, a re-run finds no unreadable system DEK,
+                // skips the cleanup, and every later pin fails on the orphaned value.
+                systemReset = persistence.deleteMetaValuesWithPrefix(SYSTEM_VALUE_META_PREFIX) > 0;
             }
             LOGGER.warnf("[VAULT] The configured master key was adopted as the vault's master key.%s %d tenant(s) hold DEKs it cannot open "
                     + "and need POST /secretstore/secrets/{tenantId}/reset: %s", systemReset ? " System values were reset." : "", unreadable.size(),
