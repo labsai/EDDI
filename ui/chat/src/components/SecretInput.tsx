@@ -1,7 +1,8 @@
 /* ──────────────────────────────────────────────
-   SecretInput — Password input field for secret values
-   Rendered when the backend sends an InputFieldOutputItem
-   with subType: "password".
+   SecretInput — the input field an agent requested
+   Rendered when the backend sends an InputFieldOutputItem. Only a
+   "password" field is masked and sent as secret; "text" and "email"
+   are ordinary fields of that type.
    ────────────────────────────────────────────── */
 
 import { useState, useCallback, useId, type KeyboardEvent } from "react";
@@ -29,13 +30,18 @@ export function SecretInput({
   const [visible, setVisible] = useState(false);
   const inputId = useId();
 
+  // Only a password field is a secret. Every subType used to be masked and
+  // sent with `secretInput`, so an e-mail address was hidden from the user
+  // typing it and vaulted by the backend as though it were a credential.
+  const isSecret = (subType || "password") === "password";
+
   const handleSubmit = useCallback(() => {
     // Don't trim — leading/trailing whitespace is valid in passwords and tokens
     if (!value || disabled) return;
-    onSend(value, true);
+    onSend(value, isSecret);
     setValue("");
     dispatch({ type: "CLEAR_INPUT_FIELD" });
-  }, [value, disabled, onSend, dispatch]);
+  }, [value, disabled, isSecret, onSend, dispatch]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
@@ -47,8 +53,13 @@ export function SecretInput({
     [handleSubmit],
   );
 
-  // Determine input type: use subType (e.g. "password", "email") or "text"
-  const inputType = visible ? "text" : (subType || "password");
+  const inputType = isSecret
+    ? visible
+      ? "text"
+      : "password"
+    : subType === "email"
+      ? "email"
+      : "text";
 
   return (
     <div className="secret-input" data-testid="secret-input">
@@ -58,7 +69,8 @@ export function SecretInput({
           className="secret-input__label"
           data-testid="secret-input-label"
         >
-          🔒 {label}
+          {isSecret ? "🔒 " : ""}
+          {label}
         </label>
       )}
       <div className="secret-input__row">
@@ -70,29 +82,31 @@ export function SecretInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder || "Enter secret value..."}
+            placeholder={placeholder || (isSecret ? "Enter secret value..." : "")}
             disabled={disabled}
             autoFocus
-            autoComplete="off"
+            autoComplete={isSecret ? "off" : undefined}
             data-testid="secret-input-field"
           />
-          <button
-            type="button"
-            className="secret-input__eye-toggle"
-            onClick={() => setVisible((v) => !v)}
-            aria-label={visible ? "Hide secret" : "Show secret"}
-            title={visible ? "Hide" : "Show"}
-            data-testid="secret-input-eye"
-          >
-            {visible ? "👁" : "👁‍🗨"}
-          </button>
+          {isSecret && (
+            <button
+              type="button"
+              className="secret-input__eye-toggle"
+              onClick={() => setVisible((v) => !v)}
+              aria-label={visible ? "Hide secret" : "Show secret"}
+              title={visible ? "Hide" : "Show"}
+              data-testid="secret-input-eye"
+            >
+              {visible ? "👁" : "👁‍🗨"}
+            </button>
+          )}
         </div>
         <button
           type="button"
           className={`chat-input__send ${value && !disabled ? "chat-input__send--active" : "chat-input__send--disabled"}`}
           onClick={handleSubmit}
           disabled={!value || disabled}
-          aria-label="Send secret"
+          aria-label={isSecret ? "Send secret" : "Send"}
           data-testid="secret-input-send"
         >
           ▶
