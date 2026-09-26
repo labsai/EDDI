@@ -3461,7 +3461,6 @@
     "agentIdPlaceholder": "معرف الوكيل لمعالجة الرسائل",
     "botToken": "رمز البوت",
     "botTokenHint": "رمز OAuth للبوت. استخدم مرجع الخزنة لمزيد من الأمان.",
-    "botTokenPlaceholder": "xoxb-… أو ${vault:slack-bot-token}",
     "channel": "قناة",
     "channelId": "معرف قناة Slack",
     "channelIdCol": "معرف القناة",
@@ -3482,7 +3481,6 @@
     "searchPlaceholder": "بحث في القنوات…",
     "signingSecret": "سر التوقيع",
     "signingSecretHint": "من صفحة المعلومات الأساسية لتطبيق Slack.",
-    "signingSecretPlaceholder": "سلسلة ست عشرية أو ${vault:slack-signing-secret}",
     "slackSetupGuide": "دليل إعداد Slack",
     "slackSetupSummary": "أنشئ تطبيق Slack، وكوّن نطاقات رمز البوت (app_mentions:read، chat:write، im:history، channels:history، groups:history)، ثم الصق بيانات الاعتماد هنا.",
     "target": "هدف",
@@ -3536,7 +3534,8 @@
     "typeAgent": "وكيل",
     "typeGroup": "مجموعة",
     "selectGroup": "اختر مجموعة…",
-    "unknownGroup": "{{id}} (غير موجودة)"
+    "unknownGroup": "{{id}} (غير موجودة)",
+    "plaintextSecret": "خزّن {{fields}} في خزنة الأسرار وأشر إليه بـ ${vault:…} — لا يتم حفظ بيانات الاعتماد بنص صريح."
   },
   "hitl": {
     "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",

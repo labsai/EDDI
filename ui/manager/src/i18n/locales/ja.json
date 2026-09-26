@@ -3321,7 +3321,6 @@
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
     "botToken": "ボットトークン",
     "botTokenHint": "ボットユーザー OAuth トークン。セキュリティのためにボールト参照を使用してください。",
-    "botTokenPlaceholder": "xoxb-… または ${vault:slack-bot-token}",
     "channel": "チャネル",
     "channelId": "Slack チャネル ID",
     "channelIdCol": "チャネル ID",
@@ -3342,7 +3341,6 @@
     "searchPlaceholder": "チャネルを検索…",
     "signingSecret": "署名シークレット",
     "signingSecretHint": "Slack アプリの基本情報ページから取得します。",
-    "signingSecretPlaceholder": "16進数文字列または ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack セットアップガイド",
     "slackSetupSummary": "Slack アプリを作成し、ボットトークンスコープ（app_mentions:read、chat:write、im:history、channels:history、groups:history）を設定し、資格情報をここに貼り付けてください。",
     "target": "ターゲット",
@@ -3396,7 +3394,8 @@
     "typeAgent": "エージェント",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択…",
-    "unknownGroup": "{{id}}（見つかりません）"
+    "unknownGroup": "{{id}}（見つかりません）",
+    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",

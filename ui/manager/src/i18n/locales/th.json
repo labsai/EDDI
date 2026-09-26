@@ -3321,7 +3321,6 @@
     "agentIdPlaceholder": "ID เอเจนต์สำหรับจัดการข้อความ",
     "botToken": "โทเค็นบอท",
     "botTokenHint": "โทเค็น OAuth ของบอท ใช้การอ้างอิงตู้นิรภัยเพื่อความปลอดภัย",
-    "botTokenPlaceholder": "xoxb-… หรือ ${vault:slack-bot-token}",
     "channel": "ช่อง",
     "channelId": "ID ช่อง Slack",
     "channelIdCol": "ID ช่อง",
@@ -3342,7 +3341,6 @@
     "searchPlaceholder": "ค้นหาช่อง…",
     "signingSecret": "ความลับในการลงนาม",
     "signingSecretHint": "จากหน้าข้อมูลพื้นฐานของแอป Slack",
-    "signingSecretPlaceholder": "สตริงฐานสิบหกหรือ ${vault:slack-signing-secret}",
     "slackSetupGuide": "คู่มือการตั้งค่า Slack",
     "slackSetupSummary": "สร้างแอป Slack กำหนดขอบเขตโทเค็นบอท (app_mentions:read, chat:write, im:history, channels:history, groups:history) แล้ววางข้อมูลประจำตัวที่นี่",
     "target": "เป้าหมาย",
@@ -3396,7 +3394,8 @@
     "typeAgent": "เอเจนต์",
     "typeGroup": "กลุ่ม",
     "selectGroup": "เลือกกลุ่ม…",
-    "unknownGroup": "{{id}} (ไม่พบ)"
+    "unknownGroup": "{{id}} (ไม่พบ)",
+    "plaintextSecret": "จัดเก็บ {{fields}} ในห้องนิรภัยความลับแล้วอ้างอิงเป็น ${vault:…} — ข้อมูลรับรองแบบข้อความธรรมดาจะไม่ถูกบันทึก"
   },
   "hitl": {
     "loadingApprovalDetails": "กำลังโหลดรายละเอียดการอนุมัติ…",

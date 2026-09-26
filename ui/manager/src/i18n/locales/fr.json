@@ -3356,7 +3356,6 @@
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
     "botToken": "Jeton de bot",
     "botTokenHint": "Jeton OAuth du bot. Utilisez une référence coffre-fort pour la sécurité.",
-    "botTokenPlaceholder": "xoxb-… ou ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID du canal Slack",
     "channelIdCol": "ID du canal",
@@ -3377,7 +3376,6 @@
     "searchPlaceholder": "Rechercher des canaux…",
     "signingSecret": "Secret de signature",
     "signingSecretHint": "Depuis la page Informations de base de votre application Slack.",
-    "signingSecretPlaceholder": "Chaîne hex ou ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guide de configuration Slack",
     "slackSetupSummary": "Créez une application Slack, configurez les portées du jeton de bot (app_mentions:read, chat:write, im:history, channels:history, groups:history), puis collez les identifiants ici.",
     "target": "cible",
@@ -3431,7 +3429,8 @@
     "typeAgent": "Agent",
     "typeGroup": "Groupe",
     "selectGroup": "Choisir un groupe…",
-    "unknownGroup": "{{id}} (introuvable)"
+    "unknownGroup": "{{id}} (introuvable)",
+    "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés."
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",

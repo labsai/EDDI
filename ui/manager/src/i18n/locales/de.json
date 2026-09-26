@@ -3321,7 +3321,6 @@
     "agentIdPlaceholder": "Agenten-ID zur Nachrichtenverarbeitung",
     "botToken": "Bot-Token",
     "botTokenHint": "Bot-Benutzer-OAuth-Token. Verwenden Sie eine Tresor-Referenz für mehr Sicherheit.",
-    "botTokenPlaceholder": "xoxb-… oder ${vault:slack-bot-token}",
     "channel": "Kanal",
     "channelId": "Slack-Kanal-ID",
     "channelIdCol": "Kanal-ID",
@@ -3342,7 +3341,6 @@
     "searchPlaceholder": "Kanäle suchen…",
     "signingSecret": "Signierungsgeheimnis",
     "signingSecretHint": "Von der Seite „Grundlegende Informationen“ Ihrer Slack-App.",
-    "signingSecretPlaceholder": "Hex-String oder ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack-Einrichtungsanleitung",
     "slackSetupSummary": "Erstellen Sie eine Slack-App, konfigurieren Sie Bot-Token-Bereiche (app_mentions:read, chat:write, im:history, channels:history, groups:history) und fügen Sie die Anmeldedaten hier ein.",
     "target": "Ziel",
@@ -3396,7 +3394,8 @@
     "typeAgent": "Agent",
     "typeGroup": "Gruppe",
     "selectGroup": "Gruppe auswählen …",
-    "unknownGroup": "{{id}} (nicht gefunden)"
+    "unknownGroup": "{{id}} (nicht gefunden)",
+    "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert."
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",
