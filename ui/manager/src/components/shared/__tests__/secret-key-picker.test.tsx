@@ -270,6 +270,10 @@ describe("SecretKeyPicker", () => {
         stored = true;
         return HttpResponse.json({});
       }),
+      // The existence check reads the key's own metadata.
+      http.get("*/secretstore/secrets/default/openai-key", () =>
+        HttpResponse.json({ tenantId: "default", keyName: "openai-key", allowedAgents: ["agent1"] }),
+      ),
     );
     renderWithProviders(<SecretKeyPicker value="" onChange={mockOnChange} />);
     await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));

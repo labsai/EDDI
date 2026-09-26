@@ -363,15 +363,28 @@ export const SECRET_NOT_FOUND = "SECRET_NOT_FOUND";
 /**
  * The key's current metadata, read fresh, or null when it does not exist.
  *
- * A list read rather than a per-key GET because the list is what the backend
- * exposes to the Manager for metadata; it is one tenant's secrets, not a page.
+ * `GET /{tenantId}/{keyName}` — an exact lookup of one key's metadata (never
+ * its value), cheaper than listing the tenant. A 404 means "no such key"; every
+ * other failure is raised, because "could not check" must not read as "free to
+ * create".
  */
 export async function findSecret(
   tenantId: string,
   keyName: string,
 ): Promise<SecretMetadata | null> {
-  const all = await listSecrets(tenantId);
-  return all.find((s) => s.keyName === keyName) ?? null;
+  try {
+    return await api.get<SecretMetadata>(secretPath(tenantId, keyName));
+  } catch (err) {
+    if (err instanceof ApiClientError && err.status === 404) return null;
+    if (err instanceof ApiClientError && err.status === 503) {
+      throw new SecretsError(
+        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+        VAULT_NOT_CONFIGURED,
+        503,
+      );
+    }
+    throw err;
+  }
 }
 
 /* ─── Key lifecycle (crypto-key operations) ─── */
@@ -437,63 +450,4 @@ export async function resetTenant(
     await throwVaultError(res, "reset vault");
   }
   return res.json();
-}
-
-/** Response of `POST /admin/adopt-master-key`. */
-export interface AdoptMasterKeyResponse {
-  /** Tenants whose DEKs the adopted key cannot open — each needs a reset. */
-  tenantsNeedingReset: string[];
-  /** Whether the reserved system tenant's sealed values had to be discarded. */
-  systemValuesReset: boolean;
-  message: string;
-}
-
-/**
- * Stable code for a backend with no adopt-master-key operation.
- *
- * An EDDI without it has no KEK check value either, so a lost key never blocks
- * new secrets there and resetting the affected tenant is the whole recovery.
- * The UI says so instead of reporting a bare 404.
- */
-export const ADOPT_NOT_SUPPORTED = "ADOPT_NOT_SUPPORTED";
-
-/**
- * Make the running master key the vault's master key after the previous one was
- * LOST. Maps to `POST /admin/adopt-master-key?confirm=true`.
- *
- * Destructive for anything sealed under the lost key. A backend that records
- * which key the vault uses refuses every new secret after a key change, because
- * a lost key and a replica that was not restarted look the same from a node;
- * this is the operator saying which case it is. The answer names the tenants
- * that must then be reset. Never the right call while a KEK rotation is merely
- * unfinished — re-running `rotateKek` with the same two keys recovers
- * everything there.
- */
-export async function adoptMasterKey(): Promise<AdoptMasterKeyResponse> {
-  try {
-    const data = await api.post<Partial<AdoptMasterKeyResponse> | undefined>(
-      `${BASE}/admin/adopt-master-key?confirm=true`,
-    );
-    return {
-      tenantsNeedingReset: data?.tenantsNeedingReset ?? [],
-      systemValuesReset: data?.systemValuesReset ?? false,
-      message: data?.message ?? "",
-    };
-  } catch (err) {
-    if (err instanceof ApiClientError && (err.status === 404 || err.status === 405)) {
-      throw new SecretsError(
-        "This EDDI version has no adopt-master-key step. Reset the affected tenant instead.",
-        ADOPT_NOT_SUPPORTED,
-        err.status,
-      );
-    }
-    if (err instanceof ApiClientError && err.status === 503) {
-      throw new SecretsError(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
-        VAULT_NOT_CONFIGURED,
-        503,
-      );
-    }
-    throw err;
-  }
 }

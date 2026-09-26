@@ -9,8 +9,6 @@ import {
   getVaultHealth,
   rotateSecret,
   findSecret,
-  adoptMasterKey,
-  ADOPT_NOT_SUPPORTED,
 } from "../secrets";
 
 describe("secrets API — uses ApiClient (C2 fix)", () => {
@@ -280,6 +278,19 @@ describe("findSecret", () => {
     ]);
     expect(await findSecret("default", "no-such-key")).toBeNull();
   });
+
+  it("looks the key up by its own path, and raises anything but a 404", async () => {
+    let url = "";
+    server.use(
+      http.get("*/secretstore/secrets/:tenantId/:keyName", ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({ error: "Failed to get metadata" }, { status: 500 });
+      }),
+    );
+    // "Could not check" must never read as "free to create".
+    await expect(findSecret("team a", "k/1")).rejects.toThrow("Failed to get metadata");
+    expect(new URL(url).pathname).toBe("/secretstore/secrets/team%20a/k%2F1");
+  });
 });
 
 describe("path segments are encoded", () => {
@@ -302,46 +313,5 @@ describe("path segments are encoded", () => {
       expect(new URL(url).search).toBe("");
     }
     expect(urls).toHaveLength(2);
-  });
-});
-
-describe("adoptMasterKey", () => {
-  it("POSTs with confirm=true and returns the tenants that need a reset", async () => {
-    let url = "";
-    server.use(
-      http.post("*/secretstore/secrets/admin/adopt-master-key", ({ request }) => {
-        url = request.url;
-        return HttpResponse.json({
-          tenantsNeedingReset: ["default", "team-b"],
-          systemValuesReset: true,
-          message: "adopted",
-        });
-      }),
-    );
-    const result = await adoptMasterKey();
-    expect(new URL(url).searchParams.get("confirm")).toBe("true");
-    expect(result).toEqual({
-      tenantsNeedingReset: ["default", "team-b"],
-      systemValuesReset: true,
-      message: "adopted",
-    });
-  });
-
-  it("reports a backend without the operation as ADOPT_NOT_SUPPORTED, not as a failure", async () => {
-    server.use(
-      http.post("*/secretstore/secrets/admin/adopt-master-key", () =>
-        new HttpResponse(null, { status: 404 }),
-      ),
-    );
-    await expect(adoptMasterKey()).rejects.toMatchObject({ code: ADOPT_NOT_SUPPORTED });
-  });
-
-  it("keeps the backend's refusal message for any other error", async () => {
-    server.use(
-      http.post("*/secretstore/secrets/admin/adopt-master-key", () =>
-        HttpResponse.json({ error: "Adopting the master key failed" }, { status: 500 }),
-      ),
-    );
-    await expect(adoptMasterKey()).rejects.toThrow("Adopting the master key failed");
   });
 });

@@ -8,7 +8,6 @@ import {
   rotateDek,
   rotateKek,
   resetTenant,
-  adoptMasterKey,
   findSecret,
   updateSecretGrant,
   grantsAllAgents,
@@ -250,22 +249,6 @@ export function useResetTenant() {
         queryKey: secretKeys.list(vars.tenantId),
       });
       qc.invalidateQueries({ queryKey: secretKeys.all });
-    },
-  });
-}
-
-/**
- * Adopt the running master key after the previous one was lost. Every tenant's
- * listing may change (the system tenant can be reset), so everything is
- * invalidated, and health is re-checked.
- */
-export function useAdoptMasterKey() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => adoptMasterKey(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: secretKeys.all });
-      qc.invalidateQueries({ queryKey: secretKeys.health });
     },
   });
 }

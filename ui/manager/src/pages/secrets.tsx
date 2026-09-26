@@ -33,15 +33,12 @@ import {
   useRotateDek,
   useRotateKek,
   useResetTenant,
-  useAdoptMasterKey,
 } from "@/hooks/use-secrets";
 import {
   grantsAllAgents,
   SecretsError,
-  ADOPT_NOT_SUPPORTED,
   SECRET_EXISTS,
   SECRET_NOT_FOUND,
-  type AdoptMasterKeyResponse,
   type SecretMetadata,
 } from "@/lib/api/secrets";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -93,9 +90,6 @@ export function SecretsPage() {
   const [kekNewVisible, setKekNewVisible] = useState(false);
   const [resetConfirm, setResetConfirm] = useState("");
   const [kekResult, setKekResult] = useState<number | null>(null);
-  const [showAdoptKey, setShowAdoptKey] = useState(false);
-  const [adoptAcknowledged, setAdoptAcknowledged] = useState(false);
-  const [adoptResult, setAdoptResult] = useState<AdoptMasterKeyResponse | null>(null);
 
   /* ─── Queries ─── */
   const {
@@ -112,7 +106,6 @@ export function SecretsPage() {
   const rotateDekMut = useRotateDek();
   const rotateKekMut = useRotateKek();
   const resetTenantMut = useResetTenant();
-  const adoptKeyMut = useAdoptMasterKey();
 
   const vaultDown = vaultHealth?.available === false;
   const secretCount = secrets?.length ?? 0;
@@ -141,12 +134,6 @@ export function SecretsPage() {
           return t(
             "secrets.rotateNotFound",
             "This secret no longer exists, so there is nothing to rotate. Add it again instead.",
-          );
-        }
-        if (err.code === ADOPT_NOT_SUPPORTED) {
-          return t(
-            "secrets.adoptNotSupported",
-            "This EDDI version has no adopt step and does not need one: reset the affected tenant directly.",
           );
         }
       }
@@ -259,27 +246,6 @@ export function SecretsPage() {
       },
     );
   }, [rotateTarget, rotateValue, rotateMut, t, secretsErrorMessage]);
-
-  const handleAdoptKey = useCallback(() => {
-    if (!adoptAcknowledged) return;
-    adoptKeyMut.mutate(undefined, {
-      onSuccess: (data) => {
-        setAdoptResult(data);
-        setShowAdoptKey(false);
-        setAdoptAcknowledged(false);
-        toast.success(t("secrets.adoptSuccess", "Master key adopted — new secrets can be stored again"));
-      },
-      onError: (err) => {
-        setShowAdoptKey(false);
-        setAdoptAcknowledged(false);
-        if (err instanceof SecretsError && err.code === ADOPT_NOT_SUPPORTED) {
-          toast.info(secretsErrorMessage(err));
-          return;
-        }
-        toast.error(secretsErrorMessage(err));
-      },
-    });
-  }, [adoptAcknowledged, adoptKeyMut, t, secretsErrorMessage]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -781,7 +747,7 @@ export function SecretsPage() {
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             {/* Rotate DEK */}
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
               <div className="flex items-center gap-2">
@@ -854,124 +820,9 @@ export function SecretsPage() {
               </button>
             </div>
 
-            {/* Adopt master key — the lost-key recovery step */}
-            <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-card p-3">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-destructive" />
-                <span className="text-sm font-medium text-foreground">
-                  {t("secrets.adoptTitle", "Adopt current master key")}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  "secrets.adoptBlurb",
-                  "Only when the previous master key is lost for good. Lets the vault store secrets again under the key EDDI now runs with, and lists the tenants that must then be reset.",
-                )}
-              </p>
-              <button
-                onClick={() => {
-                  adoptKeyMut.reset();
-                  setAdoptAcknowledged(false);
-                  setShowAdoptKey(true);
-                }}
-                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
-                data-testid="open-adopt-key"
-              >
-                <KeyRound className="h-3.5 w-3.5" />
-                {t("secrets.adoptAction", "Adopt master key")}
-              </button>
-            </div>
           </div>
-
-          {/* Adopt result — which tenants still hold unreadable secrets */}
-          {adoptResult && (
-            <div
-              className="relative space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 pe-10"
-              data-testid="adopt-key-result"
-              role="status"
-            >
-              <button
-                type="button"
-                onClick={() => setAdoptResult(null)}
-                className="absolute inset-e-2 top-2 rounded-md p-1 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
-                aria-label={t("common.dismiss", "Dismiss")}
-              >
-                <X className="h-4 w-4" />
-              </button>
-              {adoptResult.tenantsNeedingReset.length === 0 ? (
-                <p className="text-sm text-foreground">
-                  {t("secrets.adoptResultNone", "No tenant holds secrets sealed under the lost key.")}
-                </p>
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-                    {t("secrets.adoptResultReset", {
-                      count: adoptResult.tenantsNeedingReset.length,
-                      defaultValue: `${adoptResult.tenantsNeedingReset.length} tenant(s) still hold secrets sealed under the lost key. Reset each one, then store its secrets again.`,
-                    })}
-                  </p>
-                  <ul className="flex flex-wrap gap-2">
-                    {adoptResult.tenantsNeedingReset.map((tenant) => (
-                      <li key={tenant}>
-                        <button
-                          type="button"
-                          onClick={() => setTenantInput(tenant)}
-                          className="rounded-md border border-border bg-card px-2 py-1 font-mono text-xs text-foreground hover:bg-muted"
-                          data-testid={`adopt-reset-tenant-${tenant}`}
-                        >
-                          {tenant}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-xs text-muted-foreground">
-                    {t("secrets.adoptResultHint", "Select a tenant to switch to it, then use \"Reset vault\" above.")}
-                  </p>
-                </>
-              )}
-              {adoptResult.systemValuesReset && (
-                <p className="text-xs text-muted-foreground">
-                  {t(
-                    "secrets.adoptResultSystem",
-                    "EDDI's own sealed values were unreadable and have been discarded; the audit ledger now signs with a new key.",
-                  )}
-                </p>
-              )}
-            </div>
-          )}
         </div>
       )}
-
-      {/* ─── Adopt master key confirmation ─── */}
-      <AlertDialog
-        open={showAdoptKey}
-        onOpenChange={(open) => {
-          setShowAdoptKey(open);
-          if (!open) setAdoptAcknowledged(false);
-        }}
-        variant="destructive"
-        title={t("secrets.adoptConfirmTitle", "Adopt the current master key?")}
-        description={t(
-          "secrets.adoptConfirmDesc",
-          "Use this only if the previous master key is gone for good. Everything sealed under it becomes permanently unreadable. If a master-key rotation was merely interrupted, or one EDDI instance still runs with the old key, do not adopt — re-run the rotation with the same two keys instead, which recovers everything.",
-        )}
-        confirmLabel={t("secrets.adoptConfirm", "Adopt master key")}
-        cancelLabel={t("common.cancel", "Cancel")}
-        onConfirm={handleAdoptKey}
-        isPending={adoptKeyMut.isPending}
-        confirmDisabled={!adoptAcknowledged}
-      >
-        <label className="flex items-start gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={adoptAcknowledged}
-            onChange={(e) => setAdoptAcknowledged(e.target.checked)}
-            className="mt-0.5"
-            data-testid="adopt-key-ack"
-          />
-          {t("secrets.adoptAck", "The previous master key is lost and cannot be recovered.")}
-        </label>
-      </AlertDialog>
 
       {/* ─── Rotate DEK confirmation ─── */}
       <AlertDialog
