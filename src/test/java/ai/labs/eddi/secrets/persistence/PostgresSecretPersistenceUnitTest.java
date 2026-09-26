@@ -482,6 +482,9 @@ class PostgresSecretPersistenceUnitTest {
         when(resultSet.getString("value")).thenReturn("winner");
 
         assertEquals("winner", persistence.putMetaValueIfAbsent("salt", "mine"));
+        // The read-back goes through getMetaValue, whose try-with-resources closes the
+        // ResultSet, the statement and the connection on every path.
+        verify(resultSet).close();
     }
 
     @Test
