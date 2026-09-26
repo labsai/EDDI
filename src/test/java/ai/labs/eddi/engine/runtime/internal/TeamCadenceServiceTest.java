@@ -35,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -57,6 +58,7 @@ class TeamCadenceServiceTest {
     private GroupConversationService groupConversationService;
     private ITemplatingEngine templatingEngine;
     private TeamCadenceService service;
+    private GroupConversationService.CadenceDiscussion prepared;
 
     @BeforeEach
     void setUp() {
@@ -86,7 +88,7 @@ class TeamCadenceServiceTest {
             workspace.getBacklog().addTask(task);
         }
         when(workspaceStore.find(GROUP_ID)).thenReturn(workspace);
-        lenient().when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(true);
+        lenient().when(workspaceStore.casRunningDiscussion(any())).thenReturn(true);
         return workspace;
     }
 
@@ -99,8 +101,10 @@ class TeamCadenceServiceTest {
         gc.setId(GC_ID);
         gc.setGroupId(GROUP_ID);
         gc.setState(GroupConversationState.IN_PROGRESS);
-        when(groupConversationService.startCadenceDiscussionAsync(eq(GROUP_ID), anyString(), anyString(), anyList(),
-                any(), any())).thenReturn(gc);
+        prepared = mock(GroupConversationService.CadenceDiscussion.class);
+        when(prepared.conversation()).thenReturn(gc);
+        when(groupConversationService.prepareCadenceDiscussion(eq(GROUP_ID), anyString(), anyString(), anyList(),
+                any(), any())).thenReturn(prepared);
         return gc;
     }
 
@@ -127,7 +131,7 @@ class TeamCadenceServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<TaskDefinition>> tasksCaptor = ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<String> questionCaptor = ArgumentCaptor.forClass(String.class);
-        verify(groupConversationService).startCadenceDiscussionAsync(eq(GROUP_ID), questionCaptor.capture(),
+        verify(groupConversationService).prepareCadenceDiscussion(eq(GROUP_ID), questionCaptor.capture(),
                 eq("pm@example.com"), tasksCaptor.capture(), eq(3.50), any());
         assertEquals(List.of("Urgent", "Mid"), tasksCaptor.getValue().stream().map(TaskDefinition::subject).toList(),
                 "top-N by priority, highest first — 'Low' stays on the backlog");
@@ -138,7 +142,11 @@ class TeamCadenceServiceTest {
         long inProgress = workspace.getBacklog().getTasks().stream()
                 .filter(t -> t.status() == TaskStatus.IN_PROGRESS).count();
         assertEquals(2, inProgress, "pulled tasks are marked while the discussion owns them");
-        verify(workspaceStore).casRunningDiscussion(workspace, GroupWorkspace.NO_RUNNING_DISCUSSION);
+        verify(workspaceStore).casRunningDiscussion(workspace);
+        // The run starts only once the claim is persisted.
+        var order = inOrder(workspaceStore, prepared);
+        order.verify(workspaceStore).casRunningDiscussion(workspace);
+        order.verify(prepared).launch();
     }
 
     @Test
@@ -149,7 +157,7 @@ class TeamCadenceServiceTest {
 
         assertTrue(result.isSuccess());
         assertNotNull(result.skippedReason());
-        verify(groupConversationService, never()).startCadenceDiscussionAsync(any(), any(), any(), any(), any(), any());
+        verify(groupConversationService, never()).prepareCadenceDiscussion(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -183,7 +191,7 @@ class TeamCadenceServiceTest {
 
         assertTrue(result.isSuccess());
         assertTrue(result.skippedReason().contains("older-gc"));
-        verify(groupConversationService, never()).startCadenceDiscussionAsync(any(), any(), any(), any(), any(), any());
+        verify(groupConversationService, never()).prepareCadenceDiscussion(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -226,7 +234,7 @@ class TeamCadenceServiceTest {
         doneGc.setState(GroupConversationState.COMPLETED);
         when(conversationStore.read("settled-gc")).thenReturn(doneGc);
         // Another reconciler got there first.
-        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(false);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
 
         var result = service.processScheduledFire(metadata());
 
@@ -236,21 +244,78 @@ class TeamCadenceServiceTest {
                 "the operator cannot act on a skip that names no discussion: " + result.skippedReason());
         assertFalse(result.skippedReason().contains("discussion  "),
                 "an empty id means the message was built after settle() cleared it: " + result.skippedReason());
-        verify(groupConversationService, never()).startCadenceDiscussionAsync(any(), any(), any(), any(), any(), any());
+        verify(groupConversationService, never()).prepareCadenceDiscussion(any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    @DisplayName("a lost claim cancels the just-started discussion and stands down")
+    @DisplayName("a lost claim retires the prepared discussion WITHOUT ever launching it, and stands down")
     void fire_lostClaim_cancelsAndSkips() throws Exception {
         workspace(cadence(5, null), new TaskItem("T", "", 0));
-        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(false);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
         startedGc();
 
         var result = service.processScheduledFire(metadata());
 
         assertTrue(result.isSuccess());
         assertNotNull(result.skippedReason());
-        verify(groupConversationService).cancelDiscussion(eq(GC_ID), any());
+        // The run used to be submitted before the claim, so the cancel that followed
+        // a lost claim raced a leg possibly already inside phase 0.
+        verify(prepared, never()).launch();
+        verify(prepared).abandon();
+        verify(groupConversationService, never()).cancelDiscussion(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("H14c: a claim that lost only to an unrelated backlog edit is re-applied to the fresh document, then launched")
+    void fire_claimLostToUnrelatedEdit_retriesOnFreshDocument() throws Exception {
+        var task = new TaskItem("T", "", 0);
+        var workspace = workspace(cadence(5, null), task);
+        // The fresh read: still idle, the pulled task still waiting, plus a task a
+        // human added between our read and our claim (the edit that bumped the
+        // revision and made the first CAS lose).
+        var fresh = new GroupWorkspace();
+        fresh.setId("ws-1");
+        fresh.setGroupId(GROUP_ID);
+        fresh.addCadence(cadence(5, null));
+        fresh.getBacklog().addTask(task);
+        var addedMeanwhile = fresh.getBacklog().addTask(new TaskItem("Added meanwhile", "", 0));
+        when(workspaceStore.find(GROUP_ID)).thenReturn(workspace, fresh);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false, true);
+        startedGc();
+
+        var result = service.processScheduledFire(metadata());
+
+        assertTrue(result.isSuccess());
+        assertNull(result.skippedReason(), "not a lost claim — nobody else holds the workspace");
+        verify(workspaceStore).casRunningDiscussion(fresh);
+        assertEquals(GC_ID, fresh.getRunningDiscussionId());
+        assertEquals(TaskStatus.IN_PROGRESS, fresh.getBacklog().findById(task.id()).status());
+        assertEquals(TaskStatus.PENDING, fresh.getBacklog().findById(addedMeanwhile.id()).status(),
+                "the concurrently added task rides the claim write untouched — not dropped");
+        verify(prepared).launch();
+        verify(prepared, never()).abandon();
+    }
+
+    @Test
+    @DisplayName("H14c: a claim retry stands down when the fresh document is already claimed by another run")
+    void fire_claimRetry_freshDocumentClaimed_standsDown() throws Exception {
+        var task = new TaskItem("T", "", 0);
+        var workspace = workspace(cadence(5, null), task);
+        var fresh = new GroupWorkspace();
+        fresh.setId("ws-1");
+        fresh.setGroupId(GROUP_ID);
+        fresh.getBacklog().addTask(task);
+        fresh.setRunningDiscussionId("gc-other-pod");
+        when(workspaceStore.find(GROUP_ID)).thenReturn(workspace, fresh);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
+        startedGc();
+
+        var result = service.processScheduledFire(metadata());
+
+        assertNotNull(result.skippedReason());
+        verify(workspaceStore).casRunningDiscussion(any());
+        verify(prepared, never()).launch();
+        verify(prepared).abandon();
     }
 
     @Test
@@ -265,7 +330,7 @@ class TeamCadenceServiceTest {
 
         assertTrue(result.isSuccess());
         ArgumentCaptor<String> questionCaptor = ArgumentCaptor.forClass(String.class);
-        verify(groupConversationService).startCadenceDiscussionAsync(eq(GROUP_ID), questionCaptor.capture(),
+        verify(groupConversationService).prepareCadenceDiscussion(eq(GROUP_ID), questionCaptor.capture(),
                 anyString(), anyList(), any(), any());
         assertTrue(questionCaptor.getValue().contains("Fix the flaky test"));
     }
@@ -332,8 +397,7 @@ class TeamCadenceServiceTest {
 
         assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
         assertTrue(workspace.getPulledTaskIds().isEmpty());
-        verify(workspaceStore).casRunningDiscussion(workspace, GC_ID);
-        verify(workspaceStore, never()).update(any());
+        verify(workspaceStore).casRunningDiscussion(workspace);
     }
 
     @Test
@@ -341,7 +405,14 @@ class TeamCadenceServiceTest {
     void writeback_lostSettleRace_dropsMutations() throws Exception {
         var taskA = new TaskItem("A", "", 0);
         var workspace = pulledWorkspace(taskA, new TaskItem("B", "", 0));
-        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenReturn(false);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
+        // What a concurrent reconciler left behind: settled, and already re-claimed
+        // by the next run.
+        var settledElsewhere = new GroupWorkspace();
+        settledElsewhere.setId("ws-1");
+        settledElsewhere.setGroupId(GROUP_ID);
+        settledElsewhere.setRunningDiscussionId("gc-next");
+        when(workspaceStore.find(GROUP_ID)).thenReturn(settledElsewhere);
         var gc = new GroupConversation();
         gc.setId(GC_ID);
         gc.setState(GroupConversationState.COMPLETED);
@@ -349,13 +420,47 @@ class TeamCadenceServiceTest {
 
         assertFalse(service.writebackCompleted(workspace, gc),
                 "a concurrent reconciler settled first — this caller's writeback must report defeat");
-        // The ONLY store interaction is the failed conditional release — the
-        // in-memory mutations (task statuses, metrics, cleared claim fields) die
-        // with this discarded snapshot; any additional store call here would be a
-        // partial persistence of a lost race (review nitpick: pin the write
-        // surface, not just the update() legacy path).
-        verify(workspaceStore).casRunningDiscussion(workspace, GC_ID);
+        // The ONLY write is the failed conditional release — the in-memory mutations
+        // (task statuses, metrics, cleared claim fields) die with this discarded
+        // snapshot; any additional write here would be a partial persistence of a
+        // lost race. The re-read is how it tells "settled elsewhere" (stop) from
+        // "lost to an unrelated edit" (redo — see the next test).
+        verify(workspaceStore).casRunningDiscussion(workspace);
+        verify(workspaceStore).find(GROUP_ID);
         verifyNoMoreInteractions(workspaceStore);
+    }
+
+    @Test
+    @DisplayName("H14c: a settle that lost only to an unrelated backlog edit redoes the writeback on the fresh document")
+    void writeback_lostToUnrelatedEdit_redoesOnFreshDocument() throws Exception {
+        var taskA = new TaskItem("A", "", 0);
+        var workspace = pulledWorkspace(taskA, new TaskItem("B", "", 0));
+        // The fresh document: still claimed by GC_ID (nobody settled it), plus a task
+        // a human added meanwhile — the edit that bumped the revision.
+        var fresh = new GroupWorkspace();
+        fresh.setId("ws-1");
+        fresh.setGroupId(GROUP_ID);
+        fresh.getBacklog().addTask(new TaskItem(taskA.id(), "A", "", TaskStatus.IN_PROGRESS, null, null, List.of(), null,
+                null, false, 0, taskA.createdAt(), null));
+        var addedMeanwhile = fresh.getBacklog().addTask(new TaskItem("Added meanwhile", "", 0));
+        fresh.setRunningDiscussionId(GC_ID);
+        fresh.setPulledTaskIds(List.of(taskA.id()));
+        when(workspaceStore.find(GROUP_ID)).thenReturn(fresh);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(false, true);
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setState(GroupConversationState.FAILED);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+
+        assertTrue(service.reconcile(workspace), "the redo on the fresh document settles the run");
+
+        verify(workspaceStore).casRunningDiscussion(fresh);
+        assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, fresh.getRunningDiscussionId());
+        assertEquals(TaskStatus.PENDING, fresh.getBacklog().findById(taskA.id()).status(),
+                "the pulled task went back to the backlog on the document that was actually written");
+        assertNotNull(fresh.getBacklog().findById(addedMeanwhile.id()),
+                "the concurrently added task survives — the whole-document write was of the FRESH copy");
+        assertEquals(1, fresh.getMetrics().getDiscussions(), "counted once, on the written copy");
     }
 
     @Test
@@ -434,7 +539,6 @@ class TeamCadenceServiceTest {
 
         assertTrue(service.reconcile(workspace));
 
-        verify(workspaceStore, never()).update(any());
     }
 
     // =================================================================
@@ -442,16 +546,17 @@ class TeamCadenceServiceTest {
     // =================================================================
 
     @Test
-    @DisplayName("a store failure during the claim CAS cancels the just-started discussion before failing")
+    @DisplayName("a store failure during the claim CAS retires the prepared discussion before failing")
     void fire_claimThrows_cancelsStartedDiscussion() throws Exception {
         workspace(cadence(5, null), new TaskItem("T", "", 0));
-        when(workspaceStore.casRunningDiscussion(any(), anyString())).thenThrow(new RuntimeException("store down"));
+        when(workspaceStore.casRunningDiscussion(any())).thenThrow(new RuntimeException("store down"));
         startedGc();
 
         var result = service.processScheduledFire(metadata());
 
         assertFalse(result.isSuccess());
-        verify(groupConversationService).cancelDiscussion(eq(GC_ID), any());
+        verify(prepared, never()).launch();
+        verify(prepared).abandon();
     }
 
     @Test

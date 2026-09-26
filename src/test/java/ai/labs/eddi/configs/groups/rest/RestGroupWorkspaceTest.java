@@ -110,7 +110,6 @@ class RestGroupWorkspaceTest {
         assertEquals("Ship it", task.subject());
         assertEquals(3, task.priority());
         verify(workspaceStore).casRevision(workspace);
-        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -126,7 +125,6 @@ class RestGroupWorkspaceTest {
         assertEquals(409, response.getStatus());
         assertTrue(String.valueOf(response.getEntity()).contains("complete or delete"),
                 "the error says what to do about it: " + response.getEntity());
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -147,7 +145,6 @@ class RestGroupWorkspaceTest {
         String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
         assertEquals(400, rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("Ok", longDescription, 0)).getStatus());
 
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -162,7 +159,6 @@ class RestGroupWorkspaceTest {
         assertEquals(409, response.getStatus());
         assertTrue(String.valueOf(response.getEntity()).contains("subject"), String.valueOf(response.getEntity()));
         assertEquals(1, workspace.getBacklog().size());
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -194,7 +190,7 @@ class RestGroupWorkspaceTest {
     void addCadence_workspaceWriteFails_deletesSchedule() throws Exception {
         var workspace = workspace();
         when(scheduleStore.createSchedule(any())).thenReturn("sched-9");
-        doThrow(new IResourceStore.ResourceStoreException("store down")).when(workspaceStore).update(workspace);
+        doThrow(new IResourceStore.ResourceStoreException("store down")).when(workspaceStore).casRevision(workspace);
 
         var response = rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, null, 0, null));
 
@@ -226,7 +222,84 @@ class RestGroupWorkspaceTest {
         assertEquals(3, cadence.maxBacklogTasksPerRun());
         assertEquals(2.50, cadence.maxCostPerRun());
         assertEquals("pm@example.com", cadence.createdBy(), "cadence runs are attributable to their creator");
-        verify(workspaceStore).update(workspace);
+        verify(workspaceStore).casRevision(workspace);
+    }
+
+    @Test
+    @DisplayName("H14c: a cadence add is revision-checked — a lost write re-reads, so a concurrent claim or task survives")
+    void addCadence_lostWrite_retriesOnFreshDocument() throws Exception {
+        var stale = workspace();
+        var fresh = new GroupWorkspace();
+        fresh.setId("ws-1");
+        fresh.setGroupId(GROUP_ID);
+        fresh.setRunningDiscussionId("gc-claimed-meanwhile");
+        when(workspaceStore.readOrCreate(GROUP_ID)).thenReturn(stale, fresh);
+        when(workspaceStore.casRevision(stale)).thenReturn(false);
+        when(workspaceStore.casRevision(fresh)).thenReturn(true);
+        when(scheduleStore.createSchedule(any())).thenReturn("sched-9");
+
+        var response = rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, null, 0, null));
+
+        assertEquals(201, response.getStatus());
+        assertEquals(1, fresh.getCadences().size(), "the cadence lands on the document that was actually written");
+        assertEquals("gc-claimed-meanwhile", fresh.getRunningDiscussionId(),
+                "the run claim taken meanwhile is not written away — the old plain update() did exactly that");
+        verify(scheduleStore, never()).deleteSchedule(anyString());
+    }
+
+    @Test
+    @DisplayName("H14c: exhausted cadence-add retries answer 409 and delete the just-created schedule")
+    void addCadence_retriesExhausted_409_andNoOrphanSchedule() throws Exception {
+        var workspace = workspace();
+        when(workspaceStore.casRevision(workspace)).thenReturn(false);
+        when(scheduleStore.createSchedule(any())).thenReturn("sched-9");
+
+        var response = rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", null, null, 0, null));
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore).deleteSchedule("sched-9");
+    }
+
+    @Test
+    @DisplayName("H14c: a cadence delete is revision-checked and retried against a fresh read")
+    void deleteCadence_lostWrite_retriesOnFreshDocument() throws Exception {
+        var stale = workspace();
+        stale.addCadence(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
+        var fresh = new GroupWorkspace();
+        fresh.setId("ws-1");
+        fresh.setGroupId(GROUP_ID);
+        fresh.addCadence(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
+        fresh.setRunningDiscussionId("gc-claimed-meanwhile");
+        when(workspaceStore.find(GROUP_ID)).thenReturn(stale, fresh);
+        when(workspaceStore.casRevision(stale)).thenReturn(false);
+        when(workspaceStore.casRevision(fresh)).thenReturn(true);
+
+        assertEquals(204, rest.deleteCadence(GROUP_ID, "c-1").getStatus());
+
+        assertTrue(fresh.getCadences().isEmpty());
+        assertEquals("gc-claimed-meanwhile", fresh.getRunningDiscussionId());
+    }
+
+    @Test
+    @DisplayName("review #5: a cadence delete that loses its write answers 409 and leaves the schedule alone")
+    void deleteCadence_retriesExhausted_409_keepsSchedule() throws Exception {
+        workspace();
+        // Every read is a fresh document that still holds the cadence (a real store
+        // never hands back the instance a lost write already mutated).
+        when(workspaceStore.find(GROUP_ID)).thenAnswer(inv -> {
+            var fresh = new GroupWorkspace();
+            fresh.setId("ws-1");
+            fresh.setGroupId(GROUP_ID);
+            fresh.addCadence(new Cadence("c-1", "sched-9", null, 5, null, "pm"));
+            return fresh;
+        });
+        when(workspaceStore.casRevision(any())).thenReturn(false);
+
+        var response = rest.deleteCadence(GROUP_ID, "c-1");
+
+        assertEquals(409, response.getStatus());
+        verify(workspaceStore, times(RestGroupWorkspace.MAX_CAS_ATTEMPTS)).casRevision(any());
+        verify(scheduleStore, never()).deleteSchedule(anyString());
     }
 
     @Test
@@ -267,7 +340,7 @@ class RestGroupWorkspaceTest {
         assertEquals(204, response.getStatus());
         verify(scheduleStore).deleteSchedule("sched-9");
         assertTrue(workspace.getCadences().isEmpty());
-        verify(workspaceStore).update(workspace);
+        verify(workspaceStore).casRevision(workspace);
     }
 
     @Test

@@ -844,6 +844,48 @@ class GroupConversationServiceBranchCoverageTest {
     }
 
     // =========================================================
+    // Document deleted while the discussion runs (H9b follow-up)
+    // =========================================================
+
+    @Nested
+    @DisplayName("document deleted while the discussion runs")
+    class DeletedWhileRunning {
+
+        /**
+         * update() no longer recreates a deleted document; it throws Gone. A GDPR
+         * erasure or the delete endpoint (possibly on another node) removing the
+         * document mid-run must end the leg as a cancel with a terminal event — not
+         * escape, not report "The group discussion failed", not leave the stream open.
+         */
+        @Test
+        @DisplayName("a mid-phase write that finds the document gone ends the leg as cancelled, with a terminal event")
+        void midPhaseGoneEndsAsCancelled() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            setupStore(cfg);
+            stubAgent("a1", "Alice opinion");
+            // Running-leg writes are conditional (updateIfState) on this branch.
+            doThrow(new IGroupConversationStore.GroupConversationGoneException("gone", null))
+                    .when(conversationStore).updateIfState(any(), any());
+            var listener = mock(IGroupConversationService.GroupDiscussionEventListener.class);
+
+            var result = assertDoesNotThrow(() -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0, listener));
+
+            assertEquals(GroupConversationState.CANCELLED, result.getState());
+            verify(listener).onCancelled(any());
+            verify(listener, never()).onGroupError(any());
+        }
+
+        @Test
+        @DisplayName("the cause chain is searched, so a wrapped Gone counts too")
+        void wrappedGoneIsRecognised() {
+            var gone = new IGroupConversationStore.GroupConversationGoneException("gone", null);
+            assertTrue(GroupConversationService.isDeletedWhileRunning(new RuntimeException(new IllegalStateException(gone))));
+            assertFalse(GroupConversationService.isDeletedWhileRunning(new RuntimeException("DB down")));
+        }
+    }
+
+    // =========================================================
     // Async error with listener
     // =========================================================
 

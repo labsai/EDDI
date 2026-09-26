@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.NegotiationConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Concession;
@@ -64,6 +65,18 @@ public final class NegotiationEngine {
      */
     static final int MAX_QUOTED_TERMS_CHARS = 600;
 
+    /**
+     * M-G1 defaults (configurable through
+     * {@code AgentGroupConfiguration.negotiationConfig}). The ledger is quoted into
+     * every later PROPOSAL/BARGAIN/SYNTHESIS turn, and a model can emit any number
+     * of array entries in one reply — without caps a single turn grew every later
+     * prompt without bound. The rendering window also bounds a ledger stored before
+     * the caps existed.
+     */
+    static final int MAX_CONCESSIONS_PER_MOVE = NegotiationConfig.DEFAULT_MAX_PER_MOVE;
+    static final int MAX_LEDGER_CONCESSIONS = NegotiationConfig.DEFAULT_MAX_LEDGER;
+    static final int MAX_RENDERED_CONCESSIONS = NegotiationConfig.DEFAULT_MAX_RENDERED;
+
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .build();
@@ -101,9 +114,19 @@ public final class NegotiationEngine {
      */
     public static void applyRepeat(GroupConversation gc, List<TranscriptEntry> repeatEntries,
                                    int transcriptOffset, int round) {
+        applyRepeat(gc, repeatEntries, transcriptOffset, round, null);
+    }
+
+    /**
+     * As {@link #applyRepeat(GroupConversation, List, int, int)}, under the group's
+     * ledger bounds ({@code null} = defaults).
+     */
+    public static void applyRepeat(GroupConversation gc, List<TranscriptEntry> repeatEntries,
+                                   int transcriptOffset, int round, NegotiationConfig config) {
         if (repeatEntries == null || repeatEntries.isEmpty()) {
             return;
         }
+        NegotiationConfig bounds = config != null ? config : new NegotiationConfig();
         NegotiationState state = gc.negotiationState();
         for (int i = 0; i < repeatEntries.size(); i++) {
             TranscriptEntry entry = repeatEntries.get(i);
@@ -114,13 +137,13 @@ public final class NegotiationEngine {
             if (entry.type() == TranscriptEntryType.PROPOSAL) {
                 addProposal(state, entry.speakerAgentId(), entry.content().trim(), round, entryIndex);
             } else if (entry.type() == TranscriptEntryType.BARGAIN) {
-                BargainMove move = parseBargain(entry.content());
+                BargainMove move = parseBargain(entry.content(), bounds.maxConcessionsPerMove());
                 if (move == null) {
                     LOGGER.warnf("Group %s: unparseable BARGAIN turn from '%s' — prose only, no state effect",
                             LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(entry.speakerAgentId()));
                     continue;
                 }
-                applyMove(gc, state, entry.speakerAgentId(), move, round, entryIndex);
+                applyMove(gc, state, entry.speakerAgentId(), move, round, entryIndex, bounds.maxLedgerConcessions());
             }
         }
     }
@@ -129,6 +152,10 @@ public final class NegotiationEngine {
      * Three-tier BARGAIN parse. {@code null} = not a readable move.
      */
     static BargainMove parseBargain(String content) {
+        return parseBargain(content, MAX_CONCESSIONS_PER_MOVE);
+    }
+
+    static BargainMove parseBargain(String content, int maxConcessionsPerMove) {
         JsonNode node = readJson(content);
         if (node == null) {
             node = readJson(embeddedJson(content));
@@ -152,7 +179,12 @@ public final class NegotiationEngine {
                 // The rule IS the structure: a concession that does not name what
                 // was received in return is not recorded.
                 if (gaveUp != null && !gaveUp.isBlank() && inReturnFor != null && !inReturnFor.isBlank()) {
-                    concessions.add(new ParsedConcession(gaveUp, inReturnFor));
+                    // Stored bounded, not just quoted bounded: the ledger is persisted
+                    // on the discussion document and rides the decision's tally.
+                    concessions.add(new ParsedConcession(truncate(gaveUp), truncate(inReturnFor)));
+                    if (concessions.size() >= maxConcessionsPerMove) {
+                        break;
+                    }
                 }
             }
         }
@@ -163,7 +195,7 @@ public final class NegotiationEngine {
     }
 
     private static void applyMove(GroupConversation gc, NegotiationState state, String agentId, BargainMove move,
-                                  int round, int entryIndex) {
+                                  int round, int entryIndex, int maxLedgerConcessions) {
         boolean counterProposal = move.proposalTerms() != null;
         if (move.accept() != null && counterProposal) {
             // Contradictory intent, resolved deterministically: new terms mean the
@@ -202,6 +234,11 @@ public final class NegotiationEngine {
             added = addProposal(state, agentId, move.proposalTerms(), round, entryIndex);
         }
         for (ParsedConcession c : move.concessions()) {
+            if (state.getConcessions().size() >= maxLedgerConcessions) {
+                LOGGER.warnf("Group %s: the concession ledger is full (%d) — '%s''s further concessions are not recorded",
+                        LogSanitizer.sanitize(gc.getId()), maxLedgerConcessions, LogSanitizer.sanitize(agentId));
+                break;
+            }
             state.addConcession(new Concession(agentId, round, c.gaveUp(), c.inReturnFor(),
                     added != null ? added.id() : null));
         }
@@ -325,6 +362,18 @@ public final class NegotiationEngine {
      * there is no state yet.
      */
     public static String appendStateIfRelevant(String input, GroupConversation gc, DiscussionPhase phase) {
+        return appendStateIfRelevant(input, gc, phase, null);
+    }
+
+    /**
+     * As
+     * {@link #appendStateIfRelevant(String, GroupConversation, DiscussionPhase)},
+     * quoting at most the group's configured ledger window ({@code null} =
+     * defaults).
+     */
+    public static String appendStateIfRelevant(String input, GroupConversation gc, DiscussionPhase phase,
+                                               NegotiationConfig config) {
+        int maxRendered = config != null ? config.maxRenderedConcessions() : MAX_RENDERED_CONCESSIONS;
         NegotiationState state = gc.getNegotiation();
         if (state == null || (state.getProposals().isEmpty() && state.getConcessions().isEmpty())) {
             return input;
@@ -352,7 +401,12 @@ public final class NegotiationEngine {
         if (state.getConcessions().isEmpty()) {
             sb.append("- (empty)\n");
         } else {
-            for (Concession c : state.getConcessions()) {
+            List<Concession> ledger = state.getConcessions();
+            int omitted = Math.max(0, ledger.size() - maxRendered);
+            if (omitted > 0) {
+                sb.append("- (").append(omitted).append(" earlier concession(s) omitted)\n");
+            }
+            for (Concession c : ledger.subList(omitted, ledger.size())) {
                 sb.append("- ").append(c.byAgentId()).append(" gave up \"").append(truncate(c.gaveUp()))
                         .append("\" in return for \"").append(truncate(c.inReturnFor())).append("\"\n");
             }

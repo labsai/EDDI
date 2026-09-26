@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -104,20 +105,58 @@ class GroupWorkspaceStoreTest {
     }
 
     @Test
-    @DisplayName("a pre-revision document is stamped with one plain write, then CAS'd forever after")
-    void casRevision_legacyNullRevision_stampsWithPlainWrite() throws Exception {
+    @DisplayName("a missing revision is a corrupt document — refused, never written blind")
+    void casRevision_nullRevision_isRefused() {
         var workspace = new GroupWorkspace();
         workspace.setId("ws-1");
         workspace.setGroupId(GROUP_ID);
         workspace.setRevision(null);
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.casRevision(workspace));
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    // =================================================================
+    // casRunningDiscussion — the same revision guard (H14c)
+    // =================================================================
+
+    @Test
+    @DisplayName("a run claim is guarded by the REVISION, so it cannot drop a concurrent backlog edit")
+    void casRunningDiscussion_guardsOnRevision_andBumpsIt() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        workspace.setRunningDiscussionId("gc-new");
         var res = resource(workspace, "ws-1");
         when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
 
-        assertTrue(store.casRevision(workspace));
+        assertTrue(store.casRunningDiscussion(workspace));
 
-        assertEquals("1", workspace.getRevision());
-        verify(storage).store(any(IResourceStorage.IResource.class));
-        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+        assertEquals("8", workspace.getRevision(),
+                "the claim bumps the revision, so a backlog add read before it now loses its CAS instead of "
+                        + "writing the claim away");
+        verify(storage).storeIfFieldEquals(res, "revision", "7");
+        verify(storage, never()).storeIfFieldEquals(any(), eq("runningDiscussionId"), anyString());
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    @Test
+    @DisplayName("a run claim that lost to ANY concurrent write reports false and restores the stamp")
+    void casRunningDiscussion_lostToConcurrentWrite_returnsFalse() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+        doThrow(new IResourceStore.ResourceModifiedException("a backlog add landed first"))
+                .when(storage).storeIfFieldEquals(any(), eq("revision"), eq("7"));
+
+        assertFalse(store.casRunningDiscussion(workspace));
+
+        assertEquals("7", workspace.getRevision());
     }
 
     @Test
@@ -128,7 +167,7 @@ class GroupWorkspaceStoreTest {
         workspace.setGroupId(GROUP_ID);
         workspace.setRevision("not-a-number");
 
-        var thrown = org.junit.jupiter.api.Assertions.assertThrows(
+        var thrown = assertThrows(
                 IResourceStore.ResourceStoreException.class, () -> store.casRevision(workspace));
 
         assertTrue(thrown.getMessage().contains("not-a-number"), thrown.getMessage());

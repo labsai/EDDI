@@ -291,4 +291,84 @@ class VoteTallyEngineTest {
         assertNull(VoteTallyEngine.resolveChoice("Both Adopt PostgreSQL and Stay on MongoDB have merit.", OPTIONS));
         assertNull(VoteTallyEngine.resolveChoice(null, OPTIONS));
     }
+
+    // =================================================================
+    // M-G2: no substring votes, no fallback from a contract-shaped empty ballot
+    // =================================================================
+
+    @Test
+    @DisplayName("M-G2: an empty contract ballot is a non-vote — its statement is never scanned into a vote")
+    void emptyContractBallot_isNotAVote() {
+        var options = List.of("Use Postgres", "Use Mongo");
+        var entry = new TranscriptEntry("a1", "Alice", "{\"votes\": [], \"statement\": \"I lean towards Use Postgres\"}", 0,
+                "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+
+        assertNull(VoteTallyEngine.parseBallot(entry, options, VoteMethod.APPROVAL),
+                "the statement mentioned an option, and the fallback counted it as this member's vote");
+        var nullVote = new TranscriptEntry("a1", "Alice", "{\"vote\": null, \"statement\": \"Use Mongo maybe\"}", 0,
+                "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+        assertNull(VoteTallyEngine.parseBallot(nullVote, options, VoteMethod.MAJORITY));
+    }
+
+    @Test
+    @DisplayName("M-G2: the prose fallback matches whole words — 'No' is not found inside 'not' or 'know'")
+    void proseFallback_matchesWholeWordsOnly() {
+        var options = List.of("Yes", "No");
+        var prose = new TranscriptEntry("a1", "Alice", "I do not know yet, but Yes seems right.", 0, "Ballot",
+                TranscriptEntryType.VOTE, Instant.now(), null, null);
+
+        var ballot = VoteTallyEngine.parseBallot(prose, options, VoteMethod.MAJORITY);
+
+        assertNotNull(ballot, "exactly one option is named as a word");
+        assertEquals(List.of("Yes"), ballot.votes(),
+                "'No' used to match inside 'not'/'know', making the reply ambiguous — or a vote for No");
+        assertEquals("No", VoteTallyEngine.resolveChoice("No.", options));
+        assertNull(VoteTallyEngine.resolveChoice("I cannot know", options));
+    }
+
+    private static TranscriptEntry vote(String content) {
+        return new TranscriptEntry("a1", "Alice", content, 0, "Ballot", TranscriptEntryType.VOTE, Instant.now(), null, null);
+    }
+
+    @Test
+    @DisplayName("M-G2: a ballot with no vote field at all is a non-vote — its statement is never read as one")
+    void missingVoteField_isNotAVote() {
+        assertNull(VoteTallyEngine.parseBallot(vote("{\"statement\": \"Use Postgres, clearly\"}"),
+                List.of("Use Postgres", "Use Mongo"), VoteMethod.MAJORITY));
+    }
+
+    @Test
+    @DisplayName("M-G2: a cast in another shape still counts — the approval array under MAJORITY, a string 'votes'")
+    void castInOtherShape_stillCounts() {
+        var options = List.of("Use Postgres", "Use Mongo");
+
+        var arrayUnderMajority = VoteTallyEngine.parseBallot(
+                vote("{\"votes\": [\"Use Postgres\"], \"statement\": \"Use Mongo would also work\"}"), options,
+                VoteMethod.MAJORITY);
+        assertNotNull(arrayUnderMajority, "the review's regression: a single-element array was dropped under MAJORITY");
+        assertEquals(List.of("Use Postgres"), arrayUnderMajority.votes(), "the cast value decides, not the statement");
+        assertEquals("Use Mongo would also work", arrayUnderMajority.statement());
+
+        var stringUnderApproval = VoteTallyEngine.parseBallot(vote("{\"votes\": \"Use Mongo\"}"), options,
+                VoteMethod.APPROVAL);
+        assertNotNull(stringUnderApproval);
+        assertEquals(List.of("Use Mongo"), stringUnderApproval.votes());
+
+        assertNull(VoteTallyEngine.parseBallot(vote("{\"votes\": [\"Use Postgres\", \"Use Mongo\"]}"), options,
+                VoteMethod.MAJORITY), "two different options cast under a single-choice method is ambiguous");
+    }
+
+    @Test
+    @DisplayName("M-G2: scripts written without spaces still match — the boundary applies only between spaced words")
+    void cjkOptions_matchWithoutSpaces() {
+        var options = List.of("方案A", "方案B");
+
+        var ballot = VoteTallyEngine.parseBallot(vote("我支持方案A。"), options, VoteMethod.MAJORITY);
+
+        assertNotNull(ballot, "the preceding 持 is a letter, but Chinese has no spaces to form a boundary");
+        assertEquals(List.of("方案A"), ballot.votes());
+        assertEquals("方案B", VoteTallyEngine.resolveChoice("私は方案Bを選びます", options));
+        assertTrue(VoteTallyEngine.mentionsAsWord("Yesです", "Yes"), "a Latin option glued to Japanese text still counts");
+        assertFalse(VoteTallyEngine.mentionsAsWord("Yesterday", "Yes"), "but not glued to another Latin word");
+    }
 }

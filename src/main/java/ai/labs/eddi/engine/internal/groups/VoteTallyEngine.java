@@ -167,31 +167,126 @@ public final class VoteTallyEngine {
                 }
                 votes.add(canonical);
             }
-            if (!votes.isEmpty()) {
-                Double confidence = node.path("confidence").isNumber()
-                        ? Math.max(0.0, Math.min(1.0, node.path("confidence").asDouble()))
-                        : null;
-                String statement = node.path("statement").isTextual() ? node.path("statement").asText() : null;
-                return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.copyOf(votes), confidence, statement);
+            if (votes.isEmpty()) {
+                // M-G2: read only what the member CAST — the "vote"/"votes" values —
+                // never the free-text "statement". An explicitly empty ballot
+                // ("votes": [], "vote": null, or no vote field at all) is a deliberate
+                // non-vote; the prose scan used to count whatever option the statement
+                // happened to mention. A cast in a shape this method did not ask for
+                // (the approval array under MAJORITY, a string "votes") still counts
+                // when it names exactly one option.
+                List<String> cast = castValues(node);
+                if (cast.isEmpty()) {
+                    return null;
+                }
+                String single = null;
+                for (String value : cast) {
+                    String match = canonicalOption(value, options);
+                    if (match == null) {
+                        match = singleMention(value, options);
+                    }
+                    if (match == null || (single != null && !single.equals(match))) {
+                        return null;
+                    }
+                    single = match;
+                }
+                votes.add(single);
             }
+            Double confidence = node.path("confidence").isNumber()
+                    ? Math.max(0.0, Math.min(1.0, node.path("confidence").asDouble()))
+                    : null;
+            String statement = node.path("statement").isTextual() ? node.path("statement").asText() : null;
+            return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.copyOf(votes), confidence, statement);
         }
 
-        // Tier 2: exactly ONE option's text appears in the reply. Two or more is
-        // ambiguous — refusing to pick by position is the point of this tier.
+        // Tier 3: exactly ONE option's text appears in the prose reply. Two or more
+        // is ambiguous — refusing to pick by position is the point of this tier.
+        String scanned = singleMention(content, options);
+        if (scanned != null) {
+            return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.of(scanned), null, null);
+        }
+        return null;
+    }
+
+    /** The textual values under "vote" and "votes", in whatever shape they came. */
+    private static List<String> castValues(JsonNode node) {
+        List<String> values = new ArrayList<>();
+        for (String field : List.of("vote", "votes")) {
+            JsonNode value = node.path(field);
+            if (value.isTextual() && !value.asText().isBlank()) {
+                values.add(value.asText());
+            } else if (value.isArray()) {
+                for (JsonNode element : value) {
+                    if (element.isTextual() && !element.asText().isBlank()) {
+                        values.add(element.asText());
+                    }
+                }
+            }
+        }
+        return values;
+    }
+
+    /**
+     * The one option {@code text} mentions, or {@code null} for none or several.
+     */
+    private static String singleMention(String text, List<String> options) {
         String scanned = null;
-        String lower = content.toLowerCase(Locale.ROOT);
         for (String option : options) {
-            if (lower.contains(option.toLowerCase(Locale.ROOT))) {
+            if (mentionsAsWord(text, option)) {
                 if (scanned != null) {
                     return null;
                 }
                 scanned = option;
             }
         }
-        if (scanned != null) {
-            return new Ballot(entry.speakerAgentId(), entry.speakerDisplayName(), List.of(scanned), null, null);
+        return scanned;
+    }
+
+    /**
+     * Whether {@code option} occurs in {@code content} as a whole word or phrase,
+     * case-insensitively (M-G2: "No" is not a mention of option "No" inside "not"
+     * or "know").
+     * <p>
+     * A word boundary only means something where words are separated by spaces. On
+     * each side of a match, the boundary is required only when BOTH the option's
+     * edge character and the neighbouring character belong to a script written with
+     * spaces; for scripts written without them (Chinese, Japanese, Thai, …) the
+     * check falls back to a plain substring match — "我支持方案A。" mentions option
+     * "方案A".
+     */
+    static boolean mentionsAsWord(String content, String option) {
+        if (content == null || option == null || option.isBlank()) {
+            return false;
         }
-        return null;
+        String needle = option.strip();
+        Matcher matcher = Pattern.compile(Pattern.quote(needle), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                .matcher(content);
+        while (matcher.find()) {
+            boolean leftOk = matcher.start() == 0
+                    || !glued(content.codePointBefore(matcher.start()), needle.codePointAt(0));
+            boolean rightOk = matcher.end() >= content.length()
+                    || !glued(content.codePointAt(matcher.end()), needle.codePointBefore(needle.length()));
+            if (leftOk && rightOk) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a neighbouring character continues the word at the option's edge:
+     * both are letters/digits of scripts that separate words with spaces.
+     */
+    private static boolean glued(int neighbour, int edge) {
+        return Character.isLetterOrDigit(neighbour) && Character.isLetterOrDigit(edge)
+                && spaceSeparated(neighbour) && spaceSeparated(edge);
+    }
+
+    private static boolean spaceSeparated(int codePoint) {
+        return switch (Character.UnicodeScript.of(codePoint)) {
+            case HAN, HIRAGANA, KATAKANA, THAI, LAO, KHMER, MYANMAR, TIBETAN, YI -> false;
+            default -> true;
+        };
     }
 
     /**
@@ -310,10 +405,9 @@ public final class VoteTallyEngine {
         if (canonical != null) {
             return canonical;
         }
-        String lower = reply.toLowerCase(Locale.ROOT);
         String scanned = null;
         for (String option : options) {
-            if (lower.contains(option.toLowerCase(Locale.ROOT))) {
+            if (mentionsAsWord(reply, option)) {
                 if (scanned != null) {
                     return null;
                 }

@@ -29,6 +29,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -586,13 +587,25 @@ public class PhaseExecutionEngine {
         }
     }
 
-    /** Immutable-record merge: a new decision keeps dissents already collected. */
-    private static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
+    /**
+     * Immutable-record merge: a new decision keeps dissents already collected.
+     * <p>
+     * M-G3: MERGED, not either-or. The earlier dissents were carried only when the
+     * new decision had none of its own, so a vote with a minority report replaced a
+     * preceding dissent round's positions wholesale — the opposite of what
+     * {@link #recordDissents} promises ("adds to the minority view rather than
+     * being the only source of it"). Earlier dissents come first; an identical
+     * dissent (same member, same position) is kept once.
+     */
+    static void setDecisionCarryingDissents(GroupConversation gc, DecisionRecord decision) {
         DecisionRecord existing = gc.getDecision();
-        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()
-                && (decision.dissents() == null || decision.dissents().isEmpty())) {
+        if (existing != null && existing.dissents() != null && !existing.dissents().isEmpty()) {
+            var merged = new LinkedHashSet<Dissent>(existing.dissents());
+            if (decision.dissents() != null) {
+                merged.addAll(decision.dissents());
+            }
             decision = new DecisionRecord(decision.type(), decision.outcome(), decision.winner(), decision.tally(),
-                    existing.dissents(), decision.method(), decision.decidedAtPhase(), decision.raw());
+                    List.copyOf(merged), decision.method(), decision.decidedAtPhase(), decision.raw());
         }
         gc.setDecision(decision);
     }
@@ -732,7 +745,7 @@ public class PhaseExecutionEngine {
                     config.getRetroConfig());
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
-            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
+            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -852,7 +865,7 @@ public class PhaseExecutionEngine {
                                 GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                                 config.getRetroConfig());
                         // I11: see the sequential loop — appended, not templated.
-                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase);
+                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
@@ -885,14 +898,16 @@ public class PhaseExecutionEngine {
         // and every member timeout became an unattributed SKIPPED "unknown" entry.
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(GroupConversationService.parallelBatchBudgetSeconds(protocol));
         for (int i = 0; i < futures.size(); i++) {
+            // The speaker this future belongs to. Every outcome below is recorded
+            // against it: a timed-out or failed member used to become an anonymous
+            // "unknown" SKIPPED/ERROR entry, and — because only a successful entry
+            // fired speaker_complete — a client that showed the member typing on
+            // speaker_start kept showing it forever.
+            GroupMember speaker = batchSpeakers.get(i);
             try {
                 long remainingNanos = Math.max(0, deadlineNanos - System.nanoTime());
                 TranscriptEntry entry = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
-                gc.getTranscript().add(entry);
-                if (listener != null) {
-                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
-                            entry.content(), phaseIdx, phase.name()));
-                }
+                recordParallelOutcome(gc, entry, phaseIdx, phase, listener);
             } catch (TimeoutException e) {
                 // The batch deadline passed — release every speaker still waiting on a
                 // response, not just this one.
@@ -915,8 +930,7 @@ public class PhaseExecutionEngine {
                 // callback now drops its gc mutations once cancellation is observed.
                 // Recovering the late entry needs the deadline contract renegotiated,
                 // which is its own change.
-                gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Timeout", null));
+                recordParallelOutcome(gc, timeoutEntry(speaker, phaseIdx, phase), phaseIdx, phase, listener);
             } catch (ExecutionException e) {
                 // Unwrap: CompletionException → GroupDiscussionException →
                 // QuotaRefusal (over-limit or accounting outage)
@@ -927,8 +941,7 @@ public class PhaseExecutionEngine {
                 if (cause instanceof MemberTurnCancelledException) {
                     // Already released by the batch deadline above — same outcome as a
                     // speaker whose own get() timed out.
-                    gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                            Instant.now(), "Timeout", null));
+                    recordParallelOutcome(gc, timeoutEntry(speaker, phaseIdx, phase), phaseIdx, phase, listener);
                     continue;
                 }
                 if (cause instanceof GroupDiscussionException gde
@@ -937,9 +950,11 @@ public class PhaseExecutionEngine {
                     cancellation.cancel();
                     throw gde;
                 }
-                gc.getTranscript().add(memberTurnExecutor.errorEntry(null, phaseIdx, phase, e.getMessage()));
+                recordParallelOutcome(gc, memberTurnExecutor.errorEntry(speaker, phaseIdx, phase, e.getMessage()), phaseIdx, phase,
+                        listener);
             } catch (Exception e) {
-                gc.getTranscript().add(memberTurnExecutor.errorEntry(null, phaseIdx, phase, e.getMessage()));
+                recordParallelOutcome(gc, memberTurnExecutor.errorEntry(speaker, phaseIdx, phase, e.getMessage()), phaseIdx, phase,
+                        listener);
             }
         }
         // Count all completed turns for this batch (parallel turns are atomic batches)
@@ -949,6 +964,34 @@ public class PhaseExecutionEngine {
         // "parallel" (independent) round stays independent — a human answering
         // after the agents must not read their answers first.
         promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
+    }
+
+    /**
+     * Appends one parallel speaker's outcome and closes its speaker_start with a
+     * speaker_complete — whatever the outcome was (contribution, timeout, error).
+     */
+    private static void recordParallelOutcome(GroupConversation gc, TranscriptEntry entry, int phaseIdx, DiscussionPhase phase,
+                                              GroupDiscussionEventListener listener) {
+        gc.getTranscript().add(entry);
+        if (listener != null) {
+            String outcome = switch (entry.type()) {
+                case SKIPPED -> entry.errorReason() != null && entry.errorReason().startsWith("Timeout")
+                        ? GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT
+                        : GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_SKIPPED;
+                case ERROR -> GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_ERROR;
+                default -> null;
+            };
+            // A skipped or failed turn carries no content (its reason is in the
+            // transcript's errorReason, never on the wire) and says so by flag.
+            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
+                    outcome == null ? entry.content() : null, phaseIdx, phase.name(), null, null, outcome));
+        }
+    }
+
+    /** A parallel speaker released by the batch deadline, attributed to it. */
+    private static TranscriptEntry timeoutEntry(GroupMember speaker, int phaseIdx, DiscussionPhase phase) {
+        return new TranscriptEntry(speaker.agentId(), speaker.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                Instant.now(), "Timeout", null);
     }
 
     /**

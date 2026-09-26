@@ -431,21 +431,24 @@ public class McpGroupTools {
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
-            List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, idx, lim);
             // Owner-filter (mirrors RestGroupConversation.listGroupConversations): these
-            // are
-            // FULL conversation documents (transcript, synthesized answer). Without this
-            // the
-            // per-conversation ownership gate is pointless — a non-owner could just list
-            // the
-            // group and read everyone's transcripts.
+            // are FULL conversation documents (transcript, synthesized answer). Without
+            // this the per-conversation ownership gate is pointless — a non-owner could
+            // just list the group and read everyone's transcripts. Applied in the query,
+            // so idx/lim page through the caller's own conversations rather than
+            // through everyone's with the others then removed.
+            List<GroupConversation> conversations;
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
-                conversations = conversations.stream()
-                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
-                        .toList();
+                conversations = callerId == null
+                        ? List.of()
+                        : groupConversationService.listGroupConversations(groupId, callerId, idx, lim).stream()
+                                .filter(gc -> callerId.equals(gc.getUserId()))
+                                .toList();
+            } else {
+                conversations = groupConversationService.listGroupConversations(groupId, idx, lim);
             }
             return jsonSerialization.serialize(conversations);
         } catch (Exception e) {

@@ -27,21 +27,21 @@ public interface IGroupWorkspaceStore {
      */
     GroupWorkspace readOrCreate(String groupId) throws IResourceStore.ResourceStoreException;
 
-    void update(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException;
-
     /** Deletes the group's workspace, if any. Idempotent. */
     void deleteByGroupId(String groupId) throws IResourceStore.ResourceStoreException;
 
     /**
-     * Atomically claims the workspace for one cadence discussion: writes
-     * {@code workspace} (which must already carry the new
-     * {@code runningDiscussionId} and pulled-task state) only if the PERSISTED
-     * {@code runningDiscussionId} still equals {@code expectedRunning}. Returns
-     * {@code false} when another pod won the claim (or released it) in between —
-     * the caller skips its run.
+     * Atomically claims (or settles) the workspace for one cadence discussion:
+     * writes {@code workspace} (which must already carry the new
+     * {@code runningDiscussionId} and pulled-task state) only if nothing changed
+     * since the caller read it — the same revision guard as {@link #casRevision},
+     * so a claim can neither drop a concurrent backlog edit nor be dropped by one
+     * (H14c). An unchanged revision implies an unchanged claim, so the caller's
+     * read of {@code runningDiscussionId} is what the write is conditioned on.
+     * Returns {@code false} when any concurrent write landed first — the caller
+     * re-reads and decides whether the claim is still its to take.
      */
-    boolean casRunningDiscussion(GroupWorkspace workspace, String expectedRunning)
-            throws IResourceStore.ResourceStoreException;
+    boolean casRunningDiscussion(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException;
 
     /**
      * Optimistic-concurrency write: persists {@code workspace} only if its
@@ -50,11 +50,11 @@ public interface IGroupWorkspaceStore {
      * concurrent editors cannot silently drop each other's changes — the loser
      * re-reads and retries.
      * <p>
-     * Known bound: a document created before the {@code revision} field existed
-     * carries {@code null} — the first write on such a document is a plain
-     * (unconditional) stamp, so two callers that BOTH read the pre-revision shape
-     * can still race that one write. The window is one write per legacy document;
-     * every write after the stamp is CAS'd.
+     * There is no unconditional write on this store: every write — backlog,
+     * cadences, run claims, writebacks — goes through this revision guard (H14c). A
+     * document created before the {@code revision} field existed carries
+     * {@code null}; its first write is guarded by the run-claim value instead and
+     * stamps a revision, so it too never lands blind.
      *
      * @return {@code true} if the write landed; {@code false} if a concurrent
      *         writer changed the workspace first (re-read before retrying)

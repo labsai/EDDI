@@ -729,7 +729,7 @@ class GroupConversationServiceHitlTest {
             // Step 2: Verify activeTokens is EMPTY for this GC.
             // This is the NEW-2 guarantee: the unconditional finally block
             // removed the token after commitPause returned.
-            var field = GroupConversationService.class.getDeclaredField("activeTokens");
+            var field = GroupConversationService.class.getDeclaredField("discussionControls");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
             var activeTokens = (ConcurrentHashMap<String, ?>) field.get(service);
@@ -744,7 +744,7 @@ class GroupConversationServiceHitlTest {
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "Paused GC should be CANCELLED via DB write");
             // verify update was called (the DB-write branch)
-            verify(conversationStore, atLeastOnce()).update(gc);
+            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
         }
     }
 
@@ -1848,7 +1848,7 @@ class GroupConversationServiceHitlTest {
             stubAgentSay();
 
             // Reflective handle on activeTokens to assert the token is present in-window.
-            var field = GroupConversationService.class.getDeclaredField("activeTokens");
+            var field = GroupConversationService.class.getDeclaredField("discussionControls");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
             var activeTokens = (ConcurrentHashMap<String, ?>) field.get(service);

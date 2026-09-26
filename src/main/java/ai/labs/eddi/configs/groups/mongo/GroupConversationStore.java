@@ -85,7 +85,14 @@ public class GroupConversationStore implements IGroupConversationStore {
     public void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException {
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(conversation.getId(), SINGLE_VERSION, conversation);
-            storage.store(resource);
+            // A replace that matches an existing row only. Every document is written at
+            // SINGLE_VERSION, so the version predicate is always true while the row
+            // exists and false once it is gone — which is the whole point: a plain store
+            // is an upsert, and a discussion running while its document was deleted
+            // (GDPR erasure, the delete endpoint) recreated it on its next write.
+            storage.storeIfCurrentVersion(resource, SINGLE_VERSION);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            throw new GroupConversationGoneException("Group conversation no longer exists.", e);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to update group conversation: " + e.getMessage(), e);
         }
@@ -98,10 +105,12 @@ public class GroupConversationStore implements IGroupConversationStore {
 
     @Override
     public List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException {
-        // For now, use a simple approach — filter by groupId.
-        // The IResourceStorage.findResources() API can be used for more complex
-        // queries.
-        // This is a placeholder that works with both DB backends.
+        return listByGroupId(groupId, null, index, limit);
+    }
+
+    @Override
+    public List<GroupConversation> listByGroupId(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException {
         var results = new ArrayList<GroupConversation>();
         if (groupId == null || groupId.isBlank() || !SAFE_ID.matcher(groupId).matches()) {
             // no stored group can carry such an id — honest empty result, and the
@@ -113,14 +122,19 @@ public class GroupConversationStore implements IGroupConversationStore {
             // Anchored exact match (see SAFE_ID): findResources turns a String
             // filter value into an unanchored regex, so a raw groupId would
             // substring-match other groups.
-            var filter = new IResourceFilter.QueryFilters(
-                    List.of(new IResourceFilter.QueryFilter(
-                            "groupId", "^" + groupId + "$")));
+            var filterList = new ArrayList<IResourceFilter.QueryFilter>();
+            filterList.add(new IResourceFilter.QueryFilter("groupId", "^" + groupId + "$"));
+            if (ownerUserId != null) {
+                // Escaped and anchored like the erasure sweep, and re-checked exactly
+                // below: the regex only narrows the query, equality decides.
+                filterList.add(new IResourceFilter.QueryFilter("userId", "^" + escapeRegex(ownerUserId) + "$"));
+            }
+            var filter = new IResourceFilter.QueryFilters(filterList);
             var resourceIds = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
                 try {
                     var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
-                    if (resource != null) {
+                    if (resource != null && (ownerUserId == null || ownerUserId.equals(resource.getData().getUserId()))) {
                         GroupConversation gc = resource.getData();
                         gc.setId(resourceId.getId());
                         results.add(gc);

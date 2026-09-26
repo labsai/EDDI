@@ -98,6 +98,14 @@ public interface IGroupConversationService {
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
     /**
+     * List the group conversations of one owner ({@code null} = every owner), with
+     * the owner restriction applied in the query so paging covers only that owner's
+     * conversations.
+     */
+    List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
      * Send a follow-up question to a specific member agent within a completed group
      * conversation. The exchange (user question + agent response) is appended to
      * the group transcript. The agent retains full context from its participation

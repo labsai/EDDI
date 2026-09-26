@@ -343,13 +343,18 @@ class RestGroupConversationTest {
             var gc2 = new GroupConversation();
             gc2.setId("gc-2");
             gc2.setUserId("other-user");
-            when(groupService.listGroupConversations("group-1", 0, 10))
+            // Even a foreign row the store handed back is dropped by the exact re-check.
+            when(groupService.listGroupConversations("group-1", "user-1", 0, 10))
                     .thenReturn(new ArrayList<>(List.of(gc1, gc2)));
 
             List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10);
 
             assertEquals(1, result.size());
             assertEquals("gc-1", result.get(0).getId());
+            // The owner restriction is part of the query, so index/limit page through
+            // the caller's own conversations; filtering a fetched page of everyone's
+            // gave non-admins short or empty pages (Workforce history).
+            verify(groupService, never()).listGroupConversations("group-1", 0, 10);
         }
 
         @Test
@@ -368,12 +373,13 @@ class RestGroupConversationTest {
             // A legacy row with no owner must not match a caller with no name.
             var unowned = new GroupConversation();
             unowned.setId("gc-2");
-            when(groupService.listGroupConversations("group-1", 0, 10))
+            lenient().when(groupService.listGroupConversations("group-1", 0, 10))
                     .thenReturn(new ArrayList<>(List.of(owned, unowned)));
 
             List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10);
 
             assertTrue(result.isEmpty());
+            verify(groupService, never()).listGroupConversations("group-1", 0, 10);
         }
     }
 

@@ -609,6 +609,7 @@ class McpGroupToolsTest {
         ArgumentCaptor<List<GroupConversation>> captor = ArgumentCaptor.forClass(List.class);
         verify(jsonSerialization).serialize(captor.capture());
         assertTrue(captor.getValue().isEmpty(), "a caller with no principal name owns nothing, got: " + result);
+        verify(groupConversationService, never()).listGroupConversations(any(), anyInt(), anyInt());
     }
 
     private GroupConversation ownedBy(String userId) throws Exception {
@@ -783,7 +784,8 @@ class McpGroupToolsTest {
         var theirs = new GroupConversation();
         theirs.setId("gc-theirs");
         theirs.setUserId("alice");
-        when(groupConversationService.listGroupConversations("g1", 0, 20)).thenReturn(List.of(mine, theirs));
+        // Even if the store handed back a foreign row, the exact re-check drops it.
+        when(groupConversationService.listGroupConversations("g1", "bob", 0, 20)).thenReturn(List.of(mine, theirs));
 
         toolsAsUser("bob", "eddi-viewer").list_group_conversations("g1", null, null);
 
@@ -791,6 +793,9 @@ class McpGroupToolsTest {
         verify(jsonSerialization).serialize(captor.capture());
         assertEquals(1, captor.getValue().size(), "a non-owner must not see another user's transcript via list");
         assertEquals("gc-mine", captor.getValue().get(0).getId());
+        // The owner restriction is in the query, so paging covers only bob's
+        // conversations — filtering a fetched page left non-admins short pages.
+        verify(groupConversationService, never()).listGroupConversations("g1", 0, 20);
     }
 
     // --- I13: standing-team backlog ---
@@ -818,7 +823,6 @@ class McpGroupToolsTest {
         assertEquals(1, workspace.getBacklog().size());
         assertEquals(7, workspace.getBacklog().getTasks().get(0).priority());
         verify(workspaceStore).casRevision(workspace);
-        verify(workspaceStore, never()).update(any());
     }
 
     @Test
@@ -832,7 +836,6 @@ class McpGroupToolsTest {
         String result = tools.add_team_task("g1", "One more", null, null);
 
         assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -869,7 +872,6 @@ class McpGroupToolsTest {
         assertTrue(tools.add_team_task("g1", longSubject, null, null).contains("error"));
         String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
         assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -883,7 +885,6 @@ class McpGroupToolsTest {
         assertTrue(result.contains("error"), result);
         assertTrue(result.contains("subject"), "the error names the conflict: " + result);
         assertEquals(1, workspace.getBacklog().size());
-        verify(workspaceStore, never()).update(any());
         verify(workspaceStore, never()).casRevision(any());
     }
 
