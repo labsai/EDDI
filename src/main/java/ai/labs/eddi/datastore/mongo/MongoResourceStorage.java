@@ -354,9 +354,34 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             untombstoneIfStillLive(historyRow, id, expectedCurrentVersion);
             throw e;
         }
-        durableHistory.updateOne(historyRow, Updates.unset(DELETED_FIELD));
+        untombstoneMovedOnVersion(durableHistory, historyRow, id, expectedCurrentVersion);
         throw new IResourceStore.ResourceModifiedException(
                 String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+    }
+
+    /**
+     * Takes the tombstone back off a version the resource has already moved past,
+     * once more if the first attempt fails.
+     * <p>
+     * Nothing else would ever clear it: {@link #clearStaleTombstone} runs only when
+     * this exact version is replaced as the live one, and the resource is already
+     * live at a newer version. A flag left here answers 404 for that version for
+     * good. The caller still gets the conflict it is owed rather than a raw driver
+     * exception — the delete was refused either way.
+     */
+    private void untombstoneMovedOnVersion(MongoCollection<Document> durableHistory, Bson historyRow, String id, int version) {
+        for (int attempt = 1;; attempt++) {
+            try {
+                durableHistory.updateOne(historyRow, Updates.unset(DELETED_FIELD));
+                return;
+            } catch (MongoException e) {
+                if (attempt >= 2) {
+                    LOGGER.warnf("Refused delete of %s v%d could not take its tombstone back; that version reads as deleted: %s",
+                            sanitize(id), version, sanitize(e.getMessage()));
+                    return;
+                }
+            }
+        }
     }
 
     private void untombstoneIfStillLive(Bson historyRow, String id, int version) {
@@ -534,7 +559,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
             List<Bson> filters = new ArrayList<>();
             for (IResourceFilter.QueryFilter queryFilter : queryFilters.getQueryFilters()) {
-                if (queryFilter.getFilter() instanceof String) {
+                if (queryFilter.isExact()) {
+                    filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
+                } else if (queryFilter.getFilter() instanceof String) {
                     filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));

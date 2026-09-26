@@ -293,14 +293,16 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     /**
      * Exact match: {@code originId} comes from an archive's file names, and was
      * pasted into a regex unescaped and unanchored, so a crafted name matched other
-     * resources' descriptors - which a merge import would then update.
+     * resources' descriptors - which a merge import would then update. An escaped
+     * {@code ^...$} regex is not enough either: on MongoDB {@code $} also matches
+     * before a final newline, so {@code name} would select {@code name\n}. Hence an
+     * equality filter, not a pattern.
      */
     @Override
     public List<T> findByOriginId(String originId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFilters = new LinkedList<>();
-        queryFilters.add(new IResourceFilter.QueryFilter(FIELD_ORIGIN_ID,
-                "^" + StringUtilities.escapeRegexChars(String.valueOf(originId)) + "$"));
+        queryFilters.add(IResourceFilter.QueryFilter.exact(FIELD_ORIGIN_ID, String.valueOf(originId)));
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 

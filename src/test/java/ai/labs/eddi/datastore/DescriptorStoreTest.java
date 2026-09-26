@@ -460,10 +460,39 @@ class DescriptorStoreTest {
 
         var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
         verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
-        Pattern pattern = Pattern.compile((String) filterValue(captor.getValue(), "originId"));
-        assertTrue(pattern.matcher(".*").find());
-        assertFalse(pattern.matcher("aaaa11112222333344445555").find());
-        assertFalse(Pattern.compile((String) filterValue(captor.getValue(), "originId")).matcher("x.*").find());
+        IResourceFilter.QueryFilter filter = filterOn(captor.getValue(), "originId");
+        assertTrue(filter.isExact(), "the origin id must be compared for equality, not matched as a regex");
+        assertEquals(".*", filter.getFilter());
+    }
+
+    @Test
+    @DisplayName("findByOriginId does not select an origin id that differs only by a trailing newline")
+    void findByOriginIdDoesNotMatchATrailingNewlineVariant() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.findByOriginId("name");
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        IResourceFilter.QueryFilter filter = filterOn(captor.getValue(), "originId");
+        // An escaped "^name$" regex also selects "name\n" on MongoDB (and in
+        // java.util.regex): `$` matches before a final newline there. Only an
+        // equality filter is exact on both backends; the server-side half is
+        // MongoResourceStorageExactMatchTest and PostgresResourceStorageContainerTest.
+        assertTrue(filter.isExact());
+        assertEquals("name", filter.getFilter());
+    }
+
+    private static IResourceFilter.QueryFilter filterOn(IResourceFilter.QueryFilters[] groups, String field) {
+        for (IResourceFilter.QueryFilters group : groups) {
+            for (IResourceFilter.QueryFilter filter : group.getQueryFilters()) {
+                if (field.equals(filter.getField())) {
+                    return filter;
+                }
+            }
+        }
+        throw new AssertionError("no filter on " + field);
     }
 
     private static Object filterValue(IResourceFilter.QueryFilters[] groups, String field) {

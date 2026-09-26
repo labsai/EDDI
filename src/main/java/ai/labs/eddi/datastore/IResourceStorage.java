@@ -294,7 +294,8 @@ public interface IResourceStorage<T> {
      *
      * @param filters
      *            the filter criteria (field/value pairs, strings are treated as
-     *            regex)
+     *            regex unless built with
+     *            {@link IResourceFilter.QueryFilter#exact(String, String)})
      * @param sortField
      *            field to sort by (descending)
      * @param skip

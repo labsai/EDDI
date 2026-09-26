@@ -21,7 +21,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link GridFsAttachmentStore} is created on first use, so building them from
  * its constructor put the index builds - and, with the database unreachable, up
  * to one server-selection timeout per index - on whichever request first
- * touched an attachment. Here they run once at boot, each bounded by
+ * touched an attachment. Here they run once at boot, the whole pass bounded by
  * {@link GridFsAttachmentStore#INDEX_TIMEOUT_SECONDS}, and a failure is logged
  * rather than stopping the application.
  */

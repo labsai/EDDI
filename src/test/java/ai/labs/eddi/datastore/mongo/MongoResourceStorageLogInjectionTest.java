@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.inject.Instance;
@@ -82,6 +84,21 @@ class MongoResourceStorageLogInjectionTest {
 
         assertLineReached(captured, "tombstone could not be checked");
         assertNoForgedRecordBoundary(captured, "the untombstone WARN");
+    }
+
+    @Test
+    @DisplayName("a refused delete whose untombstone fails does not forge a record")
+    void refusedDeleteUntombstoneWarnIsSanitized() throws Exception {
+        var history = storage.newHistoryResourceFor(storage.newResource(VALID_ID, 1, "test"), true);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+        when(durableHistory.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("unreachable" + FORGED_RECORD));
+
+        List<String> captured = captureLogsOf(MongoResourceStorage.class,
+                () -> assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1)));
+
+        assertLineReached(captured, "could not take its tombstone back");
+        assertNoForgedRecordBoundary(captured, "the refused-delete untombstone WARN");
     }
 
     @Test

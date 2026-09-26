@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
+import com.mongodb.MongoOperationTimeoutException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.gridfs.GridFSBucket;
@@ -19,6 +20,8 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.io.ByteArrayInputStream;
 import java.io.OutputStream;
@@ -26,6 +29,7 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -468,12 +472,25 @@ class GridFsAttachmentStoreTest {
 
     // ==================== indexes (M-P7) ====================
 
+    /** A collection whose {@code withTimeout} views are the collection itself. */
+    @SuppressWarnings("unchecked")
+    private static MongoCollection<Document> filesWithTimeoutViews() {
+        MongoCollection<Document> files = mock(MongoCollection.class);
+        when(files.withTimeout(anyLong(), any(TimeUnit.class))).thenReturn(files);
+        return files;
+    }
+
+    private static final long NOW = 1_000_000_000L;
+
+    private static void ensureIndexesWithin(MongoCollection<Document> files, long budgetMillis, LongSupplier clock) {
+        GridFsAttachmentStore.ensureIndexes(files, NOW + TimeUnit.MILLISECONDS.toNanos(budgetMillis), clock);
+    }
+
     @Test
     void ensureIndexes_indexesEveryMetadataFieldAQueryFiltersOn() {
-        @SuppressWarnings("unchecked")
-        MongoCollection<Document> files = mock(MongoCollection.class);
+        MongoCollection<Document> files = filesWithTimeoutViews();
 
-        GridFsAttachmentStore.ensureIndexes(files);
+        ensureIndexesWithin(files, 10_000, () -> NOW);
 
         verify(files).createIndex(Indexes.ascending("metadata.storageRef"));
         verify(files).createIndex(Indexes.ascending("metadata.conversationId"));
@@ -481,26 +498,71 @@ class GridFsAttachmentStoreTest {
     }
 
     @Test
-    void ensureIndexes_eachIndexBuildIsTimeBounded() {
+    void ensureIndexes_everyIndexBuildRunsOnATimeBoundedView() {
         @SuppressWarnings("unchecked")
         MongoCollection<Document> bounded = mock(MongoCollection.class);
-        when(filesCollection.withTimeout(GridFsAttachmentStore.INDEX_TIMEOUT_SECONDS, TimeUnit.SECONDS)).thenReturn(bounded);
+        when(filesCollection.withTimeout(anyLong(), eq(TimeUnit.MILLISECONDS))).thenReturn(bounded);
 
         sut.ensureIndexes();
 
-        // An unreachable database must cost a bounded wait, not a server-selection
-        // timeout per index.
         verify(bounded).createIndex(Indexes.ascending("metadata.storageRef"));
         verify(filesCollection, never()).createIndex(any(Bson.class));
+        ArgumentCaptor<Long> budget = ArgumentCaptor.forClass(Long.class);
+        verify(filesCollection, times(3)).withTimeout(budget.capture(), eq(TimeUnit.MILLISECONDS));
+        assertTrue(
+                budget.getAllValues().stream().allMatch(ms -> ms > 0 && ms <= TimeUnit.SECONDS.toMillis(GridFsAttachmentStore.INDEX_TIMEOUT_SECONDS)),
+                "every call must get at most the pass budget: " + budget.getAllValues());
+    }
+
+    @Test
+    void ensureIndexes_eachCallGetsWhatIsLeftOfOneSharedBudget() {
+        MongoCollection<Document> files = filesWithTimeoutViews();
+        // Each createIndex takes 4s of the 10s budget.
+        long[] clock = {NOW};
+        when(files.createIndex(any(Bson.class))).thenAnswer(invocation -> {
+            clock[0] += TimeUnit.SECONDS.toNanos(4);
+            return "ok";
+        });
+
+        ensureIndexesWithin(files, 10_000, () -> clock[0]);
+
+        InOrder order = inOrder(files);
+        order.verify(files).withTimeout(10_000L, TimeUnit.MILLISECONDS);
+        order.verify(files).withTimeout(6_000L, TimeUnit.MILLISECONDS);
+        order.verify(files).withTimeout(2_000L, TimeUnit.MILLISECONDS);
+    }
+
+    @Test
+    void ensureIndexes_aSpentBudgetSkipsTheRemainingIndexes() {
+        MongoCollection<Document> files = filesWithTimeoutViews();
+        long[] clock = {NOW};
+        when(files.createIndex(any(Bson.class))).thenAnswer(invocation -> {
+            clock[0] += TimeUnit.SECONDS.toNanos(11);
+            return "ok";
+        });
+
+        ensureIndexesWithin(files, 10_000, () -> clock[0]);
+
+        // The whole pass is bounded, not each call: nothing starts after the deadline.
+        verify(files, times(1)).createIndex(any(Bson.class));
+    }
+
+    @Test
+    void ensureIndexes_aTimeoutEndsThePassInsteadOfWaitingOnceMorePerIndex() {
+        MongoCollection<Document> files = filesWithTimeoutViews();
+        when(files.createIndex(any(Bson.class))).thenThrow(new MongoOperationTimeoutException("server selection timed out"));
+
+        assertDoesNotThrow(() -> ensureIndexesWithin(files, 10_000, () -> NOW));
+
+        verify(files, times(1)).createIndex(any(Bson.class));
     }
 
     @Test
     void ensureIndexes_aRefusedIndexDoesNotStopStartupOrTheOtherIndexes() {
-        @SuppressWarnings("unchecked")
-        MongoCollection<Document> files = mock(MongoCollection.class);
+        MongoCollection<Document> files = filesWithTimeoutViews();
         when(files.createIndex(Indexes.ascending("metadata.storageRef"))).thenThrow(new IllegalStateException("not authorized"));
 
-        assertDoesNotThrow(() -> GridFsAttachmentStore.ensureIndexes(files));
+        assertDoesNotThrow(() -> ensureIndexesWithin(files, 10_000, () -> NOW));
 
         verify(files).createIndex(Indexes.ascending("metadata.grants"));
     }

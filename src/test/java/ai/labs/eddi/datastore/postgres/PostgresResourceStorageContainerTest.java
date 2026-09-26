@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.*;
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -297,6 +299,26 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         void invalidUuid() {
             // MongoDB ObjectId format should be treated as not found
             assertEquals(-1, storage.getCurrentVersion("507f1f77bcf86cd799439011"));
+        }
+    }
+
+    // ─── findResources ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("findResources exact match")
+    class FindResourcesExact {
+
+        @Test
+        @DisplayName("an exact filter selects the value itself, not the value followed by a newline")
+        void exactFilterIgnoresATrailingNewlineVariant() throws IOException {
+            var plain = storage.newResource(Map.of("originId", "name"));
+            storage.store(plain);
+            storage.store(storage.newResource(Map.of("originId", "name\n")));
+
+            var found = storage.findResources(new IResourceFilter.QueryFilters[]{
+                    new IResourceFilter.QueryFilters(List.of(IResourceFilter.QueryFilter.exact("originId", "name")))}, null, 0, 10);
+
+            assertEquals(List.of(plain.getId()), found.stream().map(IResourceStore.IResourceId::getId).toList());
         }
     }
 }

@@ -316,6 +316,20 @@ class PostgresResourceStorageTest {
     }
 
     @Test
+    void findResources_exactFilterIsAnEqualityNotARegex() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{
+                new IResourceFilter.QueryFilters(List.of(IResourceFilter.QueryFilter.exact("originId", "name")))}, null, 0, 10);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("data ->> 'originId' = ?"), sql.getValue());
+        assertFalse(sql.getValue().contains(" ~ "), sql.getValue());
+        verify(preparedStatement).setString(2, "name");
+    }
+
+    @Test
     void findResources_traversesDottedFilterAndSortPaths() throws Exception {
         when(resultSet.next()).thenReturn(false);
 

@@ -764,8 +764,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
             List<String> clauses = new ArrayList<>();
             for (IResourceFilter.QueryFilter qf : queryFilters.getQueryFilters()) {
                 String fieldExpression = toTextPathExpression(qf.getField());
-                if (qf.getFilter() instanceof String filterStr) {
-                    // Regex filter → use SQL LIKE on JSONB field cast to text
+                if (qf.isExact()) {
+                    clauses.add(fieldExpression + " = ?");
+                    params.add(qf.getFilter().toString());
+                } else if (qf.getFilter() instanceof String filterStr) {
+                    // Regex filter → POSIX regex match on the JSONB field as text
                     clauses.add(fieldExpression + " ~ ?");
                     params.add(filterStr);
                 } else if (qf.getFilter() instanceof Boolean boolVal) {

@@ -38,9 +38,14 @@ selection and rollback, and the delete version predicate.
   query parameter into an unanchored regex (ReDoS, 500s, or one pattern that selected
   every descriptor of every type); `findByOriginId` did the same with archive file
   names, so a crafted name matched other resources' descriptors. The type is now an
-  anchored, escaped prefix and the origin id an exact match (per-character escaping,
-  because PostgreSQL's `~` has no `\Q…\E`). `StringUtilities.escapeRegexChars` became
-  public for this.
+  anchored, escaped prefix (per-character escaping, because PostgreSQL's `~` has no
+  `\Q…\E`); `StringUtilities.escapeRegexChars` became public for this. The origin id
+  is an **equality** filter, not a pattern: a new `IResourceFilter.QueryFilter.exact`
+  becomes `Filters.eq` on MongoDB and `=` on PostgreSQL. An escaped `^…$` regex was
+  not enough — on MongoDB `$` also matches before a final newline, so an archive entry
+  named `name\n` would be selected by a merge looking for `name` — and no single strict
+  end anchor works on both backends (MongoDB's `\z` is rejected by PostgreSQL, whose
+  `\Z` MongoDB treats like `$`).
 - **M-P3 — foreign ids.** A PostgreSQL archive's UUIDs reached `new ObjectId(uuid)` on
   MongoDB during preview and merge and surfaced as 500/400. `MongoResourceStorage` now
   answers "not found" for an id that cannot be an ObjectId in `read`, `readHistory`,
@@ -71,8 +76,10 @@ selection and rollback, and the delete version predicate.
   lost the insert race to the update's non-deleted history row, so the resource looked
   neither live nor deleted. `IResourceStorage.storeHistoryAndRemove` now takes the
   expected version and has no default. MongoDB upserts the tombstone, deletes with a
-  version predicate and, if the resource moved on, takes the flag back off and throws
-  `ResourceModifiedException`; PostgreSQL does the same inside its transaction, so the
+  version predicate and, if the resource moved on, takes the flag back off (retrying
+  once, then logging — nothing else would ever clear it, since that version is never
+  replaced as current again) and throws `ResourceModifiedException` either way, never
+  the raw driver exception; PostgreSQL does the same inside its transaction, so the
   rollback drops the tombstone with it. A resource that a concurrent delete already
   removed counts as deleted. On MongoDB, a delete that fails between the tombstone and
   the conditional delete (write-concern timeout, step-down, network) re-checks whether
@@ -92,8 +99,10 @@ selection and rollback, and the delete version predicate.
   filters on, so every `storageRef` lookup, upload quota check, listing and GDPR
   per-conversation delete was a full scan. `GridFsIndexInitializer` (a `StartupEvent`
   observer, MongoDB only) creates ascending indexes on `metadata.storageRef`,
-  `metadata.conversationId` and `metadata.grants` at boot, each bounded by a 10 s
-  operation timeout; none is unique (legacy blobs have no `storageRef`) and a refusal
+  `metadata.conversationId` and `metadata.grants` at boot within one 10 s budget for
+  the whole pass (each call gets what is left of it, since `withTimeout` bounds a
+  single operation, and a timeout skips the remaining indexes rather than waiting once
+  more per index); none is unique (legacy blobs have no `storageRef`) and a refusal
   is logged, not fatal.
 - **Log injection (CWE-117, code scanning alert #557).** Every log line this change
   adds routes its caller- or driver-supplied values through `LogSanitizer.sanitize`:
@@ -150,6 +159,7 @@ selection and rollback, and the delete version predicate.
 [`MongoResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/mongo/MongoResourceStorage.java),
 [`PostgresResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorage.java),
 [`DescriptorStore.java`](../../src/main/java/ai/labs/eddi/datastore/DescriptorStore.java),
+[`IResourceFilter.java`](../../src/main/java/ai/labs/eddi/datastore/IResourceFilter.java),
 [`GridFsAttachmentStore.java`](../../src/main/java/ai/labs/eddi/datastore/mongo/GridFsAttachmentStore.java),
 [`MigrationManager.java`](../../src/main/java/ai/labs/eddi/configs/migration/MigrationManager.java),
 [`RestDocumentDescriptorStore.java`](../../src/main/java/ai/labs/eddi/configs/descriptors/rest/RestDocumentDescriptorStore.java),

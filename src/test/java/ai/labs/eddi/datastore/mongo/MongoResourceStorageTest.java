@@ -363,6 +363,27 @@ class MongoResourceStorageTest {
     // ==================== readMany ====================
 
     @Test
+    @DisplayName("findResources — an exact filter is an equality, not a $regex")
+    void findResourcesExactFilterIsEquality() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        when(iterable.skip(anyInt())).thenReturn(iterable);
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{
+                new IResourceFilter.QueryFilters(List.of(IResourceFilter.QueryFilter.exact("originId", "name")))}, null, 0, 10);
+
+        ArgumentCaptor<Bson> query = ArgumentCaptor.forClass(Bson.class);
+        verify(currentCollection).find(query.capture());
+        String json = query.getValue().toBsonDocument().toJson();
+        // On MongoDB `$` also matches before a final newline, so any pattern
+        // anchored with it would select "name\n" as well.
+        assertFalse(json.contains("$regularExpression") || json.contains("$regex"), json);
+        assertTrue(json.contains("\"originId\": \"name\""), json);
+    }
+
+    @Test
     @DisplayName("readMany — one query for the whole page, results in request order")
     void readManyKeepsRequestOrder() {
         String otherId = "aabbccddeeff112233445577";
@@ -555,6 +576,50 @@ class MongoResourceStorageTest {
 
         // v1 is ordinary history of a live resource again, not a tombstone.
         verify(durableHistory).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a refused delete whose untombstone fails once retries it and still reports the conflict")
+    void storeHistoryAndRemoveRetriesAFailedUntombstone() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 1, "test");
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+        when(durableHistory.updateOne(any(Bson.class), any(Bson.class)))
+                .thenThrow(new MongoException("not primary"))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1));
+
+        // Nothing else would clear the flag later: the resource is live at a newer
+        // version, so this version is never replaced as current again.
+        verify(durableHistory, times(2)).updateOne(any(Bson.class), any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeHistoryAndRemove — a refused delete whose untombstone keeps failing is still a conflict, not a driver error")
+    void storeHistoryAndRemoveReportsTheConflictWhenUntombstoneFails() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        var resource = storage.newResource(VALID_ID, 1, "test");
+        var history = storage.newHistoryResourceFor(resource, true);
+
+        MongoCollection<Document> durableCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> durableHistory = mock(MongoCollection.class);
+        when(currentCollection.withWriteConcern(any())).thenReturn(durableCurrent);
+        when(historyCollection.withWriteConcern(any())).thenReturn(durableHistory);
+        when(durableCurrent.deleteOne(any(Bson.class))).thenReturn(DeleteResult.acknowledged(0));
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+        when(durableHistory.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("not primary"));
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> storage.storeHistoryAndRemove(history, VALID_ID, 1));
+
+        verify(durableHistory, times(2)).updateOne(any(Bson.class), any(Bson.class));
     }
 
     @Test
