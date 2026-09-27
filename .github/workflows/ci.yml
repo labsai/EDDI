@@ -527,11 +527,16 @@ jobs:
           set -euo pipefail
           helm version
           key=ci-placeholder-vault-key
+          # The in-chart MongoDB now runs with authentication, so mongodb.rootPassword
+          # is a required value whenever mongodb.enabled is true (its default). Supply
+          # a placeholder wherever MongoDB stays enabled, exactly as the vault key and
+          # the postgres password are supplied.
+          mongopw=ci-placeholder-mongo
 
-          helm lint helm/eddi --set eddi.vaultMasterKey=$key
+          helm lint helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw
 
-          echo "--- default: MongoDB, no auth"
-          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key > /dev/null
+          echo "--- default: MongoDB, with auth"
+          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw > /dev/null
 
           echo "--- PostgreSQL + in-chart Keycloak"
           helm template eddi helm/eddi \
@@ -581,6 +586,7 @@ jobs:
           echo "--- null-valued optional datastore/messaging values still render"
           helm template eddi helm/eddi \
             --set eddi.vaultMasterKey=$key \
+            --set mongodb.rootPassword=$mongopw \
             --set eddi.datastore.externalJdbcUrl=null \
             --set eddi.datastore.externalConnectionString=null \
             --set eddi.messagingType=null > /dev/null
@@ -592,6 +598,9 @@ jobs:
         run: |
           set -euo pipefail
           key=ci-placeholder-vault-key
+          # Supplied wherever MongoDB stays enabled, so each case fails on the guard
+          # it is testing rather than on the now-required mongodb.rootPassword.
+          mongopw=ci-placeholder-mongo
           expect_failure() {
             local what="$1"; shift
             if helm template eddi helm/eddi "$@" > /dev/null 2>&1; then
@@ -603,12 +612,12 @@ jobs:
           expect_failure "no datastore configured at all" \
             --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false
           expect_failure "messagingType=nats on a stock image" \
-            --set eddi.vaultMasterKey=$key --set eddi.messagingType=nats
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats
           expect_failure "OIDC enabled without a browser-facing publicUrl" \
-            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.oidc.enabled=true \
             --set eddi.oidc.authServerUrl=https://idp.example.com/realms/eddi
           expect_failure "OIDC with neither an in-chart Keycloak nor an authServerUrl" \
-            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.oidc.enabled=true \
             --set eddi.oidc.publicUrl=https://idp.example.com
           expect_failure "external PostgreSQL with no credentials" \
             --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false \
@@ -637,20 +646,20 @@ jobs:
           # them at once, each demanding the value the other rejected. Named for
           # the real cause instead.
           expect_failure "both in-chart datastores enabled at once" \
-            --set eddi.vaultMasterKey=$key --set eddi.datastoreType=postgres \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.datastoreType=postgres \
             --set postgres.enabled=true --set postgres.password=ci-placeholder-pg
           expect_failure "messagingType=nats with no NATS deployed" \
-            --set eddi.vaultMasterKey=$key --set eddi.messagingType=nats \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.buildProfileImage=true --set nats.enabled=false
           expect_failure "NATS deployed for in-memory messaging" \
-            --set eddi.vaultMasterKey=$key --set nats.enabled=true
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set nats.enabled=true
           # A NULL publicUrl, not the empty-string default. The guard is a
           # truthiness test, and `toString nil` is the truthy literal "<nil>":
           # written that way this rendered with exit 0, handing the Manager SPA
           # "<nil>" as its Keycloak authority and pinning the issuer to
           # "<nil>/realms/eddi". The empty-string case above cannot see that.
           expect_failure "OIDC with an explicitly null publicUrl" \
-            --set eddi.vaultMasterKey=$key --set eddi.oidc.enabled=true \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.oidc.enabled=true \
             --set keycloak.enabled=true --set keycloak.adminPassword=ci-placeholder-kc \
             --set eddi.oidc.publicUrl=null
           # Two datastores of one kind. The in-chart URL is a ConfigMap env var
@@ -659,7 +668,7 @@ jobs:
           # reported "in-chart" — a stale value in an upgraded values file
           # changed which database EDDI talked to, with no render error.
           expect_failure "an in-chart MongoDB alongside an external one" \
-            --set eddi.vaultMasterKey=$key \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             --set eddi.datastore.externalConnectionString=mongodb://db.example.com:27017/eddi
           expect_failure "an in-chart PostgreSQL alongside an external one" \
             --set eddi.vaultMasterKey=$key --set eddi.datastoreType=postgres \

@@ -113,3 +113,10 @@ Follow-ups from adversarial review of the change above:
   to; that file now sets `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` (an opt-out that
   branch is adding; harmless as an unknown env var until it merges) so the demo
   keeps booting.
+- **CI Deployment-Manifests render.** Making `mongodb.rootPassword` required broke
+  the `manifest-lint` job's `helm template`/`helm lint` runs, which render the
+  chart without it. [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+  now passes `--set mongodb.rootPassword=<placeholder>` on every render that
+  leaves MongoDB enabled (the default renders and the guard-failure cases alike, so
+  each guard case still fails on the guard it tests, not on the missing password),
+  mirroring how it already supplies the vault key and the PostgreSQL password.
