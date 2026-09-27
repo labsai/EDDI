@@ -50,9 +50,12 @@ export function stepsToMessages(
     const data = step?.conversationStep;
     if (!Array.isArray(data)) return;
     // The backend sends steps and outputs as parallel lists (both whole, or
-    // both just the last step), so the same index names the same turn.
-    const secretTurn =
-      Array.isArray(outputs) && outputs[index]?.input === SECRET_INPUT_PLACEHOLDER;
+    // both just the last step), so the same index names the same turn — but
+    // only when the two agree in length. A drifted document pairs an index
+    // with another turn's output, which would mask an ordinary message; the
+    // backend's read-time masking pairs them under the same condition.
+    const paired = Array.isArray(outputs) && outputs.length === steps.length;
+    const secretTurn = paired && outputs[index]?.input === SECRET_INPUT_PLACEHOLDER;
 
     for (const entry of data) {
       const key = entry?.key;
@@ -70,7 +73,9 @@ export function stepsToMessages(
         messages.push(
           makeMessage(
             "user",
-            secretTurn || secretTexts.has(text) ? SECRET_MASK : text,
+            secretTurn || text === SECRET_INPUT_PLACEHOLDER || secretTexts.has(text)
+              ? SECRET_MASK
+              : text,
           ),
         );
         continue;

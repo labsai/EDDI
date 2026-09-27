@@ -155,6 +155,25 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
     expect(msgs.some((m) => m.content.includes("hunter2"))).toBe(false);
   });
 
+  it("does not pair steps with outputs when a drifted snapshot's lists differ in length", () => {
+    // Three steps, two outputs: index 1 of the outputs is not the turn at step
+    // index 1, so its "<secret input>" marker must not mask that ordinary
+    // message. The backend's read-time masking pairs under the same condition.
+    const msgs = stepsToMessages(
+      [
+        step([{ key: "input:initial", value: "hello" }]),
+        step([{ key: "input:initial", value: "what is 2+2" }]),
+        step([{ key: "input:initial", value: "<secret input>" }]),
+      ],
+      new Set(),
+      [{ input: "hello" }, { input: "<secret input>" }],
+    );
+
+    // The secret turn is still masked from its own step: the engine masks
+    // input:initial itself, whatever the pairing.
+    expect(msgs.map((m) => m.content)).toEqual(["hello", "what is 2+2", "●●●●●●●●"]);
+  });
+
   it("leaves ordinary input untouched", () => {
     const msgs = stepsToMessages(
       [step([{ key: "input:initial", value: "what is 2+2" }])],
