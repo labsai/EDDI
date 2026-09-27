@@ -91,23 +91,46 @@ describe("ApiClient token refresh", () => {
     expect(calls).toBe(2);
   });
 
-  it("resends the same body on retry", async () => {
-    const bodies: string[] = [];
-    let first = true;
-    server.use(
-      http.post(URL, async ({ request }) => {
-        bodies.push(await request.text());
-        if (first) {
-          first = false;
+  it.each(["post", "put", "delete"] as const)(
+    "does not replay a 401'd %s — it renews the token instead",
+    async (method) => {
+      // Not every backend 401 means "the handler never ran" (managed-agent
+      // conversations are created before the handler's own 401), so a write
+      // is surfaced, not repeated. The token is still renewed for the next try.
+      let calls = 0;
+      server.use(
+        http[method](URL, () => {
+          calls++;
           return new HttpResponse(null, { status: 401 });
-        }
-        return HttpResponse.json({ ok: true });
+        }),
+      );
+      api.setAuthToken("old");
+      const refresher = refresherIssuing("new");
+      api.setTokenRefresher(refresher);
+
+      const send =
+        method === "delete" ? api.delete(PATH) : api[method](PATH, { name: "x" });
+      const error = await send.catch((e: unknown) => e);
+      expect(isApiError(error) && error.status).toBe(401);
+      expect(calls).toBe(1);
+      expect(refresher.forceRefresh).toHaveBeenCalledTimes(1);
+      expect(api.getAuthHeader()).toEqual({ Authorization: "Bearer new" });
+    },
+  );
+
+  it("does not force a refresh for a 401'd write when a background refresh already swapped the token", async () => {
+    server.use(
+      http.post(URL, () => {
+        api.setAuthToken("new"); // the background refresh lands mid-flight
+        return new HttpResponse(null, { status: 401 });
       }),
     );
-    api.setTokenRefresher(refresherIssuing("new"));
+    api.setAuthToken("old");
+    const refresher = refresherIssuing("newer");
+    api.setTokenRefresher(refresher);
 
-    await api.post(PATH, { name: "x" });
-    expect(bodies).toEqual(['{"name":"x"}', '{"name":"x"}']);
+    await expect(api.post(PATH, { name: "x" })).rejects.toMatchObject({ status: 401 });
+    expect(refresher.forceRefresh).not.toHaveBeenCalled();
   });
 
   it("without a refresher (auth disabled) a 401 is not retried", async () => {
@@ -190,11 +213,10 @@ describe("ApiClient token refresh", () => {
   it("does not replay a request under a different session's token", async () => {
     // The session that sent the request ends and another one's token is
     // installed before the 401 arrives: the "changed" token is not a refresh
-    // of the sender's session, so the request (possibly a write) must not be
-    // replayed under it.
+    // of the sender's session, so the request must not be replayed under it.
     const seen: (string | null)[] = [];
     server.use(
-      http.post(URL, ({ request }) => {
+      http.get(URL, ({ request }) => {
         const auth = request.headers.get("Authorization");
         seen.push(auth);
         if (auth === "Bearer alice") {
@@ -209,7 +231,7 @@ describe("ApiClient token refresh", () => {
     const refresher = refresherIssuing("alice-2");
     api.setTokenRefresher(refresher);
 
-    await expect(api.post(PATH, { write: 1 })).rejects.toMatchObject({ status: 401 });
+    await expect(api.get(PATH)).rejects.toMatchObject({ status: 401 });
     expect(seen).toEqual(["Bearer alice"]);
     expect(refresher.forceRefresh).not.toHaveBeenCalled();
   });
@@ -217,7 +239,7 @@ describe("ApiClient token refresh", () => {
   it("does not retry when the session ended while the forced refresh was pending", async () => {
     const seen: (string | null)[] = [];
     server.use(
-      http.post(URL, ({ request }) => {
+      http.get(URL, ({ request }) => {
         seen.push(request.headers.get("Authorization"));
         return request.headers.get("Authorization") === "Bearer bob"
           ? HttpResponse.json({ ok: true })
@@ -234,7 +256,7 @@ describe("ApiClient token refresh", () => {
       }),
     });
 
-    await expect(api.post(PATH, { write: 1 })).rejects.toMatchObject({ status: 401 });
+    await expect(api.get(PATH)).rejects.toMatchObject({ status: 401 });
     expect(seen).toEqual(["Bearer alice"]);
   });
 

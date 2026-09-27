@@ -177,6 +177,12 @@ export interface TokenRefresher {
   forceRefresh(): Promise<boolean>;
 }
 
+/**
+ * Methods the 401 retry may replay: safe ones, which change nothing on the
+ * server. See the retry in `requestWithResponse` for why writes are excluded.
+ */
+const REPLAYABLE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "OPTIONS"]);
+
 class ApiClient {
   private baseUrl: string;
   private headers: Record<string, string> = {
@@ -299,10 +305,14 @@ class ApiClient {
     // the freshness check and the server reading it (clock skew, a long request
     // queue, a laptop waking from sleep). A second 401 is real.
     //
-    // Replaying the request — a POST or PUT included — is safe only because
-    // EDDI authenticates BEFORE the resource method runs: a 401 from Quarkus
-    // OIDC means the handler never executed, so nothing happened twice. An
-    // endpoint that did work and then answered 401 would break that.
+    // Only a SAFE method is replayed. Replaying a write is safe only if every
+    // 401 means "the handler never ran", and the backend does not guarantee
+    // that: `RestAgentManagement.sayWithinContext` creates (or replaces) the
+    // user's conversation and only then throws `UnauthorizedException`, and an
+    // endpoint relaying an upstream 401 would be the same. A 401'd write is
+    // therefore surfaced, not repeated — but the token is still renewed, so
+    // the user's own retry goes out with a fresh one. The proactive refresh
+    // (`ensureFresh` above) keeps that case rare.
     //
     // If a background refresh already swapped the token while this request was
     // in flight, retry with it; otherwise force one (rate-limited by the
@@ -311,15 +321,17 @@ class ApiClient {
     //
     // The retry stays inside the session that sent the request: if that
     // session ended meanwhile (the epoch moved), a "changed" token is not a
-    // refresh of it, and replaying — possibly a write — under whatever token is
-    // installed now would act for a session that never issued it. Today a new
-    // session only arrives with a full page load (keycloak-js signs in by
-    // redirect), so this is defence in depth, not a live path. It is checked
-    // after the refresh, because the session can also end while that is
-    // pending.
+    // refresh of it, and replaying under whatever token is installed now would
+    // act for a session that never issued it. Today a new session only arrives
+    // with a full page load (keycloak-js signs in by redirect), so this is
+    // defence in depth, not a live path. It is checked after the refresh,
+    // because the session can also end while that is pending.
     if (response.status === 401 && refresher) {
       const tokenChanged = this.headers["Authorization"] !== sentAuth;
-      if ((tokenChanged || (await refresher.forceRefresh())) && this.sessionEpoch === epoch) {
+      if (!REPLAYABLE_METHODS.has(method.toUpperCase())) {
+        // Renew, don't replay.
+        if (!tokenChanged) void refresher.forceRefresh().catch(() => {});
+      } else if ((tokenChanged || (await refresher.forceRefresh())) && this.sessionEpoch === epoch) {
         response = await send();
       }
     }

@@ -42,8 +42,8 @@ Router's unstyled English default for errors thrown by the providers.
 **Auth.**
 - Tokens are refreshed ahead of expiry (every 20 s, when < 60 s remain, and on
   tab re-focus) instead of only after `onTokenExpired`, and `ApiClient`
-  checks freshness before each request and retries a 401 once after a forced
-  refresh (`TokenRefresher`, `lib/keycloak-session.ts`).
+  checks freshness before each request and retries a 401'd GET/HEAD/OPTIONS
+  once after a forced refresh (`TokenRefresher`, `lib/keycloak-session.ts`).
 - A transient refresh failure (network, Keycloak 5xx) no longer logs the user
   out; only a rejected refresh token (keycloak-js clears its tokens) sends the
   user to sign in.
@@ -100,8 +100,9 @@ Router's unstyled English default for errors thrown by the providers.
 - **Forced refreshes on 401 are rate-limited** (one per 10 s), so a 401 that is
   not about token age does not hit Keycloak's token endpoint on every request or
   poll; a 401 whose token was already swapped by a background refresh is retried
-  with the new token without forcing another. The code now says why replaying a
-  POST is safe: Quarkus OIDC rejects before the resource method runs.
+  with the new token without forcing another. (This entry also argued that
+  replaying a POST was safe because Quarkus OIDC rejects before the resource
+  method runs; that did not hold server-wide — see the second follow-up.)
 - **Pre-upgrade Workforce data is adopted, not hidden.** The first time a
   signed-in user's own key is empty while the old shared key holds data, it is
   moved into their key (once — the next user does not inherit it). Keys use the
@@ -149,6 +150,14 @@ Router's unstyled English default for errors thrown by the providers.
   the token cleared while the request waits in `ensureFresh`; it used to go out
   anyway with no token. It now fails with that 401 locally (401, not 0, which
   callers treat as a transient network failure).
+- **A 401'd write is no longer replayed.** The retry assumed every 401 means
+  the handler never ran, and the backend does not guarantee it:
+  `RestAgentManagement.sayWithinContext` / `loadConversationMemory` create (or
+  replace) the user's managed conversation and only then throw
+  `UnauthorizedException`. The automatic retry is now limited to GET, HEAD and
+  OPTIONS; a POST, PUT, PATCH or DELETE that gets a 401 surfaces it, and the
+  token is still renewed (unless a background refresh already swapped it) so
+  the user's own retry carries a fresh one.
 
 ### Decisions
 
