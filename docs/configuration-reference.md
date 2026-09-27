@@ -329,6 +329,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 
 ### OpenAI-compatible API
 
