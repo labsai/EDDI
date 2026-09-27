@@ -168,6 +168,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 |---|---|---|
 | `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
+| `eddi.vault.allow-weak-master-key` | `false` | Opt-out for the startup master-key strength gate, mirroring `eddi.security.allow-unauthenticated`. A weak or publicly-known master key (too short, too low-entropy, or a known demo/placeholder) normally **fails startup in production**; setting this `true` downgrades that to a WARN so a deployment already on a weak key can boot, rotate to a strong key via `POST /secretstore/secrets/admin/rotate-kek`, then remove the flag. Dev/test always warn regardless |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
 | `eddi.setup.vault-key-reuse` | `checksum` | `checksum` reuses an existing vault entry when the value matches; `never` always writes a new one. A typo fails startup |
