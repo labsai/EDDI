@@ -38,6 +38,23 @@ public final class SecretValueScrubber {
     private static final Logger LOGGER = Logger.getLogger(SecretValueScrubber.class);
 
     /**
+     * The shortest form of a message the client flagged {@code secretInput} that is
+     * searched for in the rest of the turn — its other step data, its output, a
+     * pending tool-call batch, its audit entries. Every nonempty form is still
+     * replaced wholesale where it IS the input ({@code input:initial},
+     * {@code input:normalized}, the displayed {@code input}).
+     * <p>
+     * Four, not the eight used for secret context values: the client explicitly
+     * marked this text a secret, and a 4-digit PIN or a short password is exactly
+     * what a password field carries. Not lower, because the search replaces every
+     * occurrence in every value and map key of the turn — a one- to three-character
+     * "secret" would shred the turn's reply and rename the fields of its stored API
+     * responses and output items, while being trivially guessable anyway. The audit
+     * ledger uses the same floor, so the stored turn and its ledger entries agree.
+     */
+    public static final int MIN_SEARCHED_SECRET_INPUT_LENGTH = 4;
+
+    /**
      * Configured like the persistence mapper, so an object is scrubbed in exactly
      * the JSON form it would be stored and returned in.
      */

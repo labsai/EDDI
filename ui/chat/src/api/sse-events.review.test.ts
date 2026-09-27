@@ -113,4 +113,17 @@ describe("structured output items", () => {
     expect(isSafeUri("//protocol-relative.example")).toBe(false);
     expect(isSafeUri("")).toBe(false);
   });
+
+  it("resolves a slash-prefixed path before calling it same-origin", () => {
+    // A backslash is a slash in an http(s) URL, so the browser sends both of
+    // these to evil.example — they are not paths on this origin.
+    expect(new URL("/\\evil.example", window.location.href).host).toBe("evil.example");
+    expect(isSafeUri("/\\evil.example")).toBe(false);
+    expect(isSafeUri("/\\evil.example/x.png")).toBe(false);
+    expect(extractOutputImages([{ type: "image", uri: "/\\evil.example/x.png" }])).toEqual([]);
+    // Real paths — and a protocol-relative URL naming this very host — still pass.
+    expect(isSafeUri("/img/logo.png")).toBe(true);
+    expect(isSafeUri("/a/../b?c=1#d")).toBe(true);
+    expect(isSafeUri(`//${window.location.host}/x`)).toBe(true);
+  });
 });

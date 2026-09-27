@@ -127,13 +127,26 @@ export interface OutputImage {
 }
 
 /**
- * True for an http(s) or same-origin path. A `javascript:` or `data:` URI in an
- * output item is not rendered.
+ * True for an http(s) URI or a path on this page's own origin. A `javascript:`
+ * or `data:` URI in an output item is not rendered.
+ *
+ * A slash-prefixed value is resolved the way the browser will resolve it, not
+ * judged by its first characters: `//host` and `/\host` (a backslash counts as a
+ * slash in an http(s) URL) both name another host, so they are paths only when
+ * that host is this page's.
  */
 export function isSafeUri(uri: string): boolean {
   const trimmed = uri.trim();
   if (!trimmed) return false;
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return true;
+  if (trimmed.startsWith("/")) {
+    try {
+      const page = new URL(window.location.href);
+      const resolved = new URL(trimmed, page);
+      return resolved.protocol === page.protocol && resolved.host === page.host;
+    } catch {
+      return false;
+    }
+  }
   try {
     const parsed = new URL(trimmed);
     return parsed.protocol === "https:" || parsed.protocol === "http:";

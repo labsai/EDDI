@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -240,6 +242,53 @@ class ConversationMemoryUtilitiesTest {
                 // The stored document is read, never rewritten.
                 assertEquals("tok-aaaa-bbbb-1111", snapshot.getConversationOutputs().get(1).get("input"));
             }
+        }
+
+        @Test
+        @DisplayName("an old secret turn's echoes in outputs and other step results are scrubbed on read; properties are not")
+        void oldStoredSecretTurnEchoesAreScrubbedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            var snapshot = oldShapeSecretTurn(new Context(Context.ContextType.string, "true"));
+            var secretOutput = snapshot.getConversationOutputs().get(1);
+            secretOutput.put("output", List.of(Map.of("type", "text", "text", "Stored Tok-Aaaa-Bbbb-1111")));
+            secretOutput.put("quickReplies", List.of(Map.of("value", "use tok-aaaa-bbbb-1111", "expressions", "ok")));
+            secretOutput.put("properties", Map.of("apiKey", "Tok-Aaaa-Bbbb-1111"));
+            var run = snapshot.getConversationSteps().get(1).getWorkflows().getFirst();
+            run.getLifecycleTasks().add(new ResultSnapshot("output:text:saved", "Stored Tok-Aaaa-Bbbb-1111", null, new Date(), null, true));
+            run.getLifecycleTasks()
+                    .add(new ResultSnapshot("httpCalls:create", Map.of("request", Map.of("key", "tok-aaaa-bbbb-1111")), null, new Date(), null,
+                            false));
+            run.getLifecycleTasks().add(new ResultSnapshot("properties:apiKey", "Tok-Aaaa-Bbbb-1111", null, new Date(), null, false));
+            snapshot.getConversationProperties().put("apiKey", new Property("apiKey", "Tok-Aaaa-Bbbb-1111", Property.Scope.conversation));
+
+            for (boolean detailed : List.of(false, true)) {
+                for (boolean currentOnly : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, currentOnly);
+                    var outputs = simple.getConversationOutputs().stream().map(output -> {
+                        Map<String, Object> copy = new LinkedHashMap<>(output);
+                        copy.remove("properties");
+                        return copy;
+                    }).toList();
+                    var steps = simple.getConversationSteps().stream()
+                            .flatMap(step -> step.getConversationStep().stream())
+                            .filter(data -> !data.getKey().equals("properties:apiKey"))
+                            .toList();
+                    String json = mapper.writeValueAsString(outputs) + mapper.writeValueAsString(steps);
+                    String where = "detailed=" + detailed + " currentOnly=" + currentOnly + ": ";
+                    assertFalse(json.toLowerCase().contains("tok-aaaa-bbbb-1111"), where + json);
+                    assertTrue(json.contains("Stored " + MemoryKeys.SECRET_INPUT_PLACEHOLDER), where + json);
+                    if (detailed) {
+                        assertTrue(json.contains("\"key\":\"" + MemoryKeys.SECRET_INPUT_PLACEHOLDER + "\""), where + json);
+                        // Properties and their step mirrors are returned as captured.
+                        assertEquals(Map.of("apiKey", "Tok-Aaaa-Bbbb-1111"), simple.getConversationOutputs().getLast().get("properties"));
+                        assertTrue(simple.getConversationSteps().getLast().getConversationStep().stream()
+                                .anyMatch(data -> data.getKey().equals("properties:apiKey") && "Tok-Aaaa-Bbbb-1111".equals(data.getValue())));
+                    }
+                    assertEquals("Tok-Aaaa-Bbbb-1111", simple.getConversationProperties().get("apiKey").getValueString());
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals("Stored Tok-Aaaa-Bbbb-1111", ((Map<?, ?>) ((List<?>) secretOutput.get("output")).getFirst()).get("text"));
         }
 
         @Test

@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
@@ -271,6 +272,53 @@ class ConversationSecretClientInputTest {
         for (String form : List.of(SECRET, NORMALIZED)) {
             assertFalse(ledgerJson.contains(form), "the audit ledger leaks: " + ledgerJson);
         }
+    }
+
+    /**
+     * A PIN or short password is below the 8-character floor of secret CONTEXT
+     * values; the client flagged it, so the echo of it is searched for from four
+     * characters (SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH). Shorter
+     * than that it is still replaced where it is the input itself, but not searched
+     * for — replacing every "ab" of the reply would shred it.
+     */
+    @Test
+    @DisplayName("a short client-flagged secret (4+ chars) is scrubbed from echoes; below four only the input fields are masked")
+    void shortSecretIsScrubbedFromEchoes() throws Exception {
+        IInputParser parser = normalizingParser();
+        doAnswer(invocation -> {
+            parserTask.execute(memory, parser);
+            var step = memory.getCurrentStep();
+            String raw = step.<String>getLatestData(MemoryKeys.INPUT_INITIAL.key()).getResult();
+            String normalized = step.<String>getLatestData(MemoryKeys.INPUT_NORMALIZED.key()).getResult();
+            step.addConversationOutputList("output", List.of(Map.of("type", "text", "text", "Your PIN " + raw + " is set")));
+            var apiResult = new Data<Object>("httpCalls:verify", Map.of("echo", "pin=" + normalized));
+            step.storeData(apiResult);
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("Pin42", secretFlag());
+
+        var step = memory.getCurrentStep();
+        String stored = MAPPER.writeValueAsString(ConversationMemoryUtilities.convertConversationMemory(memory));
+        assertFalse(stored.contains("Pin42"), "the raw short secret leaks: " + stored);
+        assertFalse(stored.contains("pin42"), "the normalized short secret leaks: " + stored);
+        assertTrue(String.valueOf(step.getConversationOutput().get("output")).contains("Your PIN " + PLACEHOLDER + " is set"));
+        assertEquals(Map.of("echo", "pin=" + PLACEHOLDER), step.getLatestData("httpCalls:verify").getResult());
+
+        // Below the floor: the input fields are masked, the reply is not searched.
+        setUp();
+        doAnswer(invocation -> {
+            parserTask.execute(memory, parser);
+            memory.getCurrentStep().addConversationOutputList("output", List.of(Map.of("type", "text", "text", "ok abc")));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("abc", secretFlag());
+
+        step = memory.getCurrentStep();
+        assertEquals(PLACEHOLDER, step.getLatestData(MemoryKeys.INPUT_INITIAL.key()).getResult());
+        assertEquals(PLACEHOLDER, step.getConversationOutput().get("input"));
+        assertTrue(String.valueOf(step.getConversationOutput().get("output")).contains("ok abc"), "a sub-floor form is not searched for");
     }
 
     private Conversation conversation() {

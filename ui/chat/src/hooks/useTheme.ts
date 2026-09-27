@@ -2,7 +2,7 @@
    useTheme — Dark / Light / System theme hook
    ────────────────────────────────────────────── */
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 
 export type ThemeMode = "dark" | "light" | "system";
 
@@ -43,15 +43,22 @@ function applyTheme(mode: ThemeMode): void {
 }
 
 export function useTheme(initial: ThemeMode = "dark") {
+  // The mode in force on this page. Storage cannot be the record of it: when
+  // storage is blocked, setTheme("system") is never persisted, and a listener
+  // reading storage would fall back to `initial` and ignore every later system
+  // change.
+  const currentMode = useRef<ThemeMode>(initial);
+
   // Apply on mount
   useEffect(() => {
     const mode = readStoredTheme() ?? initial;
+    currentMode.current = mode;
     applyTheme(mode);
 
     // Listen for system theme changes
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
-      if ((readStoredTheme() ?? initial) === "system") {
+      if (currentMode.current === "system") {
         applyTheme("system");
       }
     };
@@ -60,6 +67,7 @@ export function useTheme(initial: ThemeMode = "dark") {
   }, [initial]);
 
   const setTheme = useCallback((mode: ThemeMode) => {
+    currentMode.current = mode;
     storeTheme(mode);
     applyTheme(mode);
   }, []);

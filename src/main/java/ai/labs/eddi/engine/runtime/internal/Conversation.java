@@ -952,13 +952,14 @@ public class Conversation implements IConversation {
      * Replaced wholesale: {@code input:initial}, {@code input:normalized}, the
      * displayed {@code input}, and the parsed forms derived from the secret.
      * Searched for (raw and normalized, from
-     * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} characters): every other datum of
-     * the step and its conversation output — a template may have echoed the input.
-     * Deliberately NOT touched: conversation properties and their step mirrors. A
-     * property that captured the input ({@code {memory.current.input}}) is the
-     * agent designer's explicit choice — the wizard pattern hands it to a later
-     * turn — and {@code scope:"secret"} is how a designer asks for it to be
-     * vaulted.
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters —
+     * deliberately lower than the context-value floor, and deliberately not zero):
+     * every other datum of the step and its conversation output — a template may
+     * have echoed the input. Deliberately NOT touched: conversation properties and
+     * their step mirrors. A property that captured the input
+     * ({@code {memory.current.input}}) is the agent designer's explicit choice —
+     * the wizard pattern hands it to a later turn — and {@code scope:"secret"} is
+     * how a designer asks for it to be vaulted.
      * <p>
      * A task that runs after a HITL resume of this turn sees the placeholder, as it
      * does for a secret context value.
@@ -983,8 +984,10 @@ public class Conversation implements IConversation {
                 plaintexts.add(normalized);
             }
         }
+        // The client-input floor, not the context-value one: see
+        // SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH for why it is four.
         List<String> needles = plaintexts.stream()
-                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .filter(value -> value.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
 

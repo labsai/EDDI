@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -60,9 +61,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     /**
      * Shorter inputs are not searched for elsewhere in an entry: replacing every
-     * "ok" in a model response would destroy the record for no gain.
+     * "ok" in a model response would destroy the record for no gain. The same floor
+     * as the turn-end scrub of the stored step, so the two agree on what is
+     * removed.
      */
-    static final int MIN_REDACTED_INPUT_LENGTH = 4;
+    static final int MIN_REDACTED_INPUT_LENGTH = SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH;
 
     private static final String USER_INPUT = "userInput";
 
