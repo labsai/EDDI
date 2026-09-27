@@ -89,6 +89,14 @@ export function createTokenRefresher(
   // failing Keycloak is not hammered either.
   let lastForcedAt = Number.NEGATIVE_INFINITY;
 
+  // The forced refresh currently in flight, if any. Several requests can 401
+  // together (a page mounting a handful of queries on an expired token); each
+  // one checks whether the token changed BEFORE the first refresh has
+  // answered, so each reaches forceRefresh(). Without sharing, only the first
+  // got the refresh and every other one hit the cooldown, got `false`, and
+  // surfaced its 401 instead of retrying with the new token.
+  let inFlight: Promise<boolean> | null = null;
+
   return {
     async ensureFresh() {
       // Nothing to refresh with (not signed in yet, or already lost): send the
@@ -110,11 +118,19 @@ export function createTokenRefresher(
     },
     async forceRefresh() {
       if (!keycloak.refreshToken) return false;
+      // Join the attempt already under way — before the cooldown check, which
+      // that attempt itself just armed.
+      if (inFlight) return inFlight;
       const now = Date.now();
       if (now - lastForcedAt < FORCED_REFRESH_COOLDOWN_MS) return false;
       lastForcedAt = now;
       // -1 is keycloak-js's "refresh regardless of remaining validity".
-      return refresh(-1);
+      // `refresh` never rejects (it maps failure to `false`), so `finally`
+      // only has to clear the slot.
+      inFlight = refresh(-1).finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }

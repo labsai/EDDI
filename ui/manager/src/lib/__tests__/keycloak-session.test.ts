@@ -83,6 +83,51 @@ describe("keycloak session", () => {
     expect(kc.updateToken).toHaveBeenCalledTimes(2);
   });
 
+  it("concurrent forced refreshes share the one in flight instead of hitting the cooldown", async () => {
+    // Several requests 401 together; each reaches forceRefresh() before the
+    // first refresh has answered. All of them must get the refresh's outcome —
+    // not `false` from the cooldown the first call just armed.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T10:00:00Z"));
+    let finish: (v: boolean) => void = () => {};
+    const kc = fakeKeycloak({
+      updateToken: vi.fn(() => new Promise<boolean>((r) => (finish = r))),
+    });
+    const refresher = createTokenRefresher(kc, vi.fn(), vi.fn());
+
+    const first = refresher.forceRefresh();
+    const second = refresher.forceRefresh();
+    const third = refresher.forceRefresh();
+    finish(true);
+    expect(await Promise.all([first, second, third])).toEqual([true, true, true]);
+    expect(kc.updateToken).toHaveBeenCalledTimes(1);
+
+    // Once it has settled, the cooldown still applies to a NEW attempt.
+    expect(await refresher.forceRefresh()).toBe(false);
+    expect(kc.updateToken).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() + FORCED_REFRESH_COOLDOWN_MS);
+    const later = refresher.forceRefresh();
+    finish(true);
+    expect(await later).toBe(true);
+    expect(kc.updateToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("callers that joined a FAILED forced refresh all get false, and the cooldown still holds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T10:00:00Z"));
+    let fail: (e: Error) => void = () => {};
+    const kc = fakeKeycloak({
+      updateToken: vi.fn(() => new Promise<boolean>((_, reject) => (fail = reject))),
+    });
+    const refresher = createTokenRefresher(kc, vi.fn(), vi.fn());
+
+    const joined = [refresher.forceRefresh(), refresher.forceRefresh()];
+    fail(new Error("Failed to fetch"));
+    expect(await Promise.all(joined)).toEqual([false, false]);
+    expect(await refresher.forceRefresh()).toBe(false);
+    expect(kc.updateToken).toHaveBeenCalledTimes(1);
+  });
+
   it("publishes the new token after a refresh", async () => {
     const onRefreshed = vi.fn();
     const refresher = createTokenRefresher(fakeKeycloak(), onRefreshed, vi.fn());

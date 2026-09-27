@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { api, isApiError, type TokenRefresher } from "../api-client";
+import { createTokenRefresher, type KeycloakLike } from "../keycloak-session";
 
 const PATH = "/probe-auth";
 const URL = `${window.location.origin}${PATH}`;
@@ -142,5 +143,47 @@ describe("ApiClient token refresh", () => {
     await expect(api.get(PATH)).resolves.toEqual({ ok: true });
     expect(seen).toEqual(["Bearer old", "Bearer new"]);
     expect(refresher.forceRefresh).not.toHaveBeenCalled();
+  });
+
+  it("retries EVERY request that 401'd together, not just the first (real refresher)", async () => {
+    // With the real Keycloak refresher: two requests on a revoked token both
+    // come back 401 before the forced refresh has answered. The second used to
+    // hit the forced-refresh cooldown and surface its 401.
+    let finish: (v: boolean) => void = () => {};
+    const keycloak: KeycloakLike = {
+      token: "old",
+      refreshToken: "r",
+      isTokenExpired: () => false,
+      updateToken: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = (v) => {
+              keycloak.token = "new";
+              resolve(v);
+            };
+          }),
+      ),
+    };
+    let unauthorized = 0;
+    server.use(
+      http.get(URL, ({ request }) => {
+        if (request.headers.get("Authorization") === "Bearer new") {
+          return HttpResponse.json({ ok: true });
+        }
+        // Answer the refresh once both requests have been refused.
+        if (++unauthorized === 2) setTimeout(() => finish(true), 0);
+        return new HttpResponse(null, { status: 401 });
+      }),
+    );
+    api.setAuthToken("old");
+    api.setTokenRefresher(
+      createTokenRefresher(keycloak, () => api.setAuthToken(keycloak.token!), vi.fn()),
+    );
+
+    await expect(Promise.all([api.get(PATH), api.get(PATH)])).resolves.toEqual([
+      { ok: true },
+      { ok: true },
+    ]);
+    expect(keycloak.updateToken).toHaveBeenCalledTimes(1);
   });
 });

@@ -165,6 +165,37 @@ describe("AuthProvider (Keycloak)", () => {
     expect(instance.login).not.toHaveBeenCalled();
   });
 
+  it("on a lost session stops presenting the app as signed in", async () => {
+    // The gate used to stay "ready": `authenticated` stayed true and the app
+    // stayed mounted, every call 401ing, on a session that was gone.
+    const refresherSet = vi.spyOn(api, "setTokenRefresher");
+    renderStrict();
+    expect(await screen.findByTestId("status")).toHaveTextContent("in");
+    const instance = lastInstance() as FakeInstance & {
+      refreshToken?: string;
+      login: ReturnType<typeof vi.fn>;
+    };
+    instance.updateToken.mockImplementation(async () => {
+      instance.refreshToken = undefined;
+      instance.token = undefined;
+      throw new Error("Server responded with an invalid status.");
+    });
+    await act(async () => {
+      instance.onTokenExpired?.();
+    });
+
+    expect(await screen.findByTestId("auth-signed-out")).toBeInTheDocument();
+    expect(screen.queryByTestId("status")).not.toBeInTheDocument();
+    // Leaving "ready" detached the refresher and the expiry hook.
+    expect(refresherSet).toHaveBeenLastCalledWith(null);
+    expect(instance.onTokenExpired).toBeUndefined();
+
+    // The screen's way out is a sign-in on the (still initialised) adapter.
+    await userEvent.setup().click(screen.getByTestId("auth-sign-in"));
+    expect(instance.login).toHaveBeenCalledTimes(1);
+    refresherSet.mockRestore();
+  });
+
   it("re-reads realm roles when the token is refreshed", async () => {
     renderStrict();
     expect(await screen.findByTestId("roles")).toHaveTextContent("eddi-viewer");

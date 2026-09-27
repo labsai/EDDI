@@ -118,6 +118,20 @@ Router's unstyled English default for errors thrown by the providers.
   the tests compare against `Intl` rather than English literals, since the
   exact English wording comes from the engine's CLDR data.
 
+### Second review follow-up (same branch)
+
+- **Requests that 401 together are all retried.** Several requests refused on
+  one revoked token each reached `forceRefresh()` before the first refresh had
+  answered; only the first got it, the rest hit the 10 s cooldown and surfaced
+  their 401. Callers now join the forced refresh already in flight; the cooldown
+  still applies to a new attempt after it settles, successful or not
+  (`keycloak-session.ts`).
+- **A lost session leaves the app.** When the token endpoint rejected the
+  refresh token, the provider cleared the API token but stayed "ready" —
+  `authenticated: true`, the app mounted, every call 401ing — until keycloak-js's
+  redirect landed. It now switches to the "You are signed out" screen (Sign in),
+  which also detaches the refresher and its timers (`auth-provider.tsx`).
+
 ### Decisions
 
 - The route table stays declarative inside a single splat data route rather

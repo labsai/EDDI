@@ -81,7 +81,8 @@ function sameRoles(a: string[], b: string[]): boolean {
  * - `incomplete`: Keycloak sent the user back with an OAuth error — the user
  *   cancelled, or Keycloak refused the sign-in. The service is reachable, so
  *   "could not reach the sign-in service" would be the wrong thing to say.
- * - `signed-out`: init completed without a session.
+ * - `signed-out`: init completed without a session, or a live session was
+ *   lost (the token endpoint rejected the refresh token).
  */
 type Gate = "loading" | "failed" | "incomplete" | "signed-out" | "ready";
 
@@ -219,11 +220,17 @@ function KeycloakAuthProvider({
     // already redirects to sign in, because init ran with
     // `onLoad: "login-required"` (which sets `loginRequired`) — a second call
     // only assigned `location` twice. What is left for us is to stop sending a
-    // dead token in the moment before the redirect. A failure that left the
-    // session intact (network error, Keycloak 5xx) is retried on the next tick
-    // instead of logging the user out.
+    // dead token and stop presenting the session as live: leaving the gate
+    // "ready" kept `authenticated: true` and the whole app mounted on a session
+    // that no longer exists — every call 401ing — until the redirect landed,
+    // and indefinitely if it never did. "signed-out" swaps the app for the
+    // sign-in screen, and leaving "ready" runs this effect's cleanup, which
+    // detaches the refresher and its timers. A failure that left the session
+    // intact (network error, Keycloak 5xx) is retried on the next tick instead
+    // of logging the user out.
     const onSessionLost = () => {
       api.clearAuthToken();
+      setGate("signed-out");
     };
 
     const refresher = createTokenRefresher(keycloak, applyToken, onSessionLost);
