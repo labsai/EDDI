@@ -3762,6 +3762,7 @@
       "untitled": "Ohne Titel",
       "viewSessions": "Frühere Sitzungen ansehen",
       "alreadyEnded": "Die Diskussion war bereits beendet.",
+      "stopRaced": "Die Diskussion hat beim Stoppen ihren Zustand geändert und läuft weiter. Bitte erneut stoppen.",
       "stopFailed": "Die Diskussion konnte nicht gestoppt werden: {{error}}",
       "stopping": "Wird gestoppt…",
       "startOver": "Neu beginnen",

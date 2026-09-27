@@ -53,6 +53,13 @@ backend strings (P2).
   group. The confirmation is dismissed when the board changes, and a pending or
   in-flight "Stop and start new" now clears only the board it was asked on,
   not the one the user moved to.
+- **A 409 is checked, not believed (review follow-up):** the cancel endpoint
+  answers 409 both for a discussion that had ended and for a cancel that lost a
+  state race on a paused one (`GroupHitlCoordinator.cancelDiscussion`). The
+  board now reads the stored state before saying "already ended"; if the
+  discussion is still going it reports a failed Stop (new key
+  `Workforce.board.stopRaced`, all 11 locales), keeps Stop on offer, and "Stop
+  and start new" does not clear the board.
 
 ### Streams that end, and members that "type forever"
 

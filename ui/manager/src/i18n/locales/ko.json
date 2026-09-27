@@ -3762,6 +3762,7 @@
       "untitled": "제목 없음",
       "viewSessions": "지난 세션 보기",
       "alreadyEnded": "토론이 이미 종료되었습니다.",
+      "stopRaced": "중지하는 동안 토론 상태가 바뀌어 아직 진행 중입니다. 다시 중지해 보세요.",
       "stopFailed": "토론을 중지할 수 없습니다: {{error}}",
       "stopping": "중지하는 중…",
       "startOver": "다시 시작",

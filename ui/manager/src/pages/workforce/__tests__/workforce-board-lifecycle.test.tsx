@@ -486,6 +486,53 @@ describe("WorkforceBoard — lifecycle", () => {
   });
 
   /**
+   * The backend answers a cancel with 409 both when the discussion had ended
+   * and when the cancel lost a state race on a paused one (an approval, resume
+   * or timeout landed first). The board used to say "already ended" either way.
+   * It now reads the stored state: a discussion still going gets a failed Stop,
+   * and Stop stays on offer.
+   */
+  it.each([
+    ["still going after the race", "IN_PROGRESS", "raced"],
+    ["really over", "COMPLETED", "ended"],
+  ] as const)("on a 409, reports a discussion %s from its stored state", async (_label, afterState, expected) => {
+    const toastError = vi.spyOn(toast, "error");
+    const toastInfo = vi.spyOn(toast, "info");
+    let conflicted = false;
+    server.use(
+      // Running when Stop is pressed; afterwards, whatever the race left behind.
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.gcId), { state: conflicted ? afterState : "IN_PROGRESS" })),
+      ),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+        conflicted = true;
+        return HttpResponse.text("Group conversation is already in a terminal state — nothing to cancel", {
+          status: 409,
+        });
+      }),
+    );
+    try {
+      renderPage("/workforce/grp1?version=1&conversation=gc-raced", <WorkforceBoard />, "/workforce/:boardId");
+      await userEvent.click(await screen.findByTestId("board-stop-btn"));
+      await userEvent.click(await screen.findByRole("button", { name: /cancel discussion/i }));
+
+      if (expected === "raced") {
+        await waitFor(() =>
+          expect(toastError).toHaveBeenCalledWith(expect.stringContaining("still going")),
+        );
+        expect(toastInfo).not.toHaveBeenCalledWith(expect.stringContaining("already ended"));
+        expect(await screen.findByTestId("board-stop-btn")).toBeEnabled();
+      } else {
+        await waitFor(() => expect(toastInfo).toHaveBeenCalledWith(expect.stringContaining("already ended")));
+        expect(toastError).not.toHaveBeenCalled();
+      }
+    } finally {
+      toastError.mockRestore();
+      toastInfo.mockRestore();
+    }
+  });
+
+  /**
    * "Stop and start new" pressed before `group_start` named the conversation:
    * the cancel waits for the id, and the new discussion must still follow it
    * rather than leave the user on the run they chose to leave.

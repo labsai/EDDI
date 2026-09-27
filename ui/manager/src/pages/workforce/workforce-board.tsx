@@ -34,7 +34,9 @@ import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import {
   followupGroupMember,
   closeGroupConversation,
+  getGroupConversation,
   type GroupAttachmentRef,
+  type GroupConversationState,
 } from "@/lib/api/groups";
 import { useSubmitHumanInput } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
@@ -106,6 +108,30 @@ function StopIcon() {
 }
 
 // ─── Component ───────────────────────────────────────────────────
+
+/** States the backend never cancels out of; a 409 on one of them is a real "already ended". */
+const ENDED_STATES: ReadonlySet<GroupConversationState> = new Set<GroupConversationState>([
+  "COMPLETED",
+  "FAILED",
+  "REJECTED",
+  "CANCELLED",
+  "CLOSED",
+]);
+
+/**
+ * After a cancel answered 409: is the discussion in fact still going? The
+ * backend answers 409 both for a terminal discussion and for a cancel that lost
+ * a state race (`GroupHitlCoordinator.cancelDiscussion`). A failed read cannot
+ * tell, and falls back to the 409's own claim.
+ */
+async function stillGoingAfterConflict(groupId: string, gcId: string): Promise<boolean> {
+  try {
+    const doc = await getGroupConversation(groupId, gcId);
+    return !ENDED_STATES.has(doc.state);
+  } catch {
+    return false;
+  }
+}
 
 function WorkforceBoard() {
   const { t } = useTranslation();
@@ -494,6 +520,20 @@ function WorkforceBoard() {
       if (outcome === "cancelled") {
         toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
       } else if (outcome === "alreadyEnded") {
+        // A 409 also means the cancel lost a state race on a paused discussion
+        // (an approval, resume or timeout landed first). The stored state says
+        // which: "already ended" is only claimed when it has.
+        const gcId = targetId ?? streamState.conversationId;
+        if (boardId && gcId && (await stillGoingAfterConflict(boardId, gcId))) {
+          toast.error(
+            t(
+              "Workforce.board.stopRaced",
+              "The discussion changed state as you stopped it and is still going. Try Stop again.",
+            ),
+          );
+          queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+          return false;
+        }
         toast.info(t("Workforce.board.alreadyEnded", "The discussion had already ended."));
       }
       if (boardId) queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
@@ -508,7 +548,7 @@ function WorkforceBoard() {
     } finally {
       setIsStopping(false);
     }
-  }, [cancelStream, boardId, queryClient, t]);
+  }, [cancelStream, streamState.conversationId, boardId, queryClient, t]);
 
   // A Stop pressed before `group_start` is sent later, from the stream, so its
   // failure cannot reach the catch above. Reported the same way, as a failed

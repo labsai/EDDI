@@ -3762,6 +3762,7 @@
       "untitled": "无标题",
       "viewSessions": "查看历史会话",
       "alreadyEnded": "讨论已经结束。",
+      "stopRaced": "停止时讨论状态已发生变化，讨论仍在进行。请再次尝试停止。",
       "stopFailed": "无法停止讨论：{{error}}",
       "stopping": "正在停止…",
       "startOver": "重新开始",
