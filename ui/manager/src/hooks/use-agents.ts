@@ -169,13 +169,14 @@ export function useUpdateAgent() {
 }
 
 /**
- * Per-environment deployment status of an agent — at `version` where that
- * version is live, otherwise at whichever older version still is (flagged with
- * `deployedVersion`; see `withAnyDeployedVersion`).
+ * Per-environment deployment status of an agent — at `version`, except that an
+ * environment with nothing at `version` (NOT_FOUND) reports whichever older
+ * version is still live there (flagged with `deployedVersion`; see
+ * `withAnyDeployedVersion`). An ERROR at `version` is never covered up.
  *
- * The environment-wide listing is only fetched when some environment is not
- * live at `version`, and is shared by key across every card on the page, so a
- * list of 50 agents costs one listing per environment, not 50.
+ * The environment-wide listing is only fetched when some environment has
+ * nothing at `version`, and is shared by key across every card on the page, so
+ * a list of 50 agents costs one listing per environment, not 50.
  */
 export function useDeploymentStatuses(agentId: string, version: number) {
   const exact = useQuery({
@@ -189,7 +190,9 @@ export function useDeploymentStatuses(agentId: string, version: number) {
       return false;
     },
   });
-  const needsListing = !!exact.data?.some((s) => s.status !== "READY" && s.status !== "IN_PROGRESS");
+  // Only NOT_FOUND is ever replaced (see withAnyDeployedVersion), so only it
+  // needs the listing.
+  const needsListing = !!exact.data?.some((s) => s.status === "NOT_FOUND");
   const listings = useQueries({
     queries: ENVIRONMENTS.map((environment) => ({
       queryKey: [...agentKeys.all, "deploymentListing", environment],
@@ -202,7 +205,7 @@ export function useDeploymentStatuses(agentId: string, version: number) {
   ENVIRONMENTS.forEach((environment, i) => {
     deployed[environment] = listings[i]?.data;
   });
-  return { ...exact, data: withAnyDeployedVersion(exact.data, deployed, agentId) };
+  return { ...exact, data: withAnyDeployedVersion(exact.data, deployed, agentId, version) };
 }
 
 export function useCreateAgent() {

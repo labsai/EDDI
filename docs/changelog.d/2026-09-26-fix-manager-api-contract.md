@@ -61,8 +61,8 @@ tests would now fail on a regression.
   per-version status endpoint then says NOT_FOUND although an older version is
   live. `useDeploymentStatuses` and the chat picker now consult
   `GET /administration/{env}/deploymentstatus` (one shared listing per
-  environment) and adopt an older READY/IN_PROGRESS version, flagged
-  `deployedVersion`; the card's chip shows `vN` and its deploy toggle still acts
+  environment) and, for an environment with nothing at the asked-for version
+  (NOT_FOUND), adopt an older READY version, flagged `deployedVersion`; the card's chip shows `vN` and its deploy toggle still acts
   on the card's own version. Tests: `deployment-environments.test.ts`,
   `use-agents.test.tsx`, `agent-card.test.tsx`.
 - **Dashboard counts.** The conversation count asked for 1000 but the backend
@@ -111,6 +111,25 @@ tests would now fail on a regression.
   listing holds the highest deployed version whatever its status, so when that
   one is ERROR an older READY version is not visible (no backend "latest READY"
   listing). Test: `deployment-environments.test.ts`.
+- **Deployment fallback replaces only NOT_FOUND, never at the asked-for
+  version** (second review). A READY listing row *at* the requested version
+  contradicts the exact NOT_FOUND it would replace, so it is stale: undeploying
+  v4 set the exact status to NOT_FOUND optimistically while the shared, cached
+  listing still said v4 READY, and the card showed v4 live again until the
+  refetch. `withAnyDeployedVersion` now takes the requested version and skips
+  such rows. And an ERROR at the requested version is kept instead of being
+  replaced by an older READY one — it had turned a failed v4 deploy into a green
+  production chip and hidden `env-chip-error-*`. The listing is now fetched only
+  when some environment is NOT_FOUND. Tests: `deployment-environments.test.ts`,
+  `use-agents.test.tsx` (undeploy with a cached listing; ERROR kept),
+  `use-chat.test.tsx` (`useDeployedAgents`), `agent-card.test.tsx`.
+- **Chat panel serialises undo, redo and rerun with sends** (second review).
+  Each of the three finishes by replacing the transcript with a fresh read, so
+  while one is in flight the composer is disabled, quick replies are hidden, the
+  Retry button is hidden during a move, and Undo/Redo are unavailable during a
+  rerun. Before, a send or quick reply issued during an undo raced its re-read.
+  Tests: `chat-panel.test.tsx` ("holds every other way…", "offers no undo,
+  redo or send while a rerun is in flight").
 - **`auditToolCalls`** attaches `tool_error` reasons (budget, quota, HITL cap)
   to the refused call, or lists an orphan refusal. Test: `audit.test.ts`.
 - **`useAllAgentDescriptors` has its own cache key**, so the Agents list does

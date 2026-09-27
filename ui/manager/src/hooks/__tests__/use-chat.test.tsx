@@ -264,6 +264,45 @@ describe("useDeployedAgents", () => {
     );
     expect(Array.isArray(result.current.data)).toBe(true);
   });
+
+  it("lists an agent where an OLDER version is live, but never on a listing row at its own version", async () => {
+    // v4 is the latest descriptor and is not deployed anywhere (exact
+    // NOT_FOUND). `test` still serves v3, so the agent belongs in the picker
+    // there. Production's listing row is AT v4 — it contradicts the exact
+    // NOT_FOUND, so it is stale and must not put production back.
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent9?version=4",
+            name: "Picker Agent",
+            description: "",
+            createdOn: 0,
+            lastModifiedOn: 0,
+          },
+        ]),
+      ),
+      http.get("*/administration/:env/deploymentstatus/:agentId", () =>
+        HttpResponse.json({ status: "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json([
+          {
+            environment: params.env,
+            agentId: "agent9",
+            agentVersion: params.env === "production" ? 4 : 3,
+            status: "READY",
+          },
+        ]),
+      ),
+    );
+    const { result } = renderHook(() => useDeployedAgents(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data![0]).toMatchObject({ id: "agent9", version: 4, environments: ["test"] });
+  });
 });
 
 describe("useConversationHistory", () => {

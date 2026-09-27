@@ -40,8 +40,8 @@ export function preferredChatEnvironment(live: readonly Environment[]): Environm
 }
 
 /**
- * Fill in environments where the asked-for version is not live but an older
- * version of the same agent is.
+ * Fill in environments where the asked-for version is not deployed but an older
+ * version of the same agent is live.
  *
  * The per-version status endpoint answers only for the exact version asked, and
  * every save bumps the version — so an agent still serving v3 in production
@@ -49,12 +49,21 @@ export function preferredChatEnvironment(live: readonly Environment[]): Environm
  * page and the chat picker alike. `deployed` is the per-environment result of
  * `listDeploymentStatuses` (same order as `statuses`' environments, entries may
  * be missing when that call failed). The adopted entry carries `deployedVersion`
- * so callers can tell "live at this version" from "live at another one", and a
- * version-exact READY/IN_PROGRESS always wins.
+ * so callers can tell "live at this version" from "live at another one".
  *
- * Only a READY row is adopted. An IN_PROGRESS row from the listing would come
- * from a cached, unpolled read and keep the card's toggle disabled on a state
- * that has long moved on; the version-exact query is the one that polls.
+ * Only a NOT_FOUND status is replaced. READY and IN_PROGRESS are version-exact
+ * answers and win outright; ERROR is kept too, because a failed deploy of v4 is
+ * the thing the reader must see — overwriting it with a green chip for the v3
+ * that still serves would hide it (and the card's `env-chip-error-*`).
+ *
+ * Only a READY row is adopted, and never one at `version` itself. An IN_PROGRESS
+ * row from the listing would come from a cached, unpolled read and keep the
+ * card's toggle disabled on a state that has long moved on; the version-exact
+ * query is the one that polls. A READY row AT `version` contradicts the
+ * version-exact NOT_FOUND it would replace, so it can only be stale: an undeploy
+ * sets the exact status to NOT_FOUND optimistically while the shared listing is
+ * still cached from before, and adopting that row reported the version just
+ * undeployed as live again until the listing refetched.
  *
  * Known gap: the listing holds the HIGHEST deployed version per agent whatever
  * its status (`AgentFactory.getAllLatestAgents`). If that version failed (ERROR)
@@ -66,12 +75,13 @@ export function withAnyDeployedVersion(
   statuses: EnvironmentStatus[] | undefined,
   deployed: Partial<Record<Environment, AgentDeploymentSummary[] | undefined>>,
   agentId: string,
+  version: number,
 ): EnvironmentStatus[] | undefined {
   if (!statuses) return statuses;
   return statuses.map((s) => {
-    if (s.status === "READY" || s.status === "IN_PROGRESS") return s;
+    if (s.status !== "NOT_FOUND") return s;
     const other = deployed[s.environment]?.find(
-      (d) => d.agentId === agentId && d.status === "READY",
+      (d) => d.agentId === agentId && d.status === "READY" && d.agentVersion !== version,
     );
     return other
       ? { environment: s.environment, status: other.status, deployedVersion: other.agentVersion }

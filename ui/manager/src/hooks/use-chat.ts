@@ -317,6 +317,7 @@ export function useDeployedAgents() {
             await getDeploymentStatuses(agent.id, agent.version),
             deployed,
             agent.id,
+            agent.version,
           );
           return { agent, environments: deployedEnvironments(statuses) };
         } catch {

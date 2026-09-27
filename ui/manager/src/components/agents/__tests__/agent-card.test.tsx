@@ -267,4 +267,30 @@ describe("AgentCard", () => {
       "Deploy to production",
     );
   });
+
+  /**
+   * A failed deploy of the card's version must not be painted over with a
+   * green chip for the older version that still serves — the error chip is the
+   * one thing on the card saying production is broken.
+   */
+  it("keeps a failed deploy visible even while an older version is live", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+        HttpResponse.json({ status: params.env === "production" ? "ERROR" : "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json([
+          { environment: params.env, agentId: "agent-test-1", agentVersion: 0, status: "READY" },
+        ]),
+      ),
+    );
+    renderWithProviders(<AgentCard {...defaultProps} agent={{ ...mockAgent, version: 2 }} />);
+
+    // `test` adopts v0 (it was NOT_FOUND); production stays an error.
+    await waitFor(() => {
+      expect(screen.getByTestId("env-chip-version-test")).toHaveTextContent("v0");
+    });
+    expect(screen.getByTestId("env-chip-error-production")).toBeInTheDocument();
+    expect(screen.queryByTestId("env-chip-production")).not.toBeInTheDocument();
+  });
 });

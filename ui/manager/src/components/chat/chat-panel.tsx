@@ -292,6 +292,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
   // ── Rerun last step ──
   const rerunConversation = useRerunConversation();
+  // Undo, redo and rerun each finish by replacing the whole transcript with a
+  // fresh read. While one is in flight nothing else may change the
+  // conversation — a send, quick reply or other move racing it would either be
+  // wiped by that read or be read half-done — so every entry point below waits.
+  const conversationBusy = stepMovePending || rerunConversation.isPending;
   const lastMessage = messages[messages.length - 1];
   const showRerun = lastMessage?.role === "agent" && (lastMessage.content ?? "").includes("⚠️ Error");
 
@@ -556,7 +561,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 ))}
 
               {/* Rerun button — shown when last message is an error */}
-              {showRerun && !isProcessing && (
+              {showRerun && !isProcessing && !stepMovePending && (
                 <div className="flex justify-center py-2">
                   <button
                     onClick={handleRerun}
@@ -604,7 +609,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && (
+        {quickReplies.length > 0 && !isProcessing && !isPaused && !conversationBusy && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -656,12 +661,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               handleSend(val, true);
               clearInputField();
             }}
-            disabled={isProcessing || isPaused}
+            disabled={isProcessing || isPaused || conversationBusy}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId || isPaused}
+            disabled={!conversationId || isPaused || conversationBusy}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
@@ -673,13 +678,13 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={removeAttachment}
             hasReadyAttachment={hasReadyAttachment}
-            // Disabled while either move is pending: the flags only change
-            // after the re-read, so a double click would otherwise undo a
-            // second turn.
-            onUndo={conversationId && undoAvailable && !isProcessing && !stepMovePending
+            // Disabled while either move (or a rerun) is pending: the flags
+            // only change after the re-read, so a double click would otherwise
+            // undo a second turn.
+            onUndo={conversationId && undoAvailable && !isProcessing && !conversationBusy
               ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
-            onRedo={conversationId && redoAvailable && !isProcessing && !stepMovePending
+            onRedo={conversationId && redoAvailable && !isProcessing && !conversationBusy
               ? () => redoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
             embedded={embedded}

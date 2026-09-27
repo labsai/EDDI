@@ -306,6 +306,67 @@ describe("useDeploymentStatuses", () => {
     ]);
   });
 
+  it("does not report the version being undeployed as live again from the cached listing", async () => {
+    // Production serves v4; `test` has nothing, so the listing is fetched and
+    // cached with v4 READY. Undeploying v4 flips the exact status to NOT_FOUND
+    // optimistically while that cached row still says v4 READY — adopting it
+    // put the green v4 chip straight back until the listing refetched.
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+        HttpResponse.json({ status: params.env === "production" ? "READY" : "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json(
+          params.env === "production"
+            ? [{ environment: "production", agentId: "agent1", agentVersion: 4, status: "READY" }]
+            : [],
+        ),
+      ),
+      // Never answers, so the optimistic state is what the assertion reads.
+      http.post("*/administration/:env/undeploy/:agentId", () => new Promise<never>(() => {})),
+    );
+    const { result } = renderHook(
+      () => ({ statuses: useDeploymentStatuses("agent1", 4), undeploy: useUndeployAgent() }),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() =>
+      expect(result.current.statuses.data?.find((s) => s.environment === "production")?.status).toBe("READY"),
+    );
+    act(() => {
+      result.current.undeploy.mutate({ environment: "production", agentId: "agent1", version: 4 });
+    });
+    await waitFor(() =>
+      expect(result.current.statuses.data?.find((s) => s.environment === "production")).toEqual({
+        environment: "production",
+        status: "NOT_FOUND",
+      }),
+    );
+  });
+
+  it("keeps a failed deploy of the asked-for version visible over an older live one", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
+        HttpResponse.json({ status: params.env === "production" ? "ERROR" : "NOT_FOUND" }),
+      ),
+      http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+        HttpResponse.json([
+          { environment: params.env, agentId: "agent1", agentVersion: 3, status: "READY" },
+        ]),
+      ),
+    );
+    const { result } = renderHook(() => useDeploymentStatuses("agent1", 4), {
+      wrapper: createWrapper(),
+    });
+    // `test` adopts v3 once the listing lands; production must stay ERROR.
+    await waitFor(() =>
+      expect(result.current.data?.find((s) => s.environment === "test")?.status).toBe("READY"),
+    );
+    expect(result.current.data).toEqual([
+      { environment: "production", status: "ERROR" },
+      { environment: "test", status: "READY", deployedVersion: 3 },
+    ]);
+  });
+
   it("is disabled with empty agentId", () => {
     const { result } = renderHook(
       () => useDeploymentStatuses("", 3),
