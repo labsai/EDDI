@@ -137,6 +137,13 @@ Router's unstyled English default for errors thrown by the providers.
   Logout now marks the session ended, and the refresh effect ignores callbacks
   once it has been cleaned up (raised in CodeRabbit's security architecture
   review on the walkthrough comment).
+- **A 401 retry stays inside the session that sent the request** (defence in
+  depth). `ApiClient` bumps a session epoch whenever the token is cleared
+  (logout, lost session) and skips the retry when the epoch moved, so a request
+  cannot be replayed under another session's token. Not reachable today: the
+  Manager only gains a new session through a full page load (keycloak-js's
+  default adapter signs in by `location.assign`; init runs once per provider
+  instance; the route error page reloads).
 
 ### Decisions
 

@@ -183,6 +183,11 @@ class ApiClient {
     "Content-Type": "application/json",
   };
   private tokenRefresher: TokenRefresher | null = null;
+  /**
+   * Bumped whenever the session's token is cleared (logout, lost session): a
+   * session boundary. A refresh replaces the token but keeps the epoch.
+   */
+  private sessionEpoch = 0;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -194,6 +199,7 @@ class ApiClient {
 
   clearAuthToken() {
     delete this.headers["Authorization"];
+    this.sessionEpoch++;
   }
 
   /**
@@ -275,6 +281,7 @@ class ApiClient {
     };
 
     const refresher = this.tokenRefresher;
+    const epoch = this.sessionEpoch;
     if (refresher) await refresher.ensureFresh();
 
     const sentAuth = this.headers["Authorization"];
@@ -293,9 +300,18 @@ class ApiClient {
     // in flight, retry with it; otherwise force one (rate-limited by the
     // refresher, so a 401 that is not about the token does not hit Keycloak on
     // every request).
+    //
+    // The retry stays inside the session that sent the request: if that
+    // session ended meanwhile (the epoch moved), a "changed" token is not a
+    // refresh of it, and replaying — possibly a write — under whatever token is
+    // installed now would act for a session that never issued it. Today a new
+    // session only arrives with a full page load (keycloak-js signs in by
+    // redirect), so this is defence in depth, not a live path. It is checked
+    // after the refresh, because the session can also end while that is
+    // pending.
     if (response.status === 401 && refresher) {
       const tokenChanged = this.headers["Authorization"] !== sentAuth;
-      if (tokenChanged || (await refresher.forceRefresh())) {
+      if ((tokenChanged || (await refresher.forceRefresh())) && this.sessionEpoch === epoch) {
         response = await send();
       }
     }

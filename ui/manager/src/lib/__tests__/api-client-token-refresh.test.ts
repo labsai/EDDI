@@ -186,4 +186,55 @@ describe("ApiClient token refresh", () => {
     ]);
     expect(keycloak.updateToken).toHaveBeenCalledTimes(1);
   });
+
+  it("does not replay a request under a different session's token", async () => {
+    // The session that sent the request ends and another one's token is
+    // installed before the 401 arrives: the "changed" token is not a refresh
+    // of the sender's session, so the request (possibly a write) must not be
+    // replayed under it.
+    const seen: (string | null)[] = [];
+    server.use(
+      http.post(URL, ({ request }) => {
+        const auth = request.headers.get("Authorization");
+        seen.push(auth);
+        if (auth === "Bearer alice") {
+          api.clearAuthToken(); // alice's session ends
+          api.setAuthToken("bob"); // another session's token arrives
+          return new HttpResponse(null, { status: 401 });
+        }
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    api.setAuthToken("alice");
+    const refresher = refresherIssuing("alice-2");
+    api.setTokenRefresher(refresher);
+
+    await expect(api.post(PATH, { write: 1 })).rejects.toMatchObject({ status: 401 });
+    expect(seen).toEqual(["Bearer alice"]);
+    expect(refresher.forceRefresh).not.toHaveBeenCalled();
+  });
+
+  it("does not retry when the session ended while the forced refresh was pending", async () => {
+    const seen: (string | null)[] = [];
+    server.use(
+      http.post(URL, ({ request }) => {
+        seen.push(request.headers.get("Authorization"));
+        return request.headers.get("Authorization") === "Bearer bob"
+          ? HttpResponse.json({ ok: true })
+          : new HttpResponse(null, { status: 401 });
+      }),
+    );
+    api.setAuthToken("alice");
+    api.setTokenRefresher({
+      ensureFresh: vi.fn(async () => {}),
+      forceRefresh: vi.fn(async () => {
+        api.clearAuthToken();
+        api.setAuthToken("bob");
+        return true;
+      }),
+    });
+
+    await expect(api.post(PATH, { write: 1 })).rejects.toMatchObject({ status: 401 });
+    expect(seen).toEqual(["Bearer alice"]);
+  });
 });
