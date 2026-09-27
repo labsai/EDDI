@@ -75,6 +75,24 @@ public class HttpClientWrapper implements IHttpClient {
     }
 
     /**
+     * Performs the actual piped send: streams the response body into {@code sink}
+     * (size-capped) and hands the response — sans body, which lives in the sink —
+     * to {@code responseHandler}. Package-private and on the outer class so a unit
+     * test can stub the transport (the one part that needs a real Vert.x exchange)
+     * while still exercising the real {@code doSend}/{@code handleResponse} logic
+     * through {@code responseHandler} and {@code sink}.
+     */
+    void executePipedSend(HttpRequest<Buffer> vertxRequest, Buffer body, CappedBufferSink sink,
+                          Handler<AsyncResult<HttpResponse<Void>>> responseHandler) {
+        HttpRequest<Void> piped = vertxRequest.as(BodyCodec.pipe(sink, false));
+        if (body != null) {
+            piped.sendBuffer(body, responseHandler);
+        } else {
+            piped.send(responseHandler);
+        }
+    }
+
+    /**
      * Wrapper for Vert.x HttpRequest.
      * <p>
      * <b>Note:</b> This class is stateful and wraps a mutable {@link HttpRequest}.
@@ -239,7 +257,7 @@ public class HttpClientWrapper implements IHttpClient {
             // maxLength fails the sink mid-stream, so the transfer is aborted rather
             // than pulled fully into memory first.
             CappedBufferSink sink = new CappedBufferSink(maxLength);
-            HttpRequest<Void> piped = request.as(BodyCodec.pipe(sink, false));
+            Handler<AsyncResult<HttpResponse<Void>>> responseHandler = ar -> handleResponse(ar, sink, handler);
             if (requestBody != null) {
                 Buffer buffer;
                 try {
@@ -248,9 +266,9 @@ public class HttpClientWrapper implements IHttpClient {
                     handler.handle(Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
                     return;
                 }
-                piped.sendBuffer(buffer, ar -> handleResponse(ar, sink, handler));
+                executePipedSend(request, buffer, sink, responseHandler);
             } else {
-                piped.send(ar -> handleResponse(ar, sink, handler));
+                executePipedSend(request, null, sink, responseHandler);
             }
         }
 

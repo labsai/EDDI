@@ -105,6 +105,19 @@ locally.
 Round-2 mutation checks (revert → named test fails → restore): cross-origin strip (3 tests
 killed) and the A2A watchdog (stalled-body test times out). Both restored.
 
+### CI fixups
+
+- Documented the three new config keys in
+  [`configuration-reference.md`](../configuration-reference.md)
+  (`eddi.tools.web-scraper.max-response-bytes`, `eddi.tools.pdf-reader.max-download-bytes`,
+  `eddi.attachments.extraction.max-pages`) — `ConfigurationReferenceCoverageTest` requires every
+  read property to be written down.
+- `HttpClientWrapper` gained a package-private `executePipedSend` seam so the streamed-body
+  behaviour is unit-testable: only the Vert.x transport (which needs a live exchange) is stubbed,
+  while `doSend`'s body encoding and the full `handleResponse` logic (Content-Length check,
+  body-from-sink, size-cap → 503, header handling) run for real. `HttpClientWrapperSendBranchTest`
+  rewritten to the streaming flow and now also asserts the sink actually caps an oversize body.
+
 ### Known residuals (documented, not fixed here)
 
 - `WebSearchTool` and `WeatherTool` still use `SafeHttpClient.send(..., ofString())` unbounded;
