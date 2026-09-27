@@ -94,11 +94,16 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     // Fallback for backends that send unnamed SSE events
     es.onmessage = handleEvent;
 
+    // Closing the stream does not stop a seed already in flight: without this
+    // flag a slow reply for the PREVIOUS agent or conversation resolved after
+    // the switch and merged its lines into the new scope's log.
+    let cancelled = false;
     const seed = () =>
       getRecentLogs({ ...scope, limit: SEED_LIMIT })
-        .then((recent) =>
-          setLogs((prev) => mergeNewestFirst(prev, recent, MAX_LOG_ENTRIES))
-        )
+        .then((recent) => {
+          if (cancelled) return;
+          setLogs((prev) => mergeNewestFirst(prev, recent, MAX_LOG_ENTRIES));
+        })
         .catch(() => {
           /* the live stream still works */
         });
@@ -117,6 +122,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     eventSourceRef.current = es;
 
     return () => {
+      cancelled = true;
       es.close();
       eventSourceRef.current = null;
       setConnected(false);

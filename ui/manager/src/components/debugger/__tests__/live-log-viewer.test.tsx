@@ -293,6 +293,27 @@ describe("LiveLogViewer", () => {
     expect(screen.getByText("before pause")).toBeInTheDocument();
   });
 
+  it("drops a seed from the previous scope that resolves after the switch", async () => {
+    let resolveOldSeed: (v: unknown[]) => void = () => {};
+    mockGetRecentLogs.mockImplementationOnce(
+      () => new Promise((r) => (resolveOldSeed = r as typeof resolveOldSeed)) as never
+    );
+
+    const { rerender } = renderWithProviders(
+      <LiveLogViewer agentId="agent-old" conversationId="conv-old" />
+    );
+    rerender(<LiveLogViewer agentId="agent-new" conversationId="conv-new" />);
+    emit(line(2000, "new scope line"));
+
+    // The old conversation's history arrives late; it is not this log's.
+    await act(async () => {
+      resolveOldSeed([line(1000, "old scope line")]);
+    });
+
+    expect(screen.getByText("new scope line")).toBeInTheDocument();
+    expect(screen.queryByText("old scope line")).not.toBeInTheDocument();
+  });
+
   it("re-seeds on a reconnect, not only on mount", async () => {
     renderWithProviders(
       <LiveLogViewer agentId="agent-reopen" conversationId={null} />

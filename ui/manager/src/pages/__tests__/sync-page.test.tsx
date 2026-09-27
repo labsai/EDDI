@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SyncPage } from "@/pages/sync-page";
 import { server } from "@/test/mocks/server";
@@ -688,5 +688,76 @@ describe("SyncPage — failed and stale previews", () => {
     expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
     expect(screen.queryByTestId("sync-execute-btn")).not.toBeInTheDocument();
   });
-});
 
+  // Unchecked mappings kept their preview across a new run. Unchecking one,
+  // then running a preview that failed, then checking it again re-armed
+  // "Sync Selected" on the old diff.
+  it("a failed preview also clears the preview of a mapping that was unchecked", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    const first = screen.getAllByRole("checkbox")[0]!;
+    await user.click(first);
+
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () =>
+        HttpResponse.json({ message: "source unreachable" }, { status: 502 })
+      )
+    );
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-preview-all-error")).toBeInTheDocument()
+    );
+
+    // Re-select only the agent that was previewed before the failed run.
+    for (const cb of screen.getAllByRole("checkbox")) {
+      if ((cb as HTMLInputElement).checked) await user.click(cb);
+    }
+    await user.click(first);
+    expect(first).toBeChecked();
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  // The connect request was not tied to the source it was sent for. Editing the
+  // URL while it was in flight cleared the list, and the late reply then filled
+  // it again with the OLD source's agents, ready to preview and sync.
+  it("ignores a connect reply that arrives after the source URL was edited", async () => {
+    let release: () => void = () => {};
+    let calls = 0;
+    server.use(
+      http.get("*/backup/import/sync/agents", async () => {
+        calls++;
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/stale-agent?version=1",
+            name: "Stale Agent",
+            description: "",
+            lastModifiedOn: new Date().toISOString(),
+          },
+        ]);
+      })
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "https://old.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+    await waitFor(() => expect(calls).toBe(1));
+
+    await user.type(screen.getByTestId("sync-url-input"), "/new");
+    // Editing frees the Connect button instead of leaving it on the old request.
+    expect(screen.getByTestId("sync-connect-btn")).not.toBeDisabled();
+
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText(/agents found|Connected/)).not.toBeInTheDocument();
+  });
+});

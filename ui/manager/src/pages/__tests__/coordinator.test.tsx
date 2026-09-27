@@ -565,5 +565,105 @@ describe("CoordinatorPage", () => {
     act(() => es.onerror?.());
     await waitFor(() => expect(screen.getByText("DISCONNECTED")).toBeInTheDocument());
   });
-});
 
+  // TanStack keeps the last good data next to a refetch error. The page read
+  // `dlError && !deadLetters`, so a successful empty read followed by a failed
+  // poll kept showing the green "No dead-letter entries" check.
+  it("shows the dead-letter error on a failed refetch even with a cached empty list", async () => {
+    let reads = 0;
+    server.use(
+      http.get("*/administration/coordinator/dead-letters", () => {
+        reads++;
+        return reads === 1
+          ? HttpResponse.json([])
+          : new HttpResponse(null, { status: 500 });
+      })
+    );
+
+    const { queryClient } = renderCoordinator();
+    await waitFor(() =>
+      expect(screen.getByTestId("dead-letters-empty")).toBeInTheDocument()
+    );
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["coordinator", "dead-letters"] });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("dead-letters-error")).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId("dead-letters-empty")).not.toBeInTheDocument();
+  });
+
+  it("hides the cached dead-letter table and Purge All while the read is failing", async () => {
+    const { queryClient } = renderCoordinator();
+    await waitFor(() =>
+      expect(screen.getByTestId("dead-letters-table")).toBeInTheDocument()
+    );
+    expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
+
+    server.use(
+      http.get("*/administration/coordinator/dead-letters", () =>
+        new HttpResponse(null, { status: 500 })
+      )
+    );
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["coordinator", "dead-letters"] });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("dead-letters-error")).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId("dead-letters-table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("purge-dead-letters-btn")).not.toBeInTheDocument();
+  });
+
+  // Status read failed, an SSE snapshot arrived, then the stream dropped: the
+  // snapshot was the last fallback, so the page kept showing it as the current
+  // state and the status error never rendered.
+  it("shows the status error, not a dropped stream's snapshot, when polling has no status", async () => {
+    server.use(
+      http.get("*/administration/coordinator/status", () =>
+        new HttpResponse(null, { status: 500 })
+      )
+    );
+
+    const es = {
+      addEventListener: vi.fn(),
+      close: vi.fn(),
+      onmessage: null,
+      onerror: null as (() => void) | null,
+      onopen: null as (() => void) | null,
+    };
+    vi.mocked(BearerEventSource).mockImplementation(function () {
+      return es;
+    } as never);
+
+    renderCoordinator();
+    await waitFor(() => expect(es.addEventListener).toHaveBeenCalled());
+    const onStatus = es.addEventListener.mock.calls.find(
+      (c) => c[0] === "status"
+    )![1] as (e: MessageEvent) => void;
+
+    act(() =>
+      onStatus(
+        new MessageEvent("status", {
+          data: JSON.stringify({
+            coordinatorType: "nats",
+            connected: true,
+            connectionStatus: "CONNECTED",
+            activeConversations: 0,
+            totalProcessed: 1,
+            totalDeadLettered: 0,
+            queueDepths: {},
+          }),
+        })
+      )
+    );
+    await waitFor(() => expect(screen.getByText("CONNECTED")).toBeInTheDocument());
+
+    act(() => es.onerror?.());
+    await waitFor(() => expect(screen.getByTestId("error-state")).toBeInTheDocument());
+    expect(screen.queryByText("CONNECTED")).not.toBeInTheDocument();
+  });
+});

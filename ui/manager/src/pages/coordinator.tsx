@@ -74,7 +74,9 @@ export function CoordinatorPage() {
   // `liveStatus ?? status`: once one SSE snapshot had arrived it won for the
   // rest of the page's life, so after the stream dropped the page showed that
   // last snapshot forever while the polled status underneath kept updating.
-  const currentStatus = (sseConnected ? liveStatus : null) ?? status ?? liveStatus;
+  // A dropped stream's snapshot is never a fallback either — with the status
+  // read failing too, it hid the error state behind a frozen "CONNECTED".
+  const currentStatus = (sseConnected ? liveStatus : null) ?? status;
 
   const isNats = currentStatus?.coordinatorType === "nats";
   const isConnected = currentStatus?.connected ?? false;
@@ -426,7 +428,7 @@ export function CoordinatorPage() {
             {t("coordinator.deadLetterTitle", "Dead-Letter Queue")}
           </h2>
           <div className="flex items-center gap-2">
-            {deadLetters && deadLetters.length > 0 && (
+            {!dlError && deadLetters && deadLetters.length > 0 && (
               confirmPurge ? (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">
@@ -464,10 +466,12 @@ export function CoordinatorPage() {
           <div className="p-8 text-center">
             <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
           </div>
-        ) : dlError && !deadLetters ? (
+        ) : dlError ? (
           // A failed read is not an empty queue. It used to fall through to the
           // green "No dead-letter entries" check — telling an operator nothing
-          // is stuck at the moment the check for stuck work failed.
+          // is stuck at the moment the check for stuck work failed. That holds
+          // for a failed REFETCH too: TanStack keeps the last good list (even an
+          // empty one) alongside the error, and showing it hid the failure.
           <div className="p-8" data-testid="dead-letters-error">
             <ErrorState
               message={t("common.error")}

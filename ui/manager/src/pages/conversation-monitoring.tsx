@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -138,7 +138,25 @@ export function ConversationMonitoringPage() {
   // sent as IN_PROGRESS and ended without its pending approval being cleaned up
   // (UI side of C1b). So re-read the list first and send what it says.
   const [refreshingForEnd, setRefreshingForEnd] = useState(false);
+  // The dialog's button is disabled only once React re-renders with
+  // refreshingForEnd/isPending set, so a quick double click entered this
+  // function twice and sent /end twice. A ref is set synchronously; it is
+  // cleared on every path that does not submit, and otherwise when the
+  // mutation settles.
+  const endInFlight = useRef(false);
   async function confirmEndSelected() {
+    if (endInFlight.current || endMutation.isPending) return;
+    endInFlight.current = true;
+    let submitted = false;
+    try {
+      submitted = await refreshAndEnd();
+    } finally {
+      if (!submitted) endInFlight.current = false;
+    }
+  }
+
+  /** Returns true when an end request was sent (the guard then waits for it). */
+  async function refreshAndEnd(): Promise<boolean> {
     setRefreshingForEnd(true);
     let fresh: ConversationStatus[] | undefined;
     try {
@@ -154,7 +172,7 @@ export function ConversationMonitoringPage() {
           "Could not re-check the conversations' current state, so nothing was ended. Try again."
         )
       );
-      return;
+      return false;
     }
 
     const statuses: ConversationStatus[] = fresh.filter((r) =>
@@ -182,12 +200,12 @@ export function ConversationMonitoringPage() {
           "A selected conversation is now waiting for approval. Review the selection and confirm again."
         )
       );
-      return;
+      return false;
     }
     if (statuses.length === 0) {
       setSelected(new Set());
       setConfirmEnd(false);
-      return;
+      return false;
     }
 
     endMutation.mutate(statuses, {
@@ -203,7 +221,11 @@ export function ConversationMonitoringPage() {
         setConfirmEnd(false);
       },
       onError: (err) => toast.error(getErrorMessage(err)),
+      onSettled: () => {
+        endInFlight.current = false;
+      },
     });
+    return true;
   }
 
   function confirmPurgeEnded() {

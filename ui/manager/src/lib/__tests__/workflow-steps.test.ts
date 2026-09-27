@@ -40,6 +40,36 @@ describe("addWorkflowStep", () => {
     ]);
   });
 
+  // A workflow that is already misordered: a trailing-only scan found no
+  // trailing templating step and appended, so the new step ran after every
+  // templating step and its placeholders were never resolved.
+  it("inserts in front of the last templating step even when it is not trailing", () => {
+    const steps = [step("eddi://ai.labs.templating"), step("eddi://ai.labs.output")];
+    expect(types(addWorkflowStep(steps, step("eddi://ai.labs.output")))).toEqual([
+      "eddi://ai.labs.output",
+      "eddi://ai.labs.templating",
+      "eddi://ai.labs.output",
+    ]);
+  });
+
+  it("does not move a new step ahead of a mid-pipeline templating step's successors", () => {
+    const steps = [
+      step("eddi://ai.labs.parser"),
+      step("eddi://ai.labs.templating"),
+      step("eddi://ai.labs.behavior"),
+      step("eddi://ai.labs.templating"),
+      step("eddi://ai.labs.output"),
+    ];
+    expect(types(addWorkflowStep(steps, step("eddi://ai.labs.llm")))).toEqual([
+      "eddi://ai.labs.parser",
+      "eddi://ai.labs.templating",
+      "eddi://ai.labs.behavior",
+      "eddi://ai.labs.llm",
+      "eddi://ai.labs.templating",
+      "eddi://ai.labs.output",
+    ]);
+  });
+
   it("appends when there is no templating step, or when adding templating itself", () => {
     const steps = [step("eddi://ai.labs.parser")];
     expect(types(addWorkflowStep(steps, step("eddi://ai.labs.output")))).toEqual([

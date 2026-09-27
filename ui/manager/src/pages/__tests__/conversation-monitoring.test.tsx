@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { act, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ConversationMonitoringPage } from "@/pages/conversation-monitoring";
 import { server } from "@/test/mocks/server";
@@ -314,3 +314,71 @@ describe("ConversationMonitoringPage — bulk end uses the current state", () =>
   });
 });
 
+// The confirm button is disabled only after React re-renders, so two clicks
+// landing before that re-render both entered confirmEndSelected and sent /end
+// twice for the same conversations.
+describe("ConversationMonitoringPage — bulk end double submit", () => {
+  async function openEndDialog(user: ReturnType<typeof userEvent.setup>) {
+    await chooseAgent(user);
+    await screen.findByTestId("active-conversation-list");
+    await user.click(screen.getByTestId("select-conv-active-1"));
+    await user.click(screen.getByTestId("end-selected"));
+    return screen.findByRole("dialog");
+  }
+
+  it("sends /end once when confirm is clicked twice before a re-render", async () => {
+    let endCalls = 0;
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () =>
+        HttpResponse.json([ACTIVE_ROWS[0]])
+      ),
+      http.post("*/conversationstore/conversations/end", () => {
+        endCalls++;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const dialog = await openEndDialog(userEvent.setup());
+    const confirm = within(dialog).getByRole("button", { name: "End selected" });
+
+    // Both clicks inside one act: no render runs between them, which is the
+    // window a fast double click hits in the browser.
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
+
+    await waitFor(() => expect(endCalls).toBe(1));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(endCalls).toBe(1);
+  });
+
+  it("releases the guard when /end fails, so confirming again sends it again", async () => {
+    let endCalls = 0;
+    server.use(
+      http.get("*/conversationstore/conversations/active/:agentId", () =>
+        HttpResponse.json([ACTIVE_ROWS[0]])
+      ),
+      http.post("*/conversationstore/conversations/end", () => {
+        endCalls++;
+        return endCalls === 1
+          ? new HttpResponse(null, { status: 500 })
+          : new HttpResponse(null, { status: 200 });
+      })
+    );
+    vi.mocked(toast.error).mockClear();
+
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+    const dialog = await openEndDialog(user);
+    const confirm = within(dialog).getByRole("button", { name: "End selected" });
+
+    await user.click(confirm);
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(() => expect(confirm).toBeEnabled());
+
+    await user.click(confirm);
+    await waitFor(() => expect(endCalls).toBe(2));
+  });
+});

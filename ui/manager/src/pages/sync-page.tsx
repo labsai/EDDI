@@ -136,10 +136,10 @@ export function SyncPage() {
     // a mapping the new response did not cover (or every mapping, when the
     // request failed) kept its OLD preview, and "Sync Selected" — which is
     // enabled by any previewed selection — then synced on the strength of a
-    // diff nobody had just looked at.
-    setMappings((prev) =>
-      prev.map((m) => (m.checked ? { ...m, preview: null } : m))
-    );
+    // diff nobody had just looked at. That includes UNCHECKED mappings: one
+    // unchecked before a failed run and re-checked after it re-armed Sync with
+    // its old preview.
+    setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
 
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
