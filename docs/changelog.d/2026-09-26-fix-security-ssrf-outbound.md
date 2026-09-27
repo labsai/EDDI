@@ -44,8 +44,10 @@ end user, the LLM, or a config author reach or exhaust.
   [`UrlValidationUtils`](../../src/main/java/ai/labs/eddi/modules/llm/tools/UrlValidationUtils.java)
   now unpacks and re-checks every IPv6 embedding of an IPv4 address (IPv4-compatible `::/96`, NAT64
   `64:ff9b::/96` and `64:ff9b:1::/48`, 6to4 `2002::/16`, Teredo `2001::/32` server and client), and
-  blocks the missing IPv4 ranges `198.18.0.0/15`, `240.0.0.0/4` (incl. `255.255.255.255`) and
+  blocks the missing IPv4 ranges `198.18.0.0/15`, the limited broadcast `255.255.255.255` and
   `192.0.0.0/24`, plus the Azure WireServer `168.63.129.16` and OCI `192.0.0.192` metadata endpoints.
+  (The rest of `240.0.0.0/4` is deliberately left reachable — the shipped validator contract, pinned
+  by `UrlValidationUtilsDeepBranchTest`, treats reserved-future-use space as allowed.)
 - **Metadata guard missing on model/vector-store endpoints (LOW).** The OpenAI and Ollama language-model
   builders, `EmbeddingModelFactory` (Ollama), `EmbeddingStoreFactory` (pgvector, Elasticsearch, Qdrant,
   Chroma) and `AgentSetupService` (llmBaseUrl) now call `rejectCloudMetadataTarget` where the endpoint

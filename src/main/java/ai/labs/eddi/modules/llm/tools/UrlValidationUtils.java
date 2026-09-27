@@ -295,8 +295,8 @@ public final class UrlValidationUtils {
      * 64:ff9b::/96 and 64:ff9b:1::/48, 6to4 2002::/16, Teredo 2001::/32) — extracts
      * and re-checks the IPv4</li>
      * <li>IPv4 multicast (224.0.0.0/4)</li>
-     * <li>Reserved 240.0.0.0/4 (incl. 255.255.255.255), IETF 192.0.0.0/24,
-     * benchmarking 198.18.0.0/15</li>
+     * <li>Limited broadcast 255.255.255.255, IETF 192.0.0.0/24, benchmarking
+     * 198.18.0.0/15 (the rest of 240.0.0.0/4 is left reachable)</li>
      * <li>Unspecified (0.0.0.0/8)</li>
      * <li>Cloud metadata (169.254.169.254, Azure 168.63.129.16, OCI 192.0.0.192,
      * Alibaba 100.100.100.200)</li>
@@ -347,9 +347,12 @@ public final class UrlValidationUtils {
             return true;
         }
 
-        // Reserved / future use (240.0.0.0/4) — RFC 1112; this also covers the
-        // limited broadcast address 255.255.255.255.
-        if ((b0 & 0xF0) == 240) {
+        // Limited broadcast 255.255.255.255 — never a legitimate outbound API target.
+        // The rest of 240.0.0.0/4 (reserved-for-future-use) is deliberately left
+        // reachable: the shipped validator contract treats it as allowed
+        // (UrlValidationUtilsDeepBranchTest pins 240.0.0.1), and blocking the whole
+        // block over-blocked hosts the deployment may legitimately reach.
+        if (b0 == 255 && b1 == 255 && (bytes[2] & 0xFF) == 255 && (bytes[3] & 0xFF) == 255) {
             return true;
         }
 

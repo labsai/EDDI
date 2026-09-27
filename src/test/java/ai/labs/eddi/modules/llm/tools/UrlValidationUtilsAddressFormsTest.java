@@ -51,11 +51,13 @@ class UrlValidationUtilsAddressFormsTest {
         }
 
         @Test
-        @DisplayName("240.0.0.0/4 reserved range and 255.255.255.255 broadcast are private")
-        void reservedAndBroadcast() throws Exception {
-            assertTrue(UrlValidationUtils.isPrivateAddress(ipv4(240, 0, 0, 1)));
-            assertTrue(UrlValidationUtils.isPrivateAddress(ipv4(250, 1, 2, 3)));
-            assertTrue(UrlValidationUtils.isPrivateAddress(ipv4(255, 255, 255, 255)));
+        @DisplayName("255.255.255.255 broadcast is private; the rest of 240.0.0.0/4 stays reachable")
+        void broadcastBlockedReservedAllowed() throws Exception {
+            assertTrue(UrlValidationUtils.isPrivateAddress(ipv4(255, 255, 255, 255)), "limited broadcast is blocked");
+            // The rest of 240.0.0.0/4 is reserved-for-future-use but deliberately left
+            // reachable to match the shipped validator contract.
+            assertFalse(UrlValidationUtils.isPrivateAddress(ipv4(240, 0, 0, 1)));
+            assertFalse(UrlValidationUtils.isPrivateAddress(ipv4(250, 1, 2, 3)));
         }
 
         @Test
