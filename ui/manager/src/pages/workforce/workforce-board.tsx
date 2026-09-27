@@ -420,9 +420,12 @@ function WorkforceBoard() {
   /**
    * Which stop the confirmation dialog is asking about: `stop` (the Stop
    * button) or `new` ("+ New" while a discussion is streaming, which stops it
-   * and then clears the board).
+   * and then clears the board), and the discussion it addresses — fixed when
+   * the dialog opens, so a selection that settles or changes while it is open
+   * cannot redirect the cancel to another run. `targetId` undefined means this
+   * tab's live stream.
    */
-  const [confirmStop, setConfirmStop] = useState<"stop" | "new" | null>(null);
+  const [confirmStop, setConfirmStop] = useState<{ kind: "stop" | "new"; targetId?: string } | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   /**
    * "Stop and start new" was confirmed before `group_start` had named the
@@ -438,9 +441,28 @@ function WorkforceBoard() {
    * a Stop — and a "+ New" that asks first — as much as a live stream does.
    */
   const canStop = isStreaming || viewingRunningConversation;
-  /** What Stop addresses when this tab has no stream for it. */
-  const remoteRunningId =
-    !isStreaming && viewingRunningConversation ? (selectedConversation?.id ?? undefined) : undefined;
+  /**
+   * The Stop button is about the discussion on screen: the stream when it is
+   * the one on screen, otherwise the selected discussion if it is running. A
+   * finished discussion browsed while another one streams gets no Stop — that
+   * Stop would cancel a run the user is not looking at ("Back to live
+   * discussion" leads to it).
+   */
+  const canStopView = streamingCurrentView || viewingRunningConversation;
+  /**
+   * What each stop addresses. `undefined` is this tab's stream before
+   * `group_start` has named it; the stop is then deferred until it does.
+   *
+   * Stop cancels the discussion on screen: the stream when it is that one,
+   * otherwise the selected discussion — including while ANOTHER discussion
+   * streams here, which it must leave running. "+ New" stops the stream when
+   * there is one, because clearing the board detaches from it; only without
+   * one does it stop the selection.
+   */
+  const streamTargetId = streamState.conversationId ?? undefined;
+  const selectedRunningId = viewingRunningConversation ? (selectedConversation?.id ?? undefined) : undefined;
+  const stopTargetId = streamingCurrentView ? streamTargetId : selectedRunningId;
+  const newTargetId = isStreaming ? streamTargetId : selectedRunningId;
 
   /**
    * Cancel the running discussion on the server.
@@ -450,10 +472,10 @@ function WorkforceBoard() {
    * stream while still saying new answers would appear, and "+ New" could start
    * a second run beside it. Returns whether the discussion is no longer running.
    */
-  const stopDiscussion = useCallback(async (): Promise<boolean> => {
+  const stopDiscussion = useCallback(async (targetId: string | undefined): Promise<boolean> => {
     setIsStopping(true);
     try {
-      const outcome = await cancelStream(remoteRunningId);
+      const outcome = await cancelStream(targetId);
       if (outcome === "cancelled") {
         toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
       } else if (outcome === "alreadyEnded") {
@@ -471,7 +493,7 @@ function WorkforceBoard() {
     } finally {
       setIsStopping(false);
     }
-  }, [cancelStream, remoteRunningId, boardId, queryClient, t]);
+  }, [cancelStream, boardId, queryClient, t]);
 
   // A Stop pressed before `group_start` is sent later, from the stream, so its
   // failure cannot reach the catch above. Reported the same way, as a failed
@@ -491,16 +513,17 @@ function WorkforceBoard() {
     // A running discussion is stopped first, and only after asking: "+ New"
     // alone must not leave it spending in the background.
     if (canStop) {
-      setConfirmStop("new");
+      setConfirmStop({ kind: "new", targetId: newTargetId });
       return;
     }
     startFresh();
-  }, [canStop, startFresh]);
+  }, [canStop, newTargetId, startFresh]);
 
   const handleConfirmStop = useCallback(async () => {
-    const kind = confirmStop;
+    if (!confirmStop) return;
+    const { kind, targetId } = confirmStop;
     const pendingBefore = !streamState.conversationId && isStreaming;
-    const stopped = await stopDiscussion();
+    const stopped = await stopDiscussion(targetId);
     setConfirmStop(null);
     if (kind !== "new") return;
     if (stopped) startFresh();
@@ -713,17 +736,17 @@ function WorkforceBoard() {
         </div>
 
         <div className="flex items-center gap-1">
-          {canStop && (
+          {canStopView && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setConfirmStop("stop")}
-              disabled={isStopping || streamState.cancelRequested}
+              onClick={() => setConfirmStop({ kind: "stop", targetId: stopTargetId })}
+              disabled={isStopping || (streamingCurrentView && streamState.cancelRequested)}
               className="text-destructive gap-1"
               data-testid="board-stop-btn"
             >
               <StopIcon />
-              {isStopping || streamState.cancelRequested
+              {isStopping || (streamingCurrentView && streamState.cancelRequested)
                 ? t("Workforce.board.stopping", "Stopping…")
                 : t("Workforce.board.stop", "Stop")}
             </Button>
@@ -1162,12 +1185,12 @@ function WorkforceBoard() {
           if (!open && !isStopping) setConfirmStop(null);
         }}
         title={
-          confirmStop === "new"
+          confirmStop?.kind === "new"
             ? t("Workforce.board.confirmNewTitle", "Stop the running discussion?")
             : t("hitl.confirmCancelGroupTitle", "Cancel discussion?")
         }
         description={
-          confirmStop === "new"
+          confirmStop?.kind === "new"
             ? t(
                 "Workforce.board.confirmNewDescription",
                 "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
@@ -1175,7 +1198,7 @@ function WorkforceBoard() {
             : t("hitl.confirmCancelGroupDescription", "Cancel this discussion? Any in-progress work is aborted.")
         }
         confirmLabel={
-          confirmStop === "new"
+          confirmStop?.kind === "new"
             ? t("Workforce.board.confirmNewButton", "Stop and start new")
             : t("hitl.confirmCancelGroupButton", "Cancel discussion")
         }

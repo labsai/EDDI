@@ -408,6 +408,40 @@ describe("group stream — Stop cancels the discussion", () => {
     expect(result.current.streamState.transcript.some(isOpenPlaceholder)).toBe(false);
   });
 
+  /**
+   * Another discussion, selected from Sessions while this one streams. Stop is
+   * about the discussion on screen: it used to ignore the id whenever a stream
+   * was live and cancel the stream instead, leaving the selected one running.
+   */
+  it("cancels the named discussion, not the live stream, when they differ", async () => {
+    const release = openStream([start, phase0, speak("a")]);
+    mockCancel.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    let done: Promise<void> = Promise.resolve();
+    act(() => {
+      done = result.current.startStream("g1", "Q?");
+    });
+    await waitFor(() => expect(result.current.streamState.conversationId).toBe("gc-1"));
+
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await result.current.cancelStream("gc-other");
+    });
+
+    expect(mockCancel).toHaveBeenCalledTimes(1);
+    expect(mockCancel).toHaveBeenCalledWith("g1", "gc-other");
+    expect(outcome).toBe("cancelled");
+    const s = result.current.streamState;
+    expect(s.conversationId).toBe("gc-1");
+    expect(s.isStreaming).toBe(true);
+    expect(s.state).toBe("IN_PROGRESS");
+
+    await act(async () => {
+      release();
+      await done;
+    });
+  });
+
   it("cancels a discussion this tab never streamed, without inventing a stream for it", async () => {
     mockCancel.mockResolvedValue(undefined);
     const { result } = renderHook(() => useGroupDiscussionStream("g1"));

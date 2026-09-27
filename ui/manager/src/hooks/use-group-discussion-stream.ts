@@ -281,9 +281,11 @@ interface GroupStreamStore {
    * Stop the discussion: cancel it on the server, then close the stream.
    * See {@link CancelOutcome} for the outcome values.
    *
-   * `gcId` names a discussion this tab is NOT streaming — one whose connection
-   * dropped, or one adopted from the stored list after a reload. It is used only
-   * when there is no live stream to cancel.
+   * `gcId` names the discussion to stop when it is not the one this tab is
+   * streaming — one whose connection dropped, one adopted from the stored list
+   * after a reload, or one selected from Sessions while ANOTHER discussion
+   * streams here. That one is cancelled by id and the live stream is left
+   * alone. Omitted, or naming the streamed discussion, it stops the live stream.
    */
   cancelStream: (groupId: string, gcId?: string) => Promise<CancelOutcome>;
   /** Acknowledge a reported {@link GroupStreamState.cancelError}. */
@@ -542,6 +544,13 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    */
   cancelStream: async (groupId, knownGcId) => {
     const current = get().streams[groupId];
+    if (knownGcId && knownGcId !== current?.conversationId) {
+      // A different discussion from the one this tab streams (if it streams
+      // one at all): Stop is about the discussion on screen, and must not
+      // cancel the live stream instead. `cancelAndClose` closes a stream only
+      // when it is this discussion's, so the live one keeps running.
+      return cancelAndClose(groupId, knownGcId, get().update);
+    }
     if (!current?.isStreaming && !current?.cancelRequested) {
       // No live stream. A discussion can still be running on the server — the
       // connection dropped, or the board adopted it after a reload — and it

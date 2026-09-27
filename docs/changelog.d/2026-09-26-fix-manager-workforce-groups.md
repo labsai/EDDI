@@ -37,6 +37,16 @@ backend strings (P2).
   `cancelError` field the board clears once shown — and no longer through the
   stream's `error`, which the board renders as the discussion itself failing
   while it was in fact still running.
+- **Stop targets the discussion on screen (review follow-up):** with one
+  discussion streaming in this tab and another running one opened from
+  Sessions, Stop cancelled the stream — the run the user was not looking at —
+  and left the selected one running. The board now passes the selected
+  discussion's id, fixed when the confirmation opens, and `cancelStream`
+  cancels a named discussion that is not the streamed one by id, leaving the
+  live stream alone. A finished discussion browsed during a stream shows no
+  Stop ("Back to live discussion" leads to the running one). "+ New" still
+  stops the tab's stream when there is one, since clearing the board detaches
+  from it.
 
 ### Streams that end, and members that "type forever"
 

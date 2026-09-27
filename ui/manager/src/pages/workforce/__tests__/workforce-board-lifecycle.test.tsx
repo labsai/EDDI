@@ -26,9 +26,10 @@ const frame = (type: string, data: unknown) =>
   encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
 
 /** A stream endpoint that opens the discussion and then stays open. */
-function openDiscussionStream(gcId = "gc-live") {
+function openDiscussionStream(gcId = "gc-live", onOpen?: () => void) {
   server.use(
     http.post("*/groups/:groupId/conversations/stream", () => {
+      onOpen?.();
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(frame("group_start", { groupConversationId: gcId, question: "Ship it?" }));
@@ -284,6 +285,64 @@ describe("WorkforceBoard — lifecycle", () => {
 
     await waitFor(() => expect(ids).toEqual(["gc-remote"]));
     await waitFor(() => expect(screen.queryByTestId("board-stop-btn")).not.toBeInTheDocument());
+  });
+
+  /**
+   * One discussion streams in this tab while the user opens another, still
+   * running, from Sessions. Stop is about the discussion on screen: it used to
+   * cancel the stream instead — the run the user was NOT looking at — and leave
+   * the selected one running. A finished discussion browsed meanwhile offers no
+   * Stop at all, since the only run it could stop is not on screen.
+   */
+  it("Stop cancels the selected running discussion, not the one streaming in this tab", async () => {
+    let streamOpened = false;
+    const cancelled: string[] = [];
+    openDiscussionStream("gc-live", () => {
+      streamOpened = true;
+    });
+    // Listed only once the stream is open, so the board's reload-restore does
+    // not adopt the running one before the test starts its own discussion.
+    server.use(
+      http.get("*/groups/:groupId/conversations", () =>
+        HttpResponse.json(
+          streamOpened
+            ? [
+                conversationDoc("gc-other", { originalQuestion: "Other run?" }),
+                conversationDoc("gc-done", { originalQuestion: "Finished run?", state: "COMPLETED" }),
+              ]
+            : [],
+        ),
+      ),
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) => {
+        const id = String(params.gcId);
+        const state =
+          id === "gc-done" ? "COMPLETED" : cancelled.includes(id) ? "CANCELLED" : "IN_PROGRESS";
+        return HttpResponse.json(conversationDoc(id, { state }));
+      }),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", ({ params }) => {
+        cancelled.push(String(params.gcId));
+        return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
+      }),
+    );
+    renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+    await startDiscussion();
+    await waitFor(() => expect(useGroupStreamStore.getState().streams.grp1?.conversationId).toBe("gc-live"));
+
+    await userEvent.click(screen.getByTestId("sessions-toggle"));
+    await userEvent.click(await screen.findByText("Finished run?"));
+    await screen.findByTestId("back-to-live-btn");
+    await waitFor(() => expect(screen.queryByTestId("board-stop-btn")).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("sessions-toggle"));
+    await userEvent.click(await screen.findByText("Other run?"));
+    await userEvent.click(await screen.findByTestId("board-stop-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /cancel discussion/i }));
+
+    await waitFor(() => expect(cancelled).toEqual(["gc-other"]));
+    const live = useGroupStreamStore.getState().streams.grp1;
+    expect(live?.conversationId).toBe("gc-live");
+    expect(live?.isStreaming).toBe(true);
+    expect(live?.state).not.toBe("CANCELLED");
   });
 
   /**
