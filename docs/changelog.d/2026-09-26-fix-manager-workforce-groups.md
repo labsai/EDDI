@@ -59,7 +59,10 @@ backend strings (P2).
   board now reads the stored state before saying "already ended"; if the
   discussion is still going it reports a failed Stop (new key
   `Workforce.board.stopRaced`, all 11 locales), keeps Stop on offer, and "Stop
-  and start new" does not clear the board.
+  and start new" does not clear the board. Only a stored terminal state counts
+  as ended: a read that fails leaves the Stop unconfirmed (new key
+  `Workforce.board.stopUnconfirmed`, all 11 locales) and is handled like a
+  discussion still going, never taken as the 409's word that it ended.
 
 ### Streams that end, and members that "type forever"
 

@@ -119,17 +119,18 @@ const ENDED_STATES: ReadonlySet<GroupConversationState> = new Set<GroupConversat
 ]);
 
 /**
- * After a cancel answered 409: is the discussion in fact still going? The
- * backend answers 409 both for a terminal discussion and for a cancel that lost
- * a state race (`GroupHitlCoordinator.cancelDiscussion`). A failed read cannot
- * tell, and falls back to the 409's own claim.
+ * After a cancel answered 409: did the discussion in fact end? The backend
+ * answers 409 both for a terminal discussion and for a cancel that lost a state
+ * race (`GroupHitlCoordinator.cancelDiscussion`), so only the stored state can
+ * say. A read that fails says nothing — `unknown`, never taken as "ended": the
+ * run may well still be going.
  */
-async function stillGoingAfterConflict(groupId: string, gcId: string): Promise<boolean> {
+async function stateAfterConflict(groupId: string, gcId: string): Promise<"ended" | "going" | "unknown"> {
   try {
     const doc = await getGroupConversation(groupId, gcId);
-    return !ENDED_STATES.has(doc.state);
+    return ENDED_STATES.has(doc.state) ? "ended" : "going";
   } catch {
-    return false;
+    return "unknown";
   }
 }
 
@@ -522,16 +523,24 @@ function WorkforceBoard() {
       } else if (outcome === "alreadyEnded") {
         // A 409 also means the cancel lost a state race on a paused discussion
         // (an approval, resume or timeout landed first). The stored state says
-        // which: "already ended" is only claimed when it has.
+        // which: "already ended" is only claimed when it has. Until it has, the
+        // Stop did not take effect — Stop stays on offer, and "Stop and start
+        // new" does not clear the board.
         const gcId = targetId ?? streamState.conversationId;
-        if (boardId && gcId && (await stillGoingAfterConflict(boardId, gcId))) {
+        const after = boardId && gcId ? await stateAfterConflict(boardId, gcId) : "unknown";
+        if (after !== "ended") {
           toast.error(
-            t(
-              "Workforce.board.stopRaced",
-              "The discussion changed state as you stopped it and is still going. Try Stop again.",
-            ),
+            after === "going"
+              ? t(
+                  "Workforce.board.stopRaced",
+                  "The discussion changed state as you stopped it and is still going. Try Stop again.",
+                )
+              : t(
+                  "Workforce.board.stopUnconfirmed",
+                  "Could not confirm that the discussion stopped. Check its state and try Stop again.",
+                ),
           );
-          queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+          if (boardId) queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
           return false;
         }
         toast.info(t("Workforce.board.alreadyEnded", "The discussion had already ended."));

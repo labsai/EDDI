@@ -3805,6 +3805,7 @@
       "viewSessions": "Ver sessões anteriores",
       "alreadyEnded": "A discussão já tinha terminado.",
       "stopRaced": "A discussão mudou de estado ao ser parada e continua em andamento. Tente parar novamente.",
+      "stopUnconfirmed": "Não foi possível confirmar que a discussão parou. Verifique o estado e tente parar novamente.",
       "stopFailed": "Não foi possível parar a discussão: {{error}}",
       "stopping": "A parar…",
       "startOver": "Recomeçar",

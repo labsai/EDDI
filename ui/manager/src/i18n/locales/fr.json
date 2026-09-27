@@ -3805,6 +3805,7 @@
       "viewSessions": "Voir les sessions passées",
       "alreadyEnded": "La discussion était déjà terminée.",
       "stopRaced": "La discussion a changé d'état au moment de l'arrêt et continue. Réessayez d'arrêter.",
+      "stopUnconfirmed": "Impossible de confirmer l'arrêt de la discussion. Vérifiez son état et réessayez d'arrêter.",
       "stopFailed": "Impossible d'arrêter la discussion : {{error}}",
       "stopping": "Arrêt en cours…",
       "startOver": "Recommencer",

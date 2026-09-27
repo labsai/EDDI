@@ -3805,6 +3805,7 @@
       "viewSessions": "Ver sesiones anteriores",
       "alreadyEnded": "La discusión ya había terminado.",
       "stopRaced": "La discusión cambió de estado al detenerla y sigue en curso. Vuelve a intentar detenerla.",
+      "stopUnconfirmed": "No se pudo confirmar que la discusión se detuvo. Comprueba su estado y vuelve a intentar detenerla.",
       "stopFailed": "No se pudo detener la discusión: {{error}}",
       "stopping": "Deteniendo…",
       "startOver": "Empezar de nuevo",

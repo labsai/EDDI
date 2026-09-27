@@ -3763,6 +3763,7 @@
       "viewSessions": "Frühere Sitzungen ansehen",
       "alreadyEnded": "Die Diskussion war bereits beendet.",
       "stopRaced": "Die Diskussion hat beim Stoppen ihren Zustand geändert und läuft weiter. Bitte erneut stoppen.",
+      "stopUnconfirmed": "Es konnte nicht bestätigt werden, dass die Diskussion gestoppt wurde. Prüfen Sie ihren Status und stoppen Sie erneut.",
       "stopFailed": "Die Diskussion konnte nicht gestoppt werden: {{error}}",
       "stopping": "Wird gestoppt…",
       "startOver": "Neu beginnen",
