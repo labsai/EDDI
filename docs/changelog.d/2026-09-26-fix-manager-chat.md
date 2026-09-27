@@ -80,6 +80,18 @@ longer show in the new one's status line.
   Otherwise a proxy that swallows the terminal frame would keep one fetch and
   one pending mutation open per switch. The trade-off is that a turn still
   running two minutes after the user left it is cancelled.
+- *Returning to a turn that is still running.* A detached stream's reply is
+  ignored, so a user who reopened the conversation before the turn finished got
+  one read without the reply, and it stayed missing until a manual reload. A
+  load that finds the conversation `IN_PROGRESS` now re-reads it every
+  `EXECUTING_TURN_POLL_MS` (1.5 s) until it leaves that state, for at most
+  `EXECUTING_TURN_FOLLOW_MS` (5 min, the ceiling the operator chat uses for an
+  executing turn), then installs the settled transcript. The input shows as
+  processing meanwhile, and the field the running turn is answering is not
+  offered again. The follow stops without writing once anything else replaces
+  the transcript. A failed read or the ceiling leaves the transcript as read.
+  Resuming an agent still skips `IN_PROGRESS` conversations: a stuck one would
+  otherwise hold the chat busy for the full ceiling.
 
 **Pause handling (Medium, `awaiting_approval`; compatible with #841).**
 - The streaming endpoint reports its pre-turn refusals as `error` frames with a
@@ -174,7 +186,7 @@ key-taking providers, so a Jlama token never becomes an OpenAI key.
 **Tests:** `use-chat-stream-binding`, `use-chat-rejected-send`,
 `use-chat-secret-input`, `chat-drawer-binding`, `chat-panel-continue`,
 `agent-card-undeploy`, `agent-wizard-providers`, `agent-detail-chat`,
-`use-chat-load-race`, `use-chat-send-during-load`, `secret-input-field`, new cases in `resource-detail-llm`, `model-suggestions` and
+`use-chat-load-race`, `use-chat-send-during-load`, `use-chat-executing-turn`, `secret-input-field`, new cases in `resource-detail-llm`, `model-suggestions` and
 `operator-activation`, and `AgentSetupServiceBranchCoverageTest` (huggingface,
 gemini-vertex parameters and refusal). The two existing 409 tests now mock the paused
 state they assert.

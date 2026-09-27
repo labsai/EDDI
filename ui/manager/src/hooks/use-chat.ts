@@ -1417,7 +1417,66 @@ async function loadConversationIntoStore(
 
   store.getState().clearMessages();
   store.getState().setConversationId(conversationId);
+  installSnapshot(snapshot);
 
+  // A turn still executing (typically: the user left this conversation while
+  // its reply streamed, and came back before it finished) is not in this read,
+  // and the stream that would have delivered it was detached when they left.
+  // Follow it until it settles. `clearMessages` above advanced both the epoch
+  // and the load ticket, so these are the values that identify this install.
+  if (snapshot.conversationState === "IN_PROGRESS") {
+    void followExecutingTurn(conversationId, store.getState().conversationEpoch, latestLoadRequest);
+  }
+
+  return snapshot;
+}
+
+/** How often a reopened conversation whose turn is still executing is re-read. */
+export const EXECUTING_TURN_POLL_MS = 1_500;
+/**
+ * How long such a turn is followed before the transcript is left as read. The
+ * same ceiling the operator chat gives a turn it can see executing: a turn that
+ * chains model calls and tools legitimately runs for minutes.
+ */
+export const EXECUTING_TURN_FOLLOW_MS = 300_000;
+
+/**
+ * Re-read a conversation that was installed while `IN_PROGRESS` until it
+ * leaves that state, then install the settled transcript. The input shows as
+ * processing meanwhile, so nothing is sent into a busy conversation. Stops
+ * without writing as soon as anything else replaces the transcript (another
+ * load, an agent switch, a new conversation). A failed read or the ceiling
+ * leaves the transcript as it was read and releases the input.
+ */
+async function followExecutingTurn(conversationId: string, epoch: number, request: number) {
+  const store = useChatStore;
+  const owns = () => request === latestLoadRequest && store.getState().conversationEpoch === epoch;
+  store.getState().setProcessing(true);
+  const deadline = Date.now() + EXECUTING_TURN_FOLLOW_MS;
+  try {
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, EXECUTING_TURN_POLL_MS));
+      if (!owns()) return;
+      const snapshot = await readConversation("production", "", conversationId, false);
+      if (!owns()) return;
+      if (snapshot.conversationState !== "IN_PROGRESS") {
+        installSnapshot(snapshot);
+        return;
+      }
+    }
+  } catch {
+    // Unreadable: keep what is on screen; a reload shows the rest.
+  } finally {
+    if (owns()) store.getState().setProcessing(false);
+  }
+}
+
+/**
+ * Put a snapshot of the conversation already selected in the store on screen:
+ * its transcript, undo/redo, pause state and any requested input field.
+ */
+function installSnapshot(snapshot: SimpleConversationMemorySnapshot) {
+  const store = useChatStore;
   const messages = snapshotToMessages(snapshot);
   store.getState().replaceMessages(messages);
   store.getState().setUndoRedo(
@@ -1436,12 +1495,16 @@ async function loadConversationIntoStore(
     null,
   );
   // A conversation reopened while its last reply asks for a secret must offer
-  // the masked field again, or the answer goes into the plain textarea.
+  // the masked field again, or the answer goes into the plain textarea. Set
+  // either way: a settled turn that asks for nothing replaces the field its
+  // predecessor asked for. While a turn executes, the last stored reply's
+  // field is the one being answered, so none is offered.
   const outputs = snapshot.conversationOutputs ?? [];
-  const inputField = extractInputField(outputs[outputs.length - 1]);
-  if (inputField) store.getState().setInputField(inputField);
-
-  return snapshot;
+  const inputField =
+    snapshot.conversationState === "IN_PROGRESS"
+      ? undefined
+      : extractInputField(outputs[outputs.length - 1]);
+  store.setState({ activeInputField: inputField ?? null });
 }
 
 /** Load an existing conversation to resume it. */
