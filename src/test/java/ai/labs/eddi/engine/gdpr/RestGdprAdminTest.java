@@ -48,6 +48,7 @@ class RestGdprAdminTest {
     void deleteUserData_rejectsBlankUserId() {
         assertThrows(BadRequestException.class,
                 () -> restAdmin.deleteUserData("   "));
+        verifyNoInteractions(gdprService);
     }
 
     /**
@@ -59,7 +60,6 @@ class RestGdprAdminTest {
                 () -> restAdmin.deleteUserData("__service__"));
         assertThrows(BadRequestException.class,
                 () -> restAdmin.exportUserData("__service__"));
-        verifyNoInteractions(gdprService);
         verifyNoInteractions(gdprService);
     }
 
