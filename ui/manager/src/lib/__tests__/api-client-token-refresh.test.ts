@@ -237,4 +237,28 @@ describe("ApiClient token refresh", () => {
     await expect(api.post(PATH, { write: 1 })).rejects.toMatchObject({ status: 401 });
     expect(seen).toEqual(["Bearer alice"]);
   });
+
+  it("does not send at all when the session ended while waiting for the refresh", async () => {
+    // An expired token makes the request wait on the refresh; the token
+    // endpoint rejects it, the session is lost and the token cleared. The
+    // request must not then go out with no token.
+    let calls = 0;
+    server.use(
+      http.post(URL, () => {
+        calls++;
+        return new HttpResponse(null, { status: 401 });
+      }),
+    );
+    api.setAuthToken("alice");
+    api.setTokenRefresher({
+      ensureFresh: vi.fn(async () => {
+        api.clearAuthToken(); // onSessionLost
+      }),
+      forceRefresh: vi.fn(async () => false),
+    });
+
+    const error = await api.post(PATH, { write: 1 }).catch((e: unknown) => e);
+    expect(isApiError(error) && error.status).toBe(401);
+    expect(calls).toBe(0);
+  });
 });

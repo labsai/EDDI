@@ -144,6 +144,11 @@ Router's unstyled English default for errors thrown by the providers.
   Manager only gains a new session through a full page load (keycloak-js's
   default adapter signs in by `location.assign`; init runs once per provider
   instance; the route error page reloads).
+- **A request whose session ended while it waited for the refresh is not
+  sent.** When an expired token's refresh is rejected, the session is lost and
+  the token cleared while the request waits in `ensureFresh`; it used to go out
+  anyway with no token. It now fails with that 401 locally (401, not 0, which
+  callers treat as a transient network failure).
 
 ### Decisions
 

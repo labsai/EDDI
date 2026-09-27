@@ -283,6 +283,14 @@ class ApiClient {
     const refresher = this.tokenRefresher;
     const epoch = this.sessionEpoch;
     if (refresher) await refresher.ensureFresh();
+    // The wait above can END the session (a refresh of an expired token that
+    // the token endpoint rejected). Sending anyway would go out with no token
+    // and come back 401; answer that 401 here instead of spending a round
+    // trip on it. 401, not 0: status 0 means a network failure, which callers
+    // such as `use-connections` treat as transient and retry.
+    if (this.sessionEpoch !== epoch) {
+      throw new ApiClientError(401, "Session ended during token refresh", url);
+    }
 
     const sentAuth = this.headers["Authorization"];
     let response = await send();
