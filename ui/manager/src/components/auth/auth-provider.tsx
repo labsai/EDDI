@@ -15,7 +15,7 @@ import {
   realmRoles,
   REFRESH_INTERVAL_MS,
 } from "@/lib/keycloak-session";
-import { clearUserScopedStorage } from "@/lib/user-storage";
+import { clearUserScopedStorage, storageUserId } from "@/lib/user-storage";
 import {
   AuthContext,
   GUEST_CONTEXT,
@@ -285,8 +285,9 @@ function KeycloakAuthProvider({
     api.setTokenRefresher(null);
     api.clearAuthToken();
     // Browser-held data belonging to this user (see `user-storage.ts`) must not
-    // be there for whoever signs in next on this machine.
-    clearUserScopedStorage();
+    // be there for whoever signs in next on this machine. Only this user's:
+    // other people's keys on the same browser are theirs to keep.
+    clearUserScopedStorage(storageUserId(user));
     // Keycloak 26 only terminates the SSO session when id_token_hint is present.
     // keycloak.idToken may have been deleted by a token refresh that didn't
     // return a new id_token — restore it from the ref so the hint is always sent.
@@ -297,7 +298,7 @@ function KeycloakAuthProvider({
     // origin = "/"), because the EDDI backend returns 401 for the root path
     // when auth is enabled — only /manage and its sub-paths serve the SPA.
     void keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
-  }, [keycloak]);
+  }, [keycloak, user]);
 
   const contextValue = useMemo<AuthContextValue>(
     () => ({

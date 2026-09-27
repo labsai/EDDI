@@ -278,6 +278,7 @@ describe("AuthProvider (Keycloak)", () => {
   it("clears this user's browser-held Workforce threads at logout", async () => {
     localStorage.setItem("workforce-threads:alice", "[]");
     localStorage.setItem("workforce-threads", "[]");
+    localStorage.setItem("workforce-threads:bob", '["bob"]');
     localStorage.setItem("workforce-templates:alice", "[]");
     const user = userEvent.setup();
     renderStrict();
@@ -287,6 +288,8 @@ describe("AuthProvider (Keycloak)", () => {
 
     expect(localStorage.getItem("workforce-threads:alice")).toBeNull();
     expect(localStorage.getItem("workforce-threads")).toBeNull();
+    // Another user of this browser keeps their threads.
+    expect(localStorage.getItem("workforce-threads:bob")).toBe('["bob"]');
     // Templates exist only in this browser; they are per-user, not wiped.
     expect(localStorage.getItem("workforce-templates:alice")).toBe("[]");
     expect(lastInstance().logout).toHaveBeenCalled();

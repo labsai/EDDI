@@ -83,9 +83,9 @@ Router's unstyled English default for errors thrown by the providers.
   accessible name, focus trap, labelled close button).
 - Workforce `workforce-threads` / `workforce-templates` localStorage keys are
   per signed-in user (`lib/user-storage.ts`); threads (pointers to server
-  conversations) are also cleared at logout. Templates are deliberately not
-  cleared — they exist only in that browser — but another user no longer sees
-  them. With auth disabled the plain keys are used as before.
+  conversations) are also cleared at logout (the signing-out user's only).
+  Templates are deliberately not cleared — they exist only in that browser —
+  but another user no longer sees them. With auth disabled the plain keys are used as before.
 
 ### Review follow-up (same branch)
 
@@ -163,6 +163,12 @@ Router's unstyled English default for errors thrown by the providers.
   retry does not go out with the refused token. If that refresh fails, or none
   was started, the next request is sent with the token it has and may 401
   again.
+- **Logout clears only the signing-out user's Workforce threads.** The cleanup
+  deleted every `workforce-threads:*` key, so one user's logout also wiped the
+  saved threads of everyone else who used the browser. It now removes the
+  signing-out user's key and the unscoped legacy key (which no signed-in user
+  owns, and which the next user with an empty key would otherwise adopt);
+  other users' keys stay. Templates are unchanged (`lib/user-storage.ts`).
 
 ### Decisions
 

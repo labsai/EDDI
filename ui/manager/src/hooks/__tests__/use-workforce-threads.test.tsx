@@ -282,15 +282,26 @@ describe("Workforce storage is per signed-in user", () => {
     expect(read()).toHaveLength(1);
   });
 
-  it("clearUserScopedStorage removes threads in every scoping, and nothing else", () => {
+  it("clearUserScopedStorage removes the signing-out user's threads and the legacy key, and nothing else", () => {
     localStorage.setItem("workforce-threads", "[]");
     localStorage.setItem("workforce-threads:alice", "[]");
+    localStorage.setItem("workforce-threads:bob", '["bob"]');
     localStorage.setItem("workforce-templates:alice", "[]");
     localStorage.setItem("eddi-theme", "dark");
-    clearUserScopedStorage();
+    clearUserScopedStorage("alice");
     expect(localStorage.getItem("workforce-threads")).toBeNull();
     expect(localStorage.getItem("workforce-threads:alice")).toBeNull();
+    // Another user of this browser keeps theirs.
+    expect(localStorage.getItem("workforce-threads:bob")).toBe('["bob"]');
     expect(localStorage.getItem("workforce-templates:alice")).toBe("[]");
     expect(localStorage.getItem("eddi-theme")).toBe("dark");
+  });
+
+  it("clearUserScopedStorage without a user id clears only the legacy key", () => {
+    localStorage.setItem("workforce-threads", "[]");
+    localStorage.setItem("workforce-threads:bob", '["bob"]');
+    clearUserScopedStorage(undefined);
+    expect(localStorage.getItem("workforce-threads")).toBeNull();
+    expect(localStorage.getItem("workforce-threads:bob")).toBe('["bob"]');
   });
 });

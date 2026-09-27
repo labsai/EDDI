@@ -50,7 +50,7 @@ export function readUserScoped(base: string, userId: string | null | undefined):
 }
 
 /**
- * Keys wiped on logout, in every scoping.
+ * Keys wiped on logout.
  *
  * Only data that is a cache of server state belongs here. Advisor threads are
  * pointers to conversations that still exist on the server, so dropping them
@@ -60,17 +60,27 @@ export function readUserScoped(base: string, userId: string | null | undefined):
  */
 export const CLEARED_ON_LOGOUT: readonly string[] = ["workforce-threads"];
 
-/** Remove every user-scoped copy of the {@link CLEARED_ON_LOGOUT} keys. */
-export function clearUserScopedStorage(): void {
+/**
+ * Remove the signing-out user's copy of each {@link CLEARED_ON_LOGOUT} key,
+ * plus the unscoped legacy key.
+ *
+ * Only THIS user's keys: other people who used this browser keep theirs. The
+ * cleanup used to delete every `base:*` key, so one user's logout also wiped
+ * the saved threads of everyone else on the machine — including a tab still
+ * open for another user.
+ *
+ * The unscoped key belongs to no signed-in user. `readUserScoped` moves it
+ * into the first signed-in user whose own key is empty (and removes it), so
+ * one still present at logout was never this user's — it predates scoping (or
+ * was written with auth off). It is cleared anyway: left in place, the next
+ * user to sign in with an empty key would adopt it.
+ */
+export function clearUserScopedStorage(userId: string | null | undefined): void {
   try {
-    const doomed: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && CLEARED_ON_LOGOUT.some((base) => key === base || key.startsWith(`${base}:`))) {
-        doomed.push(key);
-      }
+    for (const base of CLEARED_ON_LOGOUT) {
+      if (userId) localStorage.removeItem(userScopedKey(base, userId));
+      localStorage.removeItem(base);
     }
-    for (const key of doomed) localStorage.removeItem(key);
   } catch {
     // Storage unavailable — there is nothing stored to clear.
   }
