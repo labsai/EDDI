@@ -29,22 +29,33 @@ In TanStack Query v5, `reset()` removes the observer, so that request's
 per-call `onSuccess` no longer fires, and a reply for the old source cannot move
 the dialog onto the preview step.
 
+[`sync-config-panel.tsx`](../../ui/manager/src/components/agents/sync-config-panel.tsx):
+the connect request the panel sends is now tied to the URL and token it was sent
+with. Each edit starts a new generation, and a reply or error from an older one
+is dropped. Without this, a connect reply that arrived after an edit filled the
+list the dialog had just cleared with the old instance's agents. This hunk is
+ported byte-for-byte from the ops-pages branch (#854), together with its
+panel test, so the two branches merge cleanly in either order and neither has
+to wait for the other.
+
 **Tests:** [`import-agent-dialog-sync-source.test.tsx`](../../ui/manager/src/components/agents/__tests__/import-agent-dialog-sync-source.test.tsx)
 runs against the real hooks and the MSW sync handlers. The sibling test file
 mocks the whole backup hook module. The new tests:
 
 - A URL edit and a token edit after connect, pick and preview each drop the
-  list and the selection.
-- After reconnecting, the source and target selects come back empty and
-  "Preview Changes" stays disabled.
+  list and the selection. After reconnecting, the source and target selects
+  come back empty and "Preview Changes" stays disabled.
 - A preview still in flight when the URL changes does not land.
+- A connect reply still in flight when the URL or the token changes does not
+  land.
 
-Reverting the fix fails all three. Dropping only the mutation reset fails the
-in-flight one.
+The in-flight tests hold the MSW reply behind a gate that exists from the start.
+They wait until the request has reached the handler before editing, and until
+the reply has left it before asserting, so the stale reply is really delivered
+and the test cannot pass on a reply that was never sent.
 
-### Not covered
+Mutation check:
 
-A **connect** reply that arrives after the URL was edited still repopulates the
-list with the old instance's agents. That request is owned by `SyncConfigPanel`,
-and the generation guard for it is in the separate ops-pages change to that
-component.
+- Reverting the dialog fix fails the three dialog-state tests.
+- Reverting the panel guard fails both connect tests.
+- Dropping only the preview mutation reset fails the in-flight preview test.

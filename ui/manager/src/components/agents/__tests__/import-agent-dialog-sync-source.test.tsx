@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { http, HttpResponse } from "msw";
+import { act, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse, type JsonBodyType } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
@@ -15,6 +15,36 @@ import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 // synced against instance B.
 
 type User = ReturnType<typeof userEvent.setup>;
+
+/**
+ * An MSW resolver that holds its reply until released. `started` resolves once
+ * the request has reached the handler and `served` once the reply has left it,
+ * so a test never releases a request that is not there yet.
+ */
+function heldReply(body: JsonBodyType) {
+  let release!: () => void;
+  let markStarted!: () => void;
+  let markServed!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const started = new Promise<void>((r) => (markStarted = r));
+  const served = new Promise<void>((r) => (markServed = r));
+  const resolver = async () => {
+    markStarted();
+    await gate;
+    markServed();
+    return HttpResponse.json(body);
+  };
+  return { resolver, started, served, release: () => release() };
+}
+
+/** Release a held reply and let the client apply whatever it is going to. */
+async function releaseAndSettle(held: ReturnType<typeof heldReply>) {
+  await act(async () => {
+    held.release();
+    await held.served;
+    await new Promise((r) => setTimeout(r, 50));
+  });
+}
 
 function renderDialog() {
   return renderWithProviders(
@@ -95,35 +125,63 @@ describe("ImportAgentDialog — sync source changes", () => {
   });
 
   it("a preview still in flight when the URL is edited does not land", async () => {
-    let release: () => void = () => {};
-    server.use(
-      http.post("*/backup/import/sync/preview", async () => {
-        await new Promise<void>((r) => (release = r));
-        return HttpResponse.json({
-          sourceAgentId: "remote-agent1",
-          sourceAgentName: "Stale Preview",
-          targetAgentId: null,
-          targetAgentName: null,
-          resources: [],
-        });
-      })
-    );
+    const held = heldReply({
+      sourceAgentId: "remote-agent1",
+      sourceAgentName: "Stale Preview",
+      targetAgentId: null,
+      targetAgentName: null,
+      resources: [],
+    });
+    server.use(http.post("*/backup/import/sync/preview", held.resolver));
 
     renderDialog();
     const user = userEvent.setup();
     await connectAndPick(user);
     await user.click(screen.getByTestId("import-target-next"));
-    await waitFor(() =>
-      expect(screen.getByTestId("import-target-next")).toHaveTextContent("Loading...")
-    );
+    await held.started;
 
     await user.type(screen.getByTestId("sync-url-input"), "/b");
-    release();
+    await releaseAndSettle(held);
 
-    // Give the reply every chance to arrive and be applied.
-    await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByText("Stale Preview")).not.toBeInTheDocument();
     expect(screen.getByTestId("sync-url-input")).toBeInTheDocument();
+    expect(screen.getByTestId("import-target-next")).toBeDisabled();
+  });
+
+  // The connect request is sent by SyncConfigPanel. A reply for the URL or
+  // token it was sent with used to land after an edit and fill the list the
+  // dialog had just cleared with the old instance's agents.
+  it.each([
+    ["URL", "sync-url-input", "/b"],
+    ["token", "sync-auth-input", "x"],
+  ])("a connect reply still in flight when the %s is edited does not land", async (_, testId, typed) => {
+    const held = heldReply([
+      {
+        resource: "eddi://ai.labs.agent/agentstore/agents/stale-agent?version=1",
+        name: "Stale Agent",
+        description: "",
+        lastModifiedOn: new Date().toISOString(),
+      },
+    ]);
+    server.use(http.get("*/backup/import/sync/agents", held.resolver));
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.upload(
+      screen.getByTestId("import-file-input"),
+      new File(["zip"], "agent.zip", { type: "application/zip" })
+    );
+    await user.click(screen.getByTestId("strategy-sync"));
+    await user.click(screen.getByTestId("import-confirm-strategy"));
+    await user.type(screen.getByTestId("sync-url-input"), "https://a.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+    await held.started;
+
+    await user.type(screen.getByTestId(testId), typed);
+    await releaseAndSettle(held);
+
+    expect(screen.queryByText("Stale Agent")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sync-source-select")).not.toBeInTheDocument();
     expect(screen.getByTestId("import-target-next")).toBeDisabled();
   });
 });
