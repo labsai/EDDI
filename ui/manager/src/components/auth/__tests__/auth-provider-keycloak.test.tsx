@@ -196,6 +196,64 @@ describe("AuthProvider (Keycloak)", () => {
     refresherSet.mockRestore();
   });
 
+  it("a refresh that lands after logout does not republish its token", async () => {
+    // Detaching the refresher does not cancel a refresh already awaiting
+    // Keycloak; its late success used to put a bearer token back into the API
+    // client that logout had just cleared.
+    const user = userEvent.setup();
+    renderStrict();
+    await screen.findByTestId("status");
+    const instance = lastInstance();
+    let finish: () => void = () => {};
+    instance.updateToken.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = () => {
+            instance.token = "token-2";
+            resolve(true);
+          };
+        }),
+    );
+    await act(async () => {
+      instance.onTokenExpired?.(); // refresh now pending
+    });
+
+    await user.click(screen.getByTestId("logout"));
+    expect(api.getAuthHeader()).toEqual({});
+    await act(async () => {
+      finish();
+    });
+
+    expect(api.getAuthHeader()).toEqual({});
+  });
+
+  it("a refresh that settles after the provider unmounts publishes nothing", async () => {
+    const view = renderStrict();
+    await screen.findByTestId("status");
+    const instance = lastInstance();
+    let finish: () => void = () => {};
+    instance.updateToken.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = () => {
+            instance.token = "token-2";
+            resolve(true);
+          };
+        }),
+    );
+    await act(async () => {
+      instance.onTokenExpired?.();
+    });
+    view.unmount();
+    const published = vi.spyOn(api, "setAuthToken");
+    await act(async () => {
+      finish();
+    });
+
+    expect(published).not.toHaveBeenCalled();
+    published.mockRestore();
+  });
+
   it("re-reads realm roles when the token is refreshed", async () => {
     renderStrict();
     expect(await screen.findByTestId("roles")).toHaveTextContent("eddi-viewer");

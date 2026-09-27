@@ -141,9 +141,18 @@ function KeycloakAuthProvider({
    */
   const initRef = useRef<Promise<boolean> | null>(null);
 
+  /**
+   * Set once logout has begun. A refresh already awaiting Keycloak when the
+   * user signs out is not cancelled by detaching the refresher; without this,
+   * its late success republished a bearer token into the API client that
+   * logout had just cleared, and the still-mounted app worked again until the
+   * logout redirect landed (or for good, if it never did).
+   */
+  const sessionEndedRef = useRef(false);
+
   /** Publish the current token and refresh everything derived from it. */
   const applyToken = useCallback(() => {
-    if (!keycloak.token) return;
+    if (sessionEndedRef.current || !keycloak.token) return;
     api.setAuthToken(keycloak.token);
     // Keep idTokenRef in sync — Keycloak may or may not return a new id_token
     // in the refresh response. We always preserve the most recent one so
@@ -228,12 +237,20 @@ function KeycloakAuthProvider({
     // detaches the refresher and its timers. A failure that left the session
     // intact (network error, Keycloak 5xx) is retried on the next tick instead
     // of logging the user out.
+    // Callbacks of a refresh still in flight when this effect is cleaned up
+    // (gate left "ready", provider unmounted) must not act on a session this
+    // effect no longer owns.
+    let active = true;
+    const onRefreshed = () => {
+      if (active) applyToken();
+    };
     const onSessionLost = () => {
+      if (!active) return;
       api.clearAuthToken();
       setGate("signed-out");
     };
 
-    const refresher = createTokenRefresher(keycloak, applyToken, onSessionLost);
+    const refresher = createTokenRefresher(keycloak, onRefreshed, onSessionLost);
     api.setTokenRefresher(refresher);
 
     keycloak.onTokenExpired = () => {
@@ -251,6 +268,7 @@ function KeycloakAuthProvider({
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
+      active = false;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
       keycloak.onTokenExpired = undefined;
@@ -263,6 +281,7 @@ function KeycloakAuthProvider({
   }, [keycloak]);
 
   const logout = useCallback(() => {
+    sessionEndedRef.current = true;
     api.setTokenRefresher(null);
     api.clearAuthToken();
     // Browser-held data belonging to this user (see `user-storage.ts`) must not

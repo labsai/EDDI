@@ -131,6 +131,12 @@ Router's unstyled English default for errors thrown by the providers.
   `authenticated: true`, the app mounted, every call 401ing — until keycloak-js's
   redirect landed. It now switches to the "You are signed out" screen (Sign in),
   which also detaches the refresher and its timers (`auth-provider.tsx`).
+- **A refresh that lands after logout publishes nothing.** Detaching the
+  refresher does not cancel a refresh already awaiting Keycloak; its late
+  success put a bearer token back into the API client logout had just cleared.
+  Logout now marks the session ended, and the refresh effect ignores callbacks
+  once it has been cleaned up (raised in CodeRabbit's security architecture
+  review on the walkthrough comment).
 
 ### Decisions
 
