@@ -31,6 +31,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -293,7 +294,13 @@ public class RestAgentManagement implements IRestAgentManagement {
             throws CannotCreateConversationException {
 
         String agentId = agentDeployment.getAgentId();
-        Map<String, Context> initialContext = agentDeployment.getInitialContext();
+        // A per-request copy: the deployment belongs to the trigger held in the shared
+        // agentTriggers cache, so writing this caller's language into its own map would
+        // hand it to concurrent callers (and write a plain HashMap from several
+        // threads).
+        // The engine still receives a lang entry even when language is null, as before.
+        Map<String, Context> triggerContext = agentDeployment.getInitialContext();
+        Map<String, Context> initialContext = triggerContext != null ? new HashMap<>(triggerContext) : new HashMap<>();
         initialContext.put(KEY_LANG, new Context(Context.ContextType.string, language));
         Response agentResponse = restAgentEngine.startConversationWithContext(agentId, agentDeployment.getEnvironment(), userId, initialContext);
         int responseHttpCode = agentResponse.getStatus();

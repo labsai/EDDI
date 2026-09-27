@@ -532,6 +532,145 @@ class RestAgentManagementExtendedTest {
         }
     }
 
+    // ─── The cached trigger's context is never written to ───────
+
+    /**
+     * The deployment a new conversation is started with belongs to the
+     * {@link AgentTriggerConfiguration} held in the shared {@code agentTriggers}
+     * cache. Writing the caller's language into its {@code initialContext} leaked
+     * that language to concurrent callers and wrote a plain HashMap from several
+     * threads; each request now starts the conversation with its own copy.
+     */
+    @Nested
+    @DisplayName("Trigger context is copied per request")
+    class TriggerContextCopy {
+
+        private static final String ENDED_CONV_ID = "112233445566778899aabbcc";
+        private static final String NEW_CONV_ID = "aabbccddee112233aabbccdd";
+
+        private AgentTriggerConfiguration trigger;
+        private Map<String, Context> triggerContextBefore;
+
+        /** A trigger whose deployment carries one designer-set context entry. */
+        private void givenTriggerWithContext() {
+            trigger = triggerWithDeployment("agent-1");
+            trigger.getAgentDeployments().getFirst().getInitialContext().put("channel", new Context(Context.ContextType.string, "web"));
+            triggerContextBefore = new HashMap<>(trigger.getAgentDeployments().getFirst().getInitialContext());
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(trigger);
+        }
+
+        private void givenEngineCreatesConversation() {
+            var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + NEW_CONV_ID + "?version=1");
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenReturn(Response.status(201).header("location", location.toString()).build());
+            when(restAgentEngine.getConversationState(NEW_CONV_ID)).thenReturn(ConversationState.READY);
+            when(restAgentEngine.readConversation(eq(NEW_CONV_ID), any(), any(), any())).thenReturn(new SimpleConversationMemorySnapshot());
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Context> contextSentToEngine() {
+            ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(restAgentEngine).startConversationWithContext(eq("agent-1"), any(), eq("user-1"), captor.capture());
+            return captor.getValue();
+        }
+
+        private void assertTriggerContextUnchanged() {
+            var triggerContext = trigger.getAgentDeployments().getFirst().getInitialContext();
+            assertEquals(triggerContextBefore, triggerContext, "the cached trigger's context was modified");
+            assertFalse(triggerContext.containsKey(RestAgentManagement.KEY_LANG), "the caller's language was written into the cached trigger");
+        }
+
+        private void assertEngineGot(Map<String, Context> sent, String expectedLanguage) {
+            assertNotSame(trigger.getAgentDeployments().getFirst().getInitialContext(), sent, "the engine was handed the cached map itself");
+            assertEquals("web", sent.get("channel").getValue(), "the designer-set context must still reach the engine");
+            assertTrue(sent.containsKey(RestAgentManagement.KEY_LANG));
+            assertEquals(Context.ContextType.string, sent.get(RestAgentManagement.KEY_LANG).getType());
+            assertEquals(expectedLanguage, sent.get(RestAgentManagement.KEY_LANG).getValue());
+        }
+
+        @Test
+        @DisplayName("load, new conversation: engine gets lang, cached trigger context unchanged")
+        void loadCreate() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "en");
+        }
+
+        @Test
+        @DisplayName("say, new conversation: engine gets lang from the input context, cached trigger context unchanged")
+        void sayCreate() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.sayWithinContext("intent-1", "user-1", false, false, List.of(),
+                    new InputData("Bonjour", Map.of("lang", new Context(Context.ContextType.string, "fr"))), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "fr");
+        }
+
+        @Test
+        @DisplayName("load, ended conversation replaced: engine gets lang, cached trigger context unchanged")
+        void loadReplaceEnded() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(new UserConversation("intent-1", "user-1", Deployment.Environment.production, "agent-1", ENDED_CONV_ID));
+            when(restAgentEngine.getConversationState(ENDED_CONV_ID)).thenReturn(ConversationState.ENDED);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "de", false, false, List.of(), asyncResponse);
+
+            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "de");
+        }
+
+        /**
+         * Unchanged engine-facing behaviour: with no language the engine still receives
+         * a {@code lang} entry whose value is null, as it did before the copy.
+         */
+        @Test
+        @DisplayName("no language: engine still gets a null-valued lang entry, cached trigger context unchanged")
+        void nullLanguage() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", null, false, false, List.of(), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), null);
+        }
+
+        @Test
+        @DisplayName("deployment without an initial context: engine gets a map holding only lang")
+        void nullInitialContext() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            trigger = triggerWithDeployment("agent-1");
+            trigger.getAgentDeployments().getFirst().setInitialContext(null);
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(trigger);
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            var sent = contextSentToEngine();
+            assertEquals(Set.of(RestAgentManagement.KEY_LANG), sent.keySet());
+            assertEquals("en", sent.get(RestAgentManagement.KEY_LANG).getValue());
+            assertNull(trigger.getAgentDeployments().getFirst().getInitialContext());
+        }
+    }
+
     // ─── sayWithinContext error wrapping ─────────────────────────
 
     @Nested
