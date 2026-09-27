@@ -102,6 +102,13 @@ export function createTokenRefresher(
       // Nothing to refresh with (not signed in yet, or already lost): send the
       // request as it is and let the server answer.
       if (!keycloak.refreshToken) return;
+      // A forced refresh is under way: some request just got a 401 with the
+      // current token, so this one would too. Wait for the new token. (Not the
+      // "slow Keycloak freezes a healthy Manager" case below — the token in
+      // hand has already been refused.) A write's 401 starts one without
+      // awaiting it, and the user's immediate retry must not go out with the
+      // refused token.
+      if (inFlight) await inFlight;
       if (expiresWithin(keycloak, 0)) {
         // Already expired: the request would 401, so it has to wait.
         await refresh(REFRESH_MIN_VALIDITY_SECONDS);

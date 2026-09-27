@@ -310,9 +310,11 @@ class ApiClient {
     // that: `RestAgentManagement.sayWithinContext` creates (or replaces) the
     // user's conversation and only then throws `UnauthorizedException`, and an
     // endpoint relaying an upstream 401 would be the same. A 401'd write is
-    // therefore surfaced, not repeated — but the token is still renewed, so
-    // the user's own retry goes out with a fresh one. The proactive refresh
-    // (`ensureFresh` above) keeps that case rare.
+    // therefore surfaced, not repeated. A forced refresh is still requested
+    // (subject to the refresher's cooldown), and the next request's
+    // `ensureFresh` waits for it while it is pending; if it fails or was not
+    // started, that request goes out with the token it has and may 401 too.
+    // The proactive refresh (`ensureFresh` above) keeps that case rare.
     //
     // If a background refresh already swapped the token while this request was
     // in flight, retry with it; otherwise force one (rate-limited by the

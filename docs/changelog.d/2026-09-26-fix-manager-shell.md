@@ -43,7 +43,8 @@ Router's unstyled English default for errors thrown by the providers.
 - Tokens are refreshed ahead of expiry (every 20 s, when < 60 s remain, and on
   tab re-focus) instead of only after `onTokenExpired`, and `ApiClient`
   checks freshness before each request and retries a 401'd GET/HEAD/OPTIONS
-  once after a forced refresh (`TokenRefresher`, `lib/keycloak-session.ts`).
+  once a newer token is available, forcing a refresh when needed
+  (`TokenRefresher`, `lib/keycloak-session.ts`).
 - A transient refresh failure (network, Keycloak 5xx) no longer logs the user
   out; only a rejected refresh token (keycloak-js clears its tokens) sends the
   user to sign in.
@@ -155,9 +156,13 @@ Router's unstyled English default for errors thrown by the providers.
   `RestAgentManagement.sayWithinContext` / `loadConversationMemory` create (or
   replace) the user's managed conversation and only then throw
   `UnauthorizedException`. The automatic retry is now limited to GET, HEAD and
-  OPTIONS; a POST, PUT, PATCH or DELETE that gets a 401 surfaces it, and the
-  token is still renewed (unless a background refresh already swapped it) so
-  the user's own retry carries a fresh one.
+  OPTIONS; a POST, PUT, PATCH or DELETE that gets a 401 surfaces it. A forced
+  refresh is still requested (unless a background refresh already swapped the
+  token, and subject to the 10 s cooldown), and `ensureFresh` makes the next
+  request wait for a forced refresh that is still pending, so an immediate
+  retry does not go out with the refused token. If that refresh fails, or none
+  was started, the next request is sent with the token it has and may 401
+  again.
 
 ### Decisions
 

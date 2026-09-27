@@ -283,4 +283,48 @@ describe("ApiClient token refresh", () => {
     expect(isApiError(error) && error.status).toBe(401);
     expect(calls).toBe(0);
   });
+
+  it("a write retried while its renewal is pending waits for the new token (real refresher)", async () => {
+    // POST 401s → a forced refresh starts, not awaited. The user retries at
+    // once, with the refused token still far from expiry: the retry must wait
+    // for the refresh and carry the new token.
+    let finish: () => void = () => {};
+    const keycloak: KeycloakLike = {
+      token: "old",
+      refreshToken: "r",
+      isTokenExpired: () => false,
+      updateToken: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finish = () => {
+              keycloak.token = "new";
+              resolve(true);
+            };
+          }),
+      ),
+    };
+    const seen: (string | null)[] = [];
+    server.use(
+      http.post(URL, ({ request }) => {
+        const auth = request.headers.get("Authorization");
+        seen.push(auth);
+        return auth === "Bearer new"
+          ? HttpResponse.json({ ok: true })
+          : new HttpResponse(null, { status: 401 });
+      }),
+    );
+    api.setAuthToken("old");
+    api.setTokenRefresher(
+      createTokenRefresher(keycloak, () => api.setAuthToken(keycloak.token!), vi.fn()),
+    );
+
+    await expect(api.post(PATH, { n: 1 })).rejects.toMatchObject({ status: 401 });
+    const retry = api.post(PATH, { n: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+    finish();
+
+    await expect(retry).resolves.toEqual({ ok: true });
+    expect(seen).toEqual(["Bearer old", "Bearer new"]);
+    expect(keycloak.updateToken).toHaveBeenCalledTimes(1);
+  });
 });

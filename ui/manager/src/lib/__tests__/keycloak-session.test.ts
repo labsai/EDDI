@@ -128,6 +128,28 @@ describe("keycloak session", () => {
     expect(kc.updateToken).toHaveBeenCalledTimes(1);
   });
 
+  it("ensureFresh waits for a forced refresh already in flight", async () => {
+    // A write's 401 starts a forced refresh without awaiting it; the user's
+    // retry must not go out with the refused token while it is pending, even
+    // though that token is nowhere near expiry.
+    let finish: (v: boolean) => void = () => {};
+    const kc = fakeKeycloak({
+      isTokenExpired: vi.fn(() => false),
+      updateToken: vi.fn(() => new Promise<boolean>((r) => (finish = r))),
+    });
+    const refresher = createTokenRefresher(kc, vi.fn(), vi.fn());
+    void refresher.forceRefresh();
+
+    let done = false;
+    const pending = refresher.ensureFresh().then(() => (done = true));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(done).toBe(false);
+    finish(true);
+    await pending;
+    expect(done).toBe(true);
+    expect(kc.updateToken).toHaveBeenCalledTimes(1);
+  });
+
   it("publishes the new token after a refresh", async () => {
     const onRefreshed = vi.fn();
     const refresher = createTokenRefresher(fakeKeycloak(), onRefreshed, vi.fn());
