@@ -231,6 +231,7 @@ describe("DiscussionTranscript", () => {
       stances: new Map(),
       interrupted: false,
       cancelRequested: false,
+      cancelError: null,
       roundStartIndex: 0,
     };
 
@@ -279,6 +280,7 @@ describe("DiscussionTranscript", () => {
       stances: new Map(),
       interrupted: false,
       cancelRequested: false,
+      cancelError: null,
       roundStartIndex: 0,
     };
 

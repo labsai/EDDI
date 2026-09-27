@@ -32,6 +32,11 @@ backend strings (P2).
 - "Stop and start new" confirmed before `group_start` named the conversation
   now starts the new discussion once the pending cancel lands; a cancel that
   fails drops the intent and leaves the run on screen.
+- A deferred cancel the server refuses is reported like a refused immediate
+  one — the "Could not stop the discussion" toast, through a separate
+  `cancelError` field the board clears once shown — and no longer through the
+  stream's `error`, which the board renders as the discussion itself failing
+  while it was in fact still running.
 
 ### Streams that end, and members that "type forever"
 
@@ -110,7 +115,10 @@ backend strings (P2).
 - A picked round is reset when the panel moves to another discussion.
 - An earlier round no longer borrows whole-discussion records: its stances are
   extracted from its own turns, its cost is unknown (null) rather than the
-  total, and it shows its own synthesis and no later verdict.
+  total, and it shows its own synthesis and no later verdict. That includes
+  the decision card the surfaces hand the overview as `outcome` (built from
+  the stored or streamed decision, i.e. the newest round's): the overview
+  shows it only while the newest round is selected.
 - The Workforce history viewer passes the group's `style` to the overview.
 
 ### Configs that did not save what was entered

@@ -174,6 +174,15 @@ export interface GroupStreamState {
    */
   cancelRequested: boolean;
   /**
+   * A deferred Stop (see `cancelRequested`) was sent once `group_start` named
+   * the conversation, and the server refused it. The discussion is still
+   * running and the stream still follows it, so this is deliberately NOT
+   * `error`: the board renders `error` as a discussion failure, which a failed
+   * Stop is not. The board reports it the way it reports an immediate Stop
+   * failure (a toast) and then clears it with `clearCancelError`.
+   */
+  cancelError: string | null;
+  /**
    * Index in `transcript` where the CURRENT round's entries begin — the live
    * counterpart of `GroupConversation.roundStartTranscriptIndex`.
    *
@@ -214,6 +223,7 @@ const initialState: GroupStreamState = {
   stances: new Map(),
   interrupted: false,
   cancelRequested: false,
+  cancelError: null,
   roundStartIndex: 0,
 };
 
@@ -276,6 +286,8 @@ interface GroupStreamStore {
    * when there is no live stream to cancel.
    */
   cancelStream: (groupId: string, gcId?: string) => Promise<CancelOutcome>;
+  /** Acknowledge a reported {@link GroupStreamState.cancelError}. */
+  clearCancelError: (groupId: string) => void;
   resetStream: (groupId: string) => void;
 }
 
@@ -445,6 +457,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       conversationId: gcId,
       interrupted: false,
       cancelRequested: false,
+      cancelError: null,
       hitlPause: null,
       hitlResume: null,
       humanInputRequest: null,
@@ -480,6 +493,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       errorKind: null,
       interrupted: false,
       cancelRequested: false,
+      cancelError: null,
       startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
       // Keep transcript (appended by the round_start handler), but reset
       // per-round derived fields so stale data doesn't leak into the UI.
@@ -538,10 +552,15 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
     if (!gcId) {
       // Nothing to address yet. consumeStream sends the cancel as soon as
       // group_start names the conversation.
-      get().update(groupId, (s) => ({ ...s, cancelRequested: true }));
+      get().update(groupId, (s) => ({ ...s, cancelRequested: true, cancelError: null }));
       return "pending";
     }
     return cancelAndClose(groupId, gcId, get().update);
+  },
+
+  clearCancelError: (groupId) => {
+    if (!get().streams[groupId]?.cancelError) return;
+    get().update(groupId, (s) => ({ ...s, cancelError: null }));
   },
 
   /** Abort any in-flight stream AND fully reset to the initial clean state.
@@ -653,7 +672,11 @@ async function consumeStream(
           await cancelAndClose(groupId, current.conversationId, update);
           return;
         } catch (e) {
-          setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e), errorKind: "generic" }));
+          // The Stop failed, the discussion did not: keep following it, and
+          // report the refusal as a failed Stop rather than as `error`, which
+          // the board renders as the discussion itself failing.
+          // `cancelAndClose` has already dropped `cancelRequested`.
+          setState((s) => ({ ...s, cancelError: e instanceof Error ? e.message : String(e) }));
         }
       }
     }
@@ -770,11 +793,24 @@ export function useGroupDiscussionStream(groupId?: string) {
     return useGroupStreamStore.getState().cancelStream(key, gcId);
   }, [key]);
 
+  const clearCancelError = useCallback(() => {
+    if (key) useGroupStreamStore.getState().clearCancelError(key);
+  }, [key]);
+
   const resetStream = useCallback(() => {
     if (key) useGroupStreamStore.getState().resetStream(key);
   }, [key]);
 
-  return { streamState, startStream, continueStream, approveAndStream, abortStream, cancelStream, resetStream };
+  return {
+    streamState,
+    startStream,
+    continueStream,
+    approveAndStream,
+    abortStream,
+    cancelStream,
+    clearCancelError,
+    resetStream,
+  };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────

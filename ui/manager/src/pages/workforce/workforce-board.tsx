@@ -157,7 +157,7 @@ function WorkforceBoard() {
   );
   // Bound to this board, so a discussion started here keeps streaming (and
   // stays visible) after navigating away and back.
-  const { streamState, startStream, continueStream, cancelStream, resetStream } =
+  const { streamState, startStream, continueStream, cancelStream, clearCancelError, resetStream } =
     useGroupDiscussionStream(boardId);
   const queryClient = useQueryClient();
 
@@ -472,6 +472,20 @@ function WorkforceBoard() {
       setIsStopping(false);
     }
   }, [cancelStream, remoteRunningId, boardId, queryClient, t]);
+
+  // A Stop pressed before `group_start` is sent later, from the stream, so its
+  // failure cannot reach the catch above. Reported the same way, as a failed
+  // Stop: the discussion is still running, and the stream's `error` banner would
+  // have read as the discussion itself failing.
+  useEffect(() => {
+    if (!streamState.cancelError) return;
+    toast.error(
+      t("Workforce.board.stopFailed", "Could not stop the discussion: {{error}}", {
+        error: streamState.cancelError,
+      }),
+    );
+    clearCancelError();
+  }, [streamState.cancelError, clearCancelError, t]);
 
   const handleNewDiscussion = useCallback(() => {
     // A running discussion is stopped first, and only after asking: "+ New"

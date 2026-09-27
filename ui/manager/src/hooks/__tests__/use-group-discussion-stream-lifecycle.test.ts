@@ -325,6 +325,57 @@ describe("group stream — Stop cancels the discussion", () => {
     expect(result.current.streamState.cancelRequested).toBe(false);
   });
 
+  /**
+   * The deferred cancel is refused. The discussion is still running, so the
+   * failure is a failed Stop (`cancelError`), not the stream's `error` — which
+   * the board renders as the discussion itself failing.
+   */
+  it("reports a refused deferred cancel as cancelError and keeps following the run", async () => {
+    let deliverStart: () => void = () => {};
+    let finish: () => void = () => {};
+    const startGate = new Promise<void>((resolve) => {
+      deliverStart = resolve;
+    });
+    const endGate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mockStreamGroupDiscussion.mockImplementation(() =>
+      (async function* () {
+        await startGate;
+        yield start;
+        await endGate;
+        yield ev("group_complete", { state: "COMPLETED", synthesizedAnswer: null });
+      })(),
+    );
+    mockCancel.mockRejectedValue(new Error("Server said no"));
+    const { result } = renderHook(() => useGroupDiscussionStream("g1"));
+    let done: Promise<void> = Promise.resolve();
+    act(() => {
+      done = result.current.startStream("g1", "Q?");
+    });
+    await act(async () => {
+      await result.current.cancelStream();
+    });
+
+    await act(async () => {
+      deliverStart();
+    });
+    await waitFor(() => expect(result.current.streamState.cancelError).toBe("Server said no"));
+    expect(mockCancel).toHaveBeenCalledWith("g1", "gc-1");
+    expect(result.current.streamState.error).toBeNull();
+    expect(result.current.streamState.isStreaming).toBe(true);
+    expect(result.current.streamState.cancelRequested).toBe(false);
+
+    act(() => result.current.clearCancelError());
+    expect(result.current.streamState.cancelError).toBeNull();
+
+    await act(async () => {
+      finish();
+      await done;
+    });
+    expect(result.current.streamState.state).toBe("COMPLETED");
+  });
+
   it("has nothing to cancel without a live stream", async () => {
     const { result } = renderHook(() => useGroupDiscussionStream("g1"));
     let outcome: string | undefined;

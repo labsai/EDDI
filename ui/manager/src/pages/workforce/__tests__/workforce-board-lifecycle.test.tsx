@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { toast } from "sonner";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
@@ -320,5 +321,50 @@ describe("WorkforceBoard — lifecycle", () => {
 
     await waitFor(() => expect(cancelled).toEqual(["gc-late"]));
     await waitFor(() => expect(screen.getByText("Ready for discussion")).toBeInTheDocument());
+  });
+
+  /**
+   * The same early Stop, refused by the server. The discussion is still
+   * running, so the board reports a failed Stop — as it does when an immediate
+   * cancel is refused — and not the inline banner that means the discussion
+   * itself failed. Stop is offered again.
+   */
+  it("reports a refused pending cancel as a failed Stop, not a discussion failure", async () => {
+    const toastError = vi.spyOn(toast, "error");
+    let deliverStart: () => void = () => {};
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            deliverStart = () =>
+              controller.enqueue(frame("group_start", { groupConversationId: "gc-late", question: "Ship it?" }));
+          },
+        });
+        return new HttpResponse(body, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", () =>
+        HttpResponse.json({ message: "Cancel refused" }, { status: 500 }),
+      ),
+    );
+    try {
+      renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+      await startDiscussion();
+      await userEvent.click(await screen.findByTestId("board-stop-btn"));
+      await userEvent.click(await screen.findByRole("button", { name: /cancel discussion/i }));
+      expect(screen.getByTestId("board-stop-btn")).toBeDisabled();
+
+      deliverStart();
+
+      await waitFor(() =>
+        expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Could not stop the discussion")),
+      );
+      const stream = useGroupStreamStore.getState().streams.grp1;
+      expect(stream?.error).toBeNull();
+      expect(stream?.cancelError).toBeNull();
+      expect(stream?.isStreaming).toBe(true);
+      await waitFor(() => expect(screen.getByTestId("board-stop-btn")).toBeEnabled());
+    } finally {
+      toastError.mockRestore();
+    }
   });
 });

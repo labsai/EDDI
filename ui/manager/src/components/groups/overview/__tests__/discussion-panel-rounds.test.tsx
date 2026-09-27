@@ -69,3 +69,39 @@ describe("DiscussionPanel — the picked round belongs to one discussion", () =>
     expect((screen.getByTestId("overview-round-select") as HTMLSelectElement).value).toBe("3");
   });
 });
+
+/**
+ * Every surface builds `outcome` from the stored or streamed decision, which is
+ * the NEWEST round's (a continuation replaces it). An earlier round showed that
+ * verdict beside its own, older synthesis.
+ */
+describe("DiscussionPanel — the outcome card belongs to the newest round", () => {
+  beforeEach(() => setStoredDiscussionView("rounds-outcome-test", "overview"));
+
+  function withRoundOneSynthesis(): GroupConversation {
+    const base = threeRounds("gc-outcome");
+    const transcript = [...base.transcript];
+    transcript.splice(2, 0, row("a", "SYNTHESIS", "Round one concluded: keep MongoDB."));
+    return { ...base, roundStartTranscriptIndex: 5, transcript } as GroupConversation;
+  }
+
+  it("hides the newest decision on an earlier round and keeps that round's synthesis", () => {
+    renderWithProviders(
+      <DiscussionPanel
+        surface="rounds-outcome-test"
+        transcript={<div />}
+        conversation={withRoundOneSynthesis()}
+        outcome={<div data-testid="latest-decision">Round three verdict</div>}
+      />,
+    );
+    expect(screen.getByTestId("latest-decision")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("overview-round-select"), { target: { value: "1" } });
+
+    expect(screen.queryByTestId("latest-decision")).not.toBeInTheDocument();
+    expect(screen.getByTestId("overview-synthesis")).toHaveTextContent("Round one concluded: keep MongoDB.");
+
+    fireEvent.change(screen.getByTestId("overview-round-select"), { target: { value: "3" } });
+    expect(screen.getByTestId("latest-decision")).toBeInTheDocument();
+  });
+});
