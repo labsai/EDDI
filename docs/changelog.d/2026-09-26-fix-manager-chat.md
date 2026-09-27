@@ -20,10 +20,17 @@ findings, the built-in tool whitelist, L5, L6 and the agent-card undeploy.
   the panel into [`secret-input-field.tsx`](../../ui/manager/src/components/chat/secret-input-field.tsx).
   The drawer renders it and sends the value as a secret turn.
 - *Secrets came back on reload.* `snapshotToMessages` rebuilt user bubbles from
-  the step's `input:initial`, which holds the raw text of every turn. It now reads
-  the turn's conversation output first. That is where EDDI writes the displayed
-  input, and for a secret turn it writes the `<secret input>` placeholder (shown
-  as the mask). `input:initial` is kept as the fallback. This covers reload,
+  the step's `input:initial`, which holds the raw text of every turn. A turn is
+  now shown as the mask when it answered an `inputField` the previous reply asked
+  for (every such field sends its answer as a secret turn), or when the backend
+  marks it: the output's displayed `input`, or `input:initial` itself, reads
+  `<secret input>`. The first signal is the one that works against the current
+  backend. The simple (`returnDetailed=false`) snapshot every rebuild reads drops
+  the output's `input`, and the backend leaves `input:initial` raw unless a
+  `scope:"secret"` property vaulted it. So reading the output first, as an
+  earlier revision of this branch did, never took effect. A 🔒-mode message
+  answering no field is masked on reload only once the backend returns the
+  masked `input` or scrubs `input:initial`, which #856 adds. This covers reload,
   resume, undo, redo and rerun.
 - *A refused secret answer lost its field.* The send clears the requested field
   up front. When the backend refuses the message without consuming it (a 409 or
@@ -89,8 +96,10 @@ longer show in the new one's status line.
   "processing another turn", "agent version mismatch" and, with #841, "the
   conversation changed while your message was queued". The chat now reads the
   conversation state. It shows the banner only for `AWAITING_HUMAN`, and
-  otherwise toasts the backend's reason (new key `chat.sendRejected`). It keeps
-  the old reading if the state cannot be read.
+  otherwise toasts the backend's reason (new key `chat.sendRejected`). A state
+  that cannot be read is also a refusal, not a pause. The banner disables the
+  input, and a guess would lock the user out of a conversation that is READY. If
+  it really is paused, the next send is refused and classified again.
 
 **Drawer talked to the wrong agent (Medium).** The drawer shares the chat store
 with the main panel. It now shows and sends only into a conversation of the agent

@@ -82,9 +82,12 @@ describe("useSendMessage — a refused send is classified by the conversation's 
     expect(toastError).toHaveBeenCalledWith(expect.stringContaining(reason));
   });
 
-  it("keeps the pause reading when the state cannot be read", async () => {
+  it("does not claim a pause it could not confirm: an unreadable state is a refusal", async () => {
+    // The banner disables the input; over a conversation that is READY after
+    // all, a guessed pause would lock the user out.
+    const reason = "Conversation is processing another turn";
     server.use(
-      http.post("*/agents/:conversationId", () => new HttpResponse(null, { status: 409 })),
+      http.post("*/agents/:conversationId", () => new HttpResponse(reason, { status: 409 })),
       http.get("*/agents/:conversationId", () => new HttpResponse(null, { status: 500 })),
     );
 
@@ -92,7 +95,11 @@ describe("useSendMessage — a refused send is classified by the conversation's 
     result.current.mutate({ message: "hello?" });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
-    expect(useChatStore.getState().isPaused).toBe(true);
+    const state = useChatStore.getState();
+    expect(state.isPaused).toBe(false);
+    expect(state.isProcessing).toBe(false);
+    expect(state.messages).toEqual([]);
+    expect(toastError).toHaveBeenCalledWith(expect.stringContaining(reason));
   });
 
   it("gives back the masked field a refused secret answer was meant for", async () => {

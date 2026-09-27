@@ -101,6 +101,72 @@ describe("rebuilding the transcript never un-masks a secret turn", () => {
     expect(userBubbles).toContain("what model do you use?");
   });
 
+  it("masks the answer to a field the agent asked for even when the snapshot carries only the raw input:initial", async () => {
+    // The shape the simple (returnDetailed=false) snapshot really has: its
+    // outputs never carry `input`, and a backend that does not scrub the turn
+    // leaves the pasted key in input:initial.
+    server.use(
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          ...SECRET_TURN,
+          conversationOutputs: [
+            SECRET_TURN.conversationOutputs[0],
+            { output: [{ type: "text", text: "Key stored." }] },
+            { output: [{ type: "text", text: "A good one." }] },
+          ],
+        }),
+      ),
+    );
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-s" });
+    });
+
+    const userBubbles = useChatStore
+      .getState()
+      .messages.filter((m) => m.role === "user")
+      .map((m) => m.content);
+    expect(userBubbles).toEqual(["●●●●●●●●", "what model do you use?"]);
+    expect(JSON.stringify(useChatStore.getState().messages)).not.toContain("sk-live");
+  });
+
+  it("masks a turn whose input:initial the backend replaced with its placeholder", async () => {
+    // A 🔒-mode message answers no field; a scrubbing backend leaves only the
+    // placeholder, which is shown as the mask rather than as literal text.
+    server.use(
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          ...SECRET_TURN,
+          conversationSteps: [
+            SECRET_TURN.conversationSteps[0],
+            SECRET_TURN.conversationSteps[2],
+            {
+              conversationStep: [
+                { key: "input:initial", value: "<secret input>" },
+                { key: "actions", value: ["noted"] },
+              ],
+            },
+          ],
+          conversationOutputs: [
+            { output: [{ type: "text", text: "Hello" }] },
+            { output: [{ type: "text", text: "A good one." }] },
+            { output: [{ type: "text", text: "Noted." }] },
+          ],
+        }),
+      ),
+    );
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-s" });
+    });
+
+    const userBubbles = useChatStore
+      .getState()
+      .messages.filter((m) => m.role === "user")
+      .map((m) => m.content);
+    expect(userBubbles).toEqual(["what model do you use?", "●●●●●●●●"]);
+  });
+
   it("offers the masked field again when the reopened conversation's last reply asks for it", async () => {
     server.use(
       http.get("*/agents/:conversationId", () =>

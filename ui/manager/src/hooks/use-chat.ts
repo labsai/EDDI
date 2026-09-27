@@ -570,18 +570,21 @@ function parseStreamError(data: string): { message: string; code?: string } {
  * conversation to learn whether it is really paused. Anything else passes
  * through untouched.
  *
- * A failed read keeps the old reading (paused): it is still the most common
- * cause, and the banner links to the conversation page, which shows the real
- * state.
+ * Only a confirmed `AWAITING_HUMAN` is a pause. A failed read is not one: the
+ * banner disables the input, and over a conversation that is in fact READY
+ * (busy a moment ago, say) that would lock the user out on a guess. An
+ * unreadable state is reported as the refusal it is, with the input left
+ * enabled; if the conversation really is paused, the next send is refused
+ * again and classified again.
  */
 async function classifyRejectedSend(error: unknown, conversationId: string): Promise<unknown> {
   if (!isApiError(error) || error.status !== 409) return error;
-  let paused = true;
+  let paused = false;
   try {
     const snapshot = await readConversation("production", "", conversationId, true);
     paused = snapshot.conversationState === "AWAITING_HUMAN";
   } catch {
-    // keep paused
+    // Unconfirmed: a refusal, not a pause.
   }
   return new RejectedSendError(error.message, paused);
 }
@@ -1294,23 +1297,40 @@ function handleSSEEvent(
 /**
  * The user's input for one turn as the transcript should show it.
  *
- * Read from the turn's conversation OUTPUT first. That is where EDDI writes the
- * displayed input, and for a secret turn it writes a placeholder there instead
- * of the text. The step's `input:initial` holds the raw text whatever the flag
- * was (it is what the pipeline ran on, and only a `scope:"secret"` property
- * vaults it), so rebuilding bubbles from it put a pasted API key back on
- * screen in clear after every reload, resume, undo or rerun. `input:initial`
- * stays the fallback for an output that carries no input.
+ * A turn is masked on any of three signals, checked before any text is used:
+ *
+ * - it answered a field the agent asked for: the previous reply carried an
+ *   `inputField`, and every such field (password, text or email) sends its
+ *   answer with the secret flag and shows it masked while live;
+ * - the turn's conversation OUTPUT carries EDDI's placeholder as its `input`;
+ * - its `input:initial` IS the placeholder (a turn the backend scrubbed).
+ *
+ * The first is the one the Manager can rely on against any backend. The
+ * simple (`returnDetailed=false`) snapshot every rebuild reads keeps only
+ * `input:initial*`, `actions*`, `output*` and `quickReplies*` from an output,
+ * so the output's `input` never arrives there, and a backend that does not
+ * scrub a secret turn leaves the raw text in `input:initial` (only a
+ * `scope:"secret"` property vaults it). Rebuilding from `input:initial` alone
+ * put a pasted API key back on screen after every reload, resume, undo or
+ * rerun. A quick reply chosen instead of filling the field is masked too,
+ * which errs toward hiding. A 🔒-mode message sent without a field asking for it carries no
+ * signal of its own in that snapshot; masking it on reload needs the backend
+ * to return the masked display `input` or scrub `input:initial`.
  */
 function displayedUserInput(
   step: SimpleConversationStep | undefined,
   output: ConversationOutput | undefined,
+  previousOutput: ConversationOutput | undefined,
 ): string | undefined {
   const shown = output?.input;
-  if (typeof shown === "string" && shown.trim()) {
-    return shown === BACKEND_SECRET_PLACEHOLDER ? SECRET_BUBBLE : shown;
+  const raw = step ? extractInput(step) : undefined;
+  const text = typeof shown === "string" && shown.trim() ? shown : raw;
+  if (!text) return undefined;
+  const answeredInputField = extractInputField(previousOutput) !== undefined;
+  if (answeredInputField || shown === BACKEND_SECRET_PLACEHOLDER || raw === BACKEND_SECRET_PLACEHOLDER) {
+    return SECRET_BUBBLE;
   }
-  return step ? extractInput(step) : undefined;
+  return text;
 }
 
 /** Helper: rebuild messages from a conversation snapshot */
@@ -1319,7 +1339,7 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
   const outputs = snapshot.conversationOutputs ?? [];
   for (let i = 0; i < (snapshot.conversationSteps ?? []).length; i++) {
     const step = snapshot.conversationSteps[i];
-    const input = displayedUserInput(step, outputs[i]);
+    const input = displayedUserInput(step, outputs[i], i > 0 ? outputs[i - 1] : undefined);
     const parts = extractOutputParts(outputs[i]);
     if (input) {
       messages.push({
