@@ -424,15 +424,30 @@ function WorkforceBoard() {
    * the dialog opens, so a selection that settles or changes while it is open
    * cannot redirect the cancel to another run. `targetId` undefined means this
    * tab's live stream.
+   *
+   * It belongs to the board it was asked on and is dismissed when the board
+   * changes. Switching boards keeps this page mounted, and `cancelStream`
+   * addresses the board on screen, so a confirmation carried over would send
+   * the old board's discussion id under the new board's group — cancelling
+   * nothing there and leaving the old run going.
    */
   const [confirmStop, setConfirmStop] = useState<{ kind: "stop" | "new"; targetId?: string } | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   /**
    * "Stop and start new" was confirmed before `group_start` had named the
    * conversation, so the cancel is still pending. The board is cleared once it
-   * lands, not left on the run the user chose to leave.
+   * lands, not left on the run the user chose to leave. Holds the board it was
+   * asked on: the landing it waits for is that board's stream, and clearing
+   * another board would discard what the user moved on to.
    */
-  const [newAfterCancel, setNewAfterCancel] = useState(false);
+  const [newAfterCancel, setNewAfterCancel] = useState<string | null>(null);
+  /** The board on screen now, for a stop that settles after the user moved on. */
+  const currentBoardRef = useRef(boardId);
+  useEffect(() => {
+    currentBoardRef.current = boardId;
+    setConfirmStop(null);
+    setNewAfterCancel(null);
+  }, [boardId]);
 
   /**
    * The discussion on screen is running, whether or not this tab holds its
@@ -522,23 +537,28 @@ function WorkforceBoard() {
   const handleConfirmStop = useCallback(async () => {
     if (!confirmStop) return;
     const { kind, targetId } = confirmStop;
+    const askedOn = boardId;
     const pendingBefore = !streamState.conversationId && isStreaming;
     const stopped = await stopDiscussion(targetId);
+    // The user moved to another board while the cancel was in flight: the
+    // board change already dismissed the dialog, and clearing now would clear
+    // the board they are looking at instead of the one they asked about.
+    if (currentBoardRef.current !== askedOn) return;
     setConfirmStop(null);
     if (kind !== "new") return;
     if (stopped) startFresh();
-    else if (pendingBefore) setNewAfterCancel(true);
-  }, [confirmStop, stopDiscussion, startFresh, streamState.conversationId, isStreaming]);
+    else if (pendingBefore && askedOn) setNewAfterCancel(askedOn);
+  }, [confirmStop, boardId, stopDiscussion, startFresh, streamState.conversationId, isStreaming]);
 
   // The pending cancel has landed (or the run ended some other way): the
   // stream is no longer running, so the new discussion the user asked for can
   // start. A cancel that failed leaves the stream running and drops the intent
   // — the discussion was not stopped, so nothing should be cleared.
   useEffect(() => {
-    if (!newAfterCancel || streamState.cancelRequested) return;
-    setNewAfterCancel(false);
+    if (!newAfterCancel || newAfterCancel !== boardId || streamState.cancelRequested) return;
+    setNewAfterCancel(null);
     if (!streamState.isStreaming) startFresh();
-  }, [newAfterCancel, streamState.cancelRequested, streamState.isStreaming, startFresh]);
+  }, [newAfterCancel, boardId, streamState.cancelRequested, streamState.isStreaming, startFresh]);
 
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {

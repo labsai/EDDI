@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { ThemeProvider } from "@/components/layout/theme-provider";
+import { createTestQueryClient, renderPage, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
 import { WorkforceBoard } from "../workforce-board";
@@ -73,6 +76,32 @@ function conversationDoc(id: string, overrides: Record<string, unknown> = {}) {
     lastModified: new Date().toISOString(),
     ...overrides,
   };
+}
+
+/**
+ * The board on a router the test can drive. Switching task forces keeps the
+ * page mounted (same route, new `:boardId`), which `renderPage` cannot do.
+ */
+function renderSwitchableBoard(path: string) {
+  const router: { navigate?: NavigateFunction; search: string } = { search: "" };
+  function RouterHandle() {
+    router.navigate = useNavigate();
+    router.search = useLocation().search;
+    return null;
+  }
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+          <RouterHandle />
+          <Routes>
+            <Route path="/workforce/:boardId" element={<WorkforceBoard />} />
+          </Routes>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  return router;
 }
 
 async function startDiscussion() {
@@ -343,6 +372,117 @@ describe("WorkforceBoard — lifecycle", () => {
     expect(live?.conversationId).toBe("gc-live");
     expect(live?.isStreaming).toBe(true);
     expect(live?.state).not.toBe("CANCELLED");
+  });
+
+  /**
+   * The confirmation is about a discussion on the board it was asked on.
+   * Switching task forces keeps the page mounted and rebinds the stream hook to
+   * the new board, so a dialog carried over sent the old board's discussion id
+   * under the new board's group: a cancel that could not stop the old run.
+   */
+  it("dismisses the stop confirmation when the board changes, and cancels nothing", async () => {
+    openDiscussionStream("gc-live");
+    const cancelled: string[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", ({ params }) => {
+        cancelled.push(`${String(params.groupId)}/${String(params.gcId)}`);
+        return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
+      }),
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.gcId))),
+      ),
+    );
+    const router = renderSwitchableBoard("/workforce/grp1?version=1");
+    await startDiscussion();
+    await userEvent.click(await screen.findByTestId("board-stop-btn"));
+    await screen.findByRole("button", { name: /cancel discussion/i });
+
+    act(() => router.navigate!("/workforce/grp2?version=1"));
+
+    // Once the new board has rendered (its loading state unmounts everything,
+    // dialog included), the confirmation must not come back.
+    await screen.findByTestId("new-discussion-btn");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByRole("button", { name: /cancel discussion/i })).not.toBeInTheDocument();
+    expect(cancelled).toEqual([]);
+    // The run on the board that was left is untouched and still followed there.
+    expect(useGroupStreamStore.getState().streams.grp1?.isStreaming).toBe(true);
+    useGroupStreamStore.getState().resetStream("grp2");
+  });
+
+  /**
+   * The same move while a confirmed "Stop and start new" is still waiting for
+   * the server. The cancel was for the old board and still lands there; the
+   * "start new" that follows it must not clear the board the user moved to.
+   */
+  it("does not clear the new board when a 'Stop and start new' from the old one settles after the switch", async () => {
+    openDiscussionStream("gc-live");
+    let answerCancel: () => void = () => {};
+    const cancelled: string[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/cancel", async ({ params }) => {
+        cancelled.push(`${String(params.groupId)}/${String(params.gcId)}`);
+        await new Promise<void>((resolve) => {
+          answerCancel = resolve;
+        });
+        return HttpResponse.json(conversationDoc(String(params.gcId), { state: "CANCELLED" }));
+      }),
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.gcId), { state: "COMPLETED" })),
+      ),
+    );
+    const router = renderSwitchableBoard("/workforce/grp1?version=1");
+    await startDiscussion();
+    await waitFor(() => expect(useGroupStreamStore.getState().streams.grp1?.conversationId).toBe("gc-live"));
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /stop and start new/i }));
+    await waitFor(() => expect(cancelled).toEqual(["grp1/gc-live"]));
+
+    act(() => router.navigate!("/workforce/grp2?version=1&conversation=gc-2a"));
+    await screen.findByTestId("new-discussion-btn");
+    await act(async () => {
+      answerCancel();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    await waitFor(() => expect(useGroupStreamStore.getState().streams.grp1?.state).toBe("CANCELLED"));
+    expect(router.search).toContain("conversation=gc-2a");
+    useGroupStreamStore.getState().resetStream("grp2");
+  });
+
+  /**
+   * "Stop and start new" confirmed before `group_start`, then the user moves to
+   * another board. When the pending cancel's wait ends there, the "start new"
+   * it was waiting to do used to clear the board the user had moved to.
+   */
+  it("does not clear another board when a pending 'Stop and start new' was asked on the previous one", async () => {
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () => {
+        // group_start never arrives: the cancel stays pending.
+        const body = new ReadableStream<Uint8Array>({ start() {} });
+        return new HttpResponse(body, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+      http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.gcId), { groupId: "grp2", state: "COMPLETED" })),
+      ),
+    );
+    const router = renderSwitchableBoard("/workforce/grp1?version=1");
+    await startDiscussion();
+    await userEvent.click(await screen.findByTestId("new-discussion-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: /stop and start new/i }));
+    await waitFor(() => expect(useGroupStreamStore.getState().streams.grp1?.cancelRequested).toBe(true));
+
+    act(() => router.navigate!("/workforce/grp2?version=1&conversation=gc-2a"));
+
+    await screen.findByTestId("new-discussion-btn");
+    // Give any leftover "start new" effect its chance to run on the new board.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(router.search).toContain("conversation=gc-2a");
+    useGroupStreamStore.getState().resetStream("grp2");
   });
 
   /**

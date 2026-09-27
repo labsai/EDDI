@@ -47,6 +47,12 @@ backend strings (P2).
   Stop ("Back to live discussion" leads to the running one). "+ New" still
   stops the tab's stream when there is one, since clearing the board detaches
   from it.
+- **Stop stays on its board (review follow-up):** switching task forces keeps
+  the board mounted and rebinds the stream hook, so a Stop confirmation left
+  open would have sent the old board's discussion id under the new board's
+  group. The confirmation is dismissed when the board changes, and a pending or
+  in-flight "Stop and start new" now clears only the board it was asked on,
+  not the one the user moved to.
 
 ### Streams that end, and members that "type forever"
 
