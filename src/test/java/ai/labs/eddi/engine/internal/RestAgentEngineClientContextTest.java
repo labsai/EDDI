@@ -4,13 +4,13 @@
  */
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
@@ -61,7 +61,12 @@ class RestAgentEngineClientContextTest {
         var identity = mock(SecurityIdentity.class);
         var ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        when(descriptorStore.readDescriptor(anyString(), anyInt())).thenThrow(new ResourceNotFoundException("none"));
+        // An owned conversation: the access guard resolves its owner from the
+        // descriptor
+        // (a conversation with no descriptor at all is a 404 for non-admins).
+        var descriptor = new ConversationDescriptor();
+        descriptor.setUserId("user-1");
+        when(descriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(descriptor);
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
                 mock(IGroupConversationService.class));
         var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
