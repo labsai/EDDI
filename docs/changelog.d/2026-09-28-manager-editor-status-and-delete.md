@@ -44,9 +44,11 @@ None of the three pages has a Share entry point.
   `id` comes back, the lookup is empty or partial. That counts as unrestricted
   only when `/workspaces` reports enforcement off, because unmigrated data there
   can legitimately return no descriptors and owners must keep Delete. With
-  enforcement on, or before `/workspaces` has answered, nothing is offered.
-  (Raised by CodeRabbit on PR #879: the first version read "no match" as
-  unrestricted.)
+  enforcement on, before `/workspaces` has answered, or when it **failed**,
+  nothing is offered. The pages read the new `useSpaces().enforcement`, which
+  stays `undefined` on a failure. `enabled` folds a failure into `false`, so
+  reading it would turn a 502 into "enforcement off". An older backend's 404
+  still counts as off. (Both points were raised by CodeRabbit on PR #879.)
 - **Nothing is offered while the descriptors load.** Treating "not loaded yet"
   as unrestricted would show Delete briefly to an EDIT grantee, long enough to
   click it. Once the descriptors arrive the normal rule applies: a missing
@@ -65,14 +67,17 @@ None of the three pages has a Share entry point.
 - New `detail-page-owner-actions.test.tsx`: all three detail pages hide Delete
   for EDIT and show it for OWN. The agent page also shows it when the backend
   sends no level. With an empty descriptor lookup, it hides Delete under
-  enforcement and shows it with workspaces off. Each test waits for content that renders at both levels
+  enforcement and when `/workspaces` fails, and shows it when workspaces are off
+  or `/workspaces` returns 404. The negative cases wait until both the
+  descriptor and `/workspaces` queries have settled, not a fixed delay. Each test waits for content that renders at both levels
   before checking that Delete is absent.
 - `config-editor.test.tsx` and `resources.test.tsx` had checked for Delete
   synchronously on the first render. They now wait for it, since it appears
   once the level is known.
 - Mutation-checked: with the gates and the 401/403 branch removed, all five new
   behavioural tests fail. With the empty-lookup case reading as unrestricted
-  again, the three tests covering it fail.
+  again, the tests covering it fail. With the pages reading `enabled` again, the
+  `/workspaces`-failure test fails.
 
 **Files:** [`use-platform-status.ts`](../../ui/manager/src/hooks/use-platform-status.ts),
 [`access.ts`](../../ui/manager/src/lib/access.ts),

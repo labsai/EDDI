@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 import { renderPage } from "@/test/test-utils";
+import { agentKeys } from "@/lib/query-keys";
 import { AgentDetailPage } from "@/pages/agent-detail";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 import { ResourceDetailPage } from "@/pages/resource-detail";
@@ -19,6 +21,21 @@ import { http, HttpResponse } from "msw";
  * Every case first waits for a control that renders for both levels, so the
  * "absent" assertions cannot pass merely because the page had not loaded yet.
  */
+
+/**
+ * Resolves once both inputs to the agent page's Delete decision have settled —
+ * the version descriptors and `/workspaces` — whichever way they went. A
+ * negative assertion made before then passes merely because access is still
+ * pending, which is the one state guaranteed to hide Delete.
+ */
+async function accessSettled(client: QueryClient, agentId: string) {
+  await waitFor(() => {
+    for (const key of [[...agentKeys.all, "versions", agentId], ["workspaces", "info"]]) {
+      const state = client.getQueryState(key)?.status;
+      expect(state === "success" || state === "error").toBe(true);
+    }
+  });
+}
 
 function descriptor(resource: string, name: string, callerLevel?: string) {
   return {
@@ -73,11 +90,35 @@ describe("Agent detail — owner-only actions", () => {
       http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
-    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+    const { queryClient } = renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
     await screen.findByTestId("export-agent-btn");
-    // Let both /workspaces and the descriptors settle before asserting absence.
-    await new Promise((r) => setTimeout(r, 300));
+    await accessSettled(queryClient, "agent1");
     expect(screen.queryByTestId("delete-agent-btn")).not.toBeInTheDocument();
+  });
+
+  it("hides Delete when /workspaces fails and no descriptor came back", async () => {
+    // useSpaces folds a failure into `enabled: false`. Read as "enforcement
+    // off", a 502 here offered Delete to anyone whose lookup came back empty.
+    server.use(
+      http.get("*/workspaces", () => HttpResponse.json({}, { status: 502 })),
+      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
+    );
+    const { queryClient } = renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+    await screen.findByTestId("export-agent-btn");
+    await accessSettled(queryClient, "agent1");
+    expect(queryClient.getQueryState(["workspaces", "info"])?.status).toBe("error");
+    expect(screen.queryByTestId("delete-agent-btn")).not.toBeInTheDocument();
+  });
+
+  it("keeps Delete when an older backend 404s /workspaces and no descriptor came back", async () => {
+    server.use(
+      http.get("*/workspaces", () => HttpResponse.json({}, { status: 404 })),
+      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
+    );
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+    expect(await screen.findByTestId("delete-agent-btn")).toBeInTheDocument();
   });
 
   it("keeps Delete when workspaces are off and no descriptor came back", async () => {

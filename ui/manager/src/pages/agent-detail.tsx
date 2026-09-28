@@ -106,8 +106,8 @@ export function AgentDetailPage() {
   // Delete (and sharing) need OWN. An EDIT grantee was offered Delete here and
   // met a 403 — the agents list already hid it for them via the same level.
   // Only consulted when no descriptor for this id came back — see accessForDetail.
-  const spaces = useSpaces();
-  const workspacesEnforced = spaces.isLoading ? undefined : spaces.enabled;
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
   const access = accessForDetail(versions, id, workspacesEnforced);
 
   // Default to latest version once loaded

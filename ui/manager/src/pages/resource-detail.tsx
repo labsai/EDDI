@@ -122,8 +122,8 @@ export function ResourceDetailPage() {
   } = useResourceVersions(type ?? "", id ?? "");
   // Deleting a resource needs OWN; an EDIT grantee may still change it.
   // Only consulted when no descriptor for this id came back — see accessForDetail.
-  const spaces = useSpaces();
-  const workspacesEnforced = spaces.isLoading ? undefined : spaces.enabled;
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
   const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Resolve latest version from descriptors
