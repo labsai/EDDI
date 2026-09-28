@@ -77,7 +77,16 @@ authors, and existing vaults keep working.
   unwrap of an existing key (e.g. a KEK mismatch) now fails the operation instead of
   replacing the key, and racing nodes converge on the first key written rather than
   the last. There is no KEK-derived fallback key any more — a checksum written under
-  one would be unverifiable later.
+  one would be unverifiable later — and a store that keeps no metadata refuses to write
+  a keyed checksum rather than use a key that would not survive a restart (legacy
+  checksums still verify without the key).
+- **KEK rotation:** `rotate-kek` now refuses, in production, a new master key the
+  startup strength gate would reject (the `allow-weak-master-key` opt-out is for booting
+  on a weak key to rotate off it, never for rotating onto one). The checksum key is
+  unwrapped and re-wrapped during the verification phase, so a malformed or
+  unwrappable one aborts the rotation before any DEK is written; and a failed write
+  during the commit rolls the already-written DEKs back to the old KEK, so the vault
+  stays readable under its configured master key and the rotation can be retried.
 - **GCM AAD:** existing (no-AAD) rows decrypt via fallback; DEK rotation rebinds AAD
   to the new generation. The grant list is intentionally not part of the AAD so grant
   edits (which do not re-encrypt) keep values readable.
@@ -91,9 +100,12 @@ authors, and existing vaults keep working.
   encode a key id into the stored HMAC string and derive the key with a per-deployment
   random salt, keeping the fixed-salt key as the legacy verification key.
 - **AAD downgrade tolerance** (LOW): the AAD decrypt path falls back to a no-AAD decrypt
-  for legacy rows, so an attacker who can also delete/blank a row's binding cannot be
-  distinguished from a genuine legacy row. A per-row `aadBound` flag that refuses the
-  fallback once a row is known to be AAD-bound is a future hardening.
+  for legacy rows, so a legacy (no-AAD) ciphertext copied with its IV onto another row
+  under the same DEK still decrypts there — exactly as every row did before this change.
+  A per-row marker cannot close this, because it lives in the same database the
+  attacker writes. The follow-up is an operator-controlled switch (configuration, not
+  data) that disables the no-AAD fallback once every legacy row has been re-sealed with
+  AAD — which DEK rotation already does.
 - **Grant-list tampering** (LOW): `allowedAgents` is authenticated only at the
   deploy-time grant check, not bound into the ciphertext (binding it as AAD would break
   the no-re-encrypt `updateGrant`); a separate keyed MAC over the grant list is a

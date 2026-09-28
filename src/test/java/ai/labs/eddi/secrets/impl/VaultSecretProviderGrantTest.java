@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
@@ -14,6 +15,7 @@ import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,7 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -322,6 +326,14 @@ class VaultSecretProviderGrantTest {
          */
         boolean hideMetaOnce;
 
+        /**
+         * When set, every {@link #setMetaValue} throws it — a failed metadata write.
+         */
+        RuntimeException metaWriteFailure;
+
+        /** When true, the double behaves like a store that keeps no metadata at all. */
+        boolean noMetadata;
+
         int upsertSecretCalls;
         int updateSecretGrantCalls;
         int findDekCalls;
@@ -461,12 +473,17 @@ class VaultSecretProviderGrantTest {
                 hideMetaOnce = false;
                 return null;
             }
-            return meta.get(key);
+            return noMetadata ? null : meta.get(key);
         }
 
         @Override
         public void setMetaValue(String key, String value) {
-            meta.put(key, value);
+            if (metaWriteFailure != null) {
+                throw metaWriteFailure;
+            }
+            if (!noMetadata) {
+                meta.put(key, value);
+            }
         }
     }
 
@@ -587,5 +604,68 @@ class VaultSecretProviderGrantTest {
         assertTrue(nodeB.matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
                 "node B must end on node A's key, or checksums written by A are unverifiable on B");
         assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META), "the create is insert-if-absent, never an overwrite");
+    }
+
+    @Test
+    @DisplayName("a store without metadata refuses a keyed checksum instead of using a key that dies with the process")
+    void metadataLessStoreRefusesKeyedChecksum() {
+        persistence.noMetadata = true;
+
+        assertThrows(SecretProviderException.class, () -> storeSecret(List.of("*")),
+                "a process-local checksum key would make every h1: checksum unverifiable after a restart");
+        assertTrue(provider.matchesChecksum(TENANT_ID, VaultChecksum.legacy(PLAINTEXT), PLAINTEXT),
+                "a legacy checksum needs no key, so it still verifies without metadata");
+    }
+
+    // ─── KEK rotation: nothing half-committed ───
+
+    /** tenant/generation → the DEK's current wrapped ciphertext. */
+    private Map<String, String> dekSnapshot() {
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        for (EncryptedDek dek : persistence.listAllDeks()) {
+            snapshot.put(dek.getTenantId() + "/" + dek.getGeneration(), dek.getEncryptedDek() + "|" + dek.getIv());
+        }
+        return snapshot;
+    }
+
+    @Test
+    @DisplayName("KEK rotation to a weak master key is refused in production before anything is written")
+    void rotateToWeakMasterKeyRefusedInProduction() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        VaultSecretProvider production = spy(provider);
+        doReturn(LaunchMode.NORMAL).when(production).getLaunchMode();
+
+        assertThrows(SecretProviderException.class, () -> production.rotateKek(MASTER_KEY, "changeme"));
+
+        assertEquals(before, dekSnapshot(), "a refused rotation must leave every DEK on the old KEK");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF));
+    }
+
+    @Test
+    @DisplayName("an unwrappable checksum key aborts KEK rotation before any DEK is re-wrapped")
+    void malformedChecksumKeyAbortsRotationBeforeAnyWrite() throws Exception {
+        storeSecret(List.of("*"));
+        persistence.meta.put(CHECKSUM_KEY_META, "not-a-wrapped-key");
+        Map<String, String> before = dekSnapshot();
+
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+
+        assertEquals(before, dekSnapshot(), "the checksum key is verified in phase 1, so no DEK may have moved to the new KEK");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
+    }
+
+    @Test
+    @DisplayName("a failed checksum-key write during KEK rotation rolls every DEK back to the old KEK")
+    void failedChecksumKeyWriteRollsBackDeks() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        persistence.metaWriteFailure = new PersistenceException("meta write failed");
+
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+
+        persistence.metaWriteFailure = null;
+        assertEquals(before, dekSnapshot(), "DEKs written before the failure must be restored to their old wrapping");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
     }
 }

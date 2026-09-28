@@ -486,6 +486,7 @@ class PostgresSecretPersistenceUnitTest {
         when(resultSet.getString("value")).thenReturn("winner");
 
         assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+        verify(resultSet).close();
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection, atLeastOnce()).prepareStatement(sql.capture());
