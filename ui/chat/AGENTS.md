@@ -138,8 +138,8 @@ npm run build    # Outputs to dist/
 
 ### Quality gates
 
-CI's `UI Chat` job runs `npm ci`, `npm run typecheck` and `npm test` on every PR that touches
-`ui/`. Run both before pushing, plus `npm run build`. There is no lint script in this package.
+CI's `UI Chat` job runs `npm ci`, `npm run typecheck` and `npm test` on every PR into `main`
+that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets no CI at all). Run both before pushing, plus `npm run build`. There is no lint script in this package.
 
 ---
 

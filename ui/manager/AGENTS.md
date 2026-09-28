@@ -80,8 +80,8 @@ restore them from the last lockfile CI accepted rather than regenerating.
 ### Quality Gates
 
 There is no pre-commit hook (the husky + lint-staged hook did not survive the move into the
-EDDI monorepo). CI's `UI Manager Checks` job runs these on every PR that touches `ui/`, in
-this order — run them yourself before pushing:
+EDDI monorepo). CI's `UI Manager Checks` job runs these on every PR into `main` that touches `ui/`
+(`ci.yml` runs on no other base branch), in this order — run them yourself before pushing:
 
 ```bash
 npm run audit:prod   # no known-vulnerable production dependency
