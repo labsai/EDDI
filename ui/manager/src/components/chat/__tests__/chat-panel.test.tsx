@@ -723,6 +723,53 @@ describe("ChatPanel", () => {
     await user.click(redoBtn);
   });
 
+  it("holds every other way of changing the conversation while an undo is in flight", async () => {
+    // The undo finishes by replacing the transcript with a fresh read, so a
+    // send, quick reply or redo issued meanwhile would race that read.
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setUndoRedo(true, true);
+    useChatStore.getState().setQuickReplies(["Yes"]);
+    server.use(
+      // Never answers: the assertions read the in-flight state.
+      http.post("*/agents/conv1/undo", () => new Promise<never>(() => {})),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    expect(screen.getByTestId("chat-input")).toBeEnabled();
+    expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("undo-btn"));
+
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeDisabled());
+    expect(screen.queryByTestId("quick-reply-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("redo-btn")).not.toBeInTheDocument();
+  });
+
+  it("offers no undo, redo or send while a rerun is in flight", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setUndoRedo(true, true);
+    useChatStore.getState().addMessage({
+      id: "m1",
+      role: "agent",
+      content: "⚠️ Error: Something went wrong",
+      timestamp: Date.now(),
+    });
+    server.use(http.post("*/agents/conv1/rerun", () => new Promise<never>(() => {})));
+
+    renderWithProviders(<ChatPanel />);
+    expect(screen.getByTestId("undo-btn")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("rerun-btn"));
+
+    await waitFor(() => expect(screen.queryByTestId("undo-btn")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("redo-btn")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+  });
+
   it("auto-starts conversation if agentId query parameter is present", async () => {
     server.use(
       http.get("*/agentstore/agents/descriptors", () => {

@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
+import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentManagement;
 import ai.labs.eddi.engine.model.*;
@@ -22,15 +23,18 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -66,10 +70,10 @@ public class RestAgentManagement implements IRestAgentManagement {
                                        List<String> returningFields, AsyncResponse asyncResponse) {
 
         try {
+            // initUserConversation authorizes the caller before it creates, deletes or
+            // replaces anything, so an UnauthorizedException here means nothing changed.
             var userConversationResult = initUserConversation(intent, userId, language);
             var userConversation = userConversationResult.getUserConversation();
-
-            checkUserAuthIfApplicable(userConversation);
 
             var memorySnapshot = restAgentEngine.readConversation(userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly,
                     returningFields);
@@ -96,13 +100,17 @@ public class RestAgentManagement implements IRestAgentManagement {
     public void sayWithinContext(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                                  InputData inputData, AsyncResponse response) {
         try {
+            // Authorized inside initUserConversation, before any side effect.
             var userConversation = initUserConversation(intent, userId, extractLanguage(inputData)).getUserConversation();
-
-            checkUserAuthIfApplicable(userConversation);
 
             restAgentEngine.sayWithinContext(userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     response);
 
+        } catch (UnauthorizedException e) {
+            // Hand the exception to the JAX-RS exception mappers, exactly as a throw from
+            // loadConversationMemory is: Quarkus answers 401 with its authentication
+            // challenge. The generic branch below would turn it into an opaque 500.
+            response.resume(e);
         } catch (Exception e) {
             int status = e instanceof WebApplicationException webApplicationException
                     ? webApplicationException.getResponse().getStatus()
@@ -134,6 +142,24 @@ public class RestAgentManagement implements IRestAgentManagement {
         return "Internal server error (correlationId: " + correlationId + ")";
     }
 
+    /**
+     * Resolves the caller's managed conversation, creating it when none exists and
+     * replacing it when it has ended — and authorizes the caller before each of
+     * those side effects, never after.
+     * <p>
+     * The authorization check depends on the environment of the conversation the
+     * request acts on. A conversation that is about to be created (or to replace an
+     * ended one) does not exist yet, so its environment is decided up front: the
+     * agent deployment is picked from the intent's trigger first, the caller is
+     * authorized against that deployment's environment, and only then is the
+     * conversation started with <em>that same</em> deployment. The ended
+     * conversation's own environment is not consulted — it is not what the request
+     * goes on to talk to. A live existing conversation is authorized against its
+     * stored environment. Only reads (the user conversation, the engine's
+     * conversation state, the trigger) happen before the check, so an
+     * {@link UnauthorizedException} from here means nothing was created, deleted or
+     * replaced.
+     */
     private UserConversationResult initUserConversation(String intent, String userId, String language) throws CannotCreateConversationException {
 
         UserConversation userConversation;
@@ -141,19 +167,32 @@ public class RestAgentManagement implements IRestAgentManagement {
 
         userConversation = getUserConversation(intent, userId);
         if (userConversation == null) {
+            AgentDeployment agentDeployment = selectAgentDeployment(intent);
+            checkUserAuthIfApplicable(agentDeployment.getEnvironment());
             try {
-                userConversation = createNewConversation(intent, userId, language);
+                userConversation = createNewConversation(intent, userId, language, agentDeployment);
             } catch (CannotCreateConversationException e) {
+                // A concurrent request stored its conversation first; act on that one.
                 userConversation = getUserConversation(intent, userId);
             }
             newlyCreatedConversation = true;
         }
 
         if (isConversationEnded(userConversation)) {
+            AgentDeployment agentDeployment = selectAgentDeployment(intent);
+            checkUserAuthIfApplicable(agentDeployment.getEnvironment());
             deleteUserConversation(intent, userId);
-            userConversation = createNewConversation(intent, userId, language);
+            userConversation = createNewConversation(intent, userId, language, agentDeployment);
             newlyCreatedConversation = true;
         }
+
+        // The conversation the request acts on. For a live existing conversation this
+        // is
+        // the only check, and nothing has been mutated yet; for one this request
+        // created
+        // it repeats the check above; for one a concurrent request created it checks an
+        // environment this request did not pick.
+        checkUserAuthIfApplicable(userConversation);
         return new UserConversationResult(newlyCreatedConversation, userConversation);
     }
 
@@ -239,17 +278,46 @@ public class RestAgentManagement implements IRestAgentManagement {
         }
     }
 
+    /**
+     * Whether the mapped conversation can no longer be continued: it ended, or it
+     * is gone. A conversation that was permanently deleted or swept by retention
+     * leaves its user-conversation mapping behind (only GDPR erasure removes it),
+     * so "not found" is treated like "ended" and the caller recreates it —
+     * otherwise every later request for that intent and user would fail on the
+     * stale mapping.
+     */
     private boolean isConversationEnded(UserConversation userConversation) {
-        ConversationState conversationState = restAgentEngine.getConversationState(userConversation.getConversationId());
-        return conversationState.equals(ConversationState.ENDED);
+        try {
+            ConversationState conversationState = restAgentEngine.getConversationState(userConversation.getConversationId());
+            return ConversationState.ENDED.equals(conversationState);
+        } catch (NotFoundException | ConversationNotFoundException e) {
+            log.warnf("Stale user conversation mapping: conversation %s not found, recreating",
+                    sanitize(userConversation.getConversationId()));
+            return true;
+        }
     }
 
-    private UserConversation createNewConversation(String intent, String userId, String language) throws CannotCreateConversationException {
-
+    /**
+     * Picks the deployment a new conversation for {@code intent} will be started
+     * with. Read-only: it is called before the caller is authorized, so the check
+     * can use the environment the conversation will actually have.
+     */
+    private AgentDeployment selectAgentDeployment(String intent) {
         AgentTriggerConfiguration agentTriggerConfig = getAgentTrigger(intent);
-        AgentDeployment agentDeployment = getRandom(agentTriggerConfig.getAgentDeployments());
+        return getRandom(agentTriggerConfig.getAgentDeployments());
+    }
+
+    private UserConversation createNewConversation(String intent, String userId, String language, AgentDeployment agentDeployment)
+            throws CannotCreateConversationException {
+
         String agentId = agentDeployment.getAgentId();
-        Map<String, Context> initialContext = agentDeployment.getInitialContext();
+        // A per-request copy: the deployment belongs to the trigger held in the shared
+        // agentTriggers cache, so writing this caller's language into its own map would
+        // hand it to concurrent callers (and write a plain HashMap from several
+        // threads).
+        // The engine still receives a lang entry even when language is null, as before.
+        Map<String, Context> triggerContext = agentDeployment.getInitialContext();
+        Map<String, Context> initialContext = triggerContext != null ? new HashMap<>(triggerContext) : new HashMap<>();
         initialContext.put(KEY_LANG, new Context(Context.ContextType.string, language));
         Response agentResponse = restAgentEngine.startConversationWithContext(agentId, agentDeployment.getEnvironment(), userId, initialContext);
         int responseHttpCode = agentResponse.getStatus();
@@ -309,7 +377,11 @@ public class RestAgentManagement implements IRestAgentManagement {
     }
 
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
-        if (checkForUserAuthentication && !production.equals(userConversation.getEnvironment()) && identity.isAnonymous()) {
+        checkUserAuthIfApplicable(userConversation.getEnvironment());
+    }
+
+    private void checkUserAuthIfApplicable(Deployment.Environment environment) throws UnauthorizedException {
+        if (checkForUserAuthentication && !production.equals(environment) && identity.isAnonymous()) {
             throw new UnauthorizedException();
         }
     }

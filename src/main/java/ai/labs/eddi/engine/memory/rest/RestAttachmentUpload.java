@@ -106,15 +106,15 @@ public class RestAttachmentUpload {
      * {@link ConversationAccessGuard#requireExistingConversationOwner} is the
      * shared gate for this.</li>
      * <li><strong>The conversation actually exists</strong> (fail-closed). Plain
-     * {@link ConversationAccessGuard#requireConversationOwner} deliberately admits
-     * a conversation whose descriptor is missing: on {@code RestAgentEngine} that
-     * is harmless because the operation itself then 404s, and the leniency exists
-     * for legacy conversations that predate ownership stamping. The attachment
-     * store has no such backstop — it happily CREATES a record for any id and
-     * serves it back — so an unknown conversationId turned these endpoints into a
-     * shared, cross-user blob namespace: user A uploads under an invented id, user
-     * B reads it back from the same invented id. A conversation that was never
-     * created is not a legacy conversation; it is a 404.</li>
+     * {@link ConversationAccessGuard#requireConversationOwner} still admits an
+     * <em>admin</em> to a conversation whose descriptor is missing (a non-admin
+     * gets a 404): on {@code RestAgentEngine} that is harmless because the
+     * operation itself then 404s, and it lets operators reach orphaned data. The
+     * attachment store has no such backstop — it happily CREATES a record for any
+     * id and serves it back — so an unknown conversationId turned these endpoints
+     * into a shared, cross-user blob namespace: user A uploads under an invented
+     * id, user B reads it back from the same invented id. A conversation that was
+     * never created is not a legacy conversation; it is a 404.</li>
      * </ol>
      * The guard's {@code requireExistingConversationOwner} already folds the
      * existence check in, so the local descriptor read below is a deliberate second

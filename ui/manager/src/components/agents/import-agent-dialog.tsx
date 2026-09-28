@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-backup";
 import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
-import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { parseResourceUri } from "@/lib/api/backup";
 import { UploadStep, StrategyStep, PreviewStep } from "@/components/agents/import-steps";
@@ -92,6 +92,36 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   function handleClose() {
     reset();
     onClose();
+  }
+
+  // The remote agent list, the source and target picked from it and any preview
+  // built on them all belong to the instance they were fetched from. Editing the
+  // URL or the token used to keep them, so instance A's agents could be
+  // previewed and synced against instance B. Mirrors the Sync page. Resetting
+  // the preview mutation also detaches a preview still in flight, so its reply
+  // can no longer land on the new source.
+  function handleSyncSourceChange(apply: () => void) {
+    apply();
+    if (
+      remoteAgents.length > 0 ||
+      sourceAgent !== null ||
+      syncTargetId !== null ||
+      preview !== null ||
+      !previewSyncMutation.isIdle ||
+      !executeSyncMutation.isIdle
+    ) {
+      setRemoteAgents([]);
+      setSourceAgent(null);
+      setSourceVersion(null);
+      setSyncTargetId(null);
+      setPreview(null);
+      setSelected(new Set());
+      setExpandedDiff(null);
+      setWorkflowOrder([]);
+      setError(null);
+      previewSyncMutation.reset();
+      executeSyncMutation.reset();
+    }
   }
 
   function handleFileAccepted(f: File) {
@@ -341,8 +371,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               remoteAgents={remoteAgents}
               sourceAgent={sourceAgent}
               syncTargetId={syncTargetId}
-              onSyncUrlChange={setSyncUrl}
-              onSyncAuthChange={setSyncAuth}
+              onSyncUrlChange={(v) => handleSyncSourceChange(() => setSyncUrl(v))}
+              onSyncAuthChange={(v) => handleSyncSourceChange(() => setSyncAuth(v))}
               onRemoteAgents={setRemoteAgents}
               onSourceAgent={(id, version) => { setSourceAgent(id); setSourceVersion(version); }}
               onSyncTarget={setSyncTargetId}
@@ -563,7 +593,7 @@ function UpgradeTargetPicker({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const agents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (
@@ -615,7 +645,7 @@ function SyncTargetPicker({
   onSyncTarget: (id: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const localAgents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (

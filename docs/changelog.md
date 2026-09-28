@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 53 | 214 KB |
+| [September 2026](changelog/2026-09.md) | 84 | 400 KB |
 | [August 2026](changelog/2026-08.md) | 212 | 837 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -65,6 +65,1953 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 🐛 fix(manager): a past round and an approved resume, in the overview (2026-09-24)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+Three findings from review, all confirmed against the code:
+
+- **A past round read as still running.** `state`, `currentPhaseIndex` and the stream's
+  convergence map all describe the newest round. When an earlier round was selected while
+  a later one ran, its phases past the live phase index showed as "pending" even with
+  turns in them, and a member who stayed silent showed as "pending" instead of "silent".
+  An earlier round now counts as ended, reusing the existing terminal handling.
+- **A past round showed the live round's convergence.** The digest read convergence by
+  phase index alone. No record of an earlier round's check survives in the transcript or
+  the stored document, so a past round now shows none rather than a wrong one.
+- **Approving a paused discussion dropped its history from the Overview.** Approval clears
+  the selection so the transcript follows the resumed stream, and that also disabled the
+  stored-conversation query the Overview reads. The stream is seeded from none of the
+  stored document, and after a reload the store holds nothing from before the pause, so
+  the paused rounds' spend and every stance vanished until the stream settled.
+  `group-detail.tsx` now snapshots the paused conversation at approval and feeds it to
+  the Overview and the insights panel. It is used only while the stream is still on that
+  conversation's id, so "New Discussion" or a fresh start can't surface a stale snapshot.
+  It is a snapshot rather than a second query, because those figures change only through
+  live frames the digest already overlays.
+
+Four new digest tests and one page test cover these. All but the "live round still
+running" control fail with their fix reverted.
+
+---
+
+## 🐛 fix(manager): a resumed or continued stream starts from the whole discussion (2026-09-24)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+A review follow-up turned up a larger defect underneath it.
+
+- **Live continuations never recorded their round.** `/continue/stream` opens round 2 and
+  later with `round_start`, never with `group_start`, and the stream handled only
+  `group_start`. So a live continuation appended no question and never moved
+  `roundStartIndex`. The Overview bucketed every round's turns into one round's phases,
+  exactly the merge the round boundary was added to prevent, and the transcript showed no
+  question for the new round. The existing tests modelled a continuation with
+  `group_start`, a frame the backend does not send there, so they passed. `round_start`
+  is now handled, and `RoundStartPayload` is typed.
+- **A resumed or continued stream started from whatever the store held.** Neither
+  endpoint replays the discussion so far. After a reload the store is empty, so the first
+  resumed turn made the live transcript the only one, and the Overview lost every earlier
+  phase and round. If the user had just watched a different discussion stream, the store
+  still held that discussion's rows, costs and answer, and they appeared under this one.
+  `approveAndStream` and `continueStream` now take the stored document as a seed, and a
+  stream switching conversations starts from a clean state. The stored transcript wins
+  unless the store is ahead of it, which happens when the page's copy was fetched before
+  the last streamed rows. Both the Manager and the Workforce board pass the seed.
+- **A resume that restarts at phase 0 re-announces its round.** Against a seeded
+  transcript that would duplicate the question and count a round that never ran, so a
+  question matching the transcript's last row is not appended again.
+
+Six new stream tests. Each of the four changes (the `round_start` case, seeding, the
+duplicate guard, and "the store wins when ahead") was reverted in turn, and each revert
+fails at least one of them.
+
+---
+
+## 🐛 fix(test): RestImportServiceRagCronTest passes the source-policy constructor args (2026-09-24)
+
+**Repo:** EDDI (`feat/group-discussion-overview`, a separate commit so it can be cherry-picked to `main` by itself)
+
+### What
+
+`main` stopped compiling its test sources. Two commits landed independently:
+`b8814bf8a` (fix(rag): arm ingestion schedules) added `RestImportServiceRagCronTest`, which
+builds a `RestImportService` with twelve constructor arguments, and `52c85736b` (fix(backup):
+make agent sync work more than once) added three more to the constructor:
+`requireHttpsSource`, `allowPrivateSources` and `allowedSources`. `52c85736b` updated every
+caller it could see. The new test was not one of them, because the two branches never saw each
+other before merging. Each commit was green on its own branch, and together they fail
+`testCompile`. That fails every unit test in the module, not just this one.
+
+The test now passes `true, false, Optional.empty()`, the same production defaults its sibling
+tests use. It exercises cron arming only, so the source policy has no effect on it.
+
+---
+
+## ✨ feat(groups): member stances and live cost/stance SSE for the discussion overview (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A group discussion is readable as a transcript only while it is short. Seven members across
+five phases is ~40 messages of prose, and the questions an observer actually has — where are
+we, who thinks what, who disagreed, what has this cost — are answerable only by reading all
+of it. The Manager and the Workforce board both render that transcript and nothing else.
+
+The planned answer is a second *view* of one discussion (not a cross-conversation metrics
+screen): a dashboard of self-hiding bands — phase rail, roster, members × phases matrix —
+that any discussion style can drive, because every style reduces to the same
+phases × members × entries shape underneath. This entry is the backend half.
+
+Two things that view needs did not exist.
+
+**Cost was invisible while it mattered.** `memberCosts`/`totalCost` live on the persisted
+`GroupConversation`, and no SSE event carried them — so a *running* discussion could show no
+spend at all, and the figure appeared only once the document was reloaded. That is exactly
+backwards: spend is worth watching while it accrues.
+
+**There was no "where this member stands".** Reconstructing a member's position meant
+re-reading every turn they took.
+
+### What changed
+
+**`StanceSummaryEngine`** (new) — a one-line stance per member, recomputed at phase
+boundaries. Two producers, and which one ran is carried to the UI rather than hidden:
+
+- **Lead-sentence extraction** — the default. No config, no cost, and it is the member's
+  *own words*. `llmGenerated=false`.
+- **LLM summarization** — opt-in via `stanceSummary.llmProvider`/`llmModel`. Reads
+  everything the member has said. `llmGenerated=true`.
+
+The distinction is surfaced because an extracted line is a quote and a generated one is a
+paraphrase; presenting the second as the first would be a misattribution.
+
+A summarizer failure (throw, or a blank response) **degrades to extraction, not to nothing** —
+the roster is the band's headline content, and an empty roster is worse than a rougher one.
+Failures are WARN and never propagate: a display projection must not be able to fail a
+discussion.
+
+Modelled deliberately on the I9 window summarizer — same provider/model pair, same optional
+price fields feeding the same I1 ledger via `GroupCostLedger.recordSystemCost`, same
+warn-don't-reject treatment at save time. A second piece of machinery that spends on the
+group's behalf should not be a second thing to learn.
+
+**`StanceSummaryConfig`** has **no `enabled` flag**, unlike `ContextWindowConfig`. Stances
+always exist, so a boolean could only ever have meant "may this spend money?" — which is
+already what naming a provider and model means. A flag that could be `true` with no model
+would be two ways to say the same thing and one way to contradict it.
+
+**Recomputation is skipped** for a member whose stored stance already covers the whole
+transcript. That skip is the difference between one summarizer call per member per
+*discussion* and one per member per *phase*.
+
+**Two new SSE events:**
+
+- `cost_updated` — fires after every attribution, including system spend. Carries the key's
+  **cumulative** cost, not a delta: the ledger records by replacement so a duplicate is
+  idempotent, and a delta would throw that away — a reconnecting client replaying one frame
+  would double-count. A PARALLEL phase's turns can interleave, so `totalCost` may arrive out
+  of order; a consumer keyed on `attributionKey` that sums its own map is order-independent,
+  which is what the UI does.
+- `stance_updated` — fires only when a stance's *text* actually changed.
+
+`MemberTurnExecutor.announceCost` is called strictly **after** the ledger write returns.
+Emitting from inside `GroupCostLedger` would hold `memberCosts`' monitor across an SSE
+callback, letting one backpressured client stall every concurrent turn's attribution — the
+exact failure `announceArtifactChanges` already documents and avoids.
+
+**`memberStances` on `GroupConversation` does not bump `CURRENT_SCHEMA_VERSION`.** The bump
+rule is scoped to fields "resume-time logic depends on", and this is a display projection:
+fully reproducible from the transcript, read by nothing in the discussion, refilled at the
+next boundary if empty. An older pod re-saving the document loses a cache, not state.
+
+### Design decisions
+
+- **Extraction is the default, not the fallback.** Opting in is opting into *spend*, not
+  into the feature — so a deployment that never configures a summarizer still gets a
+  populated roster.
+- **`executeGroupMemberTurn` gained a listener parameter** rather than a parallel
+  announce-queue. Its only production caller already had one in scope; the queue machinery
+  `announceArtifactChanges` needs exists because tools hold no listener reference, which is
+  not the case here.
+- **Save-time warning only for a *half*-configured summarizer** (one of provider/model, or
+  prices with neither). Naming neither is the documented default and is not warned about.
+
+### Tests
+
+`StanceSummaryEngineTest` — 39 cases across extraction, entry-type selection, summarization,
+degradation, idempotence, `leadSentence`, `clean`, config normalisation and `announceCost`.
+Two mutation checks were run and both were caught by exactly the intended test: forcing the
+coverage skip off broke `unchangedMemberNotResummarized`, and adding `ABSTAINED` to the
+stance-bearing set broke `abstentionDoesNotReplaceRealStance` (a member's real position would
+otherwise be overwritten by "I have nothing to add").
+
+**Files:**
+[`StanceSummaryEngine.java`](../src/main/java/ai/labs/eddi/engine/internal/groups/StanceSummaryEngine.java),
+[`GroupConversationEventSink.java`](../src/main/java/ai/labs/eddi/engine/lifecycle/GroupConversationEventSink.java),
+[`GroupConversation.java`](../src/main/java/ai/labs/eddi/configs/groups/model/GroupConversation.java),
+[`AgentGroupConfiguration.java`](../src/main/java/ai/labs/eddi/configs/groups/model/AgentGroupConfiguration.java),
+[`MemberTurnExecutor.java`](../src/main/java/ai/labs/eddi/engine/internal/groups/MemberTurnExecutor.java),
+[`GroupConversationService.java`](../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java),
+[`AgentGroupStore.java`](../src/main/java/ai/labs/eddi/configs/groups/mongo/AgentGroupStore.java),
+[`StanceSummaryEngineTest.java`](../src/test/java/ai/labs/eddi/engine/internal/groups/StanceSummaryEngineTest.java)
+
+---
+
+## ✨ feat(manager): a dashboard view of a running group discussion (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A group discussion is readable as a transcript only while it is short. Seven members across
+five phases is ~40 messages of prose, and the questions an observer actually has — where are
+we, who thinks what, who disagreed, what has this cost — are answerable only by reading all
+of it. All three surfaces rendered that transcript and nothing else.
+
+### What changed
+
+A second **view** of one discussion (not a metrics screen across discussions), offered by a
+`Transcript / Overview / Both` switch. The transcript stays the default and is never
+replaced — the node is passed through untouched, so approvals, human turns and the composer
+keep working exactly as before.
+
+**Every style, one renderer.** A group discussion reduces to the same shape whatever its
+style: ordered **phases × members × entries**. So the dashboard is one set of bands driven by
+one adapter, and per-style difference is *band ordering*, not a code path
+(`style-recipe.ts`). A style this build has never heard of falls through to the default order
+and renders sensibly rather than blankly.
+
+The bands, each hiding itself when it has nothing — the pattern `DiscussionInsights` already
+set, so a caller can mount the panel unconditionally:
+
+- **Headline** — question, state, round, elapsed, phases done, members, turns, cost
+- **Phase rail** — the spine: each phase's status, a dot per member who has spoken, the
+  convergence score where one was judged, and an approval-gate marker
+- **Roster** — "who thinks what": each member's one-line stance, turn count, spend and
+  whether they are speaking, dissenting or broken
+- **Matrix** — members × phases, the band that does the actual compression
+- **Outcome / extras** — slots filled by the components that already exist (decision card,
+  task board, negotiation ledger, artifacts)
+
+**`useDiscussionDigest` is the load-bearing piece.** Three independent transcript renderers
+exist here, fed by two different shapes (live `GroupStreamState`, persisted
+`GroupConversation`), and a group feature wired into only some of them has already drifted
+once — a DISSENT rendered as an ordinary opinion on two of the three. One adapter means the
+dashboard cannot acquire that class of drift: exactly one place knows how a live discussion
+differs from a reloaded one.
+
+### Design decisions
+
+- **`absent` and `pending` are different cells and must not collapse.** `absent` means the
+  phase's selector never included that member (a MODERATOR-only synthesis, a `ROLE:PRO`
+  rebuttal); `pending` means they are expected and have not spoken. Drawing both blank tells
+  a reader that a debate's PRO side went quiet during a CON phase. A first cut rendered every
+  not-yet-reached phase as `absent` — i.e. "excluded" rather than "not yet" — which the
+  digest tests caught.
+- **The participant selector is only resolved when it says `ALL`.** `MODERATOR` and `ROLE:…`
+  need the roster, which not every surface has, so they resolve to *unknown* and the matrix
+  falls back to `pending`. Guessing the other way silently hides a member who was expected.
+- **Total cost is summed from the per-key map, never read off a frame.** PARALLEL turns
+  interleave, so frame order is not value order; and a member's spend can span several ledger
+  keys (a nested GROUP member gets one per child discussion), matched on a `:` boundary so
+  `agent-a` does not absorb `agent-abc`.
+- **No cost is `null`, not `$0.00`.** An unpriced LLM config reports nothing at all, and
+  "$0.00" reads as "this was free" rather than "this was not measured", so the stat hides.
+- **Whether a stance is a quote or a paraphrase is shown, not flattened** — different icons
+  and different labels. Presenting an LLM paraphrase the way a quotation is presented would
+  misattribute it.
+- **DELPHI's roster is anonymised.** Its method is that members judge the argument, not its
+  author; naming everyone next to their position would undo that for the one human watching.
+- **`split` is a layout, not a capability.** It is a pure container query, so narrowing the
+  pane restacks the two panels instead of discarding the half the user chose — and the stored
+  preference never silently changes to something they did not pick. Which element scrolls
+  changes with width, because a stacked transcript whose parent is auto-height collapses to
+  nothing (`flex-1 min-h-0` resolves to zero).
+- **Sized by container query throughout**, not viewport: this renders in a column the group
+  config panel can squeeze to half the window, which `task-board.tsx` already records getting
+  wrong the other way.
+
+### Tests
+
+`use-discussion-digest.test.ts` (30) over phase derivation, the matrix's five cell kinds,
+cost attribution and source precedence; `discussion-overview.test.tsx` (26) over the bands,
+the style recipe, the stored view preference and the panel's switching. Full suite **6682
+passing (419 files)**, lint and `tsc -b` clean, i18n drift + plural-completeness +
+translation-debt gates green across all 11 locales.
+
+Three mutation checks, each caught by exactly the intended test: dropping the `:` boundary
+from cost-key matching, forcing `rosterIsAnonymous` false, and the `absent`/`pending`
+collapse (which was a real bug, not a seeded one).
+
+**Files:**
+[`use-discussion-digest.ts`](../ui/manager/src/hooks/use-discussion-digest.ts),
+[`discussion-overview.tsx`](../ui/manager/src/components/groups/overview/discussion-overview.tsx),
+[`discussion-panel.tsx`](../ui/manager/src/components/groups/overview/discussion-panel.tsx),
+[`phase-rail.tsx`](../ui/manager/src/components/groups/overview/phase-rail.tsx),
+[`member-roster.tsx`](../ui/manager/src/components/groups/overview/member-roster.tsx),
+[`participation-matrix.tsx`](../ui/manager/src/components/groups/overview/participation-matrix.tsx),
+[`style-recipe.ts`](../ui/manager/src/components/groups/overview/style-recipe.ts),
+[`group-detail.tsx`](../ui/manager/src/pages/group-detail.tsx),
+[`workforce-board.tsx`](../ui/manager/src/pages/workforce/workforce-board.tsx),
+[`conversation-viewer.tsx`](../ui/manager/src/components/workforce/conversation-viewer.tsx)
+
+---
+
+## 🐛 fix(groups): review remediation for the discussion overview (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A high-effort adversarial review of the two commits above found eleven defects worth fixing,
+five of them producing **wrong numbers** and four making the dashboard **assert things that
+are not true**. Each is recorded here because most were invisible to the tests that existed —
+several were guarded by assertions that would have passed with the bug in.
+
+### Wrong numbers
+
+- **The documented "a silent member costs nothing" skip was never implemented.** Coverage was
+  keyed to the *transcript length*, which grows whenever anyone speaks, so the skip only fired
+  for a phase nobody spoke in. A six-member discussion re-summarised all six at every
+  boundary — the exact "one call per member per phase" the Javadoc, the docs and the changelog
+  all claimed to avoid. `MemberStance.upToTranscriptIndex` is now `coveredContributions`,
+  counting that member's own stance-bearing entries.
+- **The stance summariser escaped the I1 cost ceiling.** Every other optional spender (the I9
+  window summariser, the convergence judge, the dissent round) checks
+  `wouldExceedCeiling`; this one did not, so a boundary ran one priced call per member *after*
+  the budget was gone and before the next phase's pre-wave check could fire. Past the ceiling
+  it now downgrades to extraction — `wouldExceedCeiling`, not `enforceCeiling`, because
+  declining optional work is not the same event as a phase running out of budget.
+- **A re-summary landing on the same wording billed the ledger and emitted no
+  `cost_updated`.** Results were reported on text change alone; they are now reported when the
+  text changed *or* the call cost something.
+- **The I9 window summariser's spend was never announced**, though four places (two Javadocs,
+  the docs and the changelog) said system spend is emitted "after every attribution". Any
+  windowed discussion's live total sat below the ledger's for its whole run.
+  `updateWindowSummary` now returns the ledger key it billed, for the caller to announce.
+- **The live cost map replaced the persisted one instead of overlaying it.** A stream carries
+  only the keys it announced *this session*, so pressing Continue on a $4.10 discussion made
+  the headline read $0.02 until the document was refetched. Now merged per key — correct
+  precisely because each frame carries that key's *cumulative* cost.
+
+### The dashboard stating something false
+
+- **Continuation rounds were conflated.** The backend restarts `phaseIndex` at 0 each round,
+  so bucketing the whole transcript by phase index put round 1's turns in round 2's cells, let
+  a round-1 ERROR mark a round-2 cell "failed", and showed members as having already spoken in
+  phases the current round had not reached. The digest now slices at
+  `roundStartTranscriptIndex`.
+- **`leadSentence` returned `"1."`** for the numbered list LLM replies open with constantly —
+  rendered as that member's position, attributed as *their own words*. A candidate sentence
+  containing no letter is now rejected. Conversely the abbreviation rule swallowed
+  `"Weigh option B. Option A is worse."`, so it now also requires a lower-case continuation.
+- **Extraction quoted JSON.** `VOTE`, `BID`, `RETRO`, `PLAN`, `TASK_RESULT` and `VERIFICATION`
+  carry a JSON contract; the lead "sentence" of a ballot is `{"choice":"pgvector",` — and being
+  the newest entry it *replaced* the member's real prose position after every vote or retro.
+  Excluded from extraction on both sides; the summariser still reads them.
+- **"Has not spoken yet" was shown beside a turn count.** A moderator's only contribution is a
+  SYNTHESIS, which is not a position of its own, so it had no stance while plainly having
+  spoken. Now two messages.
+- **A dropped turn was labelled "not in this phase".** `absent` means the selector excluded
+  the member; a finished `ALL` phase with nothing from them means their turn was dropped
+  (`maxTurns`, a ceiling, a `SYNTHESIZE_NOW` jump). New `silent` cell kind, shown only where
+  the selector is *known* to have included them.
+- **The headline's "Turns" counted rows the rail excluded** (QUESTION, CONVERGENCE,
+  FACILITATION, system SKIPPED), so the two disagreed. Same filter now.
+
+### Also
+
+- **A vacuous negative assertion.** `verify(never()).summarizeWithUsage(anyString(), …)` could
+  not fail: a half-configured summariser passes a **null** model, and `anyString()` does not
+  match null. Replaced with `verifyNoInteractions`.
+- **Dead API surface removed** — `DigestPhase.expectedSpeakers` (always null),
+  `streamTotalCost` (no consumer), and the `onSelectPhase`/`onSelectMember`/`onSelectCell`
+  props no surface passed. The phase interaction that was worth keeping is now owned by
+  `DiscussionPanel` itself (picking a phase switches to the transcript, where turns are)
+  rather than being an optional callback nobody supplied — a click target that silently does
+  nothing is worse than none.
+- **An orphaned Javadoc**: the new save-time warning had been inserted between
+  `warnOnSummarizerlessWindow`'s doc comment and its body.
+- **Literal NUL bytes** were in `use-discussion-digest.ts` (a matrix key separator written as
+  a raw character rather than an escape), which made `file` report the source as binary.
+- The question in the headline is now **clamped to three lines**. `originalQuestion` is not
+  always a question — the grant-board fixture pastes an entire application — and rendering it
+  whole pushed the rail, roster and matrix below the fold, which is the wall of text this view
+  exists to replace. Found by running the UI, not by a test.
+
+### Tests
+
+Backend 48 (up from 39), frontend 42 in the digest suite (up from 30). Four further mutation
+checks, each caught by exactly the intended test: dropping the round slice, swapping the cost
+overlay back, and (backend) the per-member coverage skip and the ceiling gate.
+
+**Files:** as the two entries above, plus
+[`GroupContextBuilder.java`](../src/main/java/ai/labs/eddi/engine/internal/groups/GroupContextBuilder.java).
+
+---
+
+## 🐛 fix(groups): second review round — continuation rounds, missing bands, per-member ceiling (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A second reviewer (Copilot) found eleven further defects on the branch, clustered in three
+places the first round had touched but not finished: **continuation rounds**, **content the
+Overview simply did not render**, and the **cost ceiling**. All eleven were confirmed against
+the code before being fixed.
+
+### The ceiling and the cost/stance events
+
+- **The budget was decided once per boundary, not per member.** If the first member's call
+  pushed `totalCost` past the ceiling, every remaining member still took the LLM path — so a
+  boundary could add N paid calls after the budget was exhausted. Re-checked before each
+  member now.
+- **`stance_updated` fired when nothing had changed.** Fixing the earlier "cost with no frame"
+  bug had put cost-only results into the same list the stance event iterates, so every paid
+  re-summary announced a stance change that had not happened. `StanceResult` now carries
+  `textChanged`; the stance event keys off it and the cost event off `cost()`, because the two
+  are genuinely independent.
+- **`clean(text, 1)` returned two characters**, violating its own documented hard cap — one
+  retained character plus the ellipsis. A cap of 1 now yields the ellipsis alone.
+
+### Continuation rounds, again
+
+The first round's fix sliced the *persisted* transcript at `roundStartTranscriptIndex` but
+forced the offset to zero while live — on the assumption that a continue-stream starts at the
+round boundary. **It does not.** `continueStream` deliberately preserves `s.transcript` and the
+`group_start` handler *appends* the new question, so a live continuation carried every round in
+one array and re-created exactly the cross-round contamination the slice exists to prevent.
+`GroupStreamState` now tracks its own `roundStartIndex`, set at `group_start`.
+
+**The headline also showed the wrong question.** A continuation records its follow-up as a
+`QUESTION` entry rather than rewriting `originalQuestion` (which stays the title), so round 2+
+displayed the *first* round's prompt above a summary of answers to a different one. The digest
+now resolves the newest `QUESTION` in the current round, falling back to `originalQuestion`.
+
+### Content the Overview did not render
+
+- **No synthesised answer.** The outcome band rendered only the caller's node, and all three
+  callers pass a decision card. Most ROUND_TABLE and PEER_REVIEW runs produce no structured
+  decision — so an ordinary completed discussion showed **no conclusion at all** in Overview,
+  reachable only by switching back to the transcript. Now rendered as its own card, *alongside*
+  a decision rather than instead of it: the decision carries the tally and minority report, the
+  synthesis carries the reasoning.
+- **No task board, on any of the three surfaces.** It lives inside the transcript renderers,
+  which Overview mode unmounts — so TASK_FORCE, the one style whose recipe puts `extras`
+  first, lost its principal working surface. Added to all three `extras` nodes, reusing each
+  surface's already-computed live/persisted/placeholder state rather than deciding again.
+- **Members silent in the current round disappeared.** Roster-only members were collected from
+  the optional `rosterDisplayNames` prop alone, but the Workforce history viewer passes none —
+  so a member with no turn this round vanished from the roster *and* the matrix instead of
+  showing `silent`/`absent` cells. Now taken from the merged display-name map, which includes
+  the persisted `memberDisplayNames`.
+- **`group-detail` nulled the conversation while streaming**, copying what the transcript needs
+  — which defeated the persisted/live cost overlay the previous round had just introduced.
+  `continueStream` seeds neither its cost nor its stance map from the stored document, so a
+  continuation dropped the earlier round's spend and positions. The panel now always receives
+  the persisted document; only the transcript keeps the nulling.
+
+### Verified by running it
+
+The Overview was re-opened in the Manager's mock mode after the fixes. The Conclusion band is
+present where there was previously nothing, the matrix rows align, the moderator reads "No
+position of their own" rather than the false "has not spoken yet", and the headline's turn
+count now agrees with the rail (7, not 8 — the `QUESTION` row is excluded on both sides).
+
+### Tests
+
+Backend 748 across the group suites and repo guards; frontend 76 in the two overview suites,
+with new cases for the live round boundary, the current-round question, the silent-member
+roster entry, and the synthesis band's three states.
+
+**Files:** as above, plus
+[`use-group-discussion-stream.ts`](../ui/manager/src/hooks/use-group-discussion-stream.ts).
+
+---
+
+## 🐛 fix(manager): the overview was losing the mechanics of its two most-used styles (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+Auditing the dashboard against every discussion style turned up information the digest
+*collected and then never rendered* — the same dead-surface class two reviewers had already
+flagged elsewhere, but here it cost the reader real signal rather than just carrying an unused
+field.
+
+- **A repeating phase looked identical to a single-pass one.** `ROUND_TABLE` puts
+  `repeats = rounds - 1` on its "Discussion" phase and `DELPHI` is built on repeats
+  end-to-end, so for the two most-used styles the rail was quietly flattening the mechanic
+  that defines them. `DigestPhase.repeats` was populated and read by nothing; it now renders
+  as a `×N` badge.
+- **Convergence showed the score but not the saving.** `convergence.repeatsSkipped` is the
+  concrete outcome a DELPHI reader is looking for — "it stopped after 2 of 4" — and only the
+  bare agreement percentage was shown. A converged phase now says how many repeats it skipped.
+- **A continuation's round scope was ambiguous.** The bands are correctly scoped to the
+  current round (phase indices restart each round, so mixing them would be wrong), but the
+  headline said only "Round 2". A reader could not tell whether a low turn count meant a quiet
+  round or a view that had lost the earlier ones. It now reads "Round 2 only", with the
+  transcript named as where the rest is.
+
+**Files:**
+[`phase-rail.tsx`](../ui/manager/src/components/groups/overview/phase-rail.tsx),
+[`discussion-overview.tsx`](../ui/manager/src/components/groups/overview/discussion-overview.tsx)
+
+---
+
+## ✨ feat(manager): directional turns, bids, a round switcher and a bounded roster (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+### Why
+
+A sweep of the dashboard against every style, every length and every purpose found four
+things it did not cover. Three were signal the discussion produces and the view discarded.
+
+**Who addressed whom.** PEER_REVIEW and DEVIL_ADVOCATE are *directional* — a critique lands
+on someone, a challenge is aimed at a position — and `TranscriptEntry.targetAgentId` carries
+that on every such turn. The dashboard collected it and threw it away, so it could say
+"Security spoke during Critique" but never "Security critiqued the Architect", which is the
+content of those styles rather than a detail of them. New `interactions` band, grouped by
+speaker and led by the heaviest exchange, plus a "nobody addressed" line — in a peer review
+that names the contribution which drew no scrutiny, which is exactly what a reviewer of the
+review is looking for.
+
+Rendered as a list rather than a graph on purpose: a force-directed diagram of five nodes is
+decoration and at twenty is unreadable, while a list answers the two real questions at any
+size and needs no layout engine. **DELPHI omits this band** — naming who answered whom would
+undo the anonymity the method rests on, which is the whole reason its later rounds run
+`ANONYMOUS`.
+
+**Who bid for what.** TASK_FORCE's contract-net phase (I18) produces `BID` entries that
+nothing rendered. The task board shows who *holds* a task; this shows who *wanted* it, and the
+difference matters: a task three members bid on and a task nobody bid on look identical in an
+assignment list, and the second is the one worth acting on. Grouped by task, because
+contention is per task. Reuses `readEntryBody` rather than adding a second parser for the same
+JSON contract.
+
+**Earlier rounds were unreachable.** The bands are necessarily scoped to one round (phase
+indices restart each round), which left a reader comparing round 1 to round 2 no option but to
+leave for the transcript. There is now a round selector.
+
+Recovering the earlier boundaries needed care, because only the *current* round's start is
+persisted. They are read from the `QUESTION` entries the backend writes at every round start —
+but **validated against the stored boundary** rather than trusted: the recovered list's last
+entry must equal the round start the backend recorded, and if it does not, the recovery is
+discarded in favour of the stored boundary alone. That narrows the switcher instead of slicing
+the view wrongly, and it is not hypothetical — the validation was added because a test with a
+stray `QUESTION` row split a single-round discussion in two.
+
+**The roster had no bound.** Twenty members meant twenty stance cards, which is the wall of
+text this view exists to replace. Collapsed past eight.
+
+### Screen sizes, languages, dark mode
+
+Verified in the running Manager rather than asserted: **390 / 768 / 1600px × German (longest
+strings) and Arabic (RTL) × light and dark**. No horizontal page scroll and no band overflow
+in any combination; the container queries step the rail 2 → 3 → 5 columns and the roster
+1 → 3 as the *pane* widens, not the window. The interaction band's arrow carries
+`rtl:-scale-x-100`, the idiom three existing components already use — an arrow that keeps
+pointing right in Arabic reverses the sentence.
+
+### Tests
+
+Frontend 92 across the two overview suites, including the interaction pairs, bid flattening,
+round selection and clamping, and the boundary-validation fallback. The style-recipe invariant
+was rewritten: "every band in every recipe" is no longer true now that DELPHI deliberately
+omits one, so it asserts no repeats plus the core four, with the DELPHI omission as its own
+named test.
+
+**Files:**
+[`interaction-map.tsx`](../ui/manager/src/components/groups/overview/interaction-map.tsx),
+[`bid-board.tsx`](../ui/manager/src/components/groups/overview/bid-board.tsx),
+[`use-discussion-digest.ts`](../ui/manager/src/hooks/use-discussion-digest.ts),
+[`style-recipe.ts`](../ui/manager/src/components/groups/overview/style-recipe.ts),
+[`member-roster.tsx`](../ui/manager/src/components/groups/overview/member-roster.tsx)
+
+---
+
+## ♿ fix(manager): the overview's roster toggle and interaction rows, for screen readers (2026-09-22)
+
+**Repo:** EDDI (`feat/group-discussion-overview`)
+
+Two accessibility gaps flagged in review, both confirmed:
+
+- **The roster's show-all toggle didn't expose its state.** A screen reader user couldn't
+  tell whether the list was expanded. The toggle now carries `aria-expanded` and an
+  `aria-controls` pointing at the list, matching the task board's toggle. The id comes
+  from `useId` so it can't collide.
+- **An interaction row lost its direction when read aloud.** The arrow between speaker and
+  target is decorative (`aria-hidden`) and nothing replaced it, so the row was announced
+  as two names side by side, dropping the one fact the band exists to state. A visually
+  hidden connector now reads "Architect addressed Security". It is phrased per language
+  rather than translated word for word: most locales use a verb, but Japanese and Korean
+  put the verb last, so a bare verb there would announce the relationship backwards. They
+  use a possessive label instead ("Architect's addressees: Security").
+
+The connector test checks the text a screen reader actually announces, skipping
+`aria-hidden` subtrees. A plain `textContent` check would include the hidden arrow and
+pass whether or not the connector existed. Both tests fail with their fix reverted.
+
+---
+
+## 🔁 fix(backup): agent sync works more than once, can create, and says what it did (2026-09-22)
+
+**Repo:** EDDI (`fix/agent-sync-promotion`)
+
+### What changed and why
+
+Live Agent Sync was tested end to end against two real instances for the first
+time, and it did not survive the ordinary use it exists for — promoting an agent
+from staging to production and then keeping it current. Four defects, each in the
+seam between `UpgradeExecutor` and something it does not own, plus two decisions
+that made the feature unusable on the network shape most self-hosted deployments
+have.
+
+**Version resolution always answered 1.** Both
+[`StructuralMatcher`](../src/main/java/ai/labs/eddi/backup/impl/StructuralMatcher.java)
+and [`UpgradeExecutor`](../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java)
+asked for the target's current version with `readDescriptor(id, null)`. The
+descriptor store is historized and its read does `checkNotNull(version)`, so that
+call *always* threw; the exception was swallowed and a fallback of 1 stood in. So
+every sync diffed against the target's version 1 — showing the operator pre-sync
+content as "target" — and then wrote against version 1, which the store refuses
+once the first sync has moved the resource to version 2. A sync therefore worked
+exactly once per target agent and then answered `207` with "the store did not
+accept the update", writing nothing, for ever. Both now use
+`readCurrentDescriptor`.
+
+**Nothing moved the descriptors.** An upgrade calls the configuration stores
+in-process, so no JAX-RS filter runs and nothing did what `DocumentDescriptorFilter`
+does for a `PUT` through the API. The descriptor is what `WorkflowStoreService`
+reads to deploy an agent — so a synced version was written correctly and then
+refused to deploy at all, with "Resource not found" for a workflow that was
+demonstrably in the database — and it is what the Manager lists, so the UI kept
+showing the pre-sync version. `UpgradeExecutor` now moves the descriptor after
+each write, and reports a resource whose descriptor could not be moved as a
+failure rather than as a success.
+
+**A successful sync answered 500.** The endpoint answers `201` with the agent's
+new-version URI, which `DocumentDescriptorFilter` read as a creation and tried to
+give a second descriptor — duplicate key, after every write had already landed.
+Backup endpoints keep their own descriptors and are now skipped by that filter.
+
+**A first promotion was impossible.** With no `targetAgentId` — which the API
+documents as "create new" and which the Manager sends for any agent it cannot
+match by name — the request went into `UpgradeExecutor`, whose every path assumes
+a target. It read the agent `null`, answered `500`, and left the workflow it had
+already created behind: one orphan per attempt, pointing at resource ids that
+only exist on the other instance. A sync with no target now fetches the source's
+own export archive and imports it with `strategy=create`, so a first promotion
+lands exactly what the same archive would land by hand — schedules, connections,
+capability registration and rollback included — rather than through a second,
+thinner create path that would drift from it.
+
+**Snippets are scoped to the agent.** `readSnippets` returned the remote
+instance's entire snippet store, so promoting one agent proposed copying
+staging's whole snippet library — unreleased drafts and other teams' snippets —
+onto production. It now scans the agent's own documents for `{snippets.<name>}`,
+which is what the export has always done; the one definition now lives in
+`SnippetReferences` and both sides use it.
+
+**The source address policy is configurable.** HTTPS-only and the
+private-address refusal were compiled in, so two instances on one internal
+network — staging and production as neighbouring services, the ordinary
+self-hosted shape — could not sync at all, whatever the operator wanted, and no
+setting existed to say otherwise. `eddi.backup.sync.require-https`,
+`eddi.backup.sync.allow-private-targets` and an exact-origin
+`eddi.backup.sync.allowed-sources` now express it, all defaulting to today's
+strict behaviour, each independent of the others. A refused URL is a `400`
+naming the setting that would allow it, not an unexplained `500`.
+
+The Manager stops reporting a failed sync as a successful one. It read only "the
+mutation resolved", and `executeSyncBatch` deliberately resolves on `500` too —
+that status means every mapping failed and the body carries the reasons — so a
+batch in which nothing was written rendered a green "Sync complete". It now reads
+the outcome from the results, lists the per-resource reasons, and surfaces the
+server's own message instead of `res.statusText`.
+
+### How it is guarded now
+
+[`AgentSyncIT`](../src/test/java/ai/labs/eddi/integration/AgentSyncIT.java)
+runs the promotion an operator performs — create, update, update *again*, a
+no-op, then deploy what was promoted — over real HTTP against the real stores.
+The existing 768 backup unit tests could not have caught any of this: every one
+of them mocks the stores, and every mocked target sat at version 1, the one
+version the broken resolution answered correctly.
+
+**Files:**
+[`UpgradeExecutor.java`](../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java),
+[`StructuralMatcher.java`](../src/main/java/ai/labs/eddi/backup/impl/StructuralMatcher.java),
+[`RestImportService.java`](../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
+[`RemoteApiResourceSource.java`](../src/main/java/ai/labs/eddi/backup/impl/RemoteApiResourceSource.java),
+[`SourceUrlValidator.java`](../src/main/java/ai/labs/eddi/backup/impl/SourceUrlValidator.java),
+[`SnippetReferences.java`](../src/main/java/ai/labs/eddi/backup/impl/SnippetReferences.java),
+[`DocumentDescriptorFilter.java`](../src/main/java/ai/labs/eddi/engine/runtime/rest/interceptors/DocumentDescriptorFilter.java),
+[`sync-page.tsx`](../ui/manager/src/pages/sync-page.tsx),
+[`backup.ts`](../ui/manager/src/lib/api/backup.ts),
+[`agent-sync-guide.md`](agent-sync-guide.md)
+
+---
+
+## 🐛 fix(llm): `includeFirstAgentMessage` dropped the user's own first turn (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+The flag exists to strip EDDI's opening greeting so the history starts on a user turn —
+`docs/langchain.md` advised setting it `false` for Anthropic, which used to reject an
+assistant-first conversation. It was implemented as *remove the first message*, full stop.
+
+For the agent shape it was written for — one with an `ai.labs.output` step producing a
+greeting at `CONVERSATION_START` — those are the same thing, and it has worked for years.
+An agent built with **no** output step (a group member that only answers) opens on the
+**user's** turn. That turn was deleted, the history went out empty, and Anthropic answered:
+
+```
+invalid_request_error: messages: Field required
+```
+
+A flag whose only purpose is to satisfy Anthropic's first-message rule was, in that
+configuration, what made Anthropic reject the request. Two things hid it: Ollama accepts an
+empty message list, so a local smoke test passes on a config that cannot work against the
+real provider; and the documented advice reads as universal while only covering the
+standard agent shape.
+
+The premise has also expired. The Anthropic Messages API reference no longer documents a
+"first message must be the user's" rule, and an assistant-first history is accepted.
+
+### What changed
+
+- [`ConversationLogGenerator.java`](../src/main/java/ai/labs/eddi/engine/memory/ConversationLogGenerator.java)
+  drops the first message only when its role is `assistant`. Behaviour is unchanged for
+  every agent that has a greeting — for those the first message genuinely is the agent's —
+  so the fix is strictly additive.
+- [`ConversationHistoryBuilder.java`](../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationHistoryBuilder.java)
+  carried a second copy of the same unconditional `removeFirst()` in
+  `generateMessagesFromOutputs`. Both callers pass `skipSteps > 0` today, so that branch is
+  currently unreachable and has no behavioural test of its own; it is written correctly
+  rather than left as a trap for the next caller, and the comment says so.
+- [`docs/langchain.md`](langchain.md): the blanket "set it `false` for Anthropic" is gone
+  from the parameter table, the Anthropic example and the troubleshooting section, replaced
+  by an entry for the `messages: Field required` failure itself.
+
+**Tests:** four cases in `ConversationLogGeneratorTest` and four in
+`ConversationHistoryBuilderTest` (including the token-aware path). The pre-existing
+`excludeFirst` case asserted the bug — it built a **user**-first history and asserted the
+message was removed — and was rewritten. Mutation-checked: restoring the unconditional
+`removeFirst()` fails five of them.
+
+### And now deprecated
+
+The flag's only documented reason to exist has expired, so it is marked **deprecated**:
+`LlmTask` logs a WARN naming the task the first time each configured task uses it, the
+parameter table says not to use it in new configs, and `docs/langchain.md` gains a
+*Deprecated parameters* section explaining what to do instead.
+
+**Deprecated rather than removed**, deliberately. Agent behaviour lives in JSON stored in
+MongoDB and imported from ZIPs — per `AGENTS.md`, the one backward-compatibility boundary
+this codebase has. Silently ignoring a parameter an author set on purpose would be *worse*
+than honouring it: an agent that genuinely wants its greeting withheld would start sending
+it, with no diagnostic. The flag keeps working exactly as before.
+
+Once per task, not once per turn: an LLM task runs on every message of every conversation,
+and a per-turn WARN is a flood operators learn to filter out — which is the same as not
+warning at all.
+
+---
+
+## 🔒 fix(security): a missing `role-claim-path` 403'd every admin, silently (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+`quarkus.oidc.roles.role-claim-path=realm_access/roles` is one line in
+`application.properties`, and the released 6.4.0 image shipped without it. quarkus-oidc then
+falls back to its default `groups` claim — which is also `eddi.workspaces.groups-claim`'s
+default — so any account belonging to a Keycloak group had its EDDI roles **replaced** by its
+group paths, and every `@RolesAllowed` endpoint answered **403 with an empty body and not one
+log line**. The shipped realm puts the seeded `eddi` administrator in `/engineering`;
+accounts in no group fell through to `realm_access` and worked. It presents as "this one
+account is broken", not as a configuration gap, which is what made it cost hours to find.
+
+### What changed
+
+- [`AuthStartupGuard.java`](../src/main/java/ai/labs/eddi/engine/security/AuthStartupGuard.java)
+  gains `rolesClaimDiagnostic()`, logged at ERROR on startup whenever OIDC is enabled and the
+  roles claim path is unset, blank, or equal to the workspaces groups claim. It names
+  `QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH` and the 403 symptom. Pure and package-private, so the
+  branch is assertable without a container. It runs before the launch-mode branch: the auth
+  E2E tier runs in `TEST` and the diagnostic matters there too.
+- [`OidcRolesClaimConfigTest.java`](../src/test/java/ai/labs/eddi/configs/OidcRolesClaimConfigTest.java)
+  pins the property in the source tree — present, non-blank, `realm_access/roles`, and not
+  equal to `eddi.workspaces.groups-claim`. Value-pinned rather than presence-only: an edit to
+  `groups` would reintroduce exactly the failure and still pass a presence check.
+
+The two halves are deliberate: the test stops it being dropped from the source, so the
+runtime ERROR stays a warning about an operator override rather than about us.
+
+---
+
+## 🐛 fix(ui): `/manage/` answered 200 with an empty body (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+`GET /manage` served the app; `GET /manage/` served `content-length: 0`. The trailing slash
+reaches `{path:.*}` as an **empty** path, `normalizeSlashPath` drops empty segments, and the
+lookup became `getResourceAsStream("META-INF/resources/")` — a directory entry, which a
+classloader answers with an open, empty stream rather than `null`. The missing-asset check
+was satisfied, the `manage.html` fallback never ran, and the browser got nothing.
+
+### What changed
+
+[`RestManagerResource.java`](../src/main/java/ai/labs/eddi/ui/RestManagerResource.java):
+a path that normalizes to nothing resolves straight to the SPA shell, and the two fallback
+sites are one `serveManagerIndex()` helper.
+
+**Tests:** `RestManagerResourceTest` asserts the **lookup sequence** rather than the body —
+the unit run resolves off an exploded `target/classes`, where directory names behave
+differently from jar entries, so what must hold on every layout is that the resource base is
+never asked for at all. Covers `""`, `"/"`, `"//"`, `"./"` and `"/./"`. Mutation-checked.
+
+---
+
+## ✨ feat(groups): a rejected decision is `REJECTED`, not `FAILED` (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+Rejecting a group discussion's recommendation at a HITL gate set the conversation to
+`FAILED`, and the Manager rendered a red "Failed" badge on it. Semantically defensible — the
+run did not complete — but it reads as a system error rather than as a recorded human
+decision, and in a product whose selling point is the human in the loop that conflation is
+the wrong way round: the run did exactly what it was asked.
+
+### What changed
+
+`GroupConversationState.REJECTED`, set by
+[`GroupHitlCoordinator`](../src/main/java/ai/labs/eddi/engine/internal/groups/GroupHitlCoordinator.java)
+on a `REJECTED` verdict. It permits **exactly** what `FAILED` permitted — the label is the
+only thing that changed:
+
+- terminal in `GroupLifecycleOps.isTerminalState` and in the coordinator's
+  `persistedTerminalOverride` and cancel guards;
+- closeable — `closeGroupConversation`'s CAS chain and its refusal message now come from one
+  `CLOSEABLE_STATES` list, so a new terminal state cannot be added to the chain and left out
+  of the error, which is what three hand-written `if` blocks beside a hard-coded sentence
+  invited;
+- `availableActions` answers `["close"]`, as for `FAILED`;
+- ephemeral agents are reclaimed immediately, as for `FAILED`.
+
+Documents written before this carry `FAILED` for a rejection and are **left alone**: nothing
+in them distinguishes the two, so a migration could only guess.
+
+**Rolling downgrade is one-way.** Jackson serializes the enum by name, so a document written
+by this version and read by an older EDDI fails `valueOf`. Upgrading a cluster is safe;
+rolling back a node that has already served a rejection is not, until those documents age
+out. The same goes for a Manager older than its backend: `GroupConversationState` is a
+closed union there too.
+
+The cadence reconciler in `TeamCadenceService` was the one place the new state had to be
+routed by hand — it switches on the enum with a `default` arm rather than exhaustively, so
+`REJECTED` fell through to "still running" and wedged the standing team's claim for
+`eddi.groups.cadence.claim-ttl` (default 24 h). Caught in review; it is the only such switch
+in `src/main`, and it now carries a comment saying so.
+
+### Also
+
+[`RestGroupConversation.setDecidedByFromIdentity`](../src/main/java/ai/labs/eddi/engine/internal/RestGroupConversation.java)
+writes a blank principal name as `null` rather than `""`. The server has always overwritten
+the client's claimed `decidedBy` from the authenticated principal, which is correct for an
+audit ledger — but with `eddi.security.allow-unauthenticated=true` there is no principal, and
+the ledger recorded `"decidedBy": ""`. The audit writer already renders a null decider as
+`"unknown"`, so the unauthenticated case now lands on that same honest value.
+
+---
+
+## ✨ feat(groups): say at save time when debate roles turn a synthesis into a verdict (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+Giving members structural roles switches the SYNTHESIS phase onto the debate-judgment
+prompt: the moderator is asked for `{"winner": …, "scores": …}` and its own synthesis
+instruction is not used. A grant board whose members carried `role: PRO` and `role: CON` had
+its chair return a scoring verdict instead of the recommendation its system prompt specified.
+Correct for a debate-scoring exercise, wrong for anything else — and discoverable only by
+running it, because nothing in the configuration says so.
+
+### What changed
+
+[`AgentGroupStore.debateVerdictSynthesisPhaseNames`](../src/main/java/ai/labs/eddi/configs/groups/mongo/AgentGroupStore.java)
+reports the phases that will take the verdict path, logged at **INFO** on create and update.
+INFO rather than WARN, deliberately: for a real debate this is the intended behaviour and the
+note is its documentation, not a complaint.
+
+It mirrors `GroupContextBuilder.isDebateJudgment` with the two substitutions a config-time
+check has to make — an `ARGUE`/`REBUTTAL` *phase* before the synthesis in place of argument
+entries on the transcript, and only `participants: "MODERATOR"` phases, which are the only
+ones whose speaker is resolvable from configuration. A synthesis open to other participants
+is left unreported rather than guessed at. Preset-expanded, or it would be inert for exactly
+the style it matters most for. `moderatorlessPhaseNames` now shares the same `resolvedPhases`
+helper so the two cannot drift.
+
+**Tests:** eleven cases in `AgentGroupStoreTest`, one per condition — two sides, a chair that
+is itself a debater, a moderator-less roster, an explicit `inputTemplate` (the documented
+opt-out), arguments after the synthesis, and a ROUND_TABLE with debate roles.
+
+---
+
+## 🐛 fix(manager): "Show more" on a group's question could not be undone (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+The question header is pinned above a group discussion's transcript and clamps a long
+brief to four lines. Expanding removed the clamp and nothing replaced it: the header is
+`shrink-0` inside an `h-full` flex column, so a long brief grew it past the bottom of an
+`overflow-hidden` pane and took the transcript, the composer **and its own "Show less"
+button** with it. Nothing could be scrolled back to reach the toggle — the scroll container
+is the transcript below, not the header — so the only way out was to reload the page.
+
+### What changed
+
+[`discussion-transcript.tsx`](../ui/manager/src/components/groups/discussion-transcript.tsx):
+an expanded question is height-bounded (`max-h-[30vh]`) and scrolls in place, so the header
+cannot outgrow the pane and the toggle stays where it was.
+
+**Tests:** four cases in `discussion-transcript.test.tsx` — clamped by default, bounded and
+self-scrolling once expanded, collapsible again, and untouched for a short question.
+
+---
+
+## 🐛 fix(manager): "New Discussion" was a no-op on a group with history (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+The handler cleared the selection; the auto-select effect, which lists `selectedConvId` in
+its own dependencies, immediately put the newest conversation back. Worse than cosmetic:
+attachments are accepted only on a **new** discussion (the backend rejects a continuation
+carrying any), so the upload control is not rendered while a conversation is selected —
+**a group that had ever held one discussion could never accept a file again**, with no
+error to explain it.
+
+### What changed
+
+[`group-detail.tsx`](../ui/manager/src/pages/group-detail.tsx) records an explicit clear
+in a ref the auto-select effect honours. It is set wherever the page deliberately empties
+the selection (New Discussion, starting a stream, switching to a resumed stream) and
+cleared when a conversation is deliberately selected again — so a plain load still
+auto-selects. The Workforce board already avoided this, with a one-shot restore ref.
+
+**Tests:** five cases in `group-detail-selection.test.tsx`, the load-bearing one being that
+the attachment control comes back. Mutation-checked: removing the ref check fails four of
+them. The MSW group-conversation fixture also gained the `availableActions` field the
+backend always serializes — without it the Manager read `[]` and disabled the composer, so
+a fixture-backed test could not tell "continue this discussion" from "this discussion is
+over".
+
+---
+
+## ✨ feat(manager): the Workforce advisor thread can start over (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+Every other chat surface in the Manager offers one — `chat-panel` and `chat-drawer` ("New
+Conversation"), `operator-chat`, and the Workforce board ("New"). The 1:1 advisor thread
+did not, and its conversation is pinned in `localStorage` by (board, member): the thread it
+resumes on every visit is the one it started the first time. Escaping a derailed thread
+meant clearing site data.
+
+### What changed
+
+[`workforce-thread.tsx`](../ui/manager/src/pages/workforce/workforce-thread.tsx) gains a
+"New conversation" control beside the details toggle. The "start fresh" half of the init
+effect is now a callback both paths share, so the button and a first visit take the same
+route. Registering the thread repoints the stored (board, member) entry at the new
+conversation; the old one is left on the server, which is what "New Conversation" means
+everywhere else in the Manager.
+
+**Tests:** `workforce-thread-new-conversation.test.tsx` — the control exists, it starts a
+conversation and repoints the store, it clears the transcript, the composer stays usable,
+and a failed start leaves the thread on the old working conversation rather than a dead id.
+
+---
+
+## 🐛 fix(manager): the log SSE stream no longer opens on every page (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+`main.tsx` imported `session-log-store` for its side effect and that module connected on
+load, so **every Manager tab held an open `/administration/logs/stream` SSE connection on
+every page**, for the whole lifetime of the tab, whether or not anyone ever opened the Logs
+page.
+
+EDDI serves HTTP/1.1, where Chrome allows **six concurrent connections per origin for the
+entire profile**, and a live group discussion opens another. Measured with the demo idle,
+Chrome sat at exactly six, saturated. The symptom is pages hanging on skeleton loaders
+forever, intermittently, while the server answers every request in 0.21 s with zero
+variance and no errors — it looks exactly like a dead backend and is not.
+
+Verified two ways: a *fresh* tab opened directly on `/manage/audit`, with no prior
+navigation, issued `GET /administration/logs/stream`; and after 48 s on that page
+`performance.getEntriesByType('resource')` carried no completed entry for it at all, while
+an ordinary request on the same page reported `responseEnd: 547`.
+
+### What changed
+
+The stream is lazy and reference-counted. `connect()` returns an idempotent release (safe
+as a React 19 double-invoked effect cleanup), a second consumer reuses the open socket, and
+it closes when the last one leaves. `useLogStream` holds it only while mounted and
+unfiltered; the filtered path already opened and closed its own, as does the debugger's
+live log viewer. The bare import is gone from `main.tsx`.
+
+What was lost is small: the buffer no longer accumulates from app boot. It never needed to
+— the store seeds from `getRecentLogs` on open, so arriving at the Logs page still shows
+history.
+
+**Tests:** seven lifecycle cases in `session-log-store.test.ts` (including that importing
+the module opens nothing, asserted through a new `isStreamOpen()`), three ownership cases
+in `use-logs.test.tsx`, and a source-level guard that `main.tsx` never imports the module
+again — the runtime tests cannot see that, and `main.tsx` is not importable from a test.
+
+---
+
+## ✨ feat(manager): a rejected discussion reads as a decision (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### What changed
+
+The UI half of the backend's new `REJECTED` state. The transcript badge and the discussion
+list carry a neutral "Rejected" rather than a red "Failed"; the composer says the
+recommendation was rejected rather than "this discussion has ended"; the Workforce
+analytics, history and session views label it too — TypeScript's exhaustive
+`Record<GroupConversationState, …>` maps found every one of those reads, which is why the
+state was added to the union first.
+
+The SSE hook now honours the `state` the backend puts on `group_complete` instead of
+hardcoding `COMPLETED`. `group_complete` is the terminal notification for every outcome,
+and a rejection ends the run as `REJECTED` — rendering it as "Completed" for the seconds
+before the persisted conversation loads says the opposite of what happened.
+
+The page's settle effect — which switches the transcript from the live stream to the
+persisted conversation and refreshes the sidebar — listed its states by hand, so `REJECTED`
+matched nothing and a live rejection stranded the page: no conversation selected, the
+composer inviting a *new* discussion, the Close action unreachable, and the sidebar saying
+"Awaiting Approval" indefinitely (the conversation-list poll only runs while a discussion is
+IN_PROGRESS/SYNTHESIZING). Caught in review. That list is now a named constant with the
+reasoning attached, including why FAILED and CANCELLED are deliberately not in it.
+
+`GROUP_CONVERSATION_STATES` is now a runtime array in `lib/api/groups.ts` with the union
+derived from it, because several render sites key translations off the state name with a
+template literal — ``t(`groups.state.${state}`)`` — which `npm run i18n:check` cannot see.
+`groups.state.REJECTED` was missing from all eleven locales with every gate green; the
+transcript export would have written the raw token into a downloaded file.
+
+**Tests:** `discussion-rejected-state.test.tsx` — the label, the absence of the destructive
+badge, the declined synthesis staying visible, and the live-stream label; a rejection driven
+through the approve path in `group-detail-selection.test.tsx`; and a locale sweep over
+`GROUP_CONVERSATION_STATES` in `i18n-quality.test.ts`.
+
+---
+
+## ✨ feat(manager): the editor says when a debate synthesis answers with a verdict (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### What changed
+
+`debateVerdictSynthesisPhaseNames` in
+[`lib/group-config.ts`](../ui/manager/src/lib/group-config.ts) mirrors the backend helper
+(and through it `GroupContextBuilder.isDebateJudgment`), and the group config panel renders
+an informational note naming the phases. Same mirror-and-surface shape as the existing
+moderator-less and role-coverage warnings, which exist because the backend only ever wrote
+those to its own log.
+
+Styled as a note rather than a warning: for a real debate the verdict path is what was
+asked for. The point is that nothing else in the configuration said so.
+
+**Tests:** nine cases on the helper in `group-config.test.ts`, one per condition, plus three
+on the panel.
+
+---
+
+## 🐛 fix(manager): a plain Save no longer claims a change is live (2026-09-22)
+
+**Repo:** EDDI (`fix/pilot-demo-findings`)
+
+### Why
+
+The config editor offers two actions: `handleSave`, which cascades resource → workflow →
+agent, and `handleSaveAndDeploy`, which cascades and then deploys, polling for up to 30 s.
+The first reported "Saved successfully" with nothing to say the running agent was still
+serving the previous version.
+
+Measured on an eligibility gate (no model, sub-second, so the effect is unambiguous) with
+the ceiling lowered from 150,000 to 50,000 and a case of 85,000: cascade **+ deploy** gave
+`gate_fail_over_cap`, cascade **alone** gave `gate_pass` — no change at all. Resource,
+workflow and agent versions had advanced to v4/v5 while the deployed version stayed at v3.
+
+### What changed
+
+[`resource-detail.tsx`](../ui/manager/src/pages/resource-detail.tsx): the cascade path's
+toast is now "Saved — not yet live", explains that the running agent still serves the
+deployed version, and carries a **Deploy** action that deploys the agent version the
+cascade just produced (not the stale one the URL carried). A failed deploy surfaces its
+error rather than doing nothing.
+
+**Tests:** `resource-detail-save-not-live.test.tsx` — the wording, the explanation, the
+version the action deploys, and the failure path.
+
+---
+
+## 🛠️ chore(skills): a `ship-pr` skill that carries a PR from push to every review comment resolved (2026-09-21)
+
+**Repo:** EDDI (`chore/ship-pr-skill`)
+
+### Why
+
+Shipping a PR here has a long tail of repo-specific traps, and every session rediscovers them.
+The two that cost the most: the `CodeRabbit` check reads **`pass` while the description column
+says `Review rate limited`** — so "green checks, zero unresolved threads"
+can mean *nothing was reviewed*; and a targeted `-Dtest='A,B'` **silently drops a missing class
+and exits 0**, because surefire's `failIfNoSpecifiedTests` only trips when zero tests ran.
+
+### What changed
+
+- `.claude/skills/ship-pr/SKILL.md` — the workflow: pre-push gates, a PR-description shape built
+  from the diff, what actually gates a merge (branch protection requires only `Build & Test` and
+  `CodeQL Analysis`; everything else is advisory), and a review loop that covers all three places
+  feedback lands.
+- `.claude/skills/ship-pr/pr-threads.sh` — audits review threads via GraphQL, prints the node id
+  the reply/resolve mutations take, and drops CodeRabbit's collapsed `<details>` block so the
+  preview shows the finding rather than `🏁 Script executed:`.
+- `.gitignore` — un-ignore `.claude/skills/` only; `settings.local.json`, `workflows/` and
+  `worktrees/` stay ignored. Without this the skill files never land.
+
+### Decisions
+
+- **Tracked, not personal.** The content is repo-specific team knowledge, mirroring the precedent
+  in `ui/manager/.claude/skills/`.
+- **Nitpicks are handled separately from threads.** CodeRabbit puts nitpicks, duplicates and
+  outside-diff-range findings in the *review body*, where they have no thread and cannot be
+  resolved — and some are 🟠 Major. They get one disposition comment instead.
+- **Only bot threads get resolved.** A human closes their own, whether the finding was fixed or
+  argued down.
+
+Sibling skills for `gnowbe-frontend` and `gnowbe-api-2` ship in those repos.
+
+---
+
+## RAG docs: document the workflow step that actually binds a knowledge base (2026-09-21)
+
+**Repo:** EDDI · **Branch:** `docs/rag-workflow-step-binding`
+
+A user reported that `product-docs` retrieval "does not work" on their deployment and concluded the
+`RagContextProvider` wiring was missing from the build. The wiring is present and has been since
+Phase 8c — `LlmTask` calls `retrieveContext` and appends `## Relevant Context:`. What was missing was
+the third side of the binding, which the docs never showed.
+
+### The failure the docs were producing
+
+A knowledge base reaches an agent through three configurations, not two:
+
+1. the `RagConfiguration` at `/ragstore/rags/{id}`,
+2. an `eddi://ai.labs.rag` **step in the agent's workflow**,
+3. `knowledgeBases` / `enableWorkflowRag` on the LLM task.
+
+`RagContextProvider` matches `knowledgeBases[].name` against configs discovered from the **workflow
+document** (`WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.rag", …)`). With no such step
+`ragSteps.isEmpty()` is true and retrieval returns at a `LOGGER.debug` line, before the trace entry,
+before the store build, before any INFO log. Every symptom in the report falls out of that one early
+return: no `## Relevant Context:` block, no `rag:trace:*`/`rag:context:*`, and no `RagContextProvider`
+or `EmbeddingStoreFactory` lines while other tool providers logged on every turn.
+
+A second cause presents identically and the troubleshooting section now says so: when the workflow
+*does* bind a step but no `knowledgeBases[].name` matches its KB name, every step is `continue`d past,
+`traceEntries` stays empty so no trace is stored, and `allResults.isEmpty()` returns null just the
+same. Only the `DEBUG` line distinguishes them — it is logged for the missing-step case alone.
+
+A third cause sits even earlier and was missed in the first pass at this section: `retrieveContext`
+checks the *task* before it ever looks at the workflow — `if (!hasExplicitRefs && !useWorkflowDiscovery)
+return null;` at the top of the method. A task with an empty `knowledgeBases` and no
+`enableWorkflowRag: true` returns here, before `WorkflowTraversal.discoverConfigs` runs at all, so it
+produces no discovery, no trace, no store build, no INFO log — and, unlike the missing-step cause, no
+`DEBUG` line either, because that line lives inside the `ragSteps.isEmpty()` branch this return never
+reaches. The troubleshooting table now leads with checking the task's own RAG settings before touching
+the workflow.
+
+`rag.md` mentioned the requirement only in a subordinate clause ("Each reference names a KB from the
+workflow") and in a Status bullet at the bottom of the page. Its setup path showed the KB config and
+the LLM task and nothing else — so a reader who followed it end to end built exactly the broken
+two-sided configuration that was reported. That is a documentation defect, not a user error.
+
+### `docs/rag.md`
+
+- **Configuration** now opens with the three-sided binding as a table, and names configuring 1 and 3
+  without 2 as the most common failure — explicitly including that it produces no context, no trace,
+  no error and no log above `DEBUG`.
+- **New `### 2. Workflow Step`** section with the workflow JSON, the `{ragId}.rag.json` ZIP name, why
+  `RagTask.execute()` is a no-op while `configure()` resolves the KB, and the
+  `GET /extensionstore/extensions` check for builds where `ai.labs.rag` is not registered.
+- Existing sections renumbered to `1.`/`3.` to match. No inbound anchor links existed.
+- **Fixed a dangling sentence**: "Three of them choose what is retrieved:" was followed by nothing.
+  The three are now named.
+- Options 1 and 2 state that the name matches the KB's `name` (not its id) and that an unmatched name
+  is skipped silently; Option 3 states that `httpCallRag` calls an *external* API and cannot query an
+  EDDI knowledge base.
+- **REST API**: states outright that no `/query`, `/search` or `/retrieve` endpoint exists and that
+  those return `404`. Users were trying `httpCallRag` against their own KB as a workaround and
+  hitting 404s with nothing telling them the endpoint was never meant to exist.
+- **Document Ingestion**: warns off the `kbId` query parameter, found while reviewing this change.
+  `RagContextProvider` keys the embedding store on `ragConfig.getName()` and cannot be pointed
+  elsewhere, but `RestRagIngestion` lets the caller override that key (`effectiveKbId`, favouring
+  the `kbId` param over the name). Any `kbId` other than the KB's exact `name` therefore ingests
+  into a store nothing reads — `202`, status `completed`, documents genuinely embedded and stored,
+  retrieval empty for ever. Ingestion *sources* are unaffected: `IngestionPipeline` keys on
+  `knowledgeBase.getName()`, and `IngestionRetrievalRoundTripTest` pins that round trip after an
+  earlier draft shipped exactly this divergence on the source path.
+- **Vector Stores**: `in-memory` is no longer described only as "ephemeral, for dev/test only". The
+  cached object *is* the data, and `EmbeddingStoreFactory` holds it in a Caffeine cache bounded at 50
+  stores with a 30-minute `expireAfterAccess` and a full invalidation on any secret or global-variable
+  change — so an in-memory KB empties itself after 30 idle minutes, on restart, and on credential
+  rotation, then returns no context rather than an error.
+- **New `## Troubleshooting`** section: an ordered seven-step check for the silent-no-context case
+  (task-level RAG settings checked first, ahead of the workflow-binding checks), and the
+  `quarkus.log.category` line that makes the missing-step early return visible — called out as not
+  covering the task-level or unmatched-name causes, which log nothing at any level.
+- **Status**: the workflow-step bullet said "Options 1 and 2 below" while they are above it.
+
+### `docs/langchain.md`
+
+The task-parameter reference documented `maxRagContextChars` and nothing else about RAG — the one
+knob that merely *bounds* a feature the page never introduced. Added `knowledgeBases`,
+`enableWorkflowRag`, `ragDefaults` and `httpCallRag` under a **Retrieval (RAG)** group whose header
+carries the workflow-step requirement and links to `rag.md`.
+
+### Not changed
+
+The engine. No defect was found on the retrieval path itself. Three gaps are recorded here rather
+than fixed, each arguably worth its own issue:
+
+1. **`kbId` on `/ingest` can write where nothing reads** (above). The parameter has no correct
+   non-default value, because retrieval cannot be pointed at a custom key — so the fix is probably
+   to reject a `kbId` that does not equal the KB's `name`, or to drop the parameter, rather than to
+   document it. Documented here because a doc change cannot make a `202` mean something else.
+2. **No retrieval REST endpoint** for a knowledge base, so there is no supported way to test that
+   ingestion worked without running a conversation — which is what sent the reporting user to
+   `httpCallRag` and a wall of 404s.
+3. **`ai.labs.rag` registration is in no release tag.** It is on `main`; the newest tag is `6.4.0`.
+   Deployments on `6.4.0` or earlier cannot wire up vector RAG at all, whatever the docs now say.
+
+---
+
+## 📊 feat(llm): per-call LLM telemetry on every provider and both execution paths (2026-09-21)
+
+**Repo:** EDDI (`feat/llm-observability`)
+
+An agent that names a single model — almost every agent — produced **no LLM telemetry at all**:
+no latency timer, no token counter, no error counter, and no span below `eddi.pipeline.task`. A
+turn that spent eleven seconds waiting on a provider was indistinguishable from one that spent
+eleven seconds in EDDI's own code. The `eddi.llm.cascade.*` meters that did exist live in
+`CascadingModelExecutor`, which `LlmTask` reaches solely under `if (cascadeActive)`.
+
+### Why there was nowhere to put it
+
+`ChatModel.chat(ChatRequest)` delegates to `chat(ChatRequest, ChatRequestOptions)`, and *that*
+is where the interface merges `defaultRequestParameters()` and fires
+`onRequest`/`onResponse`/`onError` from `listeners()` around `doChat`. It is the only per-call
+hook langchain4j offers, and it covers every provider because the dispatch lives on the
+interface rather than in each binding.
+
+`ObservableChatModel` overrode `chat(ChatRequest)`, which bypassed that default entirely — so
+the decorator had no listener dispatch of its own. And `wrapIfNeeded` returned the **bare**
+model unless `timeout`/`logRequests`/`logResponses` was configured, which is the default, so
+most deployments had no decorator at all.
+
+### What changed
+
+- **`ObservableChatModel`** now overrides `doChat` and delegates `defaultRequestParameters()`,
+  `provider()` and `supportedCapabilities()`, so the inherited `chat` behaves as the provider's
+  own would and fires listeners.
+- **Both decorators always wrap.** Returning the bare model is what left the default path with
+  nowhere to attach a listener.
+- **`LlmTelemetryListener`** (new) emits `eddi.llm.request.duration`, `eddi.llm.tokens` and
+  `eddi.llm.request.errors`, plus a `gen_ai.client.inference` span.
+
+### Three design decisions that are not the obvious ones
+
+- **`doChat` forwards to `delegate.chat(...)`, not `delegate.doChat(...)`.** A `ChatModel` may
+  implement either, and `JlamaChatModel` implements `chat` — forwarding to `doChat` would throw
+  `"Not implemented"` on every Jlama turn, i.e. on the provider the previous PR just fixed.
+- **`listeners()` returns EDDI's listener only, never the delegate's.** Because the delegate
+  re-enters its own `chat`, it dispatches its own listeners; combining the lists would fire
+  every provider-registered listener twice. Mutation-tested: the combining version produces
+  `[request, request, error, error]`.
+- **`ObservableStreamingChatModel` moved from overriding both `chat` overloads to overriding
+  `doChat`.** This was a live defect in an earlier revision of this branch: the two-argument
+  `chat(request, options, handler)` is where the streaming interface reads `listeners()`, so
+  overriding it meant EDDI's listener never fired on a streaming turn — silently, while the
+  javadoc claimed otherwise. Nothing caught it because every streaming test passed `null` for
+  the listener and asserted only on tokens.
+
+### Also fixed
+
+The timeout path boxed the provider's exception in a bare `RuntimeException`. Harmless before;
+now that the error tag and `error.type` are derived from the exception class, it made every
+failure on a timeout-configured agent read as `RuntimeException`. The cause is rethrown
+directly, and the timeout itself gets a named `ChatTimeoutException`.
+
+`LlmTelemetryListener.guard` logs at WARN, not DEBUG. langchain4j already contains a throwing
+listener (`ChatModelListenerUtils` wraps each in `try/catch` and logs WARN), so catching at
+DEBUG would only have downgraded upstream's message — meaning a misconfigured `MeterRegistry`
+would lose every LLM meter with nothing in the log at default levels.
+
+### Semantic conventions
+
+The span uses the **current** names — `gen_ai.provider.name` (renamed from `gen_ai.system` in
+semconv v1.37.0) and `gen_ai.usage.input_tokens`/`output_tokens`. That namespace is still
+Development-status and moved to its own repository in v1.42.0 precisely so it can keep changing,
+so the span also carries `eddi.semconv.schema_version` recording the revision the names came
+from. Micrometer meter names stay EDDI-owned (`eddi.llm.*`) so an upstream rename cannot break a
+dashboard.
+
+### Tests
+
+`ObservableChatModelDecoratorTest` (9, new) uses a delegate shaped like a real binding rather
+than a mock stubbing `chat`, and pins the properties the old tests could not see: a `chat`-only
+delegate still works, each listener fires exactly once, the decorator carries only EDDI's
+listener, and the legacy `chat(List<ChatMessage>)` route — the default non-JSON path through
+`LegacyChatExecutor` — is observed too. `LlmTelemetryListenerTest` (8, new) grades the meters,
+including that absent token usage records *nothing* rather than a zero. Two new streaming tests
+assert a listener actually fires; mutation-checking the old override shape turns them red with
+`[]` against `[request, response]`.
+
+`docs/metrics.md` and the full-metrics Grafana dashboard gained the three meters —
+`MetricsDashboardCoverageTest` enforces both.
+
+### Follow-up: the p95 panel had no series to query
+
+Raised in review of [#809](https://github.com/labsai/EDDI/pull/809). A Micrometer timer
+publishes `_count`, `_sum` and `_max` and no buckets at all, so
+`eddi_llm_request_duration_seconds_bucket` — the series panel `id: 169` runs
+`histogram_quantile(0.95, ...)` over — was never exported. The panel would have rendered
+empty forever, which on a latency chart reads as "no LLM traffic" rather than "this metric
+does not exist".
+
+`eddi.llm.request.duration` is now registered with `publishPercentileHistogram()`, the same
+way `eddi.pipeline.task.duration` in `LifecycleManager` already is — which is also why the
+pipeline p95 panels next to it do work. The cost is one series per bucket per
+`provider`/`model`/`outcome`, and the tag set is bounded the same way: providers are a fixed
+list, `outcome` is success or error, and model names come from configuration rather than from
+user input. If a deployment does find that too much, the dashboard-side alternative is to plot
+`_sum / _count` as a mean and drop the line; that is recorded at the call site.
+
+`LlmTelemetryListenerTest.durationTimerPublishesHistogramBuckets` asserts against a real
+`PrometheusMeterRegistry.scrape()` rather than a `takeSnapshot().histogramCounts()`, because
+the scrape text is literally what the dashboard queries — a snapshot assertion would pass on a
+registry that never exports the buckets. Mutation-checked: removing
+`publishPercentileHistogram()` turns exactly that test red.
+
+---
+
+## 📄 feat(rag): ingest uploaded PDF, Word, Excel, PowerPoint and text files (2026-09-21)
+
+**Repo:** EDDI (`feat/rag-file-upload`)
+
+### What it adds
+
+A second kind of ingestion source. `type: "upload"` holds files EDDI stores on the knowledge base's
+behalf; running the source extracts their text and embeds it, through the same pipeline, state store
+and reconciliation a crawl uses. In the Manager, a source of that type shows a drag-and-drop zone
+instead of the crawl settings, with per-file progress and the list of what the source holds.
+
+Formats: PDF (PDFBox), Word, Excel and PowerPoint (`.docx` / `.xlsx` / `.pptx`), plain text, Markdown,
+JSON, XML, YAML, CSV, TSV and HTML. Excel becomes one Markdown table per sheet, PowerPoint one section
+per slide, Word keeps its headings — tabular and sectioned content survives chunking only if it keeps
+the header or heading a retrieved passage would otherwise have lost.
+
+### Design decisions
+
+**The files are kept, not just their embeddings.** That is what makes this a *source* rather than a
+one-way import: re-running after a model or chunk-size change re-ingests from what is stored, a purge
+stays recoverable, and deleting a file removes its vectors through the ordinary reconciliation.
+Embedding on upload and keeping nothing would make each of those "ask the operator to upload two
+hundred files again".
+
+**No Apache POI.** It reads these formats and much more, at seven extra jars and ~14.5 MB, built on
+reflection and with a long history of parser CVEs — measured against the constraint that EDDI's
+dependencies stay small. For text out of a handful of known parts, the JDK's own `java.util.zip` plus
+StAX is the smaller surface and the one whose limits can be stated exactly. PDFBox was already a
+dependency (3.0.8, current).
+
+**Every bound is explicit, because the file is not the operator's data.** 100,000 characters per
+document (`settings.maxContentLength`, shared with the crawl), 500 parts, 5,000 rows × 64 columns per
+sheet, 64 MB decompressed per archive — counted across every entry the reader walks over, since moving
+to the next ZIP entry inflates the rest of the current one and an entry nobody wants is otherwise the
+cheapest place to hide a bomb. DTDs and external entities off (billion-laughs); an archive naming the
+same part twice refused outright, since two entries under one name let two readers disagree about the
+contents.
+
+**Content decides the format, not the name.** `.docx`, `.xlsx` and `.pptx` are all ZIP archives, so
+neither the file name nor the browser's MIME type distinguishes them — a spreadsheet saved under a
+`.docx` name would have gone to the Word extractor and been refused as corrupt. The extension is
+consulted only for text formats, which carry no signature. A legacy `.doc`/`.xls`/`.ppt` is named as
+such, with the fix, rather than reported as unreadable.
+
+**A file's identity is its name.** Re-uploading `handbook.pdf` replaces it — blob, ingestion-state row
+and vectors all key on an id derived from the name — so the corrected version supersedes the old one
+everywhere at once. A generated id would leave last quarter's handbook retrievable beside this
+quarter's with nothing to say which is current.
+
+**Change detection uses the file's bytes, not its extracted text.** An unchanged 20 MB manual costs one
+metadata query per run rather than a download and a full parse, and improving an extractor does not
+silently re-embed an entire knowledge base.
+
+**One HTTP request per file, not one per batch.** A 200 MB batch that fails three quarters of the way
+through would otherwise lose what had already arrived with nothing to say which files those were. Each
+file gets its own progress bar (`XMLHttpRequest`, since `fetch` cannot report upload progress) and its
+own error, and the server's sentence — "This PDF is encrypted" — is what the operator sees.
+
+**Deleting a file removes its vectors immediately**, not at the next run. A source with no cron has no
+next run, so deferring it would mean an operator is told a document is gone while agents keep answering
+from it. Where the vector store cannot delete by metadata, the response says so rather than reporting a
+clean success.
+
+**Removing an upload source takes its content with it.** Dropping it from `sources[]`, changing its
+`type`, or deleting the knowledge base removes the files *and* the vectors they produced. The first
+draft deleted only the files, which left every chunk retrievable and unreachable: no endpoint lists
+them, because the source they belong to is gone.
+
+**Deleting a file takes the source's run claim.** Checking for a run first is not enough — one that
+starts between the check and the delete re-embeds the file and clears the tombstone the delete wrote.
+
+### Bugs found and fixed while testing
+
+**An upload source could never delete its last documents.** `reconcileDeletions` refused to conclude
+anything when a run produced no usable document and learned nothing definitive — a guard written for
+crawls, where "nothing came back" usually means the site was unreachable. An upload source that lists
+an empty store has learned something definitive: the operator deleted the files. The guard moved into
+the crawl branch (`learnedSomething`), where it belongs; the pre-existing crawl tests still pin it.
+
+**A reordered PowerPoint deck came back in creation order.** `r:id` and `id` share a local name on
+`<p:sldId>`, so reading the attribute by local name returned the slide's own number instead of the
+relationship — the index resolved to nothing and the fallback (part numbering) ran. Part numbers
+survive a reorder, so the deck read correctly right up until somebody moved a slide.
+
+**An encrypted PDF was reported as corrupt.** PDFBox refuses one of those with
+`InvalidPasswordException` rather than by opening it and answering `isEncrypted()`, so the only branch
+that mentioned a password never ran, and the operator was told their working file was broken.
+
+**A 25 MB file — the default limit — could not be uploaded at all.** `quarkus.http.limits.max-body-size`
+was 25M, so the request was refused with a bare 413 before the code that knows what the limit is could
+say anything. Raised to 60M, with the configurable ceiling held at 50 MB and both ends commented.
+
+### Files
+
+**Backend — extraction** (`src/main/java/ai/labs/eddi/modules/ingestion/extract/`): `DocumentExtractors`
+(registry + content-based type resolution), `DocumentTextExtractor`, `ExtractionLimits`,
+`PdfTextExtractor`, `WordTextExtractor`, `ExcelTextExtractor`, `PowerPointTextExtractor`,
+`PlainTextExtractor`, `CsvTextExtractor`, `HtmlDocumentExtractor`, `OpenXmlPackage` (bounded ZIP+StAX),
+`MarkdownTable`, `Extraction`, `UnreadableDocumentException`.
+
+**Backend — storage** (`modules/ingestion/files/`): `IIngestedFileStore`, `IngestedFileIds`,
+`IngestedFileService`; `MongoIngestedFileStore` (GridFS), `PostgresIngestedFileStore` (`bytea`, upsert
+on `(source_key, file_id)`), wired in `DataStoreProducers`.
+
+**Backend — pipeline and API**: `IngestionPipeline` (upload branch, `SourceRun`, `forgetDocument`,
+`learnedSomething`), `IngestionSource` (`TYPE_UPLOAD`, `UploadSource`), `RagSourceIngestionService`
+(files deleted with their source), `IRestRagIngestion` / `RestRagIngestion` (three endpoints),
+`ContentHashes.sha256Bytes`.
+
+**Manager**: `ingestion-files-panel.tsx` (drop zone, per-file progress, file list, delete),
+`ingestion-sources-panel.tsx` (Website/Files chooser, conditional fields), `lib/api/ingestion-sources.ts`,
+`hooks/use-ingestion-sources.ts`, 22 new i18n keys across all 11 locales, MSW handlers, refreshed
+`openapi-operations.json`.
+
+**Tests**: 40 extraction cases (zip bombs in both a wanted and a skipped entry, billion-laughs, a
+duplicate part, an encrypted PDF, a scan with no text layer, a misnamed spreadsheet, a legacy Office
+file, a reordered deck, UTF-16, and text whose first bytes look like an image), a 10-case
+`IngestedFileStoreContract` run against in-memory, MongoDB and PostgreSQL, 8 `IngestedFileIds` cases,
+16 `IngestedFileService` cases, 13 pipeline cases for the upload path, 6 source-removal cases, 14 REST
+cases, and 10 Manager cases.
+
+Three of them are the ones that matter: a real `.docx` is stored, read by the real extractor, split by
+the real chunker and answers a real retrieval — and stops answering once it is deleted. Every unit test
+on the way there can pass while that one fails, which is exactly what happened to the draft this
+feature builds on: ingestion and retrieval keyed on different names, and nothing noticed, because no
+test ever performed a retrieval after an ingest.
+
+**Docs**: `docs/rag.md` — the two source types, the upload block, what can be read, every limit and why,
+the file endpoints, and what a purge, a source removal and a ZIP export each do to stored files.
+
+---
+
+## 🐛 fix(llm): a configuration reference in an LLM parameter no longer breaks its templating (2026-09-21)
+
+**Repo:** EDDI · **Branch:** `fix/llm-config-reference-templating`
+
+`LlmTask` runs the Qute engine over every LLM parameter before the model is built, and escaped
+`${vault:...}` mentions so a prompt could document the syntax. The other three reference namespaces —
+`vars`, `connection`, `caller` — were not escaped, although they are resolved the same way: AFTER
+templating, by `ChatModelRegistry`/`SecretResolver`, with deliberately no Qute namespace resolver.
+
+So a parameter carrying one of them threw on every turn. Observed on a live deployment, where an agent
+sets `"modelName": "${vars:gemini-model}"` so one global variable drives every agent's model:
+
+```
+ERROR Template processing failed for LLM parameter 'modelName':
+      No namespace resolver found for [vars] in expression {vars:gemini-model}
+```
+
+The turn still worked — the catch keeps the parameter's RAW value, which is exactly right when the value
+is *only* a reference, and the registry resolves it afterwards. Two things were wrong anyway:
+
+- an ERROR per turn per such parameter, which buries real errors in the log;
+- a reference sitting **beside** a real expression abandons the whole render, so `{properties.x}` next to
+  it reaches the model as literal text. Silent, and wrong.
+
+`escapeVaultMentions` becomes `escapeConfigReferenceMentions` and now covers `vault`, the legacy
+`eddivault`, `vars`, `connection` and `caller`. Httpcall templating is untouched and still fails loudly
+there, as the `CallerNamespaceResolver` security decision requires.
+
+**Tests:** `LlmTaskVaultMentionTest` — one case per namespace (each asserting the un-escaped form still
+throws, so the guard cannot go vacuous), the legacy prefix, and the reference-beside-expression case.
+Narrowing the pattern back to `vault` fails 5 of them with the exact production message.
+
+The escape has two halves that can drift: the regex, and a cheap `contains` pre-check that decides whether
+the regex runs at all. The pre-check list deliberately omits the legacy `eddivault:`, which is only covered
+because `"eddivault:"` contains `"vault:"` — correct, but invisible, and a namespace added to the regex
+alone would silently keep crashing. `preCheckCoversEveryNamespaceInThePattern` derives the namespaces from
+the pattern instead of restating them and asserts each round-trips, so the halves cannot diverge unnoticed.
+Mutation-checked both ways: dropping `"vault:"` from the pre-check fails 5 tests; adding a namespace to the
+pattern alone fails that guard and only that guard.
+
+---
+
+## 🔒 fix(security): sanitize the CWE-117 log sinks PR #799 left uncovered (2026-09-21)
+
+**Repo:** EDDI (`fix/log-injection-log-admin-conversation-store-nats`)
+
+Six open `java/log-injection` alerts on `main` — #105, #106, #112, #113, #114 and #121, across five log
+statements in three files — that [PR #799](https://github.com/labsai/EDDI/pull/799) did not touch: it closed the 14 alerts in
+`RestAgentAdministration` and `AgentFactory` only. Like those, these surfaced while triaging the
+community logger-rename PRs #558 and #561, were correctly judged pre-existing and out of scope there,
+and were then tracked by nothing at all. Same one-line fix, same test shape.
+
+### What changed
+
+- **[`RestLogAdmin`](../src/main/java/ai/labs/eddi/engine/internal/RestLogAdmin.java)** (#105, #106)
+  — the `streamLogs` "SSE log stream started" DEBUG quoted `agentId` and `level` raw. Both are
+  `@QueryParam`s on `GET /logs/stream`, so both arrive unvalidated. The irony is specific to this
+  endpoint: it *is* the log viewer, so the forged line is served straight back to whoever is tailing
+  the stream. The file gained the static `sanitize` import it did not have. `listenerId` on the same
+  line is left alone deliberately — `BoundedLogStore` generates it, no caller supplies it, and CodeQL
+  did not flag it.
+- **[`RestConversationStore`](../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java)**
+  (#112, #113, #114) — the descriptor loop's "Skipping descriptor due to error" DEBUG, and both
+  `deleteAttachmentsForConversation` lines ("Deleted %d attachments" and "Failed to delete
+  attachments"). `conversationId` is the path parameter on `DELETE
+  /conversationstore/conversations/{id}`; the exception message is not the developer's text either,
+  since a store routinely quotes back the value it was handed. The file already static-imports
+  `sanitize` and applies it on the neighbouring permanent-delete, soft-delete and not-found lines, so
+  these three were missed rather than deliberately left.
+- **[`NatsConversationCoordinator`](../src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java)**
+  (#121) — `publishAndExecute`'s "Published to NATS subject" DEBUG. This one logs the *subject*, not
+  the conversation id, which is why the pass that sanitized the rest of the file went past it.
+
+### Tests
+
+Three new classes in the shape `RestAgentAdministrationLogInjectionTest` established —
+`captureLogsOf(<Class>.class, …)` plus `assertNoForgedRecordBoundary(…)` against
+`LogCaptureSupport.FORGED_RECORD`, attaching by logger category rather than by field name, so PR
+#558's renames cannot break them. Seven tests: 2 + 3 + 2.
+
+Each also asserts the benign half of the value still reaches the log, so a "fix" that dropped the
+argument instead of sanitizing it would fail. All seven of the newly wrapped arguments were
+mutation-checked one at a time — revert exactly that call, run the class, require the named test to
+fail. **7 mutations, 7 killed, 0 survived.** The driver lived in the session scratchpad and is not
+committed.
+
+### Decisions
+
+- **The NATS fix goes at the log call — and, after review, in `sanitizeSubject` as well.** `subject`
+  is `SUBJECT_PREFIX + sanitizeSubject(conversationId)`, and `sanitizeSubject` is not a log sanitizer
+  despite the name: it replaces `.` and space because a NATS subject token may not contain them. The
+  log call is fixed the way the file already does it one method down, where `routeToDeadLetter` logs
+  `sanitize(deadLetterSubject)`.
+
+  This entry first argued CR and LF should be left in `sanitizeSubject`, because widening it would
+  move the subject namespace every deployment already publishes and consumes under. **That was
+  wrong, and the review caught it.** The argument holds for `.` and space, which remap ids that
+  work. It does not hold for CR, LF and tab: `Validator.validateSubjectTerm` in the NATS client
+  refuses a subject containing any of them, so an id carrying one produced a subject the broker
+  never accepted — there was no namespace to move, and every id that works maps where it always did.
+
+  Worse, that rejection is an `IllegalArgumentException`, which is *unchecked*. The publish is
+  wrapped in `catch (IOException | JetStreamApiException)`, whose whole purpose is to degrade to
+  local execution when NATS is unavailable; an invalid subject escapes it instead. Not reachable
+  today — `ConversationService.say` loads the conversation from the store before it ever reaches
+  the coordinator, so an id that is not store-issued fails first — but it cost nothing to close.
+
+  Both sanitizers stay. They answer different questions — what the broker will accept, and what
+  cannot end a log record — and several lines in the file log the conversation id directly, building
+  no subject to be cleaned. The test that pinned "CR/LF survives `sanitizeSubject`" is inverted: it
+  now asserts the method produces a token the broker accepts, and a second test pins that the publish
+  line still logs through `sanitize`.
+- **Behavioural tests rather than entries in `SanitizedLogSinksTest`.** That source guard exists for
+  the ~38 group-conversation sinks that need a whole discussion to reach, where building one to
+  observe a single WARN tests the harness more than the fix. All four sinks here are reachable from a
+  public method with mocks, so they get real tests; the guard's hard count of 38 stays honest.
+- **A frozen clock in the `RestLogAdmin` test, not a mocked one.** `streamLogs` spawns a cleanup
+  virtual thread that logs its own "listener removed" line. A frozen clock parks it in its 2-second
+  sleep — it can neither reach the heartbeat branch nor fall out of the max-lifetime loop — so the
+  only line inside the capture window is the one under test. Without that the cleanup line could race
+  in and satisfy the assertion in place of the real subject, and the per-site mutation check would
+  stop localising. `@AfterEach` closes the sink so the thread finishes rather than outliving the test.
+- **A 24-character hex conversation id in the `RestConversationStore` test.** `extractResourceId`
+  resolves an id only out of a hex path segment; a semantic name yields a null id and the descriptor
+  is skipped at the top of the loop, well before the line under test — a test that would have passed
+  without ever reaching it.
+
+### Still open
+
+`main` carries **85** open `java/log-injection` alerts across 31 files, the largest clusters being
+`RestScheduleStore` (9), `RestUserMemoryStore` (8) and `VaultSecretProvider` (6). Whether to keep
+closing them file by file or take one broader pass is a maintainer call and was deliberately not made
+here. Two adjacent sinks in `RestConversationStore` were also noticed and left, because CodeQL has not
+flagged them and this branch is scoped to what it did flag: the HITL-cleanup WARN at the top of
+`deleteConversationLog` sanitizes its `conversationId` but not its `e.getMessage()`, and
+`populateDataToDescriptor`'s "Memory snapshot not found" WARN quotes `resourceId.getId()` raw.
+
+---
+
+## 🎯 fix(rag): stop embedding queries as documents (2026-09-21)
+
+**Repo:** EDDI (`fix/rag-embedding-input-type`)
+
+Every Gemini knowledge base has been embedding its **queries** as though they were
+documents, quietly costing retrieval quality. Nothing failed; recall was just worse than
+the model is capable of.
+
+### The mechanism
+
+Some embedding models are asymmetric — the same text produces a different vector
+depending on which side of the search it is on. `GoogleAiEmbeddingModel.toTaskType` maps a
+per-request `EmbeddingInputType.QUERY` to `RETRIEVAL_QUERY` and `DOCUMENT` to
+`RETRIEVAL_DOCUMENT`, and **when no input type is given falls back to whatever
+`taskType` the model was built with**.
+
+`RagIngestionService` and `RagContextProvider` both called
+`embeddingModelFactory.getOrCreate(ragConfig)` with the same configuration, so they hit
+the same cache entry and shared one instance. `EmbeddingModelFactory` defaults Gemini's
+`taskType` to `RETRIEVAL_DOCUMENT`. Retrieval therefore embedded the search key as a
+document.
+
+### What changed
+
+- `getOrCreate` now takes the role as a **required** parameter. Required rather than an
+  optional overload deliberately: a caller cannot forget it, and the compiler names every
+  site that has to choose. There are three: retrieval, and the two ingestion
+  paths.
+- The role is part of the cache key — to an asymmetric provider the two roles are two
+  different models, and sharing one entry is the defect.
+- `InputTypedEmbeddingModel` (new) attaches the role via `defaultRequestParameters()`,
+  which is what carries it through the `embed(String)` convenience overload that
+  `EmbeddingStoreContentRetriever` uses. There is no way to pass a per-call parameter
+  through that retriever, so the role has to travel with the instance.
+
+### Why the capability check is not optional
+
+`EmbeddingModel.embed` validates against `supportedParameters()` and throws
+`UnsupportedFeatureException` for anything unsupported **rather than ignoring it**.
+Verified against the resolved jars: only **2 of the 8** providers EDDI builds declare
+`INPUT_TYPE` — `gemini` and `cohere`. Setting it unconditionally would have turned every
+OpenAI, Azure, Ollama, Bedrock, Vertex and Mistral knowledge base into a hard failure.
+Those six are handed the provider's model unchanged.
+
+The check reads the live model's own `supportedParameters()` rather than a table of
+provider names, so it cannot go stale on a dependency bump. Mutation-tested: removing it
+produces exactly `UnsupportedFeatureException: ... does not support the following
+per-call parameter(s): inputType`.
+
+### No re-ingestion needed
+
+Stored vectors were always correct — ingestion's implicit `RETRIEVAL_DOCUMENT` was the
+right value for documents. Only the query side was wrong, so existing knowledge bases
+improve on the next query with no migration.
+
+### Tests
+
+`InputTypedEmbeddingModelTest` (9, new) covers both roles reaching the provider, the
+unsupported-provider passthrough, delegation, and that attaching a role does not drop the
+delegate's `modelName`/`dimensions`. Its first test pins the *defect* — an undecorated
+model reports no input type at all. Two call-site tests assert ingestion asks for
+`DOCUMENT` and retrieval asks for `QUERY`, which is what makes the fix real: the decorator
+is useless if both sites still ask for the same thing.
+
+`EmbeddingModelFactoryTest.PinnedTaskTypeDecision` (7, new) grades
+`pinsNonRetrievalTaskType` directly. It is package-private and tested on its own because
+every path through `build()` constructs a live provider client, which needs a socket — so
+the model-level tests only run where one is available, and the decision itself has to be
+gradeable anywhere. `PinnedTaskType` (6, new) covers the same decision through
+`getOrCreate` and runs in CI.
+
+`docs/rag.md` gained an "Asymmetric models" section covering which providers are affected,
+what happens to a pinned `taskType`, and that no re-ingestion is required.
+
+### Follow-up: a pinned Gemini `taskType` is no longer overridden by the role
+
+Raised in review of [#810](https://github.com/labsai/EDDI/pull/810). Attaching the role to
+every RAG call fixes the query side, but `GoogleAiEmbeddingModel.toTaskType` falls back to
+the build-time `taskType` **only when no input type is given**; a role maps
+unconditionally onto `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT`. A knowledge base configured
+with `taskType: SEMANTIC_SIMILARITY` (or `CLASSIFICATION`, or `CLUSTERING`) would
+therefore have stopped sending it, and everything ingested afterwards would have used
+`RETRIEVAL_DOCUMENT` — two incompatible geometries in one index, with nothing failing to
+say so.
+
+`EmbeddingModelFactory.pinsNonRetrievalTaskType` now detects that case and leaves the role
+off, so the configured task type keeps reaching the provider on both sides. Three
+boundaries are deliberate:
+
+- **`RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` do not pin.** The first is the default this
+  factory applies and is precisely the value that produced the defect; honouring it would
+  leave the bug in place for anyone who had written the default out by hand.
+- **`gemini-embedding-2` never pins.** langchain4j sends no `task_type` for any model whose
+  name contains `embedding-2` and applies a role instruction instead, so a pinned task type
+  is already inert there and skipping the role would cost the instruction for nothing.
+- **`taskType` is a Gemini parameter.** A stray one on Cohere or OpenAI pins nothing.
+
+### Follow-up: an unconfigured embedding provider names itself
+
+Raised by the static-analysis reviewer on [#810](https://github.com/labsai/EDDI/pull/810).
+`EmbeddingModelFactory.build` switches on the provider string, and
+`RagConfiguration.validate()` guards its own provider check with
+`embeddingProvider != null && !embeddingProvider.isBlank()` — it rejects providers it does
+not *recognise*, not ones that are absent. A knowledge base saved with an explicit null
+`embeddingProvider` therefore saved cleanly and only failed at first use, as a bare
+`NullPointerException` thrown by switching on null from inside the factory, naming nothing
+the operator could act on. A blank provider already fell through to the switch's `default`
+and was reported properly; null now says the same thing.
+
+The supported-provider list moved into one `SUPPORTED_PROVIDERS_HINT` constant shared by
+both rejections, so the absent-provider and unrecognised-provider messages cannot drift
+apart as providers are added.
+
+### Follow-up: the crawler ingestion path, which `main` added underneath this branch
+
+`main` gained `IngestionPipeline` (the crawl-and-ingest path) while this branch was open,
+and it calls `embeddingModelFactory.getOrCreate(knowledgeBase)`. That is a third call site
+for a method this branch had made two-argument, so the merge of the two did not compile —
+which is the required parameter doing exactly the job it was chosen for. An optional
+overload would have merged silently and left the crawler sharing retrieval's cache entry,
+reintroducing the original defect on the one ingestion path that did not exist when the
+defect was found.
+
+`IngestionPipeline.Collector.model()` now asks for `DOCUMENT`; it is storing vectors.
+`IngestionPipelineTest` pins that directly, and `IngestionRetrievalRoundTripTest` — which
+drives a real crawl and a real retrieval against one factory — now records the role each
+half asks for and asserts the pair is `[DOCUMENT, QUERY]`. That assertion is the one that
+would have caught this: the two halves sharing a role is the whole defect, and the
+round-trip test is the only place both halves are visible at once.
+
+---
+
+
+
+---
+
+## 🐛 fix(rag): a scheduled ingestion source was stored enabled and never ran (2026-09-21)
+
+**Repo:** EDDI (`fix/rag-ingestion-schedule-never-fires`) — backend, `ui/manager/`, docs
+
+Five defects that reached `main` because [PR #790](https://github.com/labsai/EDDI/pull/790)
+was merged with its review threads still unresolved. The first one made the feature that
+PR added not work at all.
+
+### 1 — the schedule had no fire time, so no poll could ever select it
+
+`RagSourceIngestionService.buildSchedule` built a CRON `ScheduleConfiguration` and never
+set `nextFire`. Neither store computes one: `MongoScheduleStore.createSchedule` and
+`PostgresScheduleStore.createSchedule` both persist whatever they are handed. Both
+`findDueSchedules` implementations then select on `enabled = true AND nextFire <= now`,
+and a null `nextFire` matches neither backend's comparison — BSON type bracketing
+excludes null on Mongo, and `next_fire <= ?` is UNKNOWN for NULL on Postgres. So a source
+with a cron was stored reading back `enabled`, showed as scheduled on every screen, and
+**never fired**.
+
+`buildSchedule` now arms the schedule the way `RestGroupWorkspace.addCadence` does, with
+the same time-zone handling: the cron is read in a fixed **UTC**, and `timeZone` is
+written onto the row rather than left null. That second half matters — `SchedulePollerService`
+re-arms a fired schedule through `resolveTimeZone(schedule.getTimeZone())`, which falls
+back to the deployment's `eddi.schedule.default-timezone`, so a first fire computed in UTC
+and every later fire computed in some other zone would have drifted by the offset, once,
+silently.
+
+**Where the fix belongs.** In the caller, not in `createSchedule`:
+
+- Putting it in `MongoScheduleStore.createSchedule` would **not** cover Postgres. The two
+  stores share no base class, so "fix the store" means writing it twice — and fixing only
+  the Mongo one leaves a Postgres deployment broken while looking fixed.
+- The arming *policy* already exists, once, in `RestScheduleStore.computeRearmNextFire`:
+  heartbeat interval, one-shot `oneTimeAt`, the unsatisfiable-cron translation, the
+  configured default zone. A second, subtly different copy of it inside the persistence
+  layer is exactly the divergence `MongoScheduleStore.updateSchedule`'s own comments
+  record as having bitten before.
+- A store that silently rewrites the object it is given also hides real bugs:
+  `markCompleted(id, null)` *means* "one-shot finished, disable it".
+
+Every other direct-to-store creator already arms its own schedule
+(`RestGroupWorkspace`, `ConversationHitlService`, `GroupHitlCoordinator`,
+`HitlCrashRecoveryObserver`). This one had simply forgotten, and that is where it is fixed.
+
+**Existing rows are already broken**, so a fix to `buildSchedule` alone would leave every
+schedule created before it dead for ever — repaired only if somebody happened to re-save
+the knowledge base, which nothing would tell them to do. A startup sweep
+(`RagSourceIngestionService.repairUnarmedSchedules`, `@Observes StartupEvent`, new
+`eddi.rag.ingestion.schedule-repair.enabled`, default on) gives a fire time to any
+*ingestion* schedule that is enabled, carries a cron and has no `nextFire` at all. It is
+safe to run repeatedly by construction: after the first pass nothing matches. It arms
+through the existing store-agnostic `setScheduleEnabled`, so it needs no new store
+method, and it touches nothing outside this feature's metadata — a schedule left unarmed
+on purpose is not a thing this repair can invent a cadence for.
+
+**Two corrections from review (Copilot, #818).** The first version of this paragraph
+claimed two nodes "compute the same next occurrence", which is only true if both compute
+inside the same cron period. They need not: the listing is a snapshot and
+`setScheduleEnabled` overwrites `nextFire` unconditionally, so a slower node crossing a
+cron boundary could replace the first node's occurrence with the following one and skip a
+fire. Arming now goes through **`IScheduleStore.armIfUnarmed`**, which carries the "still
+unarmed" condition in the write predicate itself — `AND next_fire IS NULL AND
+enabled=true` on the Postgres `UPDATE`, `eq(NEXT_FIRE, null)` in the Mongo filter, which
+matches a stored null and a missing field alike. That is the only place the two nodes
+meet, so the first writer wins and every other one is a no-op that reports `false`; a
+lost race is treated as success, because the row is armed either way. An earlier draft
+re-read the row before writing instead, which narrowed the window to one store
+round-trip without closing it.
+
+**A third, from CodeRabbit (#818): the repair could not arm in UTC, and should not have
+tried.** `buildSchedule` writes `timeZone` for rows it creates, but the repair arms through
+`IScheduleStore.setScheduleEnabled`, which takes only `enabled` and `nextFire` — a legacy
+row's null `timeZone` stays null whatever the repair does. Every fire after the first is
+therefore re-armed by the poller through `resolveTimeZone(null)`, the deployment's
+`eddi.schedule.default-timezone`, so computing the first fire in UTC regardless would hand
+a non-UTC deployment exactly one interval of the wrong length — the same drift this PR
+fixed in `buildSchedule`, arriving on the repair path instead. The repair now reads the
+cron in the zone the poller will use for that row (its own if it names one, the deployment
+default otherwise), which is the only choice that makes the row internally consistent
+without a new store method. CodeRabbit's alternative — widen the store's re-arm to carry a
+zone — would normalise legacy rows to UTC as well, at the cost of a store-API change
+implemented twice; noted, not taken.
+
+The second: the 40-page bound used to end the walk **silently**, so past 20,000 schedules
+an operator read "armed 12 schedules" with no way to tell a finished repair from one that
+stopped a page short of the row they were waiting on. `repairUnarmedSchedules` now returns
+`RepairResult(armed, complete)` and logs a warning naming the bound when it is the reason
+the walk stopped. The bound itself stays: an unbounded scan at startup is the thing it
+exists to prevent.
+
+Also refused now: a cron that parses but can never match a date (`0 0 30 2 *`).
+`CronParser.validate` accepts it; `computeNextFire` gives up after two years with an
+`IllegalStateException`. Stored, it was another source that showed as scheduled for ever.
+
+### 2 — a ZIP could store a cron the REST API refuses
+
+`RestImportService.createNewRags` writes straight to the store, so
+`RestRagStore.prepareForWrite` never runs. Its `prepareImportedRag` assigned source ids
+and called `RagConfiguration.validate()`, which does not look at the cron — so an archive
+could carry a six-field Quartz expression that `POST /ragstore/rags` rejects with a 400.
+
+The rule moved out of `RestRagStore` into `RagIngestionSchedules.requireValidCrons` and
+both paths call it. A second copy of the check would only have been a second chance to
+forget it.
+
+**Reconciling `schedule.setNextFire(null)` with defect 1.** That line, in
+`prepareScheduleForImport`, is about an *agent's* schedules from the archive's
+`schedules/` directory, and it is correct: every write on that path goes through
+`IRestScheduleStore`, which re-arms the schedule before storing it, and an archived
+`nextFire` is either long past (the schedule fires during the import) or absent. The two
+are not in contradiction — they are the same rule seen from both sides: **nothing in
+either store computes a fire time, so whoever writes has to arm.** Via the REST bean, the
+bean does it; direct to `IScheduleStore`, the caller does it. The javadoc now says so
+explicitly and names the ingestion sync as the path that did not.
+
+### 3 — run reports named a null source
+
+`IngestionPipeline` used `source.getId()` at six call sites — the failed/skipped/already-running
+reports, the abandoned reservation, the released reservation and `toReport`. A source that
+arrived without an id is addressed, keyed and scheduled by its **name** everywhere else
+(`IngestionSource.effectiveId()`, which `stateKey` already used), so those six reports
+carried `sourceId: null` into the run history, the REST answer and the fire log. All six
+now use `effectiveId()`, the record component documents the contract, and
+`RagSourceIngestionService.sourceIdOf` delegates to `effectiveId()` rather than keeping a
+third copy of the rule.
+
+### 4 — `docs/rag.md` said every ingestion field has a default
+
+It does not, and the table three lines below said so itself (`startUrl` | required).
+Corrected against the code: `name`, the `web` block and its `startUrl` have no default and
+are rejected when missing; `type` defaults to `web`; `id` is generated; `cron` and
+`costPerThousandSegments` are simply absent when unset. `userAgent`'s "EDDI's default" is
+now the actual string. The cron paragraph gained the unsatisfiable-expression rule, the
+import path, and the UTC note.
+
+### 5 — a Manager test passed for the wrong reason
+
+`resource-detail-rag-sources.test.tsx` → "does not offer Run for a disabled source"
+clicked the enabled toggle and then asserted the Run button was disabled. Toggling marks
+the editor dirty, and `hasUnsavedChanges` disables Run on its own — so the assertion held
+with `source.enabled === false` deleted from the button entirely. The source now **arrives**
+disabled from an MSW override, nothing is dirty, and the test additionally asserts that
+the unsaved-changes hint is absent and that Preview — gated on the same read-only and
+dirty guards but not on `enabled` — is still offered. Only the disabled-source rule can
+explain the result.
+
+### Mutation checks
+
+| Mutation | Test that failed |
+| --- | --- |
+| `buildSchedule` drops `setNextFire` | `RagSourceIngestionServiceTest` → "a source with a cron is due once its fire time arrives" |
+| `buildSchedule` drops `setTimeZone` | "the fire time is the cron read in UTC, and the schedule says so" |
+| `repairUnarmedSchedules` returns early | "an ingestion schedule with no fire time is given one" |
+| `prepareImportedRag` drops `requireValidCrons` | `RestImportServiceRagCronTest` → both refusal cases |
+| Run button drops `source.enabled === false` | "does not offer Run for a source that is saved as disabled" |
+| `armIfUnarmed` is replaced by the unconditional `setScheduleEnabled` | "a row another node armed while the sweep was listing is left alone" |
+| The walk always reports itself complete | "stopping at the page bound is reported, not swallowed" |
+| The repair arms in fixed UTC instead of the poller's zone | "a legacy row with no zone is armed in the zone the poller will use, not in UTC" (expected hour 2, got 11) |
+
+### Files
+
+`modules/ingestion/RagSourceIngestionService.java`,
+`modules/ingestion/RagIngestionSchedules.java`,
+`modules/ingestion/IngestionPipeline.java`,
+`configs/rag/rest/RestRagStore.java`, `backup/impl/RestImportService.java`,
+`docs/rag.md`, `docs/configuration-reference.md`,
+`ui/manager/src/pages/__tests__/resource-detail-rag-sources.test.tsx`.
+Tests: `RagSourceIngestionServiceTest` (two new nested groups),
+`RestImportServiceRagCronTest` (new).
 
 ---
 
@@ -455,6 +2402,305 @@ open review thread and is a sequencing decision, not a merge one -- it changes
 
 ---
 
+## 🐛 fix(llm): Jlama was running on the scalar fallback in every JVM we ship (2026-09-20)
+
+**Repo:** EDDI (`fix/jlama-vector-api`)
+
+The `jlama` provider is registered in `LlmModule`, documented in `docs/langchain.md`, counted
+among the supported providers, and offered by the agent wizard, the setup API, `McpSetupTools`
+and `CreateSubAgentTool`. It was also, in every JVM this repository starts, running Jlama's
+pure-scalar tensor backend.
+
+### Why it was invisible
+
+Jlama picks its backend once, at first use, in `TensorOperationsProvider.pickFastestImplementation()`:
+
+1. it tries `NativeSimdTensorOperations`, which needs `com.github.tjake:jlama-native` — not on
+   our classpath — logs "Native operations not available" and moves on;
+2. it falls back to `MachineSpec.VECTOR_TYPE`, which reads `FloatVector.SPECIES_PREFERRED`
+   inside a `catch (Throwable)`. Without `--add-modules=jdk.incubator.vector` that throws, the
+   catch logs one line through Jlama's own logger, and the type stays `NONE`;
+3. `NONE` selects `NaiveTensorOperations` — scalar Java matrix arithmetic.
+
+So a Jlama agent *worked*. It answered correctly, orders of magnitude too slowly to use, and
+nothing in the build could see it: no test configured a Jlama agent, and the container ITs
+exercise the image over HTTP.
+
+### What changed
+
+- **`src/main/docker/Dockerfile`** — the flag on a new `ENV JDK_JAVA_OPTIONS`, **not** on
+  `JAVA_OPTS_APPEND` where EDDI's other JVM settings live. The launcher reads
+  `JDK_JAVA_OPTIONS` itself, so the flag survives an operator overriding `JAVA_OPTS` or
+  `JAVA_OPTS_APPEND` — and a `docker run -e JAVA_OPTS_APPEND=...` *replaces* the image's value
+  rather than appending to it. `docs/setup-eddi-on-aws-with-mongodb-atlas.md` does exactly that
+  to pass a MongoDB connection string, so the obvious placement would have been silently dropped
+  by a deployment shape we document ourselves.
+- **`src/main/docker/Dockerfile.demo`** — the flag in the `ENTRYPOINT` array. The demo image
+  starts EDDI with a bare `java` command, so it has neither `run-java.sh` nor any ENV to inherit
+  from.
+- **`pom.xml`** — the flag on the Surefire fork's `argLine`, and deliberately **not** on the
+  Failsafe fork's.
+  Failsafe's `argLine` *parameter* defaults to the `${argLine}` property, which both
+  `jacoco:prepare-agent-integration` and the Quarkus Maven extension populate; declaring an
+  explicit element there replaces the lot, dropping the JaCoCo IT agent that feeds the merged
+  90/80 coverage gate, the add-opens Quarkus injects, and the serialized app-model path. An
+  earlier revision of this branch did exactly that. ITs exercise the image over HTTP and never
+  build a Jlama model in the test JVM, so the flag buys nothing there.
+- **`mise.toml`** — the flag via `-Djvm.args` on **both** tasks that fork a dev JVM, `dev` and
+  `debug`. `debug` was missed initially and the test could not see it, because it matched only
+  the first `quarkus:dev` line.
+- **`JlamaRuntimeSupport`** (new) — reads `MachineSpec.VECTOR_TYPE`, the field Jlama's own
+  `TensorOperationsProvider` branches on, and logs one warning that distinguishes the two causes:
+  a missing flag (fixable in one line) versus a CPU exposing no vector species Jlama accepts (not
+  fixable by any flag). Warns rather than fails — a degraded Jlama still answers correctly, and
+  failing closed would turn a slow deployment into a broken one on upgrade, for a condition the
+  operator may not be able to fix.
+- **`JlamaLanguageModelBuilder`** — exposes four of the five settings Jlama accepts and EDDI
+  was dropping: `modelCachePath`, `quantizeModelAtRuntime`, `workingDirectory`,
+  `workingQuantizedType`. Booleans go through `ModelParameterValues.applyBoolean` rather than
+  `Boolean.parseBoolean`, so `"ture"` leaves the provider default instead of silently meaning
+  `false`; `workingQuantizedType` resolves against Jlama's `DType` enum with an unknown name
+  logged and ignored rather than thrown on every turn. The parameter mapping moved into a
+  package-visible `applyTo` that stops short of `build()`.
+- **`threadCount` is deliberately NOT exposed**, though Jlama's builder accepts it and an
+  earlier revision of this branch mapped it. `JlamaModel.Loader` hands the value to
+  `ModelSupport.loadModel`, which calls the process-global
+  `PhysicalCoreExecutor.overrideThreadCount` — a one-shot latch
+  (`if (!started.compareAndSet(false, true)) throw new IllegalStateException(...)`) that the
+  executor's memoized `instance` supplier also arms merely by running inference. A per-model
+  parameter cannot honour a process-global one-shot setting: the second Jlama model built in
+  a process would throw `"Executor already started"` during load, even with an identical
+  value. And `ChatModelRegistry` rebuilds models on cache eviction, secret rotation and a
+  30-minute idle TTL, so a second build is routine rather than exotic. Caught in review;
+  pinned by a test, because the setter sits on the builder right next to the mapped ones and
+  re-adding it looks like an obvious omission being corrected.
+
+`modelCachePath` is the one that matters operationally, though not for the reason that first
+looked obvious. Jlama caches weights under `${user.home}/.jlama/models`, and in the EDDI image
+that path *is* writable — including for an arbitrary OpenShift UID, because the base image sets
+`HOME` and the JDK falls back to it. The real problem is that it resolves to the pod's ephemeral
+writable layer: the multi-gigabyte weights live exactly as long as the pod, so every restart
+re-downloads them from Hugging Face before the first turn can be answered, and an air-gapped
+deployment cannot start at all.
+
+### Design decisions
+
+- **No `jlama-native`.** It would put platform-specific, glibc-sensitive shared objects into a
+  digest-pinned UBI image, add Trivy scan surface and require `--enable-native-access`. The
+  Vector API path is pure Java and gets most of the benefit.
+- **No live-inference smoke test.** It would download gigabytes from Hugging Face on every CI
+  run. `JlamaRuntimeSupportTest#simdBackendIsAvailableInThisJvm` asserts that *Jlama's own*
+  backend selection finds a vector type in the test JVM instead — which is the thing that was
+  silently false, and it costs microseconds.
+- **Probe Jlama's decision, not the module.** An earlier revision asked whether
+  `jdk.incubator.vector` was resolved. That is a strictly weaker question: `MachineSpec` accepts
+  only a 512- or 256-bit preferred species (or 128-bit on ARM), so on an x86 host exposing a
+  128-bit species — a hypervisor masking AVX2, or `-XX:UseAVX=0` — the module resolves, the class
+  loads, and Jlama still picks the scalar backend with no warning. Reading
+  `MachineSpec.VECTOR_TYPE` cannot diverge from what Jlama actually does.
+- **`timeout` stays a pipeline key.** `JlamaChatModel.builder()` has no timeout setter; the
+  value is applied by `ObservableChatModel` as a wall-clock bound. Both tempting "fixes" —
+  adding it to `recognisedParameters()`, or deleting it from the documented example — would be
+  wrong, so `JlamaTests#timeoutIsNotABuilderParameter` pins the current behaviour.
+
+### Verified against the real base image
+
+Rather than reasoning about whether `run-java.sh` forwards a non-`-D` flag, this was run inside
+`ubi10/openjdk-25-runtime` at the exact digest the Dockerfile pins:
+
+- without the flag: `moduleResolved=false classLoadable=false` — the bug, reproduced in the
+  published base image;
+- with it: `moduleResolved=true classLoadable=true`, plus the expected
+  `WARNING: Using incubator modules` line;
+- with it on `JDK_JAVA_OPTIONS` and `JAVA_OPTS` *or* `JAVA_OPTS_APPEND` overridden by the
+  operator: still `true`. That is why the flag lives there and not on `JAVA_OPTS_APPEND`.
+
+### Tests
+
+`JlamaRuntimeFlagsTest` (5) greps both Dockerfiles, every `<argLine>` in `pom.xml` and every mise
+task that forks a dev JVM, so losing the flag from any of the five places it has to appear fails
+the build where the change was made. It also asserts the flag is on *exactly one* `<argLine>`, so
+re-adding it to failsafe fails here rather than quietly costing the IT coverage data.
+`JlamaRuntimeSupportTest` (10) proves the SIMD backend is genuinely selected in a running JVM —
+the two are complementary: a typo fails both, a flag written into a config block Maven never
+applies fails only the second. `LanguageModelBuildersTest.JlamaTests` (10) covers the parameter
+mapping, including that every key in `recognisedParameters()` actually changes builder state,
+that a mistyped boolean does not silently mean `false`, that an unknown `DType` name is ignored
+rather than thrown, that `threadCount` stays unmapped, and that the Hugging Face token stays
+masked.
+
+### Docs
+
+`docs/langchain.md`'s Jlama section rewritten: a full parameter table, the required JVM flag and
+why its absence is silent, and the three container behaviours that differ without erroring —
+`modelCachePath` landing on the ephemeral layer, inference threads being sized from a CPU
+*limit* but not a *request* (cgroup shares have been ignored since JDK 19), and memory sizing for
+memory-mapped safetensors that count against the container limit but not the heap. Plus the
+air-gap caveat that an empty cache with no egress fails rather than degrades.
+
+Assessment behind this work: [`planning/inference-stack-fit.md`](../planning/inference-stack-fit.md).
+It also carries a correction — an earlier draft wrongly called `timeout` an unrecognised
+parameter.
+
+---
+
+## 🐛 fix(ui): the agent wizard could only produce a Jlama agent that never loads (2026-09-20)
+
+**Repo:** EDDI (`fix/manager-jlama-wizard`)
+
+Every Jlama path through the Manager's agent wizard produced an agent that failed on
+its first message. Three defects, all of the same shape — the wizard offering a value
+the backend cannot use, and reporting success anyway.
+
+### What was wrong
+
+1. **The model suggestions were not resolvable.** `MODEL_SUGGESTIONS.jlama` offered
+   `llama-3.2-1b` and `tinyllama`. Jlama resolves a model through `JlamaModelRegistry`,
+   which downloads it from Hugging Face and wants an `owner/name` repository id. A bare
+   name has no owner to look up, so the download fails on the agent's first turn — long
+   after the wizard said "created". `LLM_PROVIDERS`'s `defaultModel` carried the same
+   bare name, which is what the user sees as the model placeholder before typing.
+2. **A `baseUrl` field for a provider with no endpoint.** The wizard offered Jlama a
+   Base URL with a `http://localhost:8080` placeholder. Jlama runs *in-process* inside
+   the EDDI JVM; `AgentSetupService` drops `baseUrl` for `jlama` before the builder is
+   reached, and `JlamaLanguageModelBuilder.recognisedParameters()` does not contain it
+   either. Anything typed there vanished with no visible trace.
+3. **…and the field was marked required.** `isBaseUrlRequired` returned true for
+   `jlama`, which in `operator-activation.tsx` is a hard gate (`modelStepValid`): an
+   admin activating the Platform Operator on Jlama could not proceed without filling in
+   a field whose value was then thrown away.
+4. **A hidden field still submitted its stale value.** A consequence of fixing (2):
+   with the field no longer rendered, a base URL typed for a previous provider stayed
+   in wizard state and was still sent, with no way for the user to see or clear it.
+   `handleProviderChange` now clears it — in the wizard and in operator activation —
+   when the incoming provider has no endpoint.
+
+Worth noting that the *rule-based* reference config in `docs/agent-configs/` already had
+this right — its Jlama chooser offers `tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4`. The
+Manager wizard was the outlier.
+
+### What changed
+
+**Manager (`ui/manager`)**
+
+- `src/lib/model-suggestions.ts` — Jlama now suggests only ids this repository already
+  treats as real: `tjake/Llama-3.2-1B-Instruct-JQ4` (from `docs/langchain.md`) and
+  `tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4` (from the shipped reference config). Any
+  other `owner/name` repo can still be typed.
+- `src/lib/model-suggestions.ts` — new `supportsBaseUrl()` backed by an
+  `IN_PROCESS_PROVIDERS` set; `isBaseUrlRequired()` no longer returns true for `jlama`.
+- `src/pages/agent-wizard.tsx` — the Base URL block is omitted entirely when
+  `supportsBaseUrl` is false, and a Jlama note replaces it: no endpoint, weights come
+  from Hugging Face on first use, and the tuning parameters worth setting afterwards.
+  The model hint becomes Jlama-specific (the `owner/name` requirement).
+- `src/lib/api/agent-setup.ts` — `defaultModel` is a real repo id; the provider label
+  is "Jlama (In-Process)" rather than "Jlama (Local)", which read like Ollama.
+- Four new i18n keys across all 11 locales.
+
+**Backend**
+
+The deployment parameters the wizard now points users at did not exist yet —
+surfacing them without adding them would have been a fresh instance of the same bug.
+`JlamaLanguageModelBuilder` now reads `modelCachePath`, `quantizeModelAtRuntime`,
+`workingDirectory` and `workingQuantizedType`, all of which `JlamaChatModel.builder()`
+has always accepted. `modelCachePath` is the one that matters operationally: its
+default is `~/.jlama/models`, which in a container is the ephemeral writable layer, so
+every pod restart re-downloads multiple gigabytes.
+
+**Merge note (main):** this branch originally also mapped `threadCount`. While this
+branch was in flight, `fix/jlama-vector-api` landed on `main` and deliberately
+removed `threadCount` from `recognisedParameters()` — it reaches Jlama's
+process-global, one-shot `PhysicalCoreExecutor.overrideThreadCount`, which throws on
+any second call, so it cannot be a safe per-model setting (`ChatModelRegistry` rebuilds
+Jlama models on cache eviction, secret rotation and idle TTL). Merging this branch with
+`main` kept `main`'s exclusion rather than reintroducing `threadCount`; the wizard-facing
+fixes below are unaffected, since the wizard never exposed `threadCount` itself. `main`
+also factored the parameter mapping into a static `applyTo` for testability and added
+the `JlamaRuntimeSupport.warnOnceIfDegraded()` call — both preserved as-is by the merge.
+
+`ModelParameterValues` gains `applyPath`, following the existing lenient-read
+convention — an unusable value is logged and skipped so the model default stands,
+rather than throwing out of the build path and failing every conversation the agent
+serves. `main`'s version of `JlamaLanguageModelBuilder` had applied `modelCachePath`
+and `workingDirectory` inline instead (an `isNullOrEmpty` check plus a bare
+`Path.of`), which meant a NUL-containing or otherwise unusable configured path threw
+`InvalidPathException` during model construction instead of leaving Jlama's default
+in place — the same failure mode `applyPath` exists to prevent. Review feedback on
+this PR caught the mismatch after the merge, so `applyTo` now routes both settings
+through `applyPath`, and `LanguageModelBuildersTest` gained a case asserting that an
+unusable path for either setting falls back to the default rather than propagating.
+
+**Review round 3 (2026-09-24):** two more CodeRabbit findings, both minor.
+
+- `ModelParameterValues.applyPath`'s rejection warning logged the sanitized-but-not-redacted
+  configured path (`sanitize(raw)` only strips control characters — see
+  `src/main/java/ai/labs/eddi/utils/LogSanitizer.java` — it does not remove the printable
+  path itself). An invalid `modelCachePath` or `workingDirectory` could therefore place a
+  username's home directory or an internal project path into the warning log (CWE-532).
+  The log line now names the rejected parameter key only and omits the value; the other
+  `ModelParameterValues` warnings (`applyBoolean`, `booleanValue`, `rejected`) and
+  `JlamaLanguageModelBuilder.applyWorkingQuantizedType` were swept for the same pattern —
+  none of them carry filesystem paths, so they were left as-is.
+- The `jlamaNoteTuning` copy claimed the container-cached model is "re-downloaded on every
+  restart." A container restart (`docker restart`, a crash restart) preserves its writable
+  layer, so the cache actually survives a restart; it is lost only when the container is
+  removed or replaced (a redeploy, `docker rm`, a Kubernetes pod recreation). Reworded the
+  English fallback in `agent-wizard.tsx` and all 11 locale translations to say the model
+  "may be re-downloaded after the container is removed or replaced."
+
+### Design decisions
+
+- **Omit the field rather than disable it.** A disabled or ignored Base URL input still
+  tells the reader an endpoint exists. For an in-process provider it does not, so the
+  field is not rendered at all — the same reasoning the group-collaboration configs use
+  for tools that are never assembled (root `AGENTS.md` §4.2).
+- **Only ship model ids the repo already vouches for.** A longer catalogue would have
+  meant guessing at Hugging Face repo names, which is exactly the failure being fixed.
+  The hint text carries the `owner/name` rule so a user can supply their own.
+- **`workingQuantizedType` is parsed case-insensitively** and an unknown value keeps
+  Jlama's default. `q4` is what a user writes; `Q4` is what the enum calls it.
+- **`jlama-core` stays undeclared in `pom.xml`.** `DType` is imported from it
+  transitively via `langchain4j-jlama`; pinning a second version of a library the
+  langchain4j artifact already manages would be the worse hazard.
+
+### Files
+
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/JlamaLanguageModelBuilder.java`
+- `src/main/java/ai/labs/eddi/modules/llm/impl/builder/ModelParameterValues.java`
+- `src/test/java/ai/labs/eddi/modules/llm/impl/builder/LanguageModelBuildersTest.java`
+- `src/test/java/ai/labs/eddi/modules/llm/impl/builder/ModelParameterValuesTest.java`
+- `docs/langchain.md` — the Jlama section now states the `owner/name` requirement, that
+  there is no `baseUrl`, and documents the five parameters in a table
+- `ui/manager/src/lib/model-suggestions.ts`
+- `ui/manager/src/lib/api/agent-setup.ts`
+- `ui/manager/src/lib/api/operator.ts` — stale "(Ollama, Jlama)" doc comment
+- `ui/manager/src/components/operator/operator-activation.tsx`
+- `ui/manager/src/pages/agent-wizard.tsx`
+- `ui/manager/src/lib/__tests__/model-suggestions.test.ts` (new)
+- `ui/manager/src/pages/__tests__/agent-wizard.test.tsx`
+- `ui/manager/src/i18n/locales/*.json` (11 files)
+
+### Verification
+
+- `./mvnw compile` clean; `LanguageModelBuildersTest` + `ModelParameterValuesTest` — the
+  new Jlama and `applyPath` cases pass (the pre-existing failures in that class are the
+  sandbox's "Unable to establish loopback connection", not this change).
+- Repo-wide guards green: `ImportStyleTest`, `DocumentationLinksTest`,
+  `StrictBoundaryShippedConfigsTest`, `RuleSetStoreShippedRulesetsTest`,
+  `ChangelogRotationTest`, `BuildQualityGatesTest`.
+- Round 3: `.\mvnw.cmd compile` (Checkstyle + `formatter:validate` clean); `.\mvnw.cmd test
+  "-Dtest=LanguageModelBuildersTest,ModelParameterValuesTest,JlamaRuntimeSupportTest,ChangelogFragmentTest"` —
+  all Jlama- and `applyPath`-specific cases pass (same pre-existing loopback-socket
+  failures as above, unrelated to this change).
+- Manager: `npm run typecheck`, `npm run lint`, `npm run i18n:check`, `npm run build`
+  and the full suite (413 files, 6556 tests) all pass.
+- **The six new UI tests were mutation-checked.** Reverting the suggestions, the
+  default model or `IN_PROCESS_PROVIDERS` fails the five that pin the wizard's Jlama
+  behaviour; dropping the `handleProviderChange` clear fails the sixth. They would
+  have caught this.
+
+---
+
 ## 📝 docs(mcp): how to reach an authenticated `/mcp`, and the plan to stop needing this (2026-09-20)
 
 **Repo:** EDDI (`docs/mcp-oauth-plan`)
@@ -587,2264 +2833,6 @@ it something to authenticate as.
 - `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
 - `docs/mcp-server.md`, `docs/security.md`
 
-## 🔐 feat(mcp): advertise `/mcp` as an OAuth protected resource, so clients sign themselves in (2026-09-20)
-
-**Repo:** EDDI (`feat/mcp-oauth-discovery`, stacked on `docs/mcp-oauth-plan`)
-
-Increment 1 of [`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md).
-An MCP client now discovers where to authenticate and holds its own token, instead of an
-operator pasting a bearer that expires in five minutes.
-
-Quarkus OIDC 3.39.3 already serves the RFC 9728 document and appends `resource_metadata="…"`
-to the 401 challenge, so there is no new EDDI code — five properties and one permit rule.
-
-### What changed
-
-- **`application.properties`** — `quarkus.oidc.resource-metadata.*`: `enabled` tracks
-  `tenant-enabled` (an instance with auth off has no authorization server to name, and the
-  handler is not installed for a disabled tenant), `resource=/mcp`, `force-https-scheme=true`,
-  `scopes=openid`, and `authorization-server` preferring `token.issuer` over `auth-server-url`.
-- **`application.properties`** — a `permit` rule for the two exact metadata paths (the bare
-  form and the path-inserted document), `GET,HEAD` only. Exact rather than a `/*` under the
-  prefix, which would anonymously expose any future handler beneath it.
-- **`helm/eddi`** — `eddi.oidc.resourceMetadata.{forceHttpsScheme,authorizationServer}`, because
-  neither is safely inferable: `publicUrl` describes Keycloak, not EDDI, so an https IdP in
-  front of a plain-http port-forward would advertise a resource nothing serves. The scheme now
-  follows EDDI's own `ingress.tls` unless set. Chart version bumped per Chart.yaml's rule.
-- **`application.properties`** — the MCP security banner said 33 tools (there are 84) and
-  described a two-role model (there are four, with no hierarchy).
-- **`McpOAuthDiscoveryConfigTest`** (new, 8 cases) — the config *is* the feature, so it is what
-  gets asserted: the enabled expression, the resource matching the MCP root path, the issuer
-  preference, `openid` while `user-info-required` is on, the permit rule's policy/methods/paths,
-  what those paths match and do not match, and `/mcp` still being `authenticated`.
-- **`ui/manager/e2e/auth/auth.spec.ts`** — two cases in the Keycloak tier: the document is
-  readable with no token and names the issuer a real token carries; an unauthenticated `/mcp`
-  POST answers 401 with a challenge pointing at it.
-- **Every shipped stack that serves plain http with authentication on** overrides
-  `force-https-scheme`, because that is the one shape a forced https identifier is wrong for:
-  `docker-compose.auth.yml`, the auth E2E tier, `k8s/overlays/auth` (its documented flow is
-  `kubectl port-forward`), and the helm chart whenever the Keycloak URL it is given is itself
-  plain http. Without it those deployments advertise `https://…/mcp` with nothing serving TLS,
-  and discovery dies before it starts.
-- **`ui/manager/docker-compose.integration-keycloak.yml`** — the tier now pins the
-  browser-reachable issuer the way `docker-compose.auth.yml` does, so the discovery document it
-  publishes is the one a real deployment publishes. The E2E case can therefore assert the
-  advertised authorization server is reachable **from outside the compose network** — with the
-  old in-cluster hostname that assertion could not have failed.
-- **`docs/mcp-server.md`**, **`docs/security.md`** — the discovery path as the preferred way in,
-  with the hand-pasted token demoted to a fallback; the new permit row, and why `@PermitAll`
-  alone does not make a path public.
-
-### Decisions
-
-- **The permit rule is mandatory, not defence in depth.** quarkus-oidc registers its handler as
-  `FilterBuildItem(handler, 50)` and `SecurityHandlerPriorities.AUTHORIZATION` is 100 — higher
-  runs first, so authorization would answer 401 before the document could be read, and
-  discovery could never start. Verified by `javap` on `OidcBuildStep`, and asserted over HTTP
-  in the auth E2E tier because no properties file can prove an ordering.
-- **Exact paths, never `/.well-known/*`.** A wildcard there would pre-permit whatever lands
-  under that prefix later. A test asserts what the patterns match *and* what they must not.
-- **`authorization-server` defaults to `token.issuer`.** `auth-server-url` is the
-  cluster-internal Keycloak address in both shipped deployments, so the default would have
-  advertised a host no client outside the cluster can resolve. RFC 8414 wants the advertised
-  server to equal the issuer regardless, and the E2E assertion compares it against the `iss`
-  claim of an accepted token rather than a hardcoded URL.
-- **`openid` is advertised deliberately.** `user-info-required=true` makes EDDI call userinfo
-  on every request, and Keycloak refuses userinfo for a token minted without that scope;
-  clients copy `scopes_supported` into the authorize request. A test pins the pair together so
-  removing one surfaces the other.
-- **https is forced by default.** `quarkus.http.proxy.*` is unset, so behind a TLS-terminating
-  ingress the identifier would be advertised as `http://`.
-- **The permit path interpolates the MCP root path (review round 4).** It read
-  `/.well-known/oauth-protected-resource/mcp`, a literal, while the advertised resource was
-  already derived from `${quarkus.mcp.server.http.root-path}`. An operator who moved the MCP
-  root would have moved the document with it and left the permit rule behind: the metadata
-  request then meets the catch-all `authenticated` policy and answers 401, and the 401
-  challenge that is supposed to bootstrap discovery points at a path that also answers 401.
-  Both halves now interpolate the same property. `McpOAuthDiscoveryConfigTest` asserts the
-  raw expression — asserting the resolved form would pass either way — and resolves it
-  against the root path for its match checks; reverting the property to the literal fails
-  that test. `A2aEndpointPermissionsTest` builds its matcher from this file, so it grew a
-  small expander for `${…}` inside a permission path and now probes the path-inserted
-  document through it; unexpanded, that path entered the matcher as a literal and the model
-  reported `authenticated` for a document Quarkus permits.
-
-### Files
-
-- `src/main/resources/application.properties`
-- `src/test/java/ai/labs/eddi/configs/McpOAuthDiscoveryConfigTest.java` (new)
-- `ui/manager/e2e/auth/auth.spec.ts`, `ui/manager/docker-compose.integration-keycloak.yml`
-- `docs/mcp-server.md`, `docs/security.md`
-- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java`
-
-## 🛡️ fix(security): validate the token audience, and stop calling userinfo on every request (2026-09-20)
-
-**Repo:** EDDI (`feat/oidc-audience-validation`, stacked on `feat/keycloak-mcp-client`)
-
-Increment 2 of [`planning/mcp-oauth-protected-resource-plan.md`](../planning/mcp-oauth-protected-resource-plan.md),
-kept separate because it changes which tokens are accepted — every token, not only MCP ones.
-
-Quarkus verifies `aud` on an **access** token only when `quarkus.oidc.token.audience` is set
-(`OidcIdentityProvider` passes `enforceAudienceVerification = idToken`, and with the property
-unset `OidcProvider` calls `setSkipDefaultAudienceValidation()`). It was unset, so EDDI accepted
-any token the realm issued for any client in it — and roles come from `realm_access/roles`,
-which is client-independent, so such a token arrived carrying the user's full rights. The
-`eddi-backend-audience` mapper that has been on `eddi-frontend` all along is evidence someone
-intended this check and never switched it on. It matters more now that a second client exists.
-
-### What changed
-
-- **`application.properties`** — `quarkus.oidc.token.audience=eddi-backend`.
-- **`application.properties`** — `quarkus.oidc.token-cache.{max-size=1000,time-to-live=3M,clean-up-timer-interval=5M}`.
-  `user-info-required=true` means one Keycloak round trip per request, which an MCP client makes
-  many of. Signature, expiry and audience are still checked per request, before the cache is
-  consulted at all. What it defers is the userinfo call, which doubles as a session-revocation
-  check (Keycloak refuses userinfo for a logged-out session) — so a killed session keeps working
-  for up to the TTL. That, not token expiry, is why the TTL is short.
-- **`DeploymentManifestsTest`** — every client that can mint a token (standard, direct-grant,
-  implicit or service-account flow) must mint the audience the property requires, in all three realm copies, compared
-  against the property rather than a spelling repeated in the test.
-- **`ui/manager/e2e/auth/mcp-oauth.spec.ts`** (new) — the middle of the feature, which the
-  discovery and 401 cases do not reach: authorization code + PKCE against `eddi-mcp`, the
-  token exchange, then `/mcp` `initialize` and a real `list_agents` call. It asserts the
-  token carries `aud=eddi-backend` and realm roles, so the two silent failures — a token the
-  backend refuses, and one that authenticates and is then refused by every tool — surface as
-  themselves rather than as a generic 401.
-- **`docs/security.md`**, **`docs/open-webui-integration.md`** — both properties in the table, what
-  a hand-built realm has to do, and the `/v1` adapter's 401-under-OIDC entry, which now also means
-  "and carrying `aud=eddi-backend`".
-
-### Compatibility
-
-**This rejects tokens that were accepted before.** A deployment whose users authenticate through
-a client *without* an audience mapper starts answering 401. The shipped realm is unaffected
-(both login clients carry the mapper). The fix for a custom realm is to add the mapper; the
-escape hatch is `QUARKUS_OIDC_TOKEN_AUDIENCE=any` — quarkus-oidc's own sentinel for skipping
-audience validation (`OidcProvider.ANY_AUDIENCE`), which restores the old behaviour.
-
-### Files
-
-- `src/main/resources/application.properties`
-- `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
-- `docs/security.md`, `docs/open-webui-integration.md`
-
-## 🔒 fix(security): sanitize the agent-deployment log lines CodeQL flagged for CWE-117 (2026-09-20)
-
-**Repo:** EDDI (`fix/log-injection-agent-deployment-logs`)
-
-GitHub code scanning had 14 open `java/log-injection` alerts against `refs/heads/main` in two files —
-9 in `RestAgentAdministration` (#90–#92, #97–#102) and 5 in `AgentFactory` (#116–#120). They are not
-new: they surfaced while triaging community PRs #558 and #561, which only rename logger fields and
-neither introduce nor fix any of them. `agentId` is a path parameter on every endpoint involved, so a
-CR/LF in one closes the real log record and lets the remainder read as a second line the server wrote
-itself — a forged `[SCHEDULE] Auto-enabled` line for an agent nobody deployed, for instance.
-
-### What changed
-
-- **`AgentFactory`** — `waitForDeploymentCompletion` quoted the raw `AgentId` on five lines (two
-  "did not complete successfully" ERRORs, the still-deploying DEBUG, the timeout WARN and the
-  interrupted WARN). It now derives one `var safeAgentId = sanitize(agentIdObj.toString())` after the
-  listener lookup and every line quotes that — one call site instead of five, and the rendering is
-  byte-identical to the old `%s` on the object for a benign id. `logAgentDeployment`'s two INFO lines
-  (alerts #119/#120, the only two still current at `798c6e84`) now `sanitize(agentId)`. The file
-  already sanitized its three `debugf` calls; these were simply missed.
-- **`RestAgentAdministration`** — all 9 flagged sinks: the deploy-wait timeout WARN, the deploy-failed
-  WARN (both the id *and* the cause's message), the successful-undeploy INFO, `throwError` and
-  `throwErrorForbidden`, and the four `[SCHEDULE]` auto-enable/auto-disable lines, which also quote
-  `schedule.getName()` and `schedule.getId()` verbatim. Log levels and message wording are unchanged
-  throughout.
-- **`RestAgentAdministration` now static-imports `sanitize`** rather than calling
-  `LogSanitizer.sanitize(...)` on two pre-existing sites, matching `RestAgentStore` and
-  `RestWorkflowStore` and AGENTS.md's ban on inline qualification. The class import is gone, so
-  Checkstyle's `UnusedImports` stays green.
-
-### Tests
-
-Two new classes in the established shape — `captureLogsOf(<Class>.class, …)` plus
-`assertNoForgedRecordBoundary(...)` against `LogCaptureSupport.FORGED_RECORD`, attaching by logger
-category rather than by field name (so PR #558's renames cannot break them):
-
-- `AgentFactoryLogInjectionTest` — 6 tests. Reaching `waitForDeploymentCompletion` needs a published
-  `IN_PROGRESS` placeholder, so each test parks a deployment inside its store lookup on a virtual
-  thread (the idiom `AgentFactoryUndeployVersionTest` already uses) and calls `getAgent` from the test
-  thread.
-- `RestAgentAdministrationLogInjectionTest` — 9 tests, one per alert.
-
-Every one of the 17 arguments newly wrapped in `sanitize(...)` was mutation-checked one at a time:
-revert exactly that call, run the class, require the named test to fail. 17 mutations, 17 killed,
-0 survived. Driver lived in the session scratchpad and is not committed.
-
-### Decisions
-
-- **Which alerts are real.** Three of the five `AgentFactory` alerts (#116–#118) were last seen at
-  `d5294a60` and point at lines that carry `sanitize(agentId)` on today's `main` — stale instances
-  that should close on the next scan of the branch. The genuinely unsanitized sinks in that file were
-  the two `logAgentDeployment` INFOs plus the five `waitForDeploymentCompletion` calls, which CodeQL's
-  stale line refs no longer name. Fixing by *call site* rather than by *reported line* is the only way
-  to end up with the file actually clean.
-- **`throwErrorForbidden`'s sanitize also reaches the client.** Its `message` is both logged and put
-  into the `WebApplicationException` body, so sanitizing the id narrows a response-splitting surface
-  as well. That is a strict improvement and the wording is untouched, so it stays on one call.
-- **The auto-enable/auto-disable failure WARNs pin the id only.** Both pass the cause as the record's
-  *throwable*, not as a format parameter, so `LogCaptureSupport` never sees its message — those tests
-  deliberately use a benign exception message rather than implying coverage they do not have.
-- **The `CompletableFuture` in the timeout/interrupt tests is hand-written, not mocked.** The default
-  mock maker does not intercept `CompletableFuture.get(long, TimeUnit)`: a stubbed mock silently ran
-  the real 60-second wait, and Mockito reported it as `UnfinishedStubbing` from inside the JDK. A
-  four-line anonymous subclass whose `get` throws is deterministic and needs no mock maker at all.
-- **Each capture window holds exactly one line under test.** The parked deployment's own
-  `logAgentDeployment` INFO fires *before* the store lookup and the endpoint calls run outside the
-  window, with only the captured Callable inside it. Without that ordering a test could be satisfied
-  by whichever line leaked first, and the per-site mutation check would not localise.
-
-### Still open
-
-`java/log-injection` has ~40 further open alerts on `main` in `GroupHitlCoordinator`,
-`GroupConversationService`, `MemberTurnExecutor`, `ConversationHitlService`, `PhaseExecutionEngine`,
-`AuditLedgerService` and others. Out of scope here; same one-line fix and same test shape apply.
-
-## 🔒 fix(apicalls): auto-vaulted properties carry a provenance marker; the guard requires it (2026-09-20)
-
-**Repo:** EDDI (`fix/vault-references-in-templates`)
-
-### Why
-
-`ConfigReferenceGuard.autoVaultReferences` decided whether a conversation property named by an
-HTTP-call template may resolve a vault secret by **looking at the value**: it accepted the property
-when its value was character-for-character what `PropertySetterTask.autoVaultSecret` would have
-written for that property, under this conversation's agent and tenant. Two PR reviewers (Copilot,
-CodeRabbit) asked for a provenance check instead, and the previous entry recorded why it was not
-done then: `Property` carried no marker. A `scope: "secret"` instruction stores its vault reference
-with `scope: conversation`, indistinguishable on disk from a property a template wrote from user
-input, a model reply or an API response — so `${vault:<agentId>.apiKey}` was a string an attacker
-could simply produce, and the shape test accepted it.
-
-What that bought an attacker was bounded (the key is derived from the agent and the property name
-the template reads, and the request goes to the endpoint the configuration names), which is why it
-shipped. It is still a value the configuration never wrote being resolved into an outgoing request.
-
-### What changed
-
-- **`Property.autoVaulted`** (new, `Boolean`) — the provenance marker, set by
-  `PropertySetterTask.autoVaultSecret` and by **nothing else**. No property-instruction field maps to
-  it (`convertPropertyInstructions` reads a fixed key set), and no REST endpoint takes a `Property` as
-  a request body, so "marked" means "this process vaulted it" rather than "this value looks vaulted".
-- **`ConfigReferenceGuard`** requires the marker before it will allow a reference read through
-  `{properties.x}`. The agent/property/tenant comparison is kept behind it — redundant by
-  construction, since `autoVaultSecret` derives all three itself, and kept as the bound that still
-  holds if a marked `Property` ever reaches memory from somewhere other than that method.
-- **`ApiCallExecutor`** passes the live `Map<String, Property>` from `IConversationMemory` into
-  `buildRequest` → `resolveGuardedVariables` → the guard. `ConversationProperties.toMap()` — what
-  templates and, until now, the guard see — flattens each `Property` to its raw value and loses the
-  marker, so it needs a channel of its own. Read from memory at build time, not captured earlier: a
-  pre-request property instruction writes through to the same map between `execute` being called and
-  the request being built. Threaded through `execute`, `resolve` and `executeFireAndForgetCalls`.
-- **`MemoryCheckpoint.copyProperties`** carries the marker across the deep copy. It clones through the
-  all-args constructor, which does not take the new field — a rollback that dropped it would turn
-  every later API call using that secret into a refusal.
-- `docs/secrets-vault.md`: the auto-vaulted-property case now rests on provenance, and what an
-  unmarked property means.
-
-### Decision: unmarked is refused, not grandfathered
-
-`null` covers two cases that cannot be told apart — a property written from conversation data, and
-one written into a conversation document before the field existed. Accepting the pair for
-compatibility would leave the hole open permanently, because the attacker's property is unmarked
-too; the fix would be decorative. So unmarked fails closed.
-
-The cost is a conversation that auto-vaulted a secret under an earlier release and makes the API
-call after the upgrade: the call is refused with the error that names the field and the reference,
-and re-running the `scope: "secret"` instruction (the user supplies the secret again, or a new
-conversation starts) marks it. Bounded — it needs the vault enabled, which is not the shipped
-default — and recoverable. A permanent fail-open is neither.
-
-Deserialization stays backward compatible in the mechanical sense: the field is absent from every
-document already in MongoDB and reads back as `null` rather than failing, and EDDI's global
-`NON_NULL` inclusion means an unmarked property does not gain the field on write either.
-
-### Verification
-
-- `ConfigReferenceGuardTest` 10 → 13: the three existing auto-vault cases kept (`autoVaultProperty`,
-  `autoVaultTenantIsPinned`, `autoVaultOwnTenant`, now stating the marker explicitly — tenant pinning
-  still refuses a *marked* property under a foreign tenant, so provenance is necessary and not
-  sufficient), plus an unmarked property holding the exact reference, an explicit `FALSE`, and no
-  properties at all.
-- `ApiCallExecutorConfigReferenceTest` +1: the request `autoVaultedPropertyHeader` sends, refused
-  byte-for-byte when the same property is unmarked — the vault is never asked and nothing is sent.
-- `PropertySetterTaskSecretScrubTest` +2: a `scope: "secret"` write is marked; an ordinary write of
-  the identical string is not.
-- `PropertyTest` +5 (JSON round-trip, an unmarked property omits the field, a pre-marker document
-  reads back unmarked), `MemoryCheckpointTest` +1 (the marker survives the deep copy).
-- Mutation-checked one at a time: the guard ignoring the marker fails 3 tests, `autoVaultSecret` not
-  writing it fails 1, the checkpoint clone dropping it fails 1.
-- apicalls, properties, memory and secrets suites plus the repo-wide guards: 6479 tests green.
-
-## 🔒 fix(hitl): MCP `get_approval_status` detail=full no longer serves raw tool arguments (2026-09-19)
-
-**Repo:** EDDI (`fix/mcp-approval-detail-redaction`)
-
-The REST `GET /agents/{id}/approval-status?detail=full` returns the snapshot through
-`ConversationMemoryUtilities.sanitizePendingToolCallsForApprover`, which removes the pending batch's
-`argumentsRaw`, `chatTranscriptJson` and `traceSoFar`, masks the request fingerprint and re-redacts the
-served arguments and preview. The MCP mirror, `McpHitlTools.getApprovalStatus`, called only
-`stripRequestFingerprintsForRead` — one step of that method — so every MCP caller the read gate
-admitted received the raw arguments of each gated tool call (a clear-text API key has been observed
-there) plus the full serialized LLM transcript. On a deployment without OIDC,
-`eddi.mcp.allow-unauthenticated=true` makes that surface reachable from the network.
-
-### What changed
-
-- **`McpHitlTools.getApprovalStatus`** — `detail=full` now serializes
-  `sanitizePendingToolCallsForApprover(snapshot)`, the same call the REST surface makes.
-- **`ConversationMemoryUtilities.stripRequestFingerprintsForRead` is now `private`.** The divergence
-  existed because there were two public projections to choose from; now there is one, and the compiler
-  refuses the old call. Its Javadoc and the sanitizer's say both surfaces must use the sanitizer.
-- **`McpHitlToolsTest.getApprovalStatus_detailFull_neverServesRawArgumentsOrTranscript`** — builds a
-  paused snapshot with a canary in `argumentsRaw`, `chatTranscriptJson` and `traceSoFar`, serializes
-  through the real `JsonSerialization` (a mocked serializer hides which fields ride along), and asserts
-  the canary is absent while `argumentsRedacted` is still served. It fails on the previous code.
-- **`docs/hitl.md`** — the approver read-scope paragraph states the sanitization applies to REST and MCP.
-
-### Decisions
-
-- **Group variant: no change.** `get_group_approval_status?detail=full` (MCP) and its REST twin both
-  return the `GroupConversation` unmodified. That document carries no `PendingToolCallBatch`, no
-  `argumentsRaw` and no LLM transcript JSON — its `transcript` is the group discussion itself, which is
-  the documented content of the full view, and `hitlLastPauseFingerprint` digests task state, not a
-  request. Member tool-call pauses inside group turns (`inGroupTurns: INBOX`) are still reserved, so
-  nothing gated per call is stored on the group document. Both surfaces already serve the same thing.
-- **Readers swept, already safe:** REST `approval-status` (both views — summary builds `pauseDetails`
-  from `argumentsRedacted`, re-redacted); `RestConversationStore` raw log (`redactRawPendingToolCallsForRead`,
-  names only) and simple log (`convertSimpleConversationMemory`, names only); `ConversationService.readConversation`
-  and every say/resume response (`convertSimpleConversationMemorySnapshot`, names only) and so MCP
-  `read_conversation`, the OpenAI-compatible bridge, `ConverseWithAgentTool` / `CreateSubAgentTool`
-  (tool names only); Slack approval cards (`SlackHitlSupport` reads `argumentsRedacted`, re-redacted);
-  GDPR Art. 15 export (conversation outputs only); the HITL audit entry (`argsDigest`, a SHA-256 — not
-  the arguments); `RestToolHistory` (step traces, owner-only, not the pending batch);
-  `RestTemplatePreview` (`MemoryItemConverter` exposes no HITL fields).
-- **The concurrent change landed first, and this branch absorbed it.** `fix/gemini-thought-signatures`
-  (#794) added `PendingToolCallBatch.gatingAssistantMessageJson`, which embeds every gated call's raw
-  arguments. It dropped that field inside `stripRequestFingerprintsForRead`, with the reasoning that
-  the method was "the one method every full-detail read calls — including the MCP approval-status
-  tool, which calls nothing else". That premise is exactly what this branch removes, and its own
-  sanitizer already nulls the field, so the merge keeps the strip there and drops the duplicate: one
-  projection, one place a new raw-argument field has to be listed. The test that asserted the partial
-  strip drops the field now asserts that the partial strip is private — the invariant that kept the
-  two doors from drifting again.
-
----
-
-## 🐛 fix(operator): review follow-ups on the self-URL fix — stricter origin, later retirement, factual tool errors (2026-09-19)
-
-**Repo:** EDDI (`fix/operator-self-url`) — backend and `ui/manager/`, follow-up to the entry below (PR #795 review)
-
-**What changed**
-
-- **`eddi.self.base-url` must be a bare origin.** `SelfUrlResolver` now rejects a value
-  with a path, query, fragment or userinfo (falls back to loopback, logged at ERROR).
-  Every consumer appends an API path verbatim, so `https://eddi.internal/base` silently
-  retargeted every call and `http://eddi:7070?tenant=x` turned every path into query
-  content. The Manager's activation form applies the same rule by parsing with `URL`
-  (`isOriginOnlyBaseUrl` in `lib/api/operator.ts`) instead of a character class that
-  still admitted `?` and `user:pass@`.
-- **Plain-HTTP, non-loopback self URL is warned about, not refused.** `${caller:token}`
-  is released to that address, so the resolver logs a WARN at startup that the token will
-  cross the network unencrypted unless a mesh protects it. Refusing it would break the
-  in-cluster service-name case the override exists for.
-- **The superseded operator is retired only after the replacement passes verification.**
-  `useActivateOperator` used to undeploy and delete the predecessor before
-  `verifyGateInstalled` / `enforceGateDryRun`; when either rolled the replacement back,
-  the deployment had no operator at all. Retirement now runs last, and the failure path
-  (`handBackToPredecessor`) never retires the predecessor. It asks the agent store
-  whether the replacement still exists — via `GET /agentstore/agents/{id}/currentversion`
-  (200 present, 404 absent; new `getAgentCurrentVersion` in `lib/api/agents.ts`), NOT the
-  version-less `GET /agentstore/agents/{id}`, which a live 6.4 answers with 400 for an
-  existing agent and an unknown id alike — rather than inferring it from the config
-  variable (`resetOperator` deletes the agent before clearing the variable, so a failed
-  clear leaves a config naming a deleted agent): gone means the predecessor's config is
-  written back; still present — including a predecessor with no recorded version — means
-  both are left and the error names both. Tests in `use-operator-supersede.test.tsx`,
-  mutation-checked against the old ordering and the first version of the hand-back. Their
-  agentstore mocks mirror the measured 6.4 behaviour (version-less GET → 400) and assert
-  the exact URL the presence check calls: the first cut of this check used the
-  version-less GET, and a mock that answered it with the document let it pass while it
-  could only ever return "unknown" against a real backend.
-- **Tool failure messages state facts, not reporting policy.** `HttpCallToolsProvider`
-  no longer tells the model "report this to the administrator" or that a refused
-  connection is "NOT a fault in the service" — a stopped listener refuses too. The
-  connect-class message now says the request failed before any response and lists what
-  to check (base URL reachable from the server, network path, listener); the SSRF
-  message says no request was sent and that the base URL must pass the full SSRF policy.
-- **Docs:** the SSRF guidance now says the self URL must pass the *whole* target policy
-  (private and link-local are refused too, so an in-cluster name usually stays blocked);
-  the `unresolved` self-URL case is documented in `httpcalls.md`, `hitl.md`, `AGENTS.md`
-  and `ui/manager/AGENTS.md`; `eddi.self.base-url` and
-  `eddi.caller-identity.self-release.enabled` are added to
-  `configuration-reference.md` (CI's `ConfigurationReferenceCoverageTest` was red on
-  their absence).
-- **i18n:** corrected misspelled terms in the new `hi`, `ja`, `ko` and `th` strings.
-
-**Design decisions:** the transport-security finding is answered with a startup warning
-rather than a refusal, for the reason above; the tool message keeps its diagnostics in
-the engine (every agent needs them) but drops the imperatives, which belong in an agent's
-prompt.
-
----
-
-## 🧹 chore: replace a customer name used in examples and tests with a generic one (2026-09-18)
-
-**Repo:** EDDI (`chore/genericise-customer-examples`); mirrored on the archived EDDI-Manager repo's
-branch of the same name
-
-A worked connection example, a planning section, two changelog entries, one Javadoc and the
-`CALLER_SUPPLIED` test fixtures named a real integrating customer. They now use generic values
-throughout: connection `acme`, host `https://api.example.com` (RFC 2606), header `X-Acme-Key`, and
-prose that describes the requirement ("an integration that hands EDDI the end user's own API key")
-rather than who had it.
-
-- **Docs:** `docs/connections.md`, `planning/saas-connectors-plan.md` §5.5, one line of this file,
-  and the `CALLER_SUPPLIED` entry in the `docs/changelog/2026-08.md` archive (wording only, structure
-  untouched).
-- **Code:** the `RequestRedactor` Javadoc only.
-- **Tests:** `ConnectionConfigurationValidationTest`, `RestConnectionStoreWriteGuardTest`,
-  `ConnectionResolverTest`, `ConnectionStartupGuardTest`, `CallerIdentityContextTest`,
-  `ApiCallExecutorConnectionHeaderTest`, and under `ui/manager/` the connection tests, the MSW
-  fixture and `HANDOFF.md`. The replacement is used consistently in setup and assertion; no behaviour
-  changed, and the same tests pass before and after.
-
-The removal is from the tree only. Git history is not rewritten — that would need a force-push to
-`main`.
-
----
-
-  connection on `X-Amp-Id` or a `CALLER_SUPPLIED` one on `X-Acme-Key` matched none, so the live
-
-## 🖥️ feat(manager): ingestion sources panel for knowledge bases (2026-09-18)
-
-**Repo:** EDDI (`feat/manager-ingestion-sources`, stacked on `feat/rag-ingestion-rest`)
-
-### What it adds
-
-A section inside the RAG editor listing a knowledge base's ingestion sources, with add, edit and remove,
-and — once the knowledge base is saved — run, preview, purge and recent run history.
-
-### Why a rewrite rather than a port
-
-The stale `labsai/EDDI-Manager#95` (now archived with that repository) targeted standalone
-`/ragstore/ingestion-sources` resources. Sources now live on the knowledge base as `sources[]`, so
-creating or editing one is an ordinary save of the RAG config, and only the four runtime verbs have
-endpoints of their own. The resulting component is considerably smaller than the 846-line original.
-
-### Decisions
-
-- **A new source cannot be run.** It has no id for the endpoints to address until the knowledge base is
-  saved; the panel says so instead of offering a button that 404s.
-- **Preview is headed "nothing was embedded".** A preview that looked like a run would be worse than none.
-- **Purge goes through `AlertDialog`**, since the next run re-embeds everything the source had ingested.
-- **Run history polls only while a run is `RUNNING`.** A crawl takes minutes and the start endpoint
-  answers 202; an idle screen should not tick forever.
-
-### Contract snapshot
-
-`ui/manager/src/test/mocks/openapi-operations.json` was regenerated from the OpenAPI document Maven
-produces. `openapi-contract.test.ts` failed until it was, because the new MSW handlers mocked endpoints the
-old snapshot did not know — and the regenerated diff was exactly the four new endpoints, nothing else.
-
-### Tests
-
-16 cases in `resource-detail-rag-sources.test.tsx` (9 when this entry was written, 7 added by later review rounds); 6558 passing across 413 files. `lint`, `typecheck`,
-`i18n:check` and `build` all pass, with translations for all 11 locales in the same commit.
-
----
-
-## 🔧 fix(rag): review findings on the ingestion salvage (2026-09-18)
-
-**Repo:** EDDI (`feat/rag-ingestion-rest` and the branches below it)
-
-A critical review of the six salvage branches returned ten must-fix findings. All are fixed, each with a
-test that fails when the fix is reverted. The headline four fixes the salvage was built around held up
-under mutation; every finding below was in a seam those tests did not reach.
-
-### Would not have started at all
-
-`PostgresIngestionStateStore` was `@ApplicationScoped` without `@DefaultBean` while `DataStoreProducers`
-also produces `IIngestionStateStore` — two non-default candidates, so ArC fails augmentation and nothing
-boots. Every sibling Postgres store carries `@DefaultBean` for exactly this reason. No unit test can see
-this; the review caught it by reading the pattern.
-
-### Silent data loss
-
-- **A tombstoned page that came back unchanged was never re-embedded.** Its vectors had been deleted, so
-  comparing hashes alone made it "unchanged" forever and permanently unretrievable. Two routes, both
-  closed: `hasChanged` is now true for a tombstoned document, and it is no longer revalidated with its
-  stored ETag (a 304 never re-embeds).
-- **Schedules were orphaned.** `syncSchedules` walked only the new document's sources, so a source
-  deleted from `sources[]` kept its schedule and went on crawling a third party on a cron with nothing
-  left in the configuration to switch it off. The previous version's source ids are now diffed.
-- **Deleting an old version killed the live version's schedules.** Removal now happens only when no
-  readable version remains.
-- **A duplicated knowledge base shared the original's ingestion identity.** Vector stores are keyed by
-  name, which a duplicate shares, so the copy's runs replaced and tombstoned the original's chunks while
-  the original's state still said "unchanged". A copy now gets fresh source ids and no cron.
-- **Vector removal ran after the tombstone was recorded**, and a tombstoned document is never reported
-  again — so a failed removal orphaned those vectors permanently. A failure now un-tombstones for retry.
-
-### Runs that wedged their own source
-
-- Only `crawler.crawl` was guarded and only `RuntimeException` caught, so a state-store failure or an
-  `Error` left the run `RUNNING` forever: every later manual run a 409, every scheduled fire a failure.
-  Everything after the claim is now guarded by `Throwable`, and `reapStaleRuns` is finally called before
-  claiming — nothing called it, although the interface said otherwise.
-- `ALREADY_RUNNING` and `SKIPPED` were mapped to `FireStatus.FAILED`. The schedule lease is five minutes
-  and a crawl's default budget is ten, so the schedule is legitimately re-claimed while the first run is
-  still going; the second fire lost the single-in-flight race and was recorded as a failure, dead-lettering
-  the schedule within days.
-- The converter's recursive walk had no depth cap. jsoup builds the full DOM — 60,000 levels if the page
-  says so — and a `StackOverflowError` is an `Error` that sails past every `catch (Exception)`.
-- Body reads had no time bound: `HttpRequest.timeout` covers headers only, so a server trickling one byte
-  per second held a virtual thread indefinitely.
-
-### Crawler correctness
-
-- Only successful pages entered the visited set, so a dead link in a site-wide footer was fetched once per
-  referring page — N errors, and a fetch budget so exhausted that the crawl never reported full coverage,
-  which silently disabled deletion reconciliation for that site on every run.
-- `isHtml()` matched any content type containing `xml`, so a linked sitemap or RSS feed became a
-  knowledge-base document of concatenated `<loc>` URLs.
-- robots.txt was fetched for the seed host and applied to every host reached.
-
-### Divergent backends
-
-The Postgres store swallowed every `SQLException` and returned a plausible answer — `lookup` said "never
-ingested" (re-embedding the page every run), `startRun` said "already running" (a 409 for a database
-fault), `finishRun` left the run `RUNNING`. Mongo threw. Both now fail identically through
-`IngestionStateStoreException`, which is the divergence the shared contract exists to prevent.
-
-### Also
-
-Preview was synchronous, unguarded and uncapped — up to a day on a request thread per click; it now runs
-with a two-minute budget. `runAsync` leaked an `ExecutorService` per call and swallowed `Error`s. Third-party
-titles are capped before being copied onto every segment. `ref`/`referrer` are no longer stripped as
-tracking parameters (they select content on plenty of sites). `RobotsPolicy` matched `User-agent` by
-substring, so `User-agent: a` captured every crawler.
-
-### Tests
-
-398 across the stack, up from 354: 20 new cases, one per finding, each mutation-checked. The repo's own
-`ImportStyleTest` caught two inline FQNs I had introduced.
-
-## 🐛 fix(llm): Gemini 3.x could not use tools at all — thought signatures were dropped (2026-09-18)
-
-**Repo:** EDDI (`fix/gemini-thought-signatures`, branched from `origin/main` @ 798c6e84d)
-
-Every Gemini 3.x model was unusable with tools. On a production agent using function calling on
-`gemini-3.8-flash`, the first tool call failed with `400 INVALID_ARGUMENT — Function call is missing
-a thought_signature in functionCall parts`. Gemini 3.x attaches an opaque `thoughtSignature` to
-`functionCall` parts and requires it echoed back when that model turn is replayed on the follow-up
-request carrying the `functionResponse`. `gemini-3.8-flash` and `gemini-3.5-flash` reject the replay
-without it, `gemini-2.5-flash` tolerates it, and `thinkingBudget: 0` does not help — measured table
-in [`langchain.md`](langchain.md).
-
-### Where the fix landed, and why
-
-langchain4j 1.20.0 **already models the field**, so this is neither an upgrade nor an adapter. It
-gates both halves behind builder flags that default off: `PartsAndContentsMapper` captures the
-signature into `AiMessage.attributes()["thinking_signature"]` only when `returnThinking == TRUE`,
-and re-sends it only when `sendThinking == true`. EDDI set neither. Four places dropped the field:
-
-1. **`GeminiLanguageModelBuilder`** — both flags now default **true** on `build` and
-   `buildStreaming`, overridable as `recognisedParameters`. A default rather than opt-in: this is
-   protocol correctness, not something an agent designer should learn from a 400.
-   `ModelParameterValues.booleanValue(params, key, default)` reads it, so a typo falls back to the
-   default instead of `Boolean.parseBoolean`'s silent `false`.
-2. **`ToolApprovalGateSupport.normalizeToolCallIds`** rebuilt the message with `AiMessage.from(...)`,
-   which carries only text and requests, so enabling the tool-approval gate alone broke Gemini 3.x
-   again. Now `toBuilder()`. Blank text still collapses to null: the message is replayed, the Gemini
-   mapper sends whitespace-only text as its own part, and Anthropic rejects such blocks.
-3. **`gatingAssistantMessageOf`** read `getLast()`, but in a mixed batch the ungated calls execute
-   and append their results *before* the pause is snapshotted, so it found nothing. It now walks
-   back over this batch's tool results, stopping at anything else so it cannot borrow an earlier
-   turn's message. `interimTextOf` had the same pre-existing blind spot — approvers lost the model's
-   narration on mixed batches — and shares the walk.
-4. **`ToolLoopResumer`, degraded resume** (transcript over its byte cap) replayed a bare
-   `AiMessage.from(requests)`. `PendingToolCallBatch.gatingAssistantMessageJson` now keeps the
-   gating message — written only when the transcript was omitted (a kept transcript already
-   carries it, and a codec change would break both copies alike), capped at 64 KB on its own —
-   never by the transcript's cap, since a small transcript cap is what triggers this path — shedding text
-   then thinking before its attributes. `gatingExchange` replays it **unchanged**, original parts in
-   original order, answering each ungated call with `HANDLED_BEFORE_PAUSE` — handled, not "ran",
-   since an ungated call may have been refused or failed, and the outcome is what this path lost.
-
-**Why replay the original parts** rather than rebuild from the gated calls: Gemini signs part 0 of
-a parallel batch. Measured once against the live Gemini API (3.8 and 3.5 Flash), moving that
-signature onto a different call was accepted — as were the original parts in order; only an
-unsigned replay was rejected. So the rebuild works today, on undocumented leniency that would fail
-on the rarely exercised degraded path if Google tightened it. Replaying what the model emitted
-stays valid, matches the shape the primary resume path already produces, and records the ungated
-call.
-
-**Security.** The new field embeds the gated calls' raw arguments — the content
-`sanitizePendingToolCallsForApprover` strips `argumentsRaw` for. The first cut excluded it from the
-names-only projection but not from the approver `detail=full` surface; it is now dropped in
-`stripRequestFingerprintsForRead`, which every full-detail read calls (REST through the approver
-sanitizer, the MCP approval-status tool directly), and named in the sanitizer too. Canaries pin all
-three projections. *Pre-existing and out of scope:* the MCP `detail=full` path applies only the
-fingerprint strip, so it already serves `chatTranscriptJson` and `argumentsRaw` today; only the new
-field is closed there.
-
-**Multi-turn.** The HITL tool pause is the only place a tool-carrying model turn crosses a request
-boundary and a MongoDB write; `AiMessage.attributes()` round-trips langchain4j's codec. Cross-turn
-replay needs no signature: `ConversationHistoryBuilder` rebuilds prior assistant turns as text only.
-
-**Precondition, recorded where the flags are set.** The mapper joins every part's signature into
-one attribute and re-sends it on the first `functionCall`. Measured once, every turn shape carried
-exactly one signed part (a narrating text part is unsigned). Thought parts could add more — they
-appear only with `thinkingConfig`, which EDDI does not expose; re-check before exposing it.
-
-### Tests
-
-`GeminiThoughtSignatureTest` swaps in langchain4j's own `HttpClient` through a package-private
-builder seam, so the real model, mapper and codec run with only the socket replaced. The stub
-**enforces** Gemini's rule (an unsigned `functionCall` gets the real 400) and an opt-out test proves
-the check is live. Streaming is driven over two SSE frames, so attributes merge across frames.
-Mutations, each failing the intended test: both flags removed; `sendThinking` only (the verbatim
-400); `sendThinking` in `buildStreaming` only; `normalizeToolCallIds` back to `AiMessage.from`;
-`gatingAssistantMessageOf` back to `getLast()`; the bare degraded rebuild; the field written with
-a kept transcript; either leak strip removed; the Vertex warning call removed from `build()`.
-
-**Live run of the patched build** (`5be8d02f1`, real Gemini API, `gemini-3.5-flash`, an agent with the
-calculator and datetime built-in tools and a system prompt forcing tool use; the same driver script run
-against both builds):
-
-| Scenario | Patched `5be8d02f1` | Unpatched 6.4.0 release image |
-| --- | --- | --- |
-| Non-streaming turn 1 (tool call) | correct, READY | ERROR |
-| Non-streaming turn 2 (history holds a tool turn) | correct, READY | ERROR |
-| Non-streaming turn 3 (two tool calls in one turn) | correct, READY | ERROR |
-| Streaming SSE tool turn | correct, READY (`task_start`, `tool_call`, `token`, `task_complete`, `done`) | ERROR (`task_failed`) |
-| HITL `requireApproval: ["builtin:*"]` — pause before the tool runs | AWAITING_HUMAN | AWAITING_HUMAN |
-| HITL — resume with APPROVED | correct, READY | ERROR |
-| **Total** | **6/6** | **1/6** |
-
-The unpatched container logged 33 Gemini 400s, "Function call is missing a thought_signature in
-functionCall parts". Not covered live: the degraded resume path (transcript over its cap), which is
-exercised only by the unit tests.
-
-### Provider survey — the same defect class elsewhere
-
-| Provider | Verdict |
-| --- | --- |
-| `gemini` | was live — fixed here |
-| `gemini-vertex` | **live, not fixable in EDDI.** `langchain4j-vertex-ai-gemini:1.20.0-beta30` has no `thought`/`thinking`/`signature` anywhere, and the `Part` protobuf it uses (`proto-google-cloud-vertexai-v1:1.27.0`, via `google-cloud-vertexai`) has no `thought_signature` field. Needs upstream changes; `build()` now warns for Gemini 3.x ids, bare or fully qualified, naming `gemini` |
-| Anthropic, Bedrock | **latent.** Signed thinking blocks, modelled by langchain4j under the same `thinking_signature` key, but no config key enables extended thinking, so no signed block is ever returned. Set `returnThinking(true)` when that is exposed; fixes 2–4 already apply |
-| OpenAI, Azure OpenAI | fine — Chat Completions has no opaque reasoning token; EDDI never uses the Responses API |
-| Mistral, Ollama | fine — plaintext thinking, no signature |
-| HuggingFace, Jlama, Oracle GenAI | fine — no reasoning concept in the modules |
-
-### Files
-
-`GeminiLanguageModelBuilder`, `ModelParameterValues`, `VertexGeminiLanguageModelBuilder`,
-`ToolApprovalGateSupport`, `ToolLoopResumer` (`gatingExchange`), `ChatTranscriptCodec`,
-`PendingToolCallBatch`, `ConversationMemoryUtilities` (the strip and the sanitizer);
-`docs/langchain.md`, `docs/hitl.md`; tests `GeminiThoughtSignatureTest`,
-`ToolApprovalGateSupportNormalizeTest`, `ToolLoopResumerGatingMessageTest`,
-`VertexGeminiVersionWarningTest`, plus additions to `ModelParameterValuesTest` and
-`ConversationMemoryUtilitiesHitlTest`. `AgentOrchestratorCoverageTest`'s mixed-batch fixture was
-given the runtime message order for accuracy; it guards nothing new.
-
-`LanguageModelBuildersTest` shows 13 sandbox-only errors (`Unable to establish loopback connection`
-from `JdkHttpClient`) — identical on a clean tree.
-
-## 🐛 fix(operator): the Platform Operator's self-URL, its replacement, and its error message (2026-09-18)
-
-**Repo:** EDDI (`fix/operator-self-url`) — backend and `ui/manager/`, in one branch so the two halves are tested together
-
-The Platform Operator was dead on arrival on a customer deployment. The agent
-deployed, reported "Gate verified", and then failed **every** tool call — while telling
-the admin that "the documentation service is currently unavailable" and that the refused
-connection "indicates a problem with the platform's internal services". EDDI's health was
-fine the whole time.
-
-All 22 of the operator's api-call resources carried
-`targetServerUrl: http://localhost:7080` — the origin the **browser** had used, over an
-SSH tunnel, in front of a container listening on `:7070`. That address means
-nothing inside the container. (`:7070` is confirmed by the container's own health check,
-`curl -f http://localhost:7070/q/health`, which passes from inside.) Three separate
-defects, each of which made the other two harder to find.
-
-### Defect 1 — the self-URL came from the browser
-
-`provisionOperator` sent `apiBaseUrl: window.location.origin`. That is right only when
-nothing sits between the browser and EDDI; any tunnel, published-port remap, container
-port remap or reverse proxy on another port produces a dead operator, silently.
-
-**Where the fix belongs: the backend has to supply the address, and it did not.** The
-browser cannot know it, and neither can any other client. Three mechanisms were weighed:
-
-| Option | Verdict |
-| --- | --- |
-| Manager offers an explicit, pre-filled override | Necessary but **not sufficient alone** — pre-filled from what? |
-| The operator's calls use a placeholder resolved server-side (`${self:baseUrl}`) | Rejected: a new resolver in the hot path of every api call, and it hides the value that the incident was diagnosed by *reading* |
-| **EDDI exposes its own base URL; the Manager asks and pre-fills an editable field** | **Chosen** |
-
-So: **`SelfUrlResolver`** (new, `ai.labs.eddi.engine.security`) answers
-`eddi.self.base-url` when a deployment sets it, otherwise
-`http://127.0.0.1:${quarkus.http.port}` — the port read from config, not assumed, and the
-same address `RestInterfaceFactory` has always used for EDDI's internal loopback hop.
-Loopback is correct behind a reverse proxy and on a remapped port *because* it ignores
-both: a process reaches itself without going back out through whatever is in front of it.
-The override exists for the cases where loopback genuinely is wrong — in-process TLS, a
-service name a mesh requires. It is served by **`GET /administration/operator/self-url`**
-(`IRestOperatorMetrics`, `eddi-admin`), a GET with no arguments so the answer cannot
-depend on a `Host` header or an `X-Forwarded-*` chain a proxy rewrites.
-
-**The part that would have turned one failure into another.** On an OIDC-protected
-deployment the operator's tools authenticate with `${caller:token}`, and
-`CallerIdentityResolver` releases that token **same-origin only**. Pointing the tools at
-EDDI's own address makes them cross-origin by that rule — so the fix for defect 1 would
-have produced a 401 on every call instead of a connect failure. `CallerIdentityResolver`
-now also releases the token when the target is *this very process*
-(`SelfUrlResolver.isSelf`). That is the same argument `LoopbackCallerAuthFilter` already
-makes for the internal hop: the token is handed back to the process that issued the
-request it came from. It is a **narrower** release than same-origin, not a wider one —
-`SelfUrlResolver`'s value comes from deployment configuration only, never from an agent
-config, a conversation or a request header, so no config can nominate itself. Counted
-under its own `resolved_self` outcome tag rather than folded into `resolved`.
-
-Manager side: `OperatorConfig` gains `apiBaseUrl` (optional — a config blob written before
-this field has no key at all), `resolveOperatorApiBaseUrl` decides it (explicit value →
-backend answer → browser origin *with a warning*, only on a backend that 404s the new
-endpoint), and `provisionOperator` now **throws** rather than falling back: the silent
-fallback is the defect. The value is persisted, not just sent, so the operator screen can
-show the address the live tools call — the field the incident turned on was, until now,
-nowhere on screen.
-
-### Defect 2 — Reconfigure left the old operator deployed
-
-Changing only the model produced **two** operators on staging, both `READY`, with the UI
-silently talking to the new one. That cost real debugging time: the first repair was
-applied to the agent that was no longer in use, and the symptom did not move.
-
-Not a platform constraint — the two bots on that instance are versioned in place, and
-`setup-api` creating a new agent id is a Manager consequence, not an EDDI one. The Manager
-already *tried* to retire the predecessor; it failed for two reasons, both fixed:
-
-1. `removeSupersededAgent` undeployed **without** `endAllActiveConversations`. The backend
-   answers 409 while an agent still has active conversations, and the superseded
-   operator's active conversation is almost always the admin's own operator chat — on the
-   very screen the Reconfigure button lives on. So having *used* the operator was enough
-   to make its replacement leave it deployed. `deactivateOperator` and `resetOperator`
-   already pass the flag for exactly this reason.
-2. The caller wrapped the whole retirement in a bare `catch {}`. A failed retirement now
-   travels back as `ActivationOutcome.supersededWarning`, naming **both** agent ids, and
-   the operator page shows it as a persistent destructive banner — not a toast, because
-   the admin needs to still be able to read it when they start wondering why the operator
-   is behaving oddly. (`activationError` was no use: it renders inside the activation form,
-   which is already closed by then.)
-
-The replacement is also explicit now rather than implied: the status panel shows the agent
-id and the base URL it calls, and the pre-save warning says the current agent is
-undeployed and deleted, names it, and says this screen will address the new one from then on.
-
-### Defect 3 — the failure message pointed at the wrong thing
-
-A transport failure surfaced to the model as the bare exception message —
-`"Connection refused"` and nothing else. The model has no way to tell an unreachable
-target from a broken dependency, so it guessed, and its guess sent the admin to check
-EDDI's health.
-
-`HttpCallToolsProvider.describeToolFailure` now recognises a connect-class failure
-(`ConnectException`, `UnknownHostException`, `UnresolvedAddressException`,
-`NoRouteToHostException`, connect timeouts — matched by type through the whole cause
-chain, with a message-text fallback for clients that flatten it), names the method and the
-address that was tried, states that this is a network failure reaching that address and
-**not** a fault in the service behind it, and says the configured base URL must be one the
-EDDI server can reach rather than one a browser uses. Every other failure keeps its own
-message: telling the model to suspect the base URL on a 400 would misdirect in the other
-direction.
-
-**What may travel in that string.** It reaches the model and so, in paraphrase, the chat
-surface. The URL goes in — it is the whole diagnostic value and it is configuration an
-admin can already read. Headers do not. Neither does anything vault-resolved, which is why
-the address is built from `targetServerUrl` plus the **configured** path rather than the
-fully-resolved request URI: `ApiCallExecutor` resolves `${vault:…}` and global-variable
-references into that URI, so it can legitimately hold a secret. The result is passed
-through `SecretRedactionFilter` as a belt-and-braces measure against a base URL that
-embeds credentials.
-
-The Manager's activation canary gained the matching diagnosis: a connect-shaped tool
-result now reports the configured base URL and says outright that this is not an EDDI
-outage. It is checked *after* the auth check and allowed to win — an unreachable address is
-the more actionable of the two, and a 401 cannot have happened if nothing connected.
-
-### Files
-
-**Backend:** `engine/security/SelfUrlResolver.java` (new),
-`engine/api/model/OperatorSelfUrl.java` (new), `engine/api/IRestOperatorMetrics.java`,
-`engine/rest/RestOperatorMetrics.java`, `engine/security/CallerIdentityResolver.java`,
-`modules/llm/impl/HttpCallToolsProvider.java`, `resources/application.properties`
-(documents `eddi.self.base-url`). Tests: `SelfUrlResolverTest`,
-`CallerIdentitySelfOriginTest`, `HttpCallToolsProviderFailureMessageTest`,
-`RestOperatorMetricsTest`.
-
-**Manager (`ui/manager/src/`):** `lib/api/operator.ts`, `hooks/use-operator.ts`,
-`components/operator/operator-activation.tsx`, `components/operator/operator-status.tsx`,
-`pages/operator.tsx`, `test/mocks/handlers.ts` (one handler for the new endpoint),
-`test/mocks/openapi-operations.json` (regenerated from this branch's own spec with
-`OPENAPI_FILE=../../target/openapi/openapi.json npm run openapi:refresh` — one line
-added, `GET /administration/operator/self-url`; no contract-test exemption needed), all
-11 locales, plus tests in `lib/api/__tests__/operator.test.ts`,
-`hooks/__tests__/use-operator-supersede.test.tsx` (new),
-`components/operator/__tests__/operator-activation.test.tsx`,
-`pages/__tests__/operator.test.tsx`, `pages/__tests__/operator-superseded.test.tsx` (new).
-
-**How the halves line up.** The Manager calls `GET /administration/operator/self-url`
-and reads `{ baseUrl, source }` — the `OperatorSelfUrl` record exactly, with `baseUrl`
-typed nullable for the `unresolved` case. A 404 (a backend older than the endpoint)
-reads as "cannot tell" and falls back, with a warning; every other error, a 401/403
-included, propagates rather than being guessed past. The MSW handler answers the
-loopback shape the backend produces by default, and the snapshot the contract test
-checks it against was generated from this branch, so a drift in either direction fails.
-
-### Mutation checks
-
-Every fix was reverted and the pinning test confirmed red.
-
-| Mutation | Test that failed |
-| --- | --- |
-| `provisionOperator` back to `currentOrigin()` | "targets the address EDDI can reach ITSELF at, not the browser's origin" |
-| `resolveOperatorApiBaseUrl` prefers the browser origin | the five `resolveOperatorApiBaseUrl` cases |
-| `requireApiBaseUrl` falls back to the origin | "refuses to provision without a resolved base URL" |
-| `CallerIdentityResolver`'s `isSelf` branch removed | `resolvesForSelfWhenCallerOriginDiffers` |
-| `SelfUrlResolver` hardcodes 7070 | `followsNonDefaultPort` |
-| `SelfUrlResolver` ignores the configured override | the `eddi.self.base-url` cases |
-| `selfUrl()` answers a constant | `selfUrlAnswersTheDeploymentsOwnAddress` |
-| `describeToolFailure` back to `e.getMessage()` | `namesTheAddressThroughTheExecutor` |
-| retirement drops `endAllActiveConversations` | "ends the superseded operator's conversations so its undeploy cannot 409" |
-| `supersededWarning` forced to null | "reports a failed retirement instead of swallowing it" |
-| canary drops the connection diagnosis | the three connect-diagnosis canary cases |
-
-One of those mutations initially **survived**, and the fix for that is worth carrying
-forward: the first cut of `HttpCallToolsProviderFailureMessageTest` only called
-`describeToolFailure` directly, so reverting the *catch clause* to `e.getMessage()` left
-the helper intact and all 11 cases green. The test now also drives the real executor
-lambda `discover` builds (`Wiring`, with a mocked `IApiCallExecutor` that throws), which is
-what actually pins what a failing tool call hands back to the model. A helper-level test
-proves the helper; only the call site proves the behaviour.
-
-One process note, because it cost half an hour twice: a mutation check must **not** be
-undone with `git checkout -- <file>` while the fix is unstaged — that discards the fix
-along with the mutation. Copy the file aside and copy it back. And copy it back with
-`shutil.copy` rather than `copy2`: `copy2` preserves the backup's mtime, so the restored
-source looks *older* than the `.class` Maven compiled from the mutated one, incremental
-compilation skips it, and every later run keeps testing the mutation. That reads exactly
-like a real regression.
-
-### Independent review, and what changed because of it
-
-A fresh reviewer that had not seen this work went through both halves adversarially.
-Its security pass on the `CallerIdentityResolver` change found the value provenance
-sound — `SelfUrlResolver` reads only `eddi.self.base-url` and `quarkus.http.port` at
-construction; nothing writes config at runtime; no agent config, global variable, vault
-reference, `Host` or `X-Forwarded-*` header reaches it — and the origin check sound
-against look-alikes: `OriginMatcher` compares parsed `scheme://host:port` with no DNS, so
-`https://`, `localhost`, `127.1`, `0.0.0.0`, `[::1]`, `[::ffff:127.0.0.1]`, another port
-and `http://127.0.0.1:7070@evil.example` are all refused, and the check runs on the final
-URI after template, global-variable and vault resolution, so nothing can alter the target
-after it. Every finding was addressed:
-
-| # | Finding | Resolution |
-| --- | --- | --- |
-| 1 | `describeToolFailure` claimed to redact URL credentials but `SecretRedactionFilter` only knows secret *shapes*; a plain `admin:hunter2@` went through, and the test passed only because it used an `sk-ant-` password | `stripUserInfo` removes `user:pass@` structurally from every URL in the message; new test with a plain password, mutation-checked |
-| 2 | `AGENTS.md`, `docs/httpcalls.md`, `docs/mcp-server.md` still stated same-origin as absolute | All three updated |
-| 3 | "Narrower than same-origin" was wrong: the self address bypasses the reverse proxy, so the reachable endpoints are what EDDI authorizes, not what the proxy also permits | Claim corrected in code and docs; new `eddi.caller-identity.self-release.enabled` (default true) for a deployment that relies on proxy rules too |
-| 4 | With SSRF protection on, loopback is refused and the model got a raw "internal/local addresses" message | Not exempted — that would weaken SSRF protection for every agent. Documented instead, and the tool result now names SSRF protection and the remedy (`eddi.self.base-url` to a non-loopback address) |
-| 5 | An identity with no captured origin became releasable to self (fail-closed to fail-open) | Kept fail-closed: `origin == null` never gets the self release; test added |
-| 6 | The page banner for a failed retirement was untested | `operator-superseded.test.tsx` drives the page's own wiring |
-| 7 | A stored address wins over the server's on reconfigure, and the "derived from HTTP port" note could sit under a different value | The form now says when the field differs from the server's current answer; the loopback note shows only when they match |
-| 8 | An admin-typed trailing slash became `//path` in every tool | `normalizeBaseUrl` strips it before provisioning |
-| 9 | Netty's connect timeout (a `ConnectException` subclass) read as "refused"; `SocketTimeoutException` also covers READ timeouts, where the service *is* at fault; the "unresolved" text fallback was too broad | Netty timeout matched first by name; `SocketTimeoutException` dropped; fallback narrowed to "unresolved address"; tests for both |
-| 10 | A predecessor with no recorded version was skipped silently | Reported through `supersededWarning` like any other failed retirement |
-| 11 | `quarkus.http.port=0` (random) answered a confident `:7070` | Now `source: unresolved`, `baseUrl: null`, `isSelf` false for everything; the Manager treats it as "cannot tell" |
-| 12 | Some operator strings are not i18n keys | Declined: matches every existing `toolError` string in the file; `i18n:check` is green |
-| 13 | `headersOnlyStillHolds` tested code this change never touched; the canary's "agent description" test used text none of the regexes matched | The first removed; the canary match is now anchored to the `{"error": …}` failure shape and the test uses a description containing the exact trigger phrases |
-
-Every review fix was mutation-checked the same way: R1–R7 in the backend (null
-origin, the switch, userinfo, the SSRF branch, Netty timeout, read timeout, random port)
-and U1–U9 in `ui/manager` — each reverted, each failing its named test.
-
-A second fresh review of the final branch, with the Manager in `ui/manager/`, found the
-security pass sound again (provenance, look-alikes, the URI checked being the URI sent,
-null-origin and opt-out wiring, no open redirect that would carry the header) and nine
-smaller findings, all addressed: `docs/hitl.md` still carried the retracted "narrower"
-claim; the form promised a browser-origin fallback on a 403/500 that activation would not
-perform (now a distinct notice, and `retry: false` so it appears at once); an `unresolved`
-answer fell back to the browser origin — the original defect's value — and now
-refuses with a clear message, the fallback reserved for a genuine 404; `stripUserInfo`
-stopped at the first `@`, leaking the tail of an un-encoded `p@ss` password; client
-validation accepted a path or trailing text; the regression test resolved through the
-helper's preset address instead of the backend (now `apiBaseUrl: null`); a note on
-`quarkus.http.test-port`; the notice icon; and an `sk-ant-` test fixture replaced with
-`sk-test-`. Mutation-checked: V1–V4, each failing its named test.
-
-### Noted, not fixed
-
-- **`HttpCallToolsProvider`'s sibling path.** `ApiCallsTask` (rule-based httpcalls, no LLM)
-  has the same bare-message behaviour. Left alone: there is no model there to misdiagnose
-  for a human, and the diagnostic belongs where a model paraphrases the error.
-- **`activationError` is unreachable after a successful activation.** It renders only
-  inside the activation form, which the success handler closes — so the existing
-  write-probe failure path (`setActivationError(message)` in `pages/operator.tsx`) is
-  visible only as its toast. Worked around here with a dedicated banner rather than
-  fixed for both.
-- **`secret-key-picker-reference-only.test.tsx` flakes under full-suite load** — it
-  passed in isolation and on a clean tree, and passed on the full suite the second time.
-  Timing, not a regression from this work.
-
-## 🔗 feat(rag): knowledge-base sources and the ingestion pipeline (2026-09-17)
-
-**Repo:** EDDI (`feat/rag-ingestion-pipeline`)
-
-### Why sources live on the knowledge base
-
-`RagConfiguration` gains `sources[]` rather than ingestion sources becoming a 13th resource type. The
-vector store is keyed by the knowledge base, so a source that could exist independently of one has to
-name its target by string — and that is exactly how the draft in PR #529 came to key ingestion on the
-**source's** name (`kbId = sourceConfig.name()`) while `RagContextProvider` keys retrieval on the
-**knowledge base's**. Crawled content went into one pgvector table and every query read another. The run
-reported success; the agent retrieved nothing. No test caught it because none performed a retrieval
-after an ingest. Ownership removes the possibility rather than documenting it.
-
-### The pipeline
-
-`IngestionPipeline` runs crawl → convert → compare → embed per document, then reconciles deletions:
-
-- **Re-ingesting replaces.** A document's chunks are removed by `documentId` metadata before its new
-  ones are added. The draft called `EmbeddingStoreIngestor.ingest`, which only appends and never
-  removed anything, so a page edited weekly left a year of stale versions retrievable beside the current
-  one. Where a store's driver cannot delete by metadata, the run says so (`replaceUnsupported`) instead
-  of quietly accumulating.
-- **A document is recorded only after its vectors are stored.** The draft committed the content hash
-  while *deciding* whether to ingest, with embedding afterwards inside a `catch` that only logged — so a
-  single 429 marked a page done forever.
-- **Only a crawl that covered the source may conclude anything is gone.** A run stopped by its page cap,
-  time budget or segment budget sets `tombstoningSkipped` and deletes nothing.
-- **Tombstoned documents lose their vectors.** In the draft, "stale detection" flipped a flag in a side
-  table nothing consulted at retrieval time, so a deleted page kept answering questions forever.
-- Segments carry `documentId`, `url`, `title`, `sourceName`, `runId` and `ingestedAt`, so an answer can
-  cite its source. Counts are the segments actually written, not `markdown.length() / chunkSize`.
-- `maxSegmentsPerRun` is the cost ceiling — exact without a pricing table; set
-  `costPerThousandSegments` to have runs report dollars too. `PREVIEW` mode crawls and reports what
-  would change without embedding or recording anything.
-
-### Tests
-
-**25 pipeline tests, 23 more for the in-memory state store.** The test double implements the same
-`IngestionStateStoreContract` as MongoDB and PostgreSQL, so it cannot quietly behave differently from
-production — the failure mode that let the draft's two stores drift apart.
-
-Mutation-checked against all four headline defects: keying the store on the source, appending instead of
-replacing, recording the hash before embedding, and tombstoning after a partial crawl each fail between
-one and seven tests.
-
-### Note on the branch
-
-This branch is stacked: it contains the converter, state store and crawler commits because the pipeline
-needs all three. Merge those three first, or review this as a stack.
-
-## 🧩 fix(rag): register `ai.labs.rag` so RAG workflow steps can be deployed (2026-09-17)
-
-**Repo:** EDDI (`feat/rag-workflow-extension`)
-
-### Why
-
-A workflow step of type `eddi://ai.labs.rag` could not be deployed at all. `WorkflowStoreClientLibrary`
-resolves a step by `URI.getHost()` against the `@LifecycleExtensions` map and throws
-`UnrecognizedExtensionException` when the key is absent — and no module ever registered `ai.labs.rag`.
-The nine registered types were parser, behavior/rules, property, httpcalls/apicalls, output, llm,
-mcpcalls and templating.
-
-So the two knowledge-base options documented in [`rag.md`](rag.md) were undeployable; only `httpCallRag`
-worked end to end. `RestWorkflowStepStore` builds the Manager's step chooser from the same map, so the
-real backend never offered the step either — the Manager's MSW fixture hard-codes it, which is why its
-UI suite stayed green.
-
-Nothing caught this: `RagContextProvider` discovers RAG steps by reading the workflow document directly
-(`WorkflowTraversal`), and its tests build `WorkflowConfiguration` objects by hand, so no test ever
-traversed the deploy path.
-
-### What changed
-
-- **`modules/rag/RagTask.java`** (new) — the config-carrier task. `execute` is a deliberate no-op:
-  retrieval stays in `RagContextProvider` inside the LLM task (the Phase 8c decision stands), because
-  that is where the user's query is known. `configure` resolves the referenced `RagConfiguration`, so a
-  broken knowledge-base binding fails when the workflow is deployed instead of silently returning no
-  context on the first conversation.
-- **`modules/rag/bootstrap/RagModule.java`** (new) — registers the task under `ai.labs.rag`, matching the
-  host of the documented step URI.
-
-`getType()` returns the stage name `"rag"`, not the `eddi://` URI. Per the `ILifecycleTask` contract the
-type is a lifecycle stage identifier used for ordering and partial-execution filters; the URI form
-matches no filter. (The draft this was salvaged from returned the URI — see Decision Log.)
-
-### Tests
-
-- **`RagTaskTest`** (10) — id/type contract, `configure` happy path, missing/blank/null/malformed URI,
-  `ServiceException` wrapping, no-op `execute`, descriptor shape.
-- **`RagWorkflowDeploymentTest`** (6) — deploys a real workflow containing a RAG step through
-  `WorkflowStoreClientLibrary`, including the negative case that pins the bug: without the registration
-  the whole workflow is rejected.
-- **`RagModuleTest`** (3) — registration key equals `URI.create("eddi://ai.labs.rag").getHost()`.
-- **`integration/RagWorkflowExtensionIT`** — asserts against live CDI wiring via `RestWorkflowStepStore`
-  (the bean that feeds the Manager's chooser) that the RAG step is offered, and that every documented
-  workflow step type resolves. This is the test that would have caught the original bug; it is an `IT`
-  because the repo runs every `@QuarkusTest` in the integration job.
-
-Mutation-checked: reverting `getType()` to the URI and the registration key to a wrong value fails 4 of
-the tests.
-
-### Notes
-
-This is the first of six PRs salvaging the scheduled RAG ingestion work from PR #529, which has been
-stale and conflicting since 2026-07-02. This piece is independent of that feature — main needs it either
-way.
-
-## 🛠️ fix(migration): four first-boot defects found upgrading a real 5.5.1 database (2026-09-17)
-
-**Repo:** EDDI (`fix/first-boot-migration-order`)
-
-Found by rehearsing an upgrade of a customer deployment's **staging** EDDI 5.5.1 database (MongoDB Atlas, 3012
-documents, 7 agents, 195 conversations) to 6.4.0 against a verified restore of the production-like
-dump. Four defects fire on the first boot against a 5.x database; two of them destroy data. All four
-are fixed here with tests, including three that drive a real MongoDB through Testcontainers.
-
-### What changed
-
-- **`TemplateSyntaxMigrator.migrateStringConcat` crashed on a `+` inside a string literal.** It split
-  the concat expression with `split("\\s*\\+\\s*")`, which cuts literals apart: a literal `'+'`
-  became two lone quote characters, a lone quote both starts and ends with a quote so it was taken for
-  a quoted literal, and stripping its delimiters was `substring(1, 0)` —
-  `StringIndexOutOfBoundsException: Range [1, 0) out of bounds for length 1`. A new
-  `splitOnConcatOperator` splits only outside quotes, and `isStringLiteral` requires length ≥ 2 and
-  matching delimiters. The real trigger on staging was a single `httpcalls` config holding a template
-  whose three concatenated literals render as another template expression.
-- **`V6QuteMigration.migrateCollection` had no per-document isolation**, so that one malformed template
-  aborted the Thymeleaf→Qute conversion for *every* config in the database, logging only "will retry
-  on next startup" — where it threw again. Each document now migrates in its own try/catch, failures
-  are logged with collection and id, and the migration is **not** marked complete while any document
-  failed, so it retries once the data is fixed. `migrateCollection` returns a
-  `CollectionResult(migrated, failed)`.
-- **`MongoDeploymentStorage`'s unique `(environment, agentId, agentVersion)` index destroyed deployment
-  rows on a pre-rename database.** EDDI 5 wrote `botId`/`botVersion`; Mongo indexes the absent
-  `agentId` as null, so an unrestricted unique index read all 113 staging rows as duplicates of one
-  another, `createIndex` failed with E11000, and the recovery path `removeDuplicateDeploymentRows()`
-  kept one row for the whole collection and deleted 112. The index is now partial on
-  `agentId`/`agentVersion` existing, and the dedupe pipeline `$match`es only rows that carry the key.
-- **The `@Scheduled(every = "10s", delayed = "10s")` `checkDeployments()` sweep ran before the rename
-  migration and deleted deployments.** On a first boot against a 5.x database the agent configs are
-  still in `bots`; `agents` does not exist until `V6RenameMigration` creates it, so
-  `isAgentConfigMissing` returned true for every deployed agent and the sweep called
-  `deleteDeploymentInfo` on each. Observed live: the deployment rows of both deployed agents deleted. The
-  sweep now returns early while `V6RenameMigration.isPending()`.
-
-### Design decisions
-
-- **The sweep gate asks the migration, it does not track a flag.** The first cut set a
-  `volatile boolean startupMigrationsAttempted` at the end of `autoDeployAgents()`. Two problems:
-  nothing set it if anything above it threw (parking the sweep, and with it all deployment, forever),
-  and it read "migrations attempted" as "collections renamed" — so a rename migration that *failed*
-  released the sweep to delete the rows anyway. `V6RenameMigration.isPending()` is the actual
-  precondition: `enabled && no completion entry in the migration log`, latched once complete so a
-  ten-second schedule does not re-read the log forever, and fail-safe (an unreadable log counts as
-  pending). Disabled is deliberately *not* pending — the property defaults to false, so "no completion
-  entry" is the permanent state of every installation that never needed the migration, and reading that
-  as pending would park the sweep on every normal EDDI 6 database. It also made the fix testable
-  without rewriting the ~25 existing `checkDeployments()` tests, which call it directly on a freshly
-  constructed object.
-- **A conflicting index is dropped and rebuilt.** Mongo does not re-shape an existing index: adding
-  `partialFilterExpression` to a key pattern that already carries the non-partial unique index is
-  refused, not a no-op. Every installation already running 6.x would otherwise have kept the destructive
-  index while logging something that reads like a warning about duplicate rows. On either conflict code
-  the index actually sitting on the deployment key is looked up and dropped **by name**; if none does,
-  the conflict is with someone else's index and is left alone. E11000 still goes to the
-  dedupe-and-retry path, because there the *rows* are wrong and dropping the index would throw the
-  constraint away instead of fixing them.
-- **The partial filter uses `$exists`, not a null check**, so a row that legitimately carries a null
-  `agentVersion` stays inside the uniqueness constraint. Only rows missing the field entirely — i.e.
-  pre-rename rows — fall out of the index.
-- **Not marking the Qute migration complete on a failure re-scans on every boot.** That is accepted:
-  `TEMPLATE_COLLECTIONS` is four config collections plus their `.history` counterparts, the scan is
-  cheap, and a migrated document contains no Thymeleaf syntax so nothing is rewritten twice. Shipping a
-  half-migrated database silently is the worse trade. A collection that cannot be counted is a
-  failure too, with one exception: `NamespaceNotFound` (26). Only some of these names exist on any given
-  database and some driver versions answer `estimatedDocumentCount` on a missing namespace with that
-  error rather than zero, so counting it would leave the migration permanently incomplete on a
-  database with nothing to migrate; any other count failure means a collection nobody has read.
-- **An empty part of a concat expression is now skipped rather than rendered as `{}`.** An empty
-  operand only arises from a leading, trailing or doubled `+`, i.e. from an expression that was already
-  malformed; `{}` is a broken Qute expression where nothing at all is a dropped empty operand.
-
-### Review follow-up (PR #781)
-
-Copilot found a real gap in the first version of the splitter: it left quote mode at the *first*
-matching quote character, escaped or not, so a valid OGNL literal such as `'it\'s + here'` ended at
-the escaped apostrophe and the `+` after it was read as an operator — cutting the literal in half
-again, just for a rarer input. A backslash now escapes the next character while inside a literal.
-
-Stripping the delimiters also reduces `\'`, `\"` and `\\` to the character they stood for, because
-the conversion inlines the literal's text verbatim and Thymeleaf renders `'it\'s'` as `it's` — leaving
-the backslash in would put it on the screen. The other OGNL escapes (`\t`, `\n`, …) are deliberately
-left exactly as they are: a Windows path in a config is the likelier intent than a control character,
-and guessing wrong there rewrites config content rather than merely failing to tidy it.
-
-CodeRabbit then found that the `catch` around `estimatedDocumentCount()` was half-right in the other
-direction: keeping the missing-collection case out of the failure count also swallowed authorization
-errors, timeouts and server errors, so `runIfNeeded()` saw zero failures and recorded completion over
-a collection it had never read — the same silent half-migration the per-document guard exists to
-prevent. Only `NamespaceNotFound` (26) now counts as "nothing to migrate here"; anything else counts
-as a failure and keeps the migration incomplete. A pre-existing test
-(`runIfNeeded_collectionsNotExist`) asserted the old behaviour on a false premise — `getCollection`
-does not contact the server, so it never fails merely because a collection is absent — and now
-asserts the corrected contract under the name `runIfNeeded_collectionAccessFailureBlocksCompletion`.
-
-A final independent review found five more things; all are fixed here.
-
-- **A v5 database with two deployment rows that become one v6 key never finished migrating, and so
-  never deployed an agent again.** `ENVIRONMENT_REWRITES` maps both `unrestricted` and `restricted` to
-  `production`, and v5's own check-then-act upsert wrote same-environment duplicates. The unique index
-  `MongoDeploymentStorage` builds at construction already exists when the migration runs, so the second
-  row's write failed E11000 on every boot — the first row already rewritten, the second never could be
-  — and with the sweep waiting on the migration, nothing deployed. Before this PR the dedupe deleted
-  rows but boot completed; the PR had turned lossy-but-booting into never-deploying. A collision is now
-  resolved with the store's own rule: one row per key, the newest `_id` kept, so every node picks the
-  same survivor. `migrateEnvironments` also isolates documents: one that cannot be written is logged,
-  the rest still go through, and the migration is left incomplete rather than aborted. Three
-  Testcontainers tests cover both collision shapes and the no-collision control. The staging rehearsal
-  could not have caught this: it held no such pair.
-- **A pre-check on `migrateEnvironments` was removed.** An earlier commit on this branch added one to
-  skip a clean collection, motivated by the staging measurement: the startup migrations took 24
-  minutes, ~20 of them this pass on `conversationmemories` (195 documents averaging 410 KB; a read-only
-  `mongodump` of the collection took 14 minutes on the same cluster). It could not help. Two of its
-  three conditions were server-side counts, but the third — a legacy URI nested at arbitrary depth —
-  has no filter form, and a sampled version was rejected because a miss is permanent once the migration
-  records completion; an exhaustive one reads the whole collection, which is the entire cost. Clean
-  collection: one read either way; dirty: two counts plus the same pass. It was net zero at best and
-  the PR described it as a speedup. Removing the 20 minutes needs the rewrite moved server-side
-  (`updateMany` with `$rename`/`$set`); that is follow-up work, not in this PR.
-- **The index-conflict handling had the error codes wrong.** The review suggested handling 85 alone,
-  and the real-server test showed why that is also wrong: an old non-partial index on the same key under
-  the same auto-generated name comes back as `IndexKeySpecsConflict` (86) on current servers. Handling 85
-  only passed every mocked test and left the destructive index in place. Now either code triggers a
-  lookup of the index on the deployment key, dropped by name; a same-named index on another key is not
-  touched.
-- **`/q/health/ready` reported ready with nothing deployed.** With the rename migration pending the
-  sweep is parked, yet `autoDeployAgents()` still set readiness. It now stays not-ready, with an ERROR
-  saying why; the migration only runs at startup, so that lasts until a restart after the cause is fixed.
-  The "sweep parked" warning is logged once instead of every ten seconds.
-- **This entry contradicted itself** on whether an unreadable collection counts as a failure; corrected
-  above to match the code.
-
-
-### Files
-
-- `src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java`
-- `src/main/java/ai/labs/eddi/configs/migration/V6QuteMigration.java`
-- `src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java` — new `isPending()`
-- `src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java`
-- `src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java`
-- `src/test/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigratorTest.java`,
-  `V6QuteMigrationTest.java`, `V6RenameMigrationTest.java` — the concat fixture fails with the
-  original `StringIndexOutOfBoundsException` against the pre-fix splitter
-- `src/test/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorageTest.java` (mocked) and
-  `src/test/java/ai/labs/eddi/datastore/mongo/MongoDeploymentStorageTest.java` (Testcontainers —
-  pre-rename rows survive construction, a non-partial index is rebuilt as partial, and the dedupe
-  spares pre-rename rows on a half-migrated collection)
-- `src/test/java/ai/labs/eddi/datastore/mongo/V6RenameMigrationDeploymentsTest.java` (Testcontainers —
-  deployment rows that collapse onto one v6 key)
-- `src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementTest.java`,
-  `AgentDeploymentManagementBranchTest.java`
-
-### Verification
-
-201 tests green in the selection (`TemplateSyntaxMigratorTest`, `V6QuteMigrationTest`, both
-`MongoDeploymentStorageTest`s, `V6RenameMigrationTest`, `V6RenameMigrationBranchTest`,
-`AgentDeploymentManagementTest`, `AgentDeploymentManagementBranchTest`) plus the repo-wide guards
-(`ImportStyleTest`, `DocumentationLinksTest`, `StrictBoundaryShippedConfigsTest`,
-`RuleSetStoreShippedRulesetsTest`, `BuildQualityGatesTest`, `ChangelogRotationTest`). Mutation-checked:
-reverting the literal-aware split, the partial filter, the dedupe `$match`, the index-conflict rebuild,
-the sweep gate or the "do not mark complete when a document failed" behaviour each makes a test fail.
-
-### Review round: five findings, all in code that runs against a production database (2026-09-21)
-
-- **A pass that could not read a collection counted as a pass with nothing to do.**
-  `migrateAgentFields`, `migrateCollection`, `migrateDescriptors` and `migrateEnvironments` each
-  opened with a bare `catch (Exception e) { return 0; }`, so an authorization error, a timeout or a
-  step-down read exactly like "this collection does not exist": `runIfNeeded()` saw a clean total and
-  wrote the completion log over a collection nobody had read, and because the migration runs once,
-  those documents stayed in their v5 shape for good. Only `MongoCommandException` code 26
-  (`NamespaceNotFound`) is a skip now — the rule `V6QuteMigration` already applied — and everything
-  else is counted, so the migration runs again on the next start. The four passes now return a shared
-  `(migrated, failed)` result and `runIfNeeded()` aggregates `failed` across all of them, not only
-  across the environment pass.
-- **`saveDocument` swallowed every write failure and the callers counted the document anyway.** It
-  returned `void` after catching everything, and it also declined silently to write an `_id` shape it
-  cannot address. Either way the caller incremented `migrated`. It now reports whether the write
-  happened and the callers count accordingly.
-- **"Newest `_id` wins" was not sound across processes.** An ObjectId is
-  `[4 bytes timestamp][5 bytes process-unique][3 bytes counter]` and `compareTo` compares them in
-  that order, so for two ids created in the same second by different instances the larger id is as
-  likely to be the older row — and this branch deletes the loser, which is a deployment status gone
-  with nothing to recover it from. `strictlyNewer` now answers only where insertion order is
-  established: a different second, or the same second and the same process, where the counter means
-  what it looks like it means. Same second, different process is "cannot tell", and the collision is
-  left unresolved — logged with both ids, counted as a failure, migration incomplete. A migration
-  that stops and names two rows to reconcile is recoverable; a deleted row is not.
-- **Index recovery could drop the wrong index, or the only good one.** `indexOnDeploymentKey()`
-  returned the *first* index whose key pattern matched, and MongoDB allows two indexes on one key
-  pattern when their names and options differ — the shape an installation lands in if the partial
-  index was ever built beside the old unrestricted one. Every index on the deployment key is dropped
-  now, then one partial index is rebuilt. And before anything is dropped, the index holding the name
-  this one would be given is checked: if that name belongs to an index on a *different* key, nothing
-  is dropped and the conflict is reported, because dropping ours would remove a working constraint
-  and still not get past the name. The generated name is derived from `DEPLOYMENT_KEY_PATTERN`, not
-  written out, so it cannot drift from the key the index is built on. Neither error code decides
-  anything: splitting on 85 versus 86 was tried in an earlier round and broke against a real server,
-  which reports the same key under the same name as 86.
-- **A transient migration-log read failure left the instance not-ready for ever.**
-  `setAgentsReadiness(true)` had exactly one call site, inside the startup path that runs once a
-  second after boot. `isPending()` is deliberately fail-safe — a read that fails answers "pending",
-  because answering "not pending" would let the sweep read every agent config as deleted and retire
-  its deployment row — so one failed read in that second left readiness false for the life of the
-  process while `checkDeployments()` deployed the agents ten seconds later and served them correctly.
-  Readiness is now deferred rather than abandoned, and the first scheduled sweep that completes with
-  the migration no longer pending grants it, exactly once. `E.D.D.I is ready!` moved to that same
-  point: it used to be logged from a second `isPending()` call after the lambda, so a read that
-  failed in one and succeeded in the other logged "ready" against an instance whose readiness flag
-  was false.
-- **A `}` inside a string literal defeated the Thymeleaf-to-Qute scan entirely.** `CONCAT_PATTERN`
-  used `[^}]*?`, so `[[${a + '}' + b}]]` matched nowhere: the quote-aware splitter this PR added was
-  never reached, the output patterns failed on it for the same reason, and the template was left in
-  Thymeleaf syntax by a migration that runs once and then records itself complete. The expression is
-  now located by a scan that tracks quote state and backslash escapes — the same state machine as
-  the splitter, at the delimiter instead of at the operator. An unterminated expression is left
-  exactly as it is rather than rewritten on a guess.
-
-**Tests.** `V6RenameMigrationTest` gained `CollectionAccessTests` (NamespaceNotFound completes; an
-authorization failure and a timeout each keep the migration incomplete) and `StrictlyNewerTests`,
-whose third case asserts both that two processes inside one second are unordered *and* that full
-`ObjectId` ordering calls the lower-counter row the newer one — the defect, stated.
-`MongoDeploymentStorageTest` (mocked) gained "every index on the deployment key is dropped, not the
-first one listed" and "nothing is dropped when a different key holds the name ours would be given";
-the Testcontainers test against a real MongoDB stays as it is, and is what proved an earlier
-85-only fix wrong. `TemplateSyntaxMigratorTest` gained exact-output cases for a quoted `}`, a quoted
-`{`, an escaped quote before a brace, an unterminated expression and two expressions on one line.
-`AgentDeploymentManagementBranchTest` gained four readiness cases: granted by the sweep after a
-transient pending answer, granted once however many sweeps follow, never granted while the migration
-stays pending, and granted once on a normal boot.
-
-## ⏱️ feat(rag): REST and scheduling for ingestion sources (2026-09-17)
-
-**Repo:** EDDI (`feat/rag-ingestion-rest`)
-
-### What this adds
-
-The operable surface for the sources landed in the previous entry: four endpoints and a cron.
-
-| Method | Path | Access |
-| ------ | ---- | ------ |
-| `POST` | `…/sources/{sourceId}/run` | EDIT |
-| `POST` | `…/sources/{sourceId}/preview` | EDIT |
-| `GET` | `…/sources/{sourceId}/runs` | VIEW |
-| `DELETE` | `…/sources/{sourceId}/documents` | EDIT |
-
-**Running needs EDIT, not VIEW.** A published knowledge base grants VIEW to everyone by design, and a
-run rewrites what every agent using it retrieves — so gating a run on read access would let any editor
-point a source at any published knowledge base and poison it, on a schedule. The draft this replaces
-checked nothing at all. Preview is gated the same way: it writes nothing but still sends a visible
-amount of traffic to a third party's site.
-
-Runs are async on a virtual thread (a crawl takes minutes; an HTTP request cannot wait for it), with a
-409 rather than a second crawl when one is already in flight.
-
-### Scheduling
-
-A source with a `cron` gets a schedule carrying `ragIngestion` metadata, which `ScheduleFireExecutor`
-recognises as a fourth fast-path beside HITL timeouts, Dream consolidation and team cadences — the same
-shape of work, and the same reason: a maintenance job, not a conversation turn, that wants the cluster
-claim, lease, retry and fire log.
-
-Schedules are named `rag-ingestion:{ragConfigId}:{sourceId}`, so syncing is delete-by-name then create:
-no scan and no orphans. The draft searched `readAllSchedules(1000)`; past a thousand schedules — HITL
-timeouts and Dream cycles each create one — it silently failed to find the row, then created a duplicate
-on update and left a schedule still crawling a deleted source on delete. A sync failure is logged as an
-ERROR naming the consequence rather than swallowed behind a 201.
-
-Sources get a generated stable id on write. Addressing them by name would mean renaming a source
-orphaned everything it had ingested.
-
-### Tests
-
-15 for the service (schedule upsert, no-cron and disabled handling, surfaced store failures, scheduled
-fire against a deleted source or knowledge base, concurrent-run refusal, scoped purge) and 12 for the
-REST layer (access level per endpoint, refusals never reaching the service, 404s, 409, limit clamping).
-Four existing RAG REST tests were updated for the new constructor parameter.
-
-## 🔒 fix(apicalls): configuration references work in templated HTTP-call fields; data-supplied ones are refused (2026-09-17)
-
-**Repo:** EDDI (`fix/vault-references-in-templates`)
-
-### Why
-
-HTTP-call values are rendered by Qute before `${vars:…}`, `${vault:…}`, `${eddivault:…}`, `${caller:…}` and
-`${connection:…}` are resolved. Only `caller` had a pass-through namespace resolver, so every other reference
-in a URL, header, body or query parameter failed the call with "No namespace resolver found" — including
-`${connection:name}` headers, the documented way to use connections, and the vault references
-`docs/secrets-vault.md` lists as supported. Vault was kept failing on purpose, because a resolved body was
-stored unredacted.
-
-The resolvers run on the *rendered* string, so a reference that conversation data put there was resolved
-too: a template substituting user input, a model reply or an API response sent the plaintext of any vault
-secret named in that data (grants are checked at deploy, not at read). That was independent of the
-namespace failure.
-
-### What changed
-
-- `ReferencePassThroughNamespaceResolver` (new base; `CallerNamespaceResolver` now extends it) and
-  `ConfigReferenceNamespaceResolvers` with pass-through beans for `vault`, `eddivault`, `connection` and `vars`.
-- `ConfigReferenceGuard` (new): after rendering and before resolution, every credential reference
-  (`vault`, `eddivault`, `connection`, `caller`) must appear in that field's configuration template, or be the
-  value of a property the template names that is exactly this agent's auto-vault reference
-  (`${vault:<agentId>.<name>}`, under this conversation's own tenant). Otherwise the call is refused, naming
-  the field. `${vars:…}` is not itself a credential reference, but a variable may hold one — see the second
-  review fix below for how that is guarded.
-- `ApiCallExecutor` records the vault plaintexts it substitutes (`BuiltRequest.resolvedSecrets`) and redacts
-  them by value from the memory request record (`RequestRedactor.redactResolvedSecrets`), the approval
-  preview (`ResolvedRequest.withoutResolvedSecrets`, fingerprint unchanged) and the request log lines.
-- `docs/secrets-vault.md`: where references are resolved, and the rule above.
-
-### Verification
-
-- `ConfigReferenceNamespaceResolversTest`, `ConfigReferenceGuardTest` (10) and
-  `ApiCallExecutorConfigReferenceTest` (15, incl. the nested `VariableIndirection` group) — the executor with
-  the real Qute engine, not a templating stub — plus `RequestRedactorTest`'s new `SafeRequestLog` group (5),
-  `ApiCallExecutorTest`, `ApiCallExecutorSecretContextTest`, `ApiCallExecutorBatchPrincipalPropagationTest`,
-  `ResolvedRequestTest`, `CallerNamespaceResolverTest`. The apicalls, templating, secrets, connections,
-  variables and properties suites are green (6353 tests), as are the repo-wide guards.
-- Mutation-checked, one fix at a time: redacting after formatting instead of before, dropping the
-  post-variable-expansion guard pass, accepting any tenant prefix on an auto-vault property, removing the
-  fail-closed throw, and resolving a second time to build the value each fail a test.
-- End to end on the packaged build (MongoDB, vault on, recording mock API): `${vars:}` in the target URL and
-  `${vault:}` in a header and the body reach the API; an injected reference to another agent's secret is
-  refused and never sent; neither secret appears in the response, the conversation read, the stored
-  conversation or the server log (17/17). Run on the pre-merge branch; **not** re-run after the merge and the
-  review fixes below, which add a fail-closed path a packaged run would exercise differently.
-
-### Merged `main` (2026-09-20)
-
-`main` had moved 28 commits on. Two conflicts:
-
-- **`ApiCallExecutor.executeFireAndForgetCalls`** — `main` had moved batch request *building* onto the turn's
-  own thread (each iteration getting its own copy of the template data) so an unsatisfiable reference fails
-  the turn instead of a worker nobody reads; this branch had changed the same loop to carry `BuiltRequest`
-  so the log line could be redacted. Resolved by keeping `main`'s structure and collecting `BuiltRequest`
-  rather than `IRequest`. `main`'s `rejectExpiredSecretContext` calls in `buildRequest` auto-merged beside
-  the guard calls and were kept on all four fields.
-- **`docs/changelog.md`** — both sides added an entry at the top; both kept.
-
-### Review fixes
-
-Five findings from the PR review, all in the security path:
-
-- **The log line is redacted before it is formatted.** `RequestWrapper.toString()` folds newlines and cuts the
-  body at 150 characters, so redacting its *output* by exact value missed a secret carrying a newline (a PEM
-  key) or straddling the cut. New `RequestRedactor.safeRequestLog(IRequest, Set)` reads the raw components
-  from `IRequest.toMap()`, redacts those, and shortens afterwards; all three call sites use it.
-- **`${vars:…}` can no longer smuggle a credential reference in.** A global variable is allowed to hold
-  `${vault:…}` or `${connection:…}`, so a data-supplied `${vars:x}` passed the guard (not yet a credential
-  reference) and became one after expansion. `ApiCallExecutor.resolveGuardedVariables` now guards again after
-  expansion, against the configured template expanded the same way — a configured variable's reference is
-  allowed, a data-supplied one is refused. Covered for URL, body, header and query parameter; in the path the
-  reference never forms at all, because `pathSafeView` percent-encodes what data puts there (now asserted).
-- **The auto-vault property exception no longer crosses tenants.** It accepted any `<tenant>/` prefix, so a
-  user-supplied `${vault:victim/thisAgent.apiKey}` read another tenant's secret of that key name. The
-  reference is now compared character-for-character against what `autoVaultSecret` would have written for that
-  property under *this* conversation's tenant. Also removes the per-call `Pattern.compile`.
-- **An unresolvable reference fails closed.** `SecretResolver.resolveValue` leaves a reference it cannot
-  resolve in place, and the call went out carrying the literal `${vault:name}` as its credential. It now
-  refuses, naming the field and the reference — the rule `SecretResolver.requireResolved` already applies to
-  LLM client parameters.
-- **One resolution per reference.** The bookkeeping pass and the substitution pass resolved separately, so a
-  rotation between them put the new plaintext in the request while only the old one was in the redaction set —
-  the value actually sent was the one that survived into memory, previews and logs. `resolveSecrets` now
-  builds the string from the same resolutions it records.
-
-Not fixed here, and why: the auto-vault exception was still a *shape* test rather than a provenance test.
-`Property` carried no "auto-vaulted" marker — a `scope: "secret"` instruction stores its vault reference with
-`scope: conversation`, exactly like any other property — so a real provenance check needed a marker on the
-persisted property model. What was left was bounded: the reference is derived from this agent and the
-property name the template reads, so data could not choose which secret is read, and it goes only to the
-endpoint the configuration names. **Closed on this branch by the 2026-09-20 entry above**, which adds that
-marker and makes the guard require it.
-
-## 🗃️ feat(ingestion): document state and run history for RAG sources (2026-09-17)
-
-**Repo:** EDDI (`feat/ingestion-state-store`)
-
-### Why
-
-Ingesting a source is a *reconciliation*, not an append: each run compares what the source offers now
-against what the knowledge base holds, and decides per document whether to skip, re-embed, or conclude
-it is gone. That needs durable state, and the shape of it is where the salvaged PR #529 went wrong —
-quietly, because a corrupted knowledge base has no stack trace. `IIngestionStateStore` is that state,
-designed so the draft's four failure modes are not expressible.
-
-### The two rules the API enforces
-
-- **A document is recorded only after its vectors are stored.** The draft's `shouldIngest(source, doc,
-  content)` upserted the new hash while *deciding* whether to ingest, and embedding happened afterwards
-  inside a `catch` that only logged. One 429 from the embedding provider therefore marked a page done
-  forever: the hash matched on every later run, so it reported "unchanged" and was never embedded. Here
-  `lookup` and `recordIngested` are separate calls and the Javadoc says which side of the embedding call
-  each belongs on.
-- **A document missing from one run is not a deleted document.** The draft marked everything not seen in
-  the current run as stale, unconditionally — so a site outage, a network blip, or simply hitting
-  `maxPages` flagged the remainder of the corpus. `tombstoneMissing` counts *consecutive* misses and only
-  tombstones at a threshold, and callers are told not to call it for a failed run at all.
-
-### What it stores
-
-Per (source, document): content hash, ETag and Last-Modified for conditional fetching, first/last
-ingested timestamps, last run id, consecutive miss count, tombstone flag. Per run: status, timings, the
-seen/ingested/unchanged/failed/tombstoned counters, segments stored, cost in dollars, and the error —
-so a failure is visible in the Manager rather than only in a log line.
-
-`startRun` returns empty when a run is already in flight, enforced by a **partial unique index** on
-`(source_id) WHERE status = 'RUNNING'` in both backends. This is what stops an operator clicking "run
-now" five times from starting five concurrent crawls into one knowledge base, and because the database
-enforces it, it holds across instances. `reapStaleRuns` releases a source whose run died with its
-process.
-
-`ContentHashes.sha256` is a static utility rather than an interface method: the draft had each backend
-carry its own copy, two chances to drift, and a drift silently re-embeds an entire knowledge base.
-
-### Tests
-
-**One shared contract, run against both backends** — `IngestionStateStoreContract` is a JUnit interface
-with 23 cases, implemented by `MongoIngestionStateStoreTest` and `PostgresIngestionStateStoreTest`
-(Testcontainers). The draft's two stores had drifted apart — one overwrote the first-ingest timestamp on
-every call while the other preserved it — and nothing failed, because each was only tested against
-itself. A knowledge base that behaves differently depending on the operator's database choice is a
-support problem with no error message.
-
-Plus 7 cases for `ContentHashes`, including a pinned published SHA-256 vector: if the hash ever changes,
-every deployed knowledge base re-embeds itself on the next run.
-
-53 tests, all green on both backends. Mutation-checked: reverting `setOnInsert` to `set` and ignoring the
-miss threshold fails three of them.
-
-### Next
-
-The crawler, then the source config plus the pipeline that ties fetch → convert → this store → embed,
-with vector removal driven by the tombstone list.
-
-## 🔎 fix(operator): let the Platform Operator inspect knowledge bases (2026-09-17)
-
-**Repo:** EDDI (`fix/operator-rag-reads`)
-
-### Why
-
-An admin asked the Operator to check a RAG knowledge base. It answered that the tool `readRag`
-"was not found". That tool never existed: `tool-scopes.ts` named no `ragstore` path, so no RAG
-tool was ever generated — the model guessed a name by analogy with `readLlm` and the tool loop
-answered `Error: Tool 'readRag' not found` (`ToolLoopRunner:654`).
-
-The guess was the symptom of an asymmetry. The Operator *can* read `docs/rag.md` (the docs
-endpoints are granted in both scopes), so it knew knowledge bases exist — while holding no tool
-for one and no sentence saying so. Knowing a feature exists with neither a tool nor a word about
-it is what produces an improvised tool call, the same failure `BODY_AUTHORING_NO_AGENT` already
-prevents for agents.
-
-### What changed
-
-- **`tool-scopes.ts`** — three reads added: `GET /ragstore/rags/descriptors`, `GET /ragstore/rags/{id}`,
-  `GET /ragstore/rags/{id}/ingestion/{ingestionId}/status`. Descriptors are included because a KB is
-  asked about by NAME; without the listing the by-id read is unreachable. New predicates
-  `grantsKnowledgeBaseReads` / `grantsKnowledgeBaseAuthoring`.
-- **`system-prompt.ts`** — a knowledge-base section, conditional on those reads, plus a derived
-  "you cannot create, edit or ingest" sentence; `rag` added to the step-type list and the docs map.
-- **`McpAdminTools`** — `read_resource` gained a `"rag"` case, so an MCP client can read a KB config too.
-
-### Decisions
-
-- **Not folded into `WORKFLOW_EXTENSION_STORES`.** That constant doubles as
-  `WRITABLE_EXTENSION_STORES`; adding `ragstore/rags` there would grant PUT/POST as a side effect
-  of wanting a read.
-- **Reads only; `ingest` stays excluded**, as `planning/operator-write-scope-plan.md` §5 requires.
-  The ingestion *status* read is what answers "did the documents land?" without a write.
-- **No new exposure class.** RAG embedding and vector-store credentials are `${vault:...}`
-  references resolved at runtime, exactly like `llmstore`, which was already granted.
-- **The boundary sentence is derived, not asserted**, so allow-listing a RAG write later cannot
-  leave the prompt claiming the opposite.
-
-### Note
-
-Existing operators keep their old tool set — tools are provisioned at activation, so an operator
-must be re-activated to gain these.
-
-
-### Review round 1 (Copilot)
-
-Four inline findings plus one *suppressed* comment (no thread — only visible in the review body), all
-acted on:
-
-- **`ai.labs.rag` → `unknown` in `STEP_TYPE_TO_RESOURCE_TYPE`** — a real dead end: an MCP client
-  following `list_agent_resources` into `read_resource` would have passed `unknown` and never
-  reached the new case. Mapping added, and the test that pinned `unknown` updated.
-- **The cheatsheet leaked RAG unconditionally** — `rag (knowledge base)` in the step-type list and
-  the `rag` docs-map entry sat in `BODY_CHEATSHEET`, which every prompt carries. A prompt without the
-  RAG endpoints therefore still said knowledge bases exist. Both moved into the conditional section,
-  which now has a *no-reads* variant that names the `rag` step and states the boundary rather than
-  going silent — silence is what produced the invented call.
-- **The ingestion claim did not track its own endpoint** — `grantsKnowledgeBaseReads` gates a section
-  that promised an ingestion check while requiring only the two config reads. Split into
-  `grantsIngestionStatusReads` rather than requiring all three: the config reads are a complete
-  capability alone, so demanding the third would drop the whole section on a deployment missing one
-  endpoint.
-- **`grantsKnowledgeBaseAuthoring` missed the duplicate verb** (a *suppressed* Copilot comment, which
-  carries no thread — found by grepping the review body). `POST /ragstore/rags/{id}` is `duplicateRag`,
-  and a copy of a knowledge base is a new knowledge base, so granting it would have left the prompt
-  telling an operator that CAN create one that it cannot. Added, with a test covering all four
-  authoring routes.
-- **Plaintext credentials in a `RagConfiguration`** — the exposure is real but not new: `GET
-  /llmstore/llms/{id}` returns a plaintext key verbatim too, and `RestLlmStore` says so in its own
-  javadoc. RAG was, however, the one credential-carrying store with **no write-time warning**, so it
-  now has the same one `RestLlmStore` and `RestChannelIntegrationStore` already had (warn, never
-  reject — a rejection breaks vault-less instances). Redacting config reads platform-wide is a
-  separate change; doing it for RAG alone would imply the other stores are safe.
-
-**Files:** `ui/manager/src/lib/operator/tool-scopes.ts`, `.../system-prompt.ts`, their tests,
-`src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java`,
-`src/main/java/ai/labs/eddi/configs/rag/rest/RestRagStore.java`,
-`src/test/java/ai/labs/eddi/engine/mcp/{McpAdminToolsSwitchCoverageTest,McpAdminToolsTest}.java`,
-`src/test/java/ai/labs/eddi/configs/rag/rest/RestRagStoreWriteValidationTest.java`, `docs/mcp-server.md`
-
----
-
-## 🔒 fix(security): close the CWE-117 gap in the half of a log line no call site can reach (2026-09-20)
-
-**Repo:** EDDI (`fix/log-injection-record-boundary-handler`)
-
-`LogSanitizer.sanitize(...)` at a call site only ever covered the log **message**.
-`quarkus.log.console.format` ends in `%s%e`, and `%e` renders a stack trace whose FIRST
-line is the throwable's own `toString()` — `ClassName: message`. So an attacker-controlled
-CR/LF inside an **exception message** reached the console verbatim and forged a record that
-reads as a genuine, server-authored line, no matter how carefully the message half was
-sanitized. 412 log calls in `src/main/java` pass a throwable (244 as a trailing argument,
-168 as JBoss `*f(e, …)`), and none of them could fix this themselves.
-
-Dropping the throwable at those call sites was never the trade: `RestAgentAdministration`'s
-deploy-failed WARN tells the client only *"Deployment failed. Check server logs for
-details."*, so the stack trace is the sole diagnostic a failed deployment leaves.
-
-### What changed
-
-- **`LogSanitizer.escapeRecordBoundaries(String)`** — a second, record-level rule beside the
-  existing call-site `sanitize(...)`. It escapes rather than destroys: CR → `\r`, LF → `\n`,
-  U+2028/U+2029 and every other ISO control character → `\uXXXX`, TAB kept verbatim. Returns
-  the same instance when nothing needs escaping, and `null` for `null` (unlike `sanitize`,
-  which renders `null` as the string `"null"` — doing that to a throwable's message would turn
-  a printed `java.io.IOException` into `java.io.IOException: null`).
-- **`LogRecordRedactor`** now applies both rules in one pass: `SecretRedactionFilter.redact`
-  then `escapeRecordBoundaries`, to the record's formatted message and to every message in its
-  throwable graph (causes and suppressed included). `RedactedThrowable.of` takes the message
-  rewrite as a `UnaryOperator<String>` so one walk of the graph applies both rules instead of
-  nesting one stand-in inside another.
-- **`BoundedLogStore.capture`**'s own fallback path (used when the upstream pass threw) applies
-  the same `LogRecordRedactor.rewrite`, so the ring buffer, the DB and the SSE live tail agree
-  with the console.
-- **Two log calls that this change would otherwise have made uglier**: the `\n` in
-  `ConversationStepRunner`'s "Conversation not ready" ERROR became `": "` (the throwable is
-  passed too, so `%e` prints the trace anyway), and `ApiCallExecutor`'s trailing `\n` on the
-  execution-time INFO is gone (the pattern already ends in `%n`). They were the only two
-  deliberately multi-line log messages in `src/main/java`.
-
-### Design decision — escape the throwable's MESSAGE, not the rendered trace
-
-The obvious reading of "sanitize the rendered `%s%e`" is to scan the finished stack trace and
-escape the line breaks that do not begin a genuine continuation line (`\tat `, `Caused by:`,
-`\t... N more`). **Rejected**: those three prefixes are also three strings an attacker can put
-in an exception message, so such a scan has to decide which `Caused by:` is the JVM's and which
-is the payload, and it has no way to know.
-
-There is no need to guess. In a rendered trace the only text an attacker reaches is the
-`toString()` of each throwable in the graph; every other line is generated by the JDK from the
-`StackTraceElement` array. So EDDI escapes the messages *before* the trace is rendered, by
-substituting a copy of the throwable, and lets the JDK produce the structure from clean input.
-Nothing is parsed, nothing is guessed, and `LogRecordBoundaryForgeryTest` asserts the frames,
-the `Caused by:` and the `... N more` elision come out identical to what the original threw.
-
-Two further choices worth stating: **TAB is kept** (it cannot end a record, and it is what
-indents `\tat …`), and **a backslash is not doubled** — the escaping is therefore not injective,
-which is a cosmetic ambiguity rather than a forgery, and the alternative doubles every backslash
-in the Windows paths and regexes exception messages are full of.
-
-It is also a rewrite of the record rather than a new console formatter, matching the reasoning
-already recorded in `LogRecordRedactor`: one definition of "what goes out" for every destination.
-The filter is wired to the console handler alone via
-`quarkus.log.console.filter=eddi-log-capture`; a file or syslog handler would need the same
-filter, and the test below fails if that property or the `%s%e%n` format moves out from under
-the claim.
-
-### Tests
-
-New `LogRecordBoundaryForgeryTest` (10 tests) asserts on **rendered** output — a real
-`PatternFormatter` built from the pattern read out of `src/main/resources/application.properties`
-— because `LogCaptureSupport.captureLogsOf` reads `getMessage()`/`getParameters()` but not
-`getThrown()` and so cannot see this defect at all. Its shared invariant: after the first, every
-line of a rendered record must be a continuation the JDK generated. Covers the exception message,
-a cause, a suppressed exception, U+2028, the message half, a format parameter, plus "a clean
-record renders byte-for-byte as before and keeps its throwable" and the config guard.
-`LogSanitizerTest` gains 8 cases for the new method.
-
-**Mutation-checked.** Removing the escaping entirely fails 7 of 10 (the 3 survivors are the
-must-not-change tests). Escaping the message but not the throwable fails exactly the 5
-throwable-half tests — so none of them pass on the strength of the message fix.
-
-### And the message-level alerts, folded in
-
-The handler above stops any of these forging a record at *runtime*, but CodeQL's
-`java/log-injection` is a dataflow rule and keeps flagging the call site regardless — and if
-the filter is ever detached from a handler, the call site is what is left. So the same branch
-also applies the ordinary one-line `LogSanitizer.sanitize(...)` to **38 sinks across the eight
-files** the alerts name:
-
-| File | Sinks | The tainted arguments |
-|---|---|---|
-| `GroupHitlCoordinator` | 16 | `gc.getId()`, `gc.getGroupId()`, `groupConversationId`, `entry.getKey()`, `e.getMessage()` |
-| `GroupConversationService` | 11 | `gc.getId()`, `gc.getGroupId()`, `phase.name()`, `outcome.reason()` |
-| `MemberTurnExecutor` | 3 | `member.agentId()`, `gc.getId()`, `gc.getGroupId()`, `subGroupId` |
-| `ConversationHitlService` | 3 | `conversationId` |
-| `PhaseExecutionEngine` | 2 | `gc.getId()`, `phase.name()`, `decision.outcome()` |
-| `AuditLedgerService` | 1 | `entry.agentId()`, `e.getMessage()` |
-| `AgentGroupStore` | 1 | `groupConfiguration.getName()`, the phase name |
-| `SlackGroupDiscussionListener` | 1 | `groupConversationId`, `e.getMessage()` |
-
-Only String-typed arguments are wrapped; the enums, `Instant`s and counters in the same calls
-are left alone. `MemberTurnExecutor` and `SlackGroupDiscussionListener` gained the import; each
-of the other six already had it, and each call follows the style its own file already used
-(qualified `LogSanitizer.sanitize` in six, the static import in `ConversationHitlService` and
-`AuditLedgerService`).
-
-The alert list was resolved through `gh api`, not read off `main` at HEAD: a CodeQL alert's
-line number is relative to `most_recent_instance.commit_sha`. Two of the 41 reported alerts
-turned out to be stale against an older sha — one line had already been sanitized, the other no
-longer exists — which is how 41 became 38. The eight files carry a further ~70 log arguments of
-the same shape that CodeQL has *not* flagged, overwhelmingly `e.getMessage()`; those are left
-alone, because sanitizing them is a codebase-wide policy question and not this PR's.
-
-**Tests.** `SanitizedLogSinksTest` pins all 38 at the source: each is keyed by a fragment of its
-own message rather than a line number, and every flagged argument must occur only inside a
-`sanitize(...)`. Dropping one fails the build with the file, the message and the expression
-named. `GroupHitlCoordinatorLogInjectionTest` covers the two sinks reachable through a public
-method with one mock — the forged-id and the forged-exception-message halves — in the
-`LogCaptureSupport` idiom the earlier regression tests established. Both mutation-checked.
-
-A source guard rather than 38 behavioural tests is a deliberate call and is argued in the test's
-own Javadoc: the rest sit inside a phase loop or a state-race `catch` that takes a whole group
-discussion to reach, and a test that builds one to observe a single WARN grades the harness more
-than the fix.
-
-### What's next
-
-- `RestAgentAdministration`'s deploy-failed WARN carries a comment on branch
-  `fix/log-injection-agent-deployment-logs` (#799) explaining that the throwable cannot be
-  sanitized and that only a log handler can fix it. That branch is not merged, so the comment
-  does not exist on `main` and could not be updated here: **whichever of the two lands second
-  must update it** to say the handler now exists.
-- 110 further `java/log-injection` alerts remain open on `main` in files this PR does not touch —
-  `RestScheduleStore`, `RestUserMemoryStore`, `VaultSecretProvider`, the REST stores and others.
-  `RestAgentAdministration` and `AgentFactory` among them are PR #799's scope and were left to it.
-  None of them can forge a record at runtime now, so they are alert hygiene rather than exposure.
-
----
-
----
-
----
-
-## 🕷️ feat(ingestion): web crawler — streaming, bounded, robots-aware (2026-09-17)
-
-**Repo:** EDDI (`feat/ingestion-web-crawler`)
-
-### Why a rewrite rather than a patch
-
-The crawler salvaged from PR #529 was competently written but wrong in shape: it buffered every page's
-full HTML in a `List` and returned it when the crawl finished, identified pages by the URL *requested*
-rather than the one reached, read every body with an unbounded `ofString()` **before** checking its
-Content-Type, and had no run budget. None of that is patchable without touching every line.
-
-It also had no `robots.txt` at all. EDDI installations crawl sites their operators do not own, on a
-schedule — ignoring robots gets the installation blocked and its operator a complaint.
-
-### What replaces it
-
-- **`WebCrawler`** — BFS, streaming to a `CrawlSink` one page at a time, so memory is independent of the
-  site's size. Budgets for pages, fetch attempts, bytes per page, total bytes and wall clock, each
-  reported as a `StopReason`. Cancellation checked between pages.
-- **`CrawlUrls`** — canonicalization. Lowercases scheme and host **but not the path**: the draft
-  lowercased the whole URL, so `/Docs/Guide` and `/docs/guide` collapsed into one entry and whichever
-  came second was silently never crawled. Also strips fragments, default ports, tracking parameters and
-  index filenames, and sorts query parameters, so one page is not ingested three times.
-- **`UrlPattern`** — exclude globs matched against the **path**, with every metacharacter escaped and
-  compiled once. Two defects fixed: the documented `*.pdf` could never match anything (`*` cannot cross
-  the slashes in `https://host/`), and a pattern containing `+` or `(` threw `PatternSyntaxException`
-  inside the crawl loop, where a blanket catch logged it as a *fetch* error and dropped the current
-  page's links — one bad pattern reduced a crawl to its seed URL.
-- **`RobotsPolicy`** — groups, longest-match `Allow`/`Disallow`, `*`/`$`, `Crawl-delay` and `Sitemap`.
-  Blank lines deliberately do not end a group: real files are full of them, and orphaning a group's
-  rules silently allows everything the site meant to block.
-- **`PageFetcher`/`SafeHttpPageFetcher`** — `sendValidated` per request (the crawler follows links
-  harvested from third-party pages, which is as user-controlled as a URL gets), with a hard cap on the
-  body read and charset taken from the header or sniffed from the document. Assuming UTF-8 turns legacy
-  pages into mojibake, and mojibake embeds without complaint.
-
-Identity is the URL after redirects, re-checked against the scope: a 301 to another host satisfied
-`sameSiteOnly` on the pre-redirect host and smuggled a foreign page into the knowledge base.
-`<link rel="canonical">` is honoured, but only when it stays on the same host.
-
-Sitemaps from robots.txt are crawled without needing a link — the cheapest discovery there is, and the
-mitigation for the one cost of conditional requests: a 304 has no body, so an unchanged page's links are
-not re-read that run.
-
-### Tests
-
-**113 unit tests, no network, no container, no test server.** The `PageFetcher` seam is there for exactly
-this: `FakeSite` serves an in-memory website, so scope decisions, budgets, redirect identity, robots,
-conditional requests, charset handling and error accounting all run in the unit gate. The draft's only
-coverage was one Testcontainers test the unit run does not execute, which is why none of these defects
-were caught.
-
-Three of the five failures on the first run were real bugs the tests found, not test bugs: sitemap URLs
-bypassed the scope check, `https://host/` and `https://host` canonicalized differently, and fetching the
-canonicalized form invented URLs the site never published (the crawler now fetches the address as
-published and uses the canonical form only as identity).
-
-Mutation-checked: reverting the final-URL identity and re-lowercasing the path fails four tests.
-
-### Next
-
-The source configuration and the pipeline that ties crawl → convert → state store → embed, with vector
-removal driven by the tombstone list, plus the Manager UI.
-
-## 📄 refactor(ingestion): HTML→Markdown converter, and WebScraperTool stops duplicating it (2026-09-17)
-
-**Repo:** EDDI (`feat/html-to-markdown-converter`)
-
-### Why
-
-Ingesting a web page for retrieval needs more than `Jsoup.text()`. Flat text loses the structure a
-chunker needs (heading boundaries, which section a passage came from) and merges neighbouring blocks
-into single tokens. `WebScraperTool` was doing exactly that, with its own inline
-`"script, style, nav, footer, header, aside"` strip — a second, weaker copy of the same rules.
-
-This lands the converter salvaged from the stale PR #529, with its defects fixed, and makes the
-existing tool use it instead of its own extraction.
-
-### Why not a library
-
-Checked the classpath first: jsoup and pdfbox are present; flexmark-html2md, commonmark and the
-langchain4j document parsers are not. A general HTML→Markdown library optimises for fidelity to the
-source document, while ingestion wants the opposite — aggressive removal of everything a reader skips.
-~450 lines with a 60-case suite is cheaper than a new supply-chain dependency for that job.
-
-### Defects fixed from the salvaged draft
-
-Each of these silently degraded what reached the vector store; all 46 of the draft's own tests passed
-with them present, which is the point — bad ingestion has no stack trace.
-
-- **Adjacent blocks merged.** `div`/`section`/`article` appended children with no separator, so
-  `<div>Hello</div><div>World</div>` embedded as `HelloWorld`.
-- **`<header>` stripped globally**, deleting the page title in the `<article><header><h1>` layout most
-  documentation themes use. Now only `body > header` (the site banner) is removed.
-- **Unescaped `|` in table cells**, which ends the column early and shifts every later value under the
-  wrong header — corruption that surfaces only as a wrongly cited number.
-- **Code blocks flattened**: `text()` collapses whitespace, so every multi-line sample became one line.
-  Uses `wholeText()`.
-- **Headings resolved links against `null`**, leaving them relative and useless as citations.
-- **`<dl>`, `<details>`, `<figure>` fell through to the default branch** and ran together — collapsed
-  `<details>` content is still content and is now ingested with its summary as the label.
-- Alt-less images emitted `![](url)`: tokens spent on nothing. Dropped.
-- Boilerplate selectors extended with `role=navigation|banner|contentinfo|complementary`, cookie
-  banners, buttons, `svg`, `template`, `aria-hidden`.
-- `maxLength <= 0` truncated everything; now falls back to the default.
-- Dead `inPreBlock` plumbing removed (never set true by any caller).
-
-### WebScraperTool
-
-`extractWebPageText` now returns Markdown from the converter rather than a `text()` dump prefixed with
-`Title: `. Same 5000-character cap. This is a visible change to an LLM tool's output, and a deliberate
-one: the model gets headings, lists and tables instead of one run-on paragraph. Its `extractMainContent`
-helper is gone — it was the duplicate.
-
-### Tests
-
-60 converter tests: all 46 inherited from the draft pass unchanged against the rewrite (useful evidence
-the behaviour was preserved where it was right), plus 14 in `HtmlToMarkdownConverterSalvageTest`, one per
-defect above. `WebScraperToolExtendedTest` gains a case asserting structure survives.
-
-Note: `WebScraperToolTest` cannot run in this environment — its `setUp` constructs a real
-`SafeHttpClient`, and creating an `HttpClient` here fails with "Unable to establish loopback
-connection". Pre-existing and environmental; CI covers it.
-
-## ♿ fix(ui): closing a dialog hands focus back to what opened it (2026-09-19)
-
-**Repo:** EDDI (`fix/dialog-return-focus`)
-
-`AccessibleDialog` promises "return focus to trigger element on close". It did not keep that promise
-in either of the two ways the Manager closes a dialog, so keyboard and screen-reader users were left on
-`<body>` and had to find their place from the top of the page again.
-
-### What was wrong
-
-- **With an `autoFocus` field inside** (`CreateAgentDialog`'s Name, the dictionary picker's search),
-  "what had focus" was recorded in a `useEffect`. React applies `autoFocus` during commit, before any
-  effect runs, so the recorded element was the dialog's own field. On close it had unmounted, and
-  focusing it did nothing.
-- **When closed by unmounting.** `ShareDialog` (on the Agents, Workflows and resource list pages) and
-  the Triggers dialog are rendered as `{target && <X open … />}` and close by unmounting. Focus was
-  only restored on an `open === false` render, which an unmount never produces.
-
-### What changed
-
-- `ui/manager/src/components/ui/accessible-dialog.tsx`: the trigger is recorded while rendering the
-  opening render, before React commits the dialog. It is restored in the effect's cleanup, which runs
-  on close and on unmount alike, but only if focus was actually lost with the dialog (it sits on
-  `<body>`). That guard does two things: StrictMode runs the cleanup once on mount with the dialog
-  still up, where an unconditional restore pulled focus out of the open dialog, and focus the user
-  deliberately moved elsewhere is not taken back.
-- `ui/manager/src/components/ui/__tests__/accessible-dialog-focus-return.test.tsx` (new): autoFocus
-  close, unmount close, StrictMode mount, and focus moved elsewhere. Against `main` the first two fail;
-  with the `<body>` guard removed the last two fail.
-
-### Note
-
-This rewrites the same effect as #788 (initial focus no longer steals from a focused field), which
-landed first. `main` is merged in here and the conflict resolved to keep both: #788's guarded,
-cancelled frame, and this branch's cleanup restore — the cleanup now cancels the frame *and* returns
-focus.
-
----
-
-## 🧪 fix(ui): a dialog no longer takes focus from a field the user is typing in (2026-09-18)
-
-**Repo:** EDDI (`fix/share-dialog-flaky-test`)
-
-`UI Manager Checks` failed intermittently (run 35295321603) in two unrelated-looking tests that
-pass locally: `share-dialog` › "does not let two quick Enters skip the ownership confirmation"
-(`share-owner-warning` never appeared) and `create-agent-dialog` › "allows typing in description
-field" (the field was empty after `user.type`). They had one cause, and it was in the component, not
-the tests.
-
-### Root cause
-
-`AccessibleDialog` moved initial focus to its first focusable element (the header's Close button)
-inside a `requestAnimationFrame` scheduled on open. On a loaded runner that frame fired *after* the
-test had clicked into a field, and user-event sends keystrokes to `document.activeElement`: "bob"
-went to the Close button, the share subject stayed empty, Enter failed validation, and no warning was
-ever rendered. The same frame overrode every `autoFocus` inside the dialog in the real UI —
-`CreateAgentDialog` autofocuses its Name field, and focus ended on the X a frame later.
-
-Reproduced by stubbing `requestAnimationFrame` to a 30–150 ms timeout: the original share-dialog tests
-then fail with exactly the CI error, and the create-agent tests with exactly the empty value.
-
-### What changed
-
-- `ui/manager/src/components/ui/accessible-dialog.tsx`: the frame leaves focus alone when it is
-  already inside the dialog, and is cancelled on cleanup. The trap, Escape and return-focus behaviour
-  are unchanged.
-- `ui/manager/src/components/ui/__tests__/accessible-dialog.test.tsx` (new): holds the frame and
-  releases it by hand, so "focus reached a field first" is deterministic. Covers the empty-dialog
-  default (Close gets focus), a field focused before the frame, and an `autoFocus` field.
-  Mutation-checked: removing the guard fails the latter two.
-- `ui/manager/src/components/workspaces/__tests__/share-dialog.test.tsx`: the warning assertions made
-  straight after a user event now wait (`findByTestId` for it appearing, `waitFor` for it
-  disappearing, the latter safe because each test has just seen it present). This is hygiene, **not**
-  the fix — with the delayed frame and the old component these still fail, just after the wait. The
-  behavioural guards (`shared` not called, `sentSubject` null) are unchanged.
-
-### Verification
-
-With the fix, the 80 ms and 150 ms delayed-frame copies of both the old and the new share-dialog tests
-and of `create-agent-dialog` pass (246/246); without it, they fail as CI did. Full Manager suite with
-coverage green locally.
-
-### Not done
-
-`previousFocusRef` is captured in the same effect, after an `autoFocus` child has already taken focus,
-so on close focus "returns" to that (now unmounted) field instead of the trigger. Pre-existing and
-separate; left alone here.
-
----
-
-## 🔐 fix(a2a): make the A2A endpoints' anonymity real, and decide which of them deserve it (2026-09-17)
-
-**Repo:** EDDI (`fix/a2a-anonymous-discovery-permissions`)
-
-`RestA2AEndpoint` annotated five endpoints `@PermitAll`, intending them to be reachable by peer
-agents that hold no EDDI credential. None of them were named in a
-`quarkus.http.auth.permission.*` entry. **Quarkus evaluates those path policies before declarative
-RBAC**, so the `/*` catch-all (`policy=authenticated`) claimed all five: on any instance with
-`quarkus.oidc.tenant-enabled=true`, Agent Card discovery answered **401** to exactly the callers it
-exists for — a bare 401, since `quarkus.oidc.application-type=service` sends no login redirect. The
-annotation and the deployment had disagreed for as long as the endpoints existed.
-
-Nothing caught it because `A2aEndpointIT` runs against a `BaseStandaloneIT` instance with
-authorization off, where `DisabledAuthController` switches the path policies off wholesale and a
-permitted path and a protected one answer identically.
-
-### The decision, endpoint by endpoint
-
-Not all five were meant to be anonymous, so this is not "add a permit entry for the five".
-
-| Endpoint | Posture | Why |
-|---|---|---|
-| `GET /.well-known/agent.json` | **permit** | The A2A discovery convention. A peer reads the card *before* it holds any credential |
-| `GET /a2a/agents/{agentId}/agent.json` | **permit** | The card EDDI's own client fetches — `A2AToolProviderManager.fetchAgentCard` sends `apiKey` only if one is configured. Needs the agent id, so it discloses one agent, not the roster |
-| `GET /a2a/agents` | **authenticated** — `@PermitAll` removed | The whole roster: every A2A agent's name, description, skills and URL. Strictly more than the skill-name list that sits behind `eddi.a2a.capabilities.public`, and nothing in the protocol or in this repo fetches it |
-| `GET /.well-known/capabilities` | **permit** at the HTTP layer | `eddi.a2a.capabilities.public` (default `false`) is the only *authorization* gate — `eddi.a2a.enabled` gates it as well, but neither looks at the caller. While either is off the handler answers 404 to authenticated and anonymous callers alike, so permitting the path widens nothing — and while both are on, "public" has to mean *without a token* |
-| `GET /.well-known/capabilities/skills` | **permit** at the HTTP layer | Same flag, same reasoning |
-
-Where code and config disagreed, the **code** was changed: `listA2AAgents` lost `@PermitAll` and
-gained `@Authenticated`, rather than gaining a permit entry.
-
-### Design decisions
-
-- **`/a2a/agents/*/agent.json`, not `/a2a/agents/*`.** Quarkus 3.39's `ImmutablePathMatcher`
-  supports an inner wildcard matching exactly one path segment, and the distinction is load-bearing
-  twice over. A `/a2a/agents/*` prefix would (a) permit the roster, because the prefix registers
-  under `/a2a/agents` and wins over the catch-all, and (b) **break A2A outright**: the JSON-RPC
-  `POST /a2a/agents/{agentId}` would match a `methods=GET` entry, and Quarkus *denies* on a method
-  mismatch rather than falling through. Both are asserted.
-- **No `/.well-known/*` wildcard.** RFC 9728 protected-resource metadata is planned under that
-  prefix (`planning/saas-connectors-plan.md` §6.3); a wildcard would pre-permit it, and anything
-  else later dropped there, with nobody deciding to. The paths are enumerated and a test asserts a
-  sibling still requires authentication.
-- **One knob for capability discovery.** The permission entry does not re-express
-  `eddi.a2a.capabilities.public`; duplicating the gate into a second property is how the two drift.
-
-### Tests
-
-- **`A2aEndpointPermissionsTest`** (new, unit — runs in `./mvnw test`, no container). Feeds the
-  shipped `application.properties` through Quarkus's own `ImmutablePathMatcher` and resolves the
-  effective policy per path and method, replicating `findHttpMatchers`' method-filtering rule. Its
-  last test reflects over `RestA2AEndpoint` and asserts every `@PermitAll` / `@Authenticated` method
-  resolves to the policy it claims — so the *next* endpoint added with a forgotten permit entry
-  fails here. Mutation-checked three ways: removing the card entry reproduces the original
-  `[authenticated]`; widening to `/a2a/agents/*` catches both failure modes above; a
-  `/.well-known/*` wildcard trips the sibling assertion.
-- **`ui/manager/e2e/auth/a2a-discovery.spec.ts`** (new). The auth E2E tier is the only one that
-  enforces authentication, so it is where the real status codes belong: it creates an A2A-enabled
-  agent (a card is built from stored config, no deployment needed), then asserts 200 anonymous for
-  both cards and both capability endpoints and 401 anonymous for the roster, the JSON-RPC surface
-  and an unlisted `/.well-known` sibling. It opens with its own "this backend really is enforcing
-  auth" guard so it cannot pass vacuously, and re-checks the roster with an admin token so the 401
-  is provably about anonymity.
-- `docker-compose.integration-keycloak.yml` sets `EDDI_A2A_CAPABILITIES_PUBLIC=true`, because with
-  the flag off the spec could not tell "permitted, flag says no" (404) from "the permission entry is
-  missing again". The flag-off 404 stays covered by `RestA2AEndpointTest`.
-
-### Files
-
-- `src/main/resources/application.properties` — new `a2a-agent-card` and `a2a-capabilities` permit
-  entries, GET-only, before the catch-all
-- `src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java` — `listA2AAgents` is
-  `@Authenticated`; Javadoc on every endpoint records the posture and why
-- `src/test/java/ai/labs/eddi/engine/a2a/A2aEndpointPermissionsTest.java` — new
-- `ui/manager/e2e/auth/a2a-discovery.spec.ts` — new
-- `ui/manager/docker-compose.integration-keycloak.yml` — capability flag on
-- `docs/a2a-protocol.md` — an "Anonymous?" column and a "Who can call them" section
-- `docs/configuration-reference.md` — `eddi.a2a.capabilities.public` says what it actually gates
-
-### Review follow-up (PR #782)
-
-Three findings, all valid, all fixed on the branch:
-
-- The generic guard resolved the HTTP verb as `isAnnotationPresent(GET) ? "GET" : "POST"`, so a
-  future `@PermitAll @PUT` would have been graded against a method it does not serve — and since
-  the permit entries are GET-only, that is precisely the drift the guard exists to catch. The verb
-  now comes from whichever annotation is meta-annotated `jakarta.ws.rs.HttpMethod`, and the guard
-  fails on anything other than exactly one. Confirmed by planting a `@PermitAll @PUT` endpoint plus
-  a permit entry naming POST: the old code passed it, the new code names the entry and the verb.
-- `docs/a2a-protocol.md` said everything is reachable without a token when OIDC is off. True of
-  authentication, misleading about the result — `eddi.a2a.capabilities.public` is an independent
-  switch and its endpoints 404 either way while it is off.
-- `docs/configuration-reference.md` said the capability endpoints expose agent *names*.
-  `CapabilityMatch` is `(agentId, skill, confidence, attributes)` — ids. The surface is smaller
-  than the doc claimed, which if anything strengthens the case for leaving `/a2a/agents` (names,
-  descriptions, URLs) authenticated.
-
-**Second pass** (CodeRabbit's first review was rate-limited before it saw the fix commits, so both bots
-were asked for a fresh look):
-
-- `eddi.a2a.capabilities.public` was described as "the only gate". `eddi.a2a.enabled` gates the
-  capability endpoints too (`if (!a2aEnabled || !capabilitiesPublic) → 404`). Reworded in all five
-  places that said it to "the only *authorization* gate — neither flag inspects the caller", which
-  is the claim the permit entry actually rests on.
-- The Agent Card's `authentication.credentials` is built from `quarkus.oidc.auth-server-url`, i.e.
-  the URL **EDDI** uses to reach the IdP. The shapes that bundle Keycloak set that to an in-cluster
-  or compose hostname, so the token endpoint advertised to an outside peer does not resolve — which
-  this PR makes consequential, because the card is now anonymously readable under auth. Initially
-  deferred as a config-design decision; **fixed here** once CodeRabbit raised it independently at
-  Major severity — see the fourth pass below.
-
-**Third pass — two findings Copilot *suppressed* into its review body**, where they have no thread and
-a `reviewThreads` query cannot see them. Both were real, and both are properly this PR's:
-
-- **`/.well-known/agent.json` fanned out over the whole roster.** `getDefaultAgentCard()` called
-  `listA2AAgents()` and returned `cards.get(0)` — building a card for every A2A-enabled agent
-  (`getCurrentResourceId` + `read` + `readDescriptor` apiece, up to 100 candidates) and discarding
-  all but one. Merely wasteful while the endpoint required a token; an amplification vector now that
-  this PR makes it anonymous. `AgentCardService.getDefaultAgentCard()` now stops at the first match
-  (`collectA2AAgents(stopAtFirst)`), and `AgentCardServiceTest` asserts **one** store read across 25
-  candidates rather than asserting the card — the card was always right, the cost was not.
-- **The E2E cleanup scored a failed request as success.** `await call().catch(() => undefined)`
-  followed by `res === undefined || res.status() < 400` passed when the request never completed,
-  leaking the A2A-enabled fixture agent. That one contaminates specifically: the default Agent Card
-  is whichever A2A agent comes first, so a leftover is exactly what a later run reads. The soft
-  assertion now requires a real 2xx/3xx and reports the status or the error.
-
-**Fourth pass — the advertised token endpoint, raised independently by both reviewers.** Deferred
-twice on scope, then implemented: two reviewers agreeing, both framing it as "the permission change
-makes this pre-existing URL consequential", outweighed the argument for keeping it separate.
-
-`AgentCardService.advertisedTokenEndpoint()` resolves what the card advertises:
-
-- **`eddi.a2a.public-token-endpoint`** (new, optional) — advertised verbatim. The *endpoint*, not
-  the issuer, because the path is the provider-specific part.
-- Otherwise `<issuer>/protocol/openid-connect/token`, where `<issuer>` is **`eddi.keycloak.public.url`**
-  grafted onto the realm path from `quarkus.oidc.auth-server-url`, falling back to
-  `quarkus.oidc.auth-server-url` itself. Both shipped authenticated deployments already set the
-  public URL — Helm *requires* it, since the Manager SPA cannot start a login without it — so they
-  become correct with no new configuration. Only the origin is taken from it; the realm path stays
-  what EDDI is configured against, so the two cannot drift. **Nothing moves for a deployment that
-  does not opt in**, which is what made this safe to do inside a permissions PR.
-
-The derivation **assumes Keycloak**, which the docs now say rather than gloss. OIDC discovery would
-remove the assumption instead of documenting it and is the right follow-up; it is not done here
-because it turns rendering an anonymous card into an outbound HTTP call, needing `SafeHttpClient`,
-a cache and a failure policy.
-
-Verified end to end rather than by unit test alone — built the image, ran the Keycloak tier, and read
-the anonymous card: `credentials` is now
-`http://localhost:8180/realms/eddi/protocol/openid-connect/token`, the published port an outside peer
-sees, where it was `http://keycloak:8080/...`. That URL is provably reachable — it is the one the
-test fixtures fetch their tokens from. `a2a-discovery.spec.ts` now asserts it exactly, as the
-reviewer asked.
-
-**Fifth pass — a bug in the fourth pass.** CodeRabbit (Major) caught that the property introduced
-above was the *issuer*, while the Keycloak path `/protocol/openid-connect/token` was appended to
-whatever it named. So the one knob documented as "the escape hatch for a non-Keycloak IdP" handed an
-Okta or Auth0 operator their issuer with a Keycloak path stapled on — it did not do the job it was
-documented as doing, and the docs, the commit message and the reply to the reviewer all repeated the
-claim.
-
-Replaced `eddi.a2a.public-auth-server-url` with `eddi.a2a.public-token-endpoint`, advertised
-verbatim: **one** property instead of two, and it actually covers the case the other one claimed to.
-The property was one commit old and unreleased, so nothing depended on it. Two tests pin the
-distinction, including one asserting the Keycloak path is never appended to an endpoint given in
-full.
-
-Also seen this pass and **not** fixed here: `UI Manager Checks` went red on
-`share-dialog.test.tsx › does not let two quick Enters skip the ownership confirmation`, a file this
-branch does not touch. It passes 15/15 locally three runs in a row, and the cause is visible in the
-test — a synchronous `expect(screen.getByTestId("share-owner-warning"))` immediately after an async
-`userEvent.type`, with no `waitFor`, so a slow runner loses the race. A real flake with a one-line
-fix, but in unrelated code; filed separately rather than smuggled into a permissions PR.
-
-### What's next
-
-Nothing outstanding for A2A. The generic lesson — `@PermitAll` is not a permit entry — applies to
-any future endpoint meant to be anonymous; `A2aEndpointPermissionsTest` only guards
-`RestA2AEndpoint`, and widening it to every `@PermitAll` in the codebase would be a reasonable
-follow-up.
-
----
-
-## 🔏 chore(ci): settle the dependency-review licence policy — deny-list kept, broadened, documented (2026-09-17)
-
-**Repo:** EDDI (`chore/dependency-review-license-policy`)
-
-### Why
-
-`.github/workflows/dependency-review.yml` printed a deprecation warning on every PR
-("The deny-licenses option is deprecated for possible removal in the next major
-release"). The comment above the option already recorded the deferral: migrating to
-`allow-licenses` means enumerating every licence the project accepts, which is a
-repo-wide policy decision, not a mechanical swap. This session established the real
-input, put the decision to the maintainer, and implemented the answer.
-
-### What the dependency graph actually contains
-
-Enumerated three ways: `license-maven-plugin:add-third-party` for the resolved Maven
-tree (582 artefacts), `npm query ":not(.dev)"` for both UIs, and — the one that
-matters — the live graph the action actually reads,
-`gh api repos/labsai/EDDI/dependency-graph/sbom`.
-
-GitHub's Maven graph parses `pom.xml` directly and does **not** resolve transitives,
-so the policy is evaluated against 95 Maven entries, not 582:
-
-| Count | Licence |
-|---|---|
-| 58 | `NOASSERTION` — BOM-managed (`io.quarkus:*`, `jakarta.annotation`, `caffeine`) or `${property}`-versioned (all 22 `dev.langchain4j:*`) |
-| 27 | `Apache-2.0` |
-| 4 | `MIT` (testcontainers) |
-| 2 | `Apache-2.0 AND BSD-3-Clause AND MIT` (maven plugins) |
-| 2 | `LicenseRef-bad-non-standard` — `org.jsoup:jsoup`, `io.github.classgraph:classgraph`; both are really MIT |
-| 1 | `BSD-2-Clause` (postgresql) |
-| 1 | `EPL-2.0 OR (Apache-2.0 AND EPL-2.0)` (jacoco) |
-
-npm contributes 1137 graph entries but `fail-on-scopes` defaults to `runtime` and
-`main.ts` runs the licence check on the scope-filtered set, so only production deps
-count: manager 179 (MIT 164, OFL-1.1 8, ISC 2, Apache-2.0 2, BSD-3-Clause 1,
-`MPL-2.0 OR Apache-2.0` 1) and chat 126 (MIT 122, ISC 2, BSD-3-Clause 1). The
-MPL-2.0, CC-BY-4.0 and Python-2.0 entries in the graph are all devDependencies.
-
-### Decision
-
-Keep `deny-licenses`, broaden it, and record why the warning is accepted. Three
-findings from reading the action's source made the allow-list migration the worse
-option rather than merely the more expensive one:
-
-1. **It would fail the build today.** `spdx.satisfies()` returns `false` for an
-   expression it cannot match, so the two `LicenseRef-bad-non-standard` entries land
-   in `forbidden` → `setFailed` under an allow-list. Under a deny-list
-   `satisfiesAny()` returns `false` and they pass. Migrating would mean two permanent
-   per-package exclusions that exist only to work around GitHub's own normalisation.
-2. **It buys no coverage.** The 58 unknown-licence entries go to the `unlicensed`
-   bucket, and `printNullLicenses()` only prints — it never sets `issueFound`. They
-   are informational in *both* modes.
-3. **Removal is not scheduled.** Upstream issue #997 was closed by stalebot after 180
-   days of inactivity, not by a decision, and v5.0.0 (2026-05-08) is a node20 → node24
-   runtime bump that leaves `deny-licenses` fully documented in `action.yml`. There is
-   no newer v4 digest, so the pin stays at v4.9.0.
-
-The line is drawn at the library level, because EDDI is Apache-2.0 and ships a fat jar
-inside a distributed Docker image — a combined work. Permissive and weak (file-level)
-copyleft stay acceptable; EPL especially has to, since the whole Jakarta EE / JUnit /
-JaCoCo layer Quarkus pulls in is EPL, usually dual with GPL-2.0 under the Classpath
-Exception. Denied: AGPL-3.0, GPL-2.0, GPL-3.0, LGPL-2.0/2.1/3.0 (each `-only` and
-`-or-later`), SSPL-1.0, BUSL-1.1, Elastic-2.0. The additions past the original two are
-not hypothetical — the realistic hazard for middleware is a dependency relicensing to
-source-available, and EDDI already depends on MongoDB and Elasticsearch clients.
-
-### Verified, not assumed
-
-Ran the candidate list through the same libraries the action uses
-(`@onebeyond/spdx-license-satisfies`, `spdx-expression-parse`) against every licence
-value in the live SBOM:
-
-- nothing currently in the graph is newly denied — the change is a strict superset of
-  the old behaviour with no regression;
-- every listed hazard is caught;
-- deprecated ids still match: a dep declared `GPL-3.0` is caught by `GPL-3.0-only`, so
-  modernising the identifiers does not weaken the gate;
-- Classpath-Exception artefacts do **not** false-positive —
-  `EPL-2.0 OR GPL-2.0-with-classpath-exception` and
-  `CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0` both pass with `GPL-2.0-only`
-  and `GPL-2.0-or-later` denied. This was the main risk of adding GPL-2.0 and it is
-  disproven, not hoped.
-
-Known trade-off, recorded in the workflow: `satisfiesAny()` treats `A OR B` as denied
-when either side is, so a *directly declared* dep offering `Apache-2.0 OR LGPL-2.1`
-would be flagged despite the Apache option. Nothing hits this today — the dual-licensed
-artefacts (`net.java.dev.jna`, `org.javassist`, `com.github.java-json-tools:*`) are all
-transitive and invisible to GitHub's Maven graph.
-
-### Dropped the Caffeine exemption
-
-The `allow-dependencies-licenses` entry for Caffeine is **removed**. It was first kept
-with a corrected comment calling it cosmetic; CodeRabbit pushed back on the PR, and it
-was right. `groupChanges` in the action's `src/licenses.ts` says so in its own comment —
-*"we leave it off of the `licensed` and `unlicensed` lists"* — so the input drops a
-package from the licence check **entirely**, not just from the unknown-licence notice.
-The exemption therefore also waived `deny-licenses` for any future Caffeine release
-whose licence GitHub *can* resolve, while buying nothing: per finding 2 an unresolved
-licence cannot fail the build anyway, and 57 other entries sit in the same bucket
-unexempted. Caffeine remains verified Apache-2.0 (its own POM on Maven Central at 3.2.4,
-the version the Quarkus BOM resolves), shipped transitively via `quarkus-caffeine`
-before it was ever declared here — nothing needed waiving. The replacement note records
-when that input *is* appropriate: a package whose licence GitHub reports wrongly, naming
-the licence being accepted.
-
-### Files
-
-- `.github/workflows/dependency-review.yml` — broadened `deny-licenses`, removed
-  `allow-dependencies-licenses`; rewrote the comments to record the decision, the
-  evidence, and the revisit condition (upstream announcing removal, or GitHub resolving
-  BOM-managed Maven coordinates).
-
-## ⬆️ chore(ui): Node 22 toolchain, Stryker 10, Vitest 5 for the Chat UI (2026-09-17)
-
-**Repo:** EDDI (`feat/node-22-toolchain`, stacked on `fix/ui-npm-vulnerabilities` / #770)
-
-Node 20 reached end of life on 2026-04-30, and it was what held the UIs on Stryker 9 and Vitest 4:
-Stryker 10 dropped Node 20 (Dependabot #768 was red for that reason) and Vitest 5 requires ≥ 22.12.
-
-### What changed
-
-- **Node 20 → 22 everywhere the build names a version.** `pom.xml` `node.version` `v20.20.2` →
-  `v22.23.2` (the latest 22.x; Maintenance LTS until 2027-04-30), `mise.toml` to match, and all eight
-  `actions/setup-node` steps in `ci.yml` (`node-version: 22`, step names too). `AGENTS.md` and
-  `README.md` no longer say Maven downloads Node 20. No test asserts on the version and no Dockerfile
-  uses Node.
-- **Manager: Stryker `9.6.1` → `10.0.0`** (still exact-pinned). Its only breaking change is the Node
-  floor. The `typed-rest-client` → `qs` override stays: Stryker 10 still takes `typed-rest-client`
-  `~2.3.0`.
-- **Chat UI: Vitest `^4.1.11` → `^5.0.1`.** No test or config change was needed.
-- **Manager stays on Vitest 4.1.11 — see Decisions.** `dependabot.yml` now ignores Vitest/`@vitest/*`
-  *majors* for `/ui/manager` only, with the reason and the upstream issue beside the rule
-  (`update-types` scopes it to version updates; security updates still arrive).
-- **The UIs' own docs caught up** (Copilot review): `ui/chat/README.md` and `ui/chat/AGENTS.md` still said
-  Node ≥ 20, Vitest 3 and react-markdown 9.x; `ui/manager/README.md` still said Node ≥ 20. A contributor
-  following them would install an unsupported runtime. Each now names the floor that applies to that UI
-  — 22.12 for the Chat (Vitest 5), 22.18 for the Manager (Stryker 10's Babel 8) — and the pinned 22.23.2.
-- **`updates.test.ts`: a test for the two cleanups in `getWithoutCredentials`'s `finally`.** Stryker 10
-  mutates more statements than 9.6.1 (265 mutants on `updates.ts` against 263), and both new ones
-  survived: deleting `clearTimeout(timer)` or `csp.stop()` failed no test. The existing "stops listening
-  for violations once the request is done" test cannot see that leak — each request reads its own
-  closure's flag, so a leftover listener never touches the next verdict, it only accumulates. The new
-  test pins both calls (spies on add/removeEventListener and set/clearTimeout) and fails with either
-  line deleted.
-
-### Decisions
-
-- **The Manager cannot take Vitest 5 yet: it breaks Stryker.** On Vitest 5, `@stryker-mutator/vitest-runner`
-  10.0.0 selects zero tests per mutant — its per-test filter joins names with a space, Vitest 5 joins
-  them with `' > '` ([stryker-mutator/stryker-js#6210](https://github.com/stryker-mutator/stryker-js/issues/6210),
-  open, no fixed release on npm). Measured here: `updates.ts` scored **0.00** (all 257 covered mutants
-  "survived") against 81.85 on Vitest 4 with the same runner and Node. The break threshold would at least
-  fail the run, but a gate whose every mutant survives measures nothing. The Chat UI has no Stryker, so it
-  moves. Revisit the Manager when a fixed runner ships — the Dependabot ignore rule names the issue.
-- **The real Node floor is 22.18, not 22.12.** Stryker 10 moved to Babel 8, whose packages declare
-  `engines.node` `^22.18.0 || >=24.11.0`. The `pom.xml` comment records it; on an older 22.x Stryker
-  warns `EBADENGINE` and may not run.
-- **22, not 24.** 24 is Active LTS until 2028-04-30, but this change was scoped to leaving the EOL line.
-  Every package in both lockfiles declares an `engines.node` range that also accepts 24.21.0, so moving
-  on later is a pin change, not a migration.
-
-### Verification (on Node 22.23.2 — the binary Maven downloads)
-
-- `./mvnw package -DskipTests` installed Node v22.23.2 and ran `npm ci` + `npm run build` for both UIs:
-  BUILD SUCCESS.
-- Manager (Vitest 4.1.11, Stryker 10): lint, typecheck, `vitest run --coverage` — 411 files, 6,515
-  tests, thresholds met. Scoped `stryker run --mutate src/lib/api/updates.ts`: **83.78** (216 killed of
-  265), above `thresholds.break` 82 — 81.85 before the new cleanup test, 82.49 on Stryker 9.6.1.
-- Chat (Vitest 5.0.1): typecheck, 278/278 tests. A static sweep found none of Vitest 5's removals in use
-  (`.sequential`, non-top-level `vi.mock`, removed `vitest/*` entry points, `toThrow('')`), and its new
-  `clearMocks: true` default broke nothing.
-- `npm ci` for both lockfiles in a `node:22.23.2` Linux container. The Windows `@emnapi` pruning did not
-  recur; all four entries are present. `npm audit`: 0 vulnerabilities in both UIs.
-
 ---
 
 ## Decision Log
@@ -2853,6 +2841,31 @@ _For recording decisions that come up during implementation that aren't in the p
 
 | Date       | Decision                                                              | Context                               | Alternative Considered                                      |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| 2026-09-22 | `StanceSummaryConfig` carries no `enabled` flag | Stances always exist (extraction needs no config), so the flag could only mean "may this spend?" — already said by naming a provider/model. A flag could contradict them. | EDDI |
+| 2026-09-22 | `cost_updated` carries cumulative cost, never a delta | The ledger records by replacement, so duplicates are idempotent; a delta frame replayed after a reconnect would double-count, and PARALLEL turns interleave. | EDDI |
+| 2026-09-22 | `memberStances` rides schema v4 without a bump | It is a display projection — reproducible from the transcript, read by no resume path. The bump rule is scoped to resume-consumed fields. | EDDI |
+| 2026-09-22 | Per-style difference is band ORDERING, not a renderer per style | Every discussion reduces to phases × members × entries; a style table means an unknown style still renders, and adding one is a row rather than a component. | EDDI Manager |
+| 2026-09-22 | One `useDiscussionDigest` adapter for all three transcript surfaces | Two data shapes × three renderers is exactly how a DISSENT once rendered as an opinion on two of them; one adapter makes the drift structurally impossible. | EDDI Manager |
+| 2026-09-22 | `split` restacks instead of being width-gated | A gated mode would discard the half the user picked and silently rewrite their stored preference. | EDDI Manager |
+| 2026-09-22 | Round boundaries are recovered from QUESTION entries but validated against the stored index | Only the current round's start is persisted. Trusting the QUESTION invariant blindly split a discussion on a stray marker; validating and falling back narrows the switcher instead of slicing the view wrongly. | EDDI Manager |
+| 2026-09-22 | The interaction band is a list, not a graph | A force-directed diagram of five nodes is decoration and of twenty is unreadable; a list answers "who did this member take on" and "who went unchallenged" at any size with no layout engine. | EDDI Manager |
+| 2026-09-22 | DELPHI gets no interaction band | Naming who answered whom would undo the anonymity the method rests on — the reason its later rounds run ANONYMOUS. | EDDI Manager |
+| 2026-09-22 | A first-time live sync fetches the source's export archive and imports it, rather than creating resources itself | `executeUpgrade` has no create path, and writing one meant a second implementation of everything `RestImportService` already does for a ZIP — schedules, connections, capability registration, rollback | Writing native creates in `UpgradeExecutor` (would quietly do less than a ZIP import and drift from it); materialising the archive locally from `IResourceSource` (duplicates the export's layout rules) |
+| 2026-09-22 | The sync source policy is three independent settings, all defaulting to the strict behaviour, with an exact-origin allow-list as the preferred one | A compiled-in refusal of every private address made the feature unusable for self-hosted deployments, but relaxing it globally by default would let any caller of the endpoint probe hosts behind the deployment | Reusing `eddi.security.ssrf-protection.enabled` (it governs agent-config-driven calls, a different trust question, and defaults the other way); a single "allow internal" switch (cannot express "this one staging host") |
+| 2026-09-22 | `includeFirstAgentMessage` drops a message only when it is the agent's, and the flag is deprecated | The unconditional `removeFirst()` emptied the history of any agent with no `ai.labs.output` step, and Anthropic rejected the call; the Anthropic rule the flag exists for no longer applies | REMOVING it — agent behaviour lives in stored JSON, and silently ignoring a deliberate setting would start sending a greeting the author chose to withhold, with no diagnostic |
+| 2026-09-22 | A HITL rejection gets its own `REJECTED` state rather than reusing `FAILED` | The Manager rendered a recorded human decision as a red "Failed" badge | Re-labelling `FAILED` in the UI only — the backend distinction is what audit and API consumers need |
+| 2026-09-22 | Pre-`REJECTED` documents keep `FAILED`; no migration | Nothing stored distinguishes a rejection from a failure, so a migration could only guess | Backfilling from the audit ledger — it is not guaranteed enabled |
+| 2026-09-22 | The debate-verdict note is INFO, not a save-time rejection | For a real DEBATE group the verdict path is the intended behaviour; rejecting would break every existing debate config | A hard error, and a WARN (which would cry wolf on every correct debate) |
+| 2026-09-22 | The expanded group question is height-bounded and scrolls itself | Unbounded expansion pushed its own "Show less" out of an overflow-hidden pane, so it could not be undone without a reload | Making the whole header scroll — it would move the state badge and cost pane height a transcript needs |
+| 2026-09-22 | "New Discussion" is guarded by an explicit-clear ref, not a one-shot restore | Preserves today's auto-select-after-delete behaviour, which a one-shot ref would drop | The Workforce board's one-shot `restoredRef`, which is right for its "restore an ongoing discussion" semantics but not for this page's "select the newest" one |
+| 2026-09-22 | The session log stream is lazy and refcounted rather than removed | The Logs page genuinely needs a live tail; what was wrong was holding it on every page | Keeping the boot connection and raising the tab budget — the six-per-origin cap is Chrome's, not ours |
+| 2026-09-22 | A plain Save toasts "not yet live" with a Deploy action rather than deploying itself | Deploying on every Save would make an ordinary edit a production change; the gap was that nothing said the change was inert | Auto-deploying, and leaving it to documentation |
+| 2026-09-21 | Document the three-sided KB binding instead of making the workflow step optional | Retrieval discovers knowledge bases from the workflow document, which is what makes a KB an agent-level capability rather than a per-task one; inferring a binding from `knowledgeBases[].name` alone would let any task reach any KB in the deployment. The requirement is correct — it was undocumented. |
+| 2026-09-21 | Fix CWE-117 in `NatsConversationCoordinator` at the log call, and also widen `sanitizeSubject` to strip CR, LF and tab | The log call and the subject token answer different questions, so both are fixed. Widening was first rejected as moving the subject namespace; that was wrong — NATS refuses a subject containing those characters outright, so nothing was published under one, and the rejection is an unchecked `IllegalArgumentException` that escapes the publish's `IOException \| JetStreamApiException` handler | Leave CR/LF in `sanitizeSubject` and rely on the log call alone — keeps a latent unchecked-exception path for no gain |
+| 2026-09-21 | Arm an ingestion schedule in its creator, not in `createSchedule` | A cron ingestion source was stored enabled with a null `nextFire`, which no `findDueSchedules` can ever match, so it never ran | Computing `nextFire` inside the stores: `MongoScheduleStore` does not cover `PostgresScheduleStore` (no shared base), and it would make a second copy of the arming policy that already lives once in `RestScheduleStore.computeRearmNextFire` |
+| 2026-09-21 | Repair already-stored unarmed ingestion schedules with a repeatable startup sweep, rather than a migration script or leaving it to the next save | Rows written before the fix are dead for ever and nothing tells the operator to re-save the knowledge base | A one-off migration (needs running, and is skipped on upgrades); re-syncing every knowledge base at startup (delete-then-create races between nodes); a generic sweep over all schedules (wider blast radius than the defect) |
+| 2026-09-21 | Arm a legacy row in the zone the poller will use, rather than in UTC or by widening the store's re-arm to carry one | `armIfUnarmed` writes only `nextFire`, so a legacy row's `timeZone` stays null and the poller re-arms it in the deployment default; arming the first fire in UTC regardless would make exactly one interval the wrong length | Adding a zone to the store's re-arm on both backends (CodeRabbit's suggestion — it would also normalise legacy rows to UTC, at the cost of a third field in a predicate that exists to do one thing), leaving the fixed-UTC arm and the drift with it |
+| 2026-09-21 | Close the two-node repair race with a conditional `armIfUnarmed` on both stores rather than a re-read | A re-read narrows the window to one store round-trip and still reads a snapshot; the predicate is the only place two nodes meet, and ~20 lines per backend is a small price for a write that cannot skip a fire | A re-read before writing (narrows, does not close), a distributed lock for a startup sweep, leaving the inaccurate idempotency claim in place |
 | 2026-09-21 | Changelog entries are per-branch fragment files, collated nightly on main | Every PR inserted at the same point in one file, so every open PR conflicted with every other over a document unrelated to its code | Keep one file and resolve by hand (the conflict returns at the next merge); collate on every push to main (a bot commit per merge, and races between them); let the merge tool own it (no merge driver makes two insertions at one point orderable) |
 | 2026-09-21 | The nightly job opens a PR, and skips entirely while one is open | main requires a PR; and a second PR proposing the already-claimed fragments would conflict with the first — the very failure being fixed | Push to main directly (a hole in the PR requirement); force-push the bot branch (banned by §2 rule 4); a new branch per night (two PRs carrying the same entries) |
 | 2026-09-21 | Fragments live in docs/changelog.d/, one directory below the live file | Puts all changelog material in one place, and makes a fragment exactly as deep as an archive, so the two link transforms are inverses | A repo-root newsfragments/ (avoids the SUMMARY.md carve-out, splits changelog material across two trees); a subdirectory of docs/changelog/ (collides with the archive naming rule) |
@@ -2882,3 +2895,23 @@ _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
 | ---- | ---------- | ----- | --- | ------ |
+| 2026-09-24 | A task with an empty `knowledgeBases` and no `enableWorkflowRag: true` also retrieves nothing and says nothing — `RagContextProvider.retrieveContext` returns before workflow discovery even runs, so unlike the missing-step cause there is no `DEBUG` line either. Check the task's own RAG settings before checking the workflow binding. |
+| 2026-09-22 | Matrix cells: a phase not yet reached must read `pending`, not `absent` | `absent` means "the selector excluded them"; using it for "not yet" told readers a debate's PRO side had gone quiet during a CON-only phase. Guarded by `use-discussion-digest.test.ts` "distinguishes a member excluded from a phase from one still expected". | EDDI Manager |
+| 2026-09-22 | Stance coverage must count a member's OWN contributions, not transcript length | Keyed to the transcript, any member speaking invalidated every member's stance: a six-member discussion re-summarised all six at every boundary. Guarded by `StanceSummaryEngineTest` "a member is NOT re-summarized because somebody else spoke". | EDDI |
+| 2026-09-22 | A continuation round restarts phaseIndex at 0 — slice at roundStartTranscriptIndex | Without the slice, round 1's turns render in round 2's cells and a round-1 failure marks a round-2 cell failed. Guarded by `use-discussion-digest.test.ts` "does not merge a previous round's turns into this round's phases". | EDDI Manager |
+| 2026-09-22 | The live cost map overlays the persisted one, never replaces it | A stream carries only the keys it announced this session; swapping dropped earlier rounds and unspoken members, so Continue on a $4.10 discussion showed $0.02. Guarded by "keeps persisted keys the live stream has not re-announced". | EDDI Manager |
+| 2026-09-22 | A LIVE continuation keeps every round in one transcript — slice at the stream's own roundStartIndex | `continueStream` preserves `s.transcript` and `group_start` appends; assuming the live transcript was already round-scoped re-created the cross-round contamination the persisted slice prevents. Guarded by "slices a LIVE continuation at the stream's own boundary". | EDDI Manager |
+| 2026-09-22 | The I1 ceiling must be re-checked per member, not once per boundary | Each stance call adds to the ledger, so one decision up front let every member after the first spend past an exhausted budget. | EDDI |
+| 2026-09-22 | Overview mode unmounts the transcript, so anything rendered only inside it is GONE | The task board and the synthesised answer were both invisible in Overview until moved into the `extras`/`outcome` bands. Anything added to a transcript renderer in future needs the same question asked. | EDDI Manager |
+| 2026-09-22 | A repeating phase must render its repeat count | ROUND_TABLE and DELPHI are built on `repeats`; rendering the phase once made a four-pass deliberation indistinguishable from a single one, in the two styles most groups use. | EDDI Manager |
+| 2026-09-22 | A live sync worked once per target agent, then failed permanently with "the store did not accept the update"; the version it did write could not be deployed | `readDescriptor(id, null)` always throws on a historized store, so version resolution fell back to 1 — and nothing moved the `DocumentDescriptor` onto the version each write produced | Resolve through `readCurrentDescriptor`, and bump the descriptor after every write, reporting a resource whose descriptor could not be moved as a failure | `fix/agent-sync-promotion` |
+| 2026-09-22 | `invalid_request_error: messages: Field required` on any Anthropic agent with no `ai.labs.output` step | `includeFirstAgentMessage: false` removed message zero whatever its role, emptying a one-turn history | Removal is role-aware; only an `assistant` first message is dropped | (this branch) |
+| 2026-09-22 | Every `@RolesAllowed` endpoint 403'd, with an empty body and no log line, for users in a Keycloak group | `quarkus.oidc.roles.role-claim-path` absent from the 6.4.0 image; quarkus-oidc fell back to the `groups` claim | Startup ERROR naming `QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH`, plus a test pinning the property in the source | (this branch) |
+| 2026-09-22 | `GET /manage/` answered 200 with an empty body | The empty path normalized to the resource base, whose directory entry is a non-null empty stream | A path that normalizes to nothing serves the SPA shell | (this branch) |
+| 2026-09-22 | "Show more" on a long group question could not be undone without reloading | The expanded text was unbounded inside a shrink-0 header, pushing its own toggle out of an overflow-hidden pane | Bound the expanded question and let it scroll in place | (this branch) |
+| 2026-09-22 | A group that had held any discussion could never accept an uploaded file again | "New Discussion" cleared the selection and the auto-select effect restored it within a tick, so the attachment control never rendered | An explicit-clear ref the auto-select effect honours | (this branch) |
+| 2026-09-22 | Manager pages hung on skeleton loaders while the backend was healthy | A boot-time SSE log stream per tab saturated Chrome's six-connections-per-origin cap | The stream is opened lazily by its consumers and refcounted | (this branch) |
+| 2026-09-22 | A saved config edit silently did not take effect | A plain Save cascades resource → workflow → agent but never deploys, and reported plain success | The toast says "not yet live" and offers a Deploy action | (this branch) |
+| 2026-09-21 | A RAG setup with a correct KB config and a correct `knowledgeBases` reference but no `eddi://ai.labs.rag` workflow step retrieves nothing, and says nothing: no context, no `rag:trace:*`, no error, and the only log is `DEBUG` "No RAG steps found in workflow". Check the workflow step first, and `GET /extensionstore/extensions` before that on older builds. |
+| 2026-09-21 | `POST /ragstore/rags/{id}/ingest` accepts a `kbId` that overrides the embedding-store key, but retrieval always keys on the KB's `name` and cannot be redirected. A `kbId` that is not exactly the `name` ingests into a store nothing reads, reporting `202` then `completed` the whole way. Leave `kbId` unset. Ingestion sources are unaffected. |
+| 2026-09-21 | A RAG ingestion source with a cron was stored looking enabled and never fired; a ZIP could store a cron the REST API refuses; run reports named a null source; `docs/rag.md` overstated defaults; a Manager test asserted nothing | All five were raised in review on PR #790 and the PR was **merged with those threads unresolved** — the review caught them, the merge did not wait for them | `nextFire` computed in `buildSchedule` plus a repeatable startup repair for existing rows; cron validation shared between the REST and import paths; `effectiveId()` at all six report sites; docs corrected against the code; the Manager test rewritten to serve a saved-disabled source so no dirty-state guard can mask it | (this branch) |
