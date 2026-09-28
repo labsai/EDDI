@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import DOMPurify from "dompurify";
-import { markdownImageAsLink, SAFE_HTML_SANITIZE_OPTIONS } from "@/lib/markdown-safe";
+import { markdownImageAsLink, sanitizeAgentHtml } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, Fingerprint } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -242,7 +241,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
               {renderAsHtml ? (
                 <div
                   className="text-sm text-foreground/90 leading-relaxed [&_ul]:ms-4 [&_ul]:list-disc [&_li]:mb-0.5 [&_strong]:font-semibold"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(parsedContent, SAFE_HTML_SANITIZE_OPTIONS) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeAgentHtml(parsedContent) }}
                 />
               ) : (
                 <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">

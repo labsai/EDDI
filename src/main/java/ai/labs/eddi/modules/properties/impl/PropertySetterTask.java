@@ -212,6 +212,19 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
+                                        if (scope == Scope.secret && isScrubbedPlaceholder(templateString)) {
+                                            // The value has already been scrubbed — typically a RULE
+                                            // approval pause ran between the secret turn and this task, and
+                                            // the turn's finally replaced the input before the conversation
+                                            // was persisted. Vaulting now would overwrite the stored secret
+                                            // with the placeholder. Leave the property unset: the plaintext is
+                                            // deliberately not carried across a pause, so the user must submit
+                                            // the credential again.
+                                            LOGGER.warnf("Not vaulting scope='secret' property '%s': its value is the scrubbed "
+                                                    + "placeholder, not the secret (was the input consumed across a HITL pause?). "
+                                                    + "The property was left unset.", name);
+                                            continue;
+                                        }
                                         if (scope == Scope.secret) {
                                             // Auto-vault: store the plaintext in the vault and
                                             // replace it with a vault reference in conversation properties.
@@ -615,6 +628,14 @@ public class PropertySetterTask implements ILifecycleTask {
      * what a configured parser normalizer produces — the resolved secret is the
      * NORMALIZED input, never byte-identical to the raw one.
      */
+    /**
+     * Whether {@code value} carries one of the placeholders a scrubbed secret is
+     * replaced by, instead of the secret itself.
+     */
+    static boolean isScrubbedPlaceholder(String value) {
+        return value != null && (value.contains(SECRET_INPUT_PLACEHOLDER) || value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
+    }
+
     private static boolean carriesSecret(String value, String plaintext) {
         if (isNullOrEmpty(value)) {
             return false;

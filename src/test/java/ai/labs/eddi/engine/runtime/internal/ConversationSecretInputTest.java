@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -278,6 +279,49 @@ class ConversationSecretInputTest {
             boolean outputHasToken = output != null && output.values().stream()
                     .anyMatch(v -> String.valueOf(v).toLowerCase().contains("hunter2secret"));
             assertFalse(outputHasToken, "No conversation-output value may contain the parsed secret token");
+        }
+
+        /**
+         * An output template such as {@code {memory.current.input}} renders the live
+         * plaintext into step data and the conversation output while the pipeline runs;
+         * a non-secret property instruction can copy it into a conversation property.
+         * The turn's finally scrub must remove those copies too.
+         */
+        @Test
+        @DisplayName("Secret input: copies rendered into output, step data and properties are scrubbed")
+        void secretInput_renderedCopiesScrubbed() throws Exception {
+            var lifecycleManager = mock(ILifecycleManager.class);
+            var workflow = mock(IExecutableWorkflow.class);
+            when(workflow.getWorkflowId()).thenReturn("wf-output");
+            when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+            doAnswer(inv -> {
+                IConversationMemory mem = inv.getArgument(0);
+                var step = mem.getCurrentStep();
+                step.storeData(new Data<>("output:text:echo", List.of("You said: pw-Rendered-99")));
+                step.addConversationOutputList("output", List.of(Map.of("type", "text", "text", "You said: pw-Rendered-99")));
+                mem.getConversationProperties().put("lastInput",
+                        new Property("lastInput", "pw-Rendered-99",
+                                Property.Scope.conversation));
+                return null;
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            Conversation conversation = new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
+            try {
+                conversation.say("pw-Rendered-99", secretFlag());
+            } catch (Exception ignored) {
+                // Expected — no real lifecycle tasks configured beyond the stub
+            }
+
+            var currentStep = memory.getCurrentStep();
+            for (var datum : currentStep.getAllElements()) {
+                assertFalse(String.valueOf(datum.getResult()).contains("pw-Rendered-99"),
+                        "secret survived in step data '" + datum.getKey() + "'");
+            }
+            assertEquals(List.of("You said: <secret input>"), currentStep.getLatestData("output:text:echo").getResult());
+            String output = String.valueOf(currentStep.getConversationOutput());
+            assertFalse(output.contains("pw-Rendered-99"), "secret survived in the conversation output: " + output);
+            assertTrue(output.contains("You said: <secret input>"), "the rest of the reply must be kept: " + output);
+            assertEquals("<secret input>", memory.getConversationProperties().get("lastInput").getValueString());
         }
 
         @Test

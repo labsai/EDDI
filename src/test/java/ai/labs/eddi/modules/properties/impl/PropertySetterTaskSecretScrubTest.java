@@ -41,6 +41,8 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -188,6 +190,22 @@ class PropertySetterTaskSecretScrubTest {
         for (IData<?> data : step.getAllElements()) {
             assertFalse(String.valueOf(data.getResult()).contains("live_abc"), "a token of the secret survived in '" + data.getKey() + "'");
         }
+    }
+
+    @Test
+    @DisplayName("a scrubbed placeholder (e.g. after a RULE approval pause) is never vaulted over the real secret")
+    void placeholderIsNeverVaulted() throws Exception {
+        // After a RULE pause the turn's finally already replaced the input; on resume
+        // {memory.current.input} resolves to the placeholder, not the credential.
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", PLACEHOLDER));
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        task.execute(memory, secretPropertySetter(PLACEHOLDER));
+
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+        assertNull(memory.getConversationProperties().get("apiKey"),
+                "the property must be left unset rather than pointing at a vaulted placeholder");
     }
 
     @Test

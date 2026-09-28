@@ -815,6 +815,15 @@ describe("ChatPanel", () => {
     // ...but no conversation was started and no /start call was made.
     expect(useChatStore.getState().conversationId).toBeNull();
     expect(started).toBe(false);
+
+    // The explicit start is offered instead — without it the input stays disabled
+    // and the user has to re-pick the agent they were deep-linked to.
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("open-chat"));
+    await waitFor(() => {
+      expect(useChatStore.getState().conversationId).not.toBeNull();
+    });
+    expect(screen.queryByTestId("open-chat")).not.toBeInTheDocument();
   });
 
   it("ignores ?agentName= and resolves the display name from the deployed list", async () => {

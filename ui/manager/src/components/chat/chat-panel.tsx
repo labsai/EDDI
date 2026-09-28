@@ -535,6 +535,21 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                         t("chat.emptyConversation", "This conversation has no messages yet.")
                       : t("chat.empty")}
                 </p>
+                {/* A deep link (?agentId=) only preselects the agent and never starts
+                    a conversation by itself, so offer the explicit start here —
+                    otherwise the input stays disabled and "New conversation" is
+                    hidden until the user re-picks the same agent. */}
+                {!conversationId && !startConversation.isPending && !openConversation.isPending && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAgent(selectedAgentId, selectedAgentName ?? selectedAgentId)}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    data-testid="open-chat"
+                  >
+                    <MessageSquarePlus className="h-4 w-4" />
+                    {t("commandPalette.openChat")}
+                  </button>
+                )}
               </div>
             </div>
           ) : (

@@ -99,6 +99,13 @@ public class Conversation implements IConversation {
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
 
+    /**
+     * Shorter client-flagged secret inputs are only replaced in the input keys
+     * themselves, not searched for in the rest of the turn's output. Matches the
+     * audit ledger's bound for the same input ({@code TurnAuditBuffer}).
+     */
+    static final int MIN_SCRUBBED_SECRET_INPUT_LENGTH = 4;
+
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
         this.executableWorkflows = executableWorkflows;
@@ -568,11 +575,13 @@ public class Conversation implements IConversation {
             return;
         }
         boolean hadInput = false;
+        List<String> plaintexts = new ArrayList<>();
         for (String inputKey : List.of(INPUT_INITIAL.key(), MemoryKeys.INPUT_NORMALIZED.key())) {
             IData<String> inputData = currentStep.getLatestData(inputKey);
             if (inputData != null && inputData.getResult() != null) {
                 hadInput = true;
                 if (!SECRET_INPUT_PLACEHOLDER.equals(inputData.getResult())) {
+                    plaintexts.add(inputData.getResult());
                     var replacement = new Data<>(inputKey, SECRET_INPUT_PLACEHOLDER);
                     currentStep.storeData(replacement);
                 }
@@ -581,9 +590,60 @@ public class Conversation implements IConversation {
         // The echoed input the client re-reads on reload. Only touched when this turn
         // actually carried input (never on the empty CONVERSATION_START turn).
         if (hadInput) {
+            scrubSecretInputCopies(currentStep, plaintexts);
             currentStep.resetConversationOutput(INPUT.key());
             currentStep.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
             dropParsedSecretForms(currentStep);
+        }
+    }
+
+    /**
+     * Removes verbatim copies of the raw secret input from everything else the turn
+     * produced: an output template such as {@code {memory.current.input}}, a
+     * non-secret property instruction, or any other task may have rendered it into
+     * step data, the conversation output or a conversation property while the
+     * plaintext was still live. Inputs shorter than
+     * {@link #MIN_SCRUBBED_SECRET_INPUT_LENGTH} are not searched for (same bound as
+     * the audit ledger's redaction of a secret input) — replacing every "ok" in the
+     * reply would destroy it.
+     */
+    private void scrubSecretInputCopies(IWritableConversationStep currentStep, List<String> plaintexts) {
+        List<String> needles = plaintexts.stream()
+                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_INPUT_LENGTH)
+                .distinct()
+                .toList();
+        if (needles.isEmpty()) {
+            return;
+        }
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties != null) {
+            properties.values().stream().filter(Objects::nonNull)
+                    .forEach(property -> scrubProperty(property, needles, SECRET_INPUT_PLACEHOLDER));
+        }
+        for (IData<?> datum : currentStep.getAllElements()) {
+            String key = datum.getKey();
+            if (INPUT_INITIAL.key().equals(key) || MemoryKeys.INPUT_NORMALIZED.key().equals(key)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            Object cleaned = SecretValueScrubber.scrubDeep(datum.getResult(), needles, SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                writable.setResult(cleaned);
+            }
+            if (SecretValueScrubber.scrubDeep(writable.getPossibleResults(), needles,
+                    SECRET_INPUT_PLACEHOLDER) instanceof List<?> cleanedPossible) {
+                writable.setPossibleResults(castList(cleanedPossible));
+            }
+        }
+        var conversationOutput = currentStep.getConversationOutput();
+        if (conversationOutput != null) {
+            for (var entry : conversationOutput.entrySet()) {
+                Object cleaned = SecretValueScrubber.scrubDeep(entry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
         }
     }
 
@@ -1034,13 +1094,17 @@ public class Conversation implements IConversation {
     }
 
     private static void scrubProperty(Property property, List<String> needles) {
-        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+        scrubProperty(property, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+    }
+
+    private static void scrubProperty(Property property, List<String> needles, String placeholder) {
+        if (SecretValueScrubber.scrubDeep(property.getValueString(), needles, placeholder) instanceof String cleaned) {
             property.setValueString(cleaned);
         }
-        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+        if (SecretValueScrubber.scrubDeep(property.getValueObject(), needles, placeholder) instanceof Map<?, ?> cleaned) {
             property.setValueObject(castMap(cleaned));
         }
-        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+        if (SecretValueScrubber.scrubDeep(property.getValueList(), needles, placeholder) instanceof List<?> cleaned) {
             property.setValueList(castList(cleaned));
         }
     }
