@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.datastore.IResourceStore;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
@@ -124,7 +125,7 @@ class ResourceSharingServiceTest {
         graphResolver = mock(ConfigGraphResolver.class);
         when(graphResolver.referencedResourceIds(AGENT)).thenReturn(Set.of(OWNED_CHILD, BORROWED_CHILD));
 
-        service = new ResourceSharingService(store, accessGuard, graphResolver);
+        service = new ResourceSharingService(store, accessGuard, graphResolver, mock(UserDirectory.class));
     }
 
     @Test
@@ -247,5 +248,62 @@ class ResourceSharingServiceTest {
             return null;
         }
         return d.getGrants().stream().filter(g -> subject.equals(g.getSubject())).map(ResourceGrant::accessLevel).findFirst().orElse(null);
+    }
+
+    @Test
+    @DisplayName("a dry run reports the same lists as the real change and writes nothing")
+    void dryRunWritesNothing() throws Exception {
+        var preview = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true, true);
+
+        assertTrue(preview.dryRun());
+        assertEquals(Set.of(AGENT, OWNED_CHILD), Set.copyOf(preview.updatedIds()));
+        assertEquals(List.of(BORROWED_CHILD), preview.skippedIds(),
+                "the preview must name what the share will leave alone, or the dialog shows a promise the share breaks");
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("every kind of change can be previewed without a write")
+    void everyChangeHasADryRun() throws Exception {
+        when(accessGuard.isAdmin()).thenReturn(true);
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        service.revoke(AGENT, Subjects.user("carol"), true, true);
+        service.setVisibility(AGENT, ResourceVisibility.published, true, true);
+        service.moveToSpace(AGENT, Subjects.teamSpace("engineering"), true, true);
+        service.transferOwnership(AGENT, "bob", null, true, true);
+
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("moving files the owner's resources under a team space they belong to, keeping ownership")
+    void moveToOwnTeam() throws Exception {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        var result = service.moveToSpace(AGENT, Subjects.teamSpace("engineering"), true, false);
+
+        assertEquals(Set.of(AGENT, OWNED_CHILD), Set.copyOf(result.updatedIds()));
+        assertEquals(Subjects.teamSpace("engineering"), descriptors.get(AGENT).getSpaceId());
+        assertEquals("alice", descriptors.get(AGENT).getOwnerId(), "moving is not a transfer: delete and re-share stay with the owner");
+        assertEquals(Subjects.personalSpace("bob"), descriptors.get(BORROWED_CHILD).getSpaceId(),
+                "a colleague's resource is never moved by somebody who only borrowed it");
+    }
+
+    @Test
+    @DisplayName("moving into a space the caller is not in is refused")
+    void moveIntoForeignSpaceRefused() throws Exception {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        assertThrows(ForbiddenException.class, () -> service.moveToSpace(AGENT, Subjects.teamSpace("finance"), true, false));
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("only the owner may move a resource")
+    void onlyOwnerMoves() {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        assertThrows(ForbiddenException.class, () -> service.moveToSpace(BORROWED_CHILD, Subjects.teamSpace("engineering"), false, false));
     }
 }

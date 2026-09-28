@@ -69,6 +69,9 @@ import ai.labs.eddi.connections.grants.PostgresConnectionGrantStore;
 import ai.labs.eddi.connections.settings.IConnectionSettingsStore;
 import ai.labs.eddi.connections.settings.MongoConnectionSettingsStore;
 import ai.labs.eddi.connections.settings.PostgresConnectionSettingsStore;
+import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.directory.MongoUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.directory.PostgresUserDirectoryStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -252,6 +255,12 @@ public class DataStoreProducers {
     public ITenantQuotaStore tenantQuotaStore(
                                               Instance<MongoTenantQuotaStore> mongo,
                                               Instance<PostgresTenantQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IUserDirectoryStore userDirectoryStore(Instance<MongoUserDirectoryStore> mongo, Instance<PostgresUserDirectoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

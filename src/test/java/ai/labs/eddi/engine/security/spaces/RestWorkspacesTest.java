@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security.spaces;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.security.spaces.rest.RestWorkspaces;
 import ai.labs.eddi.engine.security.spaces.rest.model.SpaceInfo;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -62,7 +63,7 @@ class RestWorkspacesTest {
         var spaceContext = new SpaceContext(identity, settings);
         var guard = new ResourceAccessGuard(identity, new OwnershipValidator(settings.isStampingOwnership()), spaceContext,
                 settings, mock(IDocumentDescriptorStore.class));
-        return new RestWorkspaces(spaceContext, settings, guard);
+        return new RestWorkspaces(spaceContext, settings, guard, mock(UserDirectory.class));
     }
 
     @Test

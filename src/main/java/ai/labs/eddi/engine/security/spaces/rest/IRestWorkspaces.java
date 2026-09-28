@@ -4,15 +4,20 @@
  */
 package ai.labs.eddi.engine.security.spaces.rest;
 
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.security.spaces.rest.model.WorkspaceInfo;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+
+import java.util.List;
 
 /**
  * What workspaces mean for the calling user.
@@ -51,4 +56,23 @@ public interface IRestWorkspaces {
                        + "and every space the caller can reach.")
     @APIResponse(responseCode = "200", description = "The caller's workspace context.")
     WorkspaceInfo readWorkspaceInfo();
+
+    /**
+     * Suggestions for a share box: teams, then people who have signed in, whose
+     * name, username or email starts with {@code q}.
+     * <p>
+     * People appear here only after signing in to EDDI once — the directory is
+     * built from sign-ins, not from the identity provider. The caller is never
+     * listed, and at most {@value UserDirectory#MAX_RESULTS} entries come back.
+     */
+    @GET
+    @Path("/directory")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Search people and teams to share with",
+               description = "Teams and signed-in people whose name, username or email starts with the query.")
+    @APIResponse(responseCode = "200", description = "Matching people and teams, teams first.")
+    List<UserDirectory.Match> searchDirectory(@QueryParam("q")
+    @DefaultValue("") String query,
+                                              @QueryParam("limit")
+                                              @DefaultValue("10") Integer limit);
 }

@@ -120,7 +120,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
                     scope);
             // The scope decides WHICH rows come back; this decides how much of each row a
             // non-owner gets to read. Without it every listing serialises the grant list.
-            descriptors.forEach(accessGuard::redactForCaller);
+            accessGuard.redactAllForCaller(descriptors);
             return descriptors;
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);

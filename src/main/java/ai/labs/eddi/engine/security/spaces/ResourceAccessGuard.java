@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -19,6 +21,9 @@ import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
 import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -63,15 +68,23 @@ public class ResourceAccessGuard {
     private final SpaceContext spaceContext;
     private final WorkspaceSettings settings;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final UserDirectory directory;
 
     @Inject
     public ResourceAccessGuard(SecurityIdentity identity, OwnershipValidator ownershipValidator, SpaceContext spaceContext,
-            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore) {
+            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore, UserDirectory directory) {
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.spaceContext = spaceContext;
         this.settings = settings;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.directory = directory;
+    }
+
+    /** Without a user directory: owners are never labelled. Test seam. */
+    public ResourceAccessGuard(SecurityIdentity identity, OwnershipValidator ownershipValidator, SpaceContext spaceContext,
+            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore) {
+        this(identity, ownershipValidator, spaceContext, settings, documentDescriptorStore, null);
     }
 
     /**
@@ -354,6 +367,30 @@ public class ResourceAccessGuard {
     }
 
     /**
+     * {@link #redactForCaller} for a whole page, looking every owner up in the user
+     * directory with one query rather than one per row.
+     *
+     * @return the same list, for chaining
+     */
+    public List<DocumentDescriptor> redactAllForCaller(List<DocumentDescriptor> descriptors) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return descriptors;
+        }
+        if (directory != null && settings.isEnforcing()) {
+            Set<String> owners = new HashSet<>();
+            for (DocumentDescriptor descriptor : descriptors) {
+                if (descriptor != null && descriptor.getOwnerId() != null) {
+                    owners.add(descriptor.getOwnerId());
+                }
+            }
+            // Warms the directory's cache, so the per-row lookups below are hits.
+            directory.lookup(owners);
+        }
+        descriptors.forEach(this::redactForCaller);
+        return descriptors;
+    }
+
+    /**
      * As {@link #redactForCaller}, but told what the caller holds instead of
      * working it out from the descriptor in hand.
      * <p>
@@ -392,6 +429,9 @@ public class ResourceAccessGuard {
      */
     private DocumentDescriptor applyCallerLevel(DocumentDescriptor descriptor, AccessLevel granted) {
         descriptor.setCallerLevel(settings.isEnforcing() && granted != null ? granted.name() : null);
+        // Same rule as the level: present only under enforcement, so a listing stays
+        // byte-identical to a deployment that has never heard of workspaces.
+        descriptor.setOwnerName(settings.isEnforcing() ? ownerLabel(descriptor.getOwnerId()) : null);
 
         if (mayReadGrants(descriptor, granted)) {
             return descriptor;
@@ -431,6 +471,14 @@ public class ResourceAccessGuard {
             return structural != null && structural.includes(AccessLevel.OWN);
         }
         return granted != null && granted.includes(AccessLevel.OWN);
+    }
+
+    private String ownerLabel(String ownerId) {
+        if (directory == null || ownerId == null || ownerId.isBlank()) {
+            return null;
+        }
+        DirectoryUser owner = directory.lookup(List.of(ownerId)).get(ownerId);
+        return owner == null ? null : owner.label();
     }
 
     /** The caller's principal name, or {@code null} when unauthenticated. */

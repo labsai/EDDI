@@ -6,8 +6,12 @@ package ai.labs.eddi.engine.security.spaces;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
+import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.security.spaces.rest.RestResourceSharing;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
+import org.eclipse.microprofile.context.ManagedExecutor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -49,7 +53,15 @@ class RestResourceSharingTest {
     @BeforeEach
     void setUp() {
         service = mock(ResourceSharingService.class);
-        sut = new RestResourceSharing(service);
+        // A directory that is switched off resolves exactly as sharing did before it
+        // existed, which is what the normalisation tests below pin down. Resolution
+        // against recorded users is covered in UserDirectoryTest.
+        var settings = mock(WorkspaceSettings.class);
+        var directory = new UserDirectory(mock(IUserDirectoryStore.class), mock(SecurityIdentity.class), mock(SpaceContext.class), settings,
+                mock(ManagedExecutor.class), false, true);
+        var guard = mock(ResourceAccessGuard.class);
+        when(guard.callerSpaces()).thenReturn(CallerSpaces.ANONYMOUS);
+        sut = new RestResourceSharing(service, directory, guard);
     }
 
     private static ResourceSharingService.ShareResult empty() {
@@ -63,23 +75,23 @@ class RestResourceSharingTest {
         @Test
         @DisplayName("a bare name is read as a person, because that is what people type")
         void bareNameBecomesUser() {
-            when(service.share(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.share(RESOURCE_ID, "alice@example.com", "USE", true);
 
-            verify(service).share(eq(RESOURCE_ID), eq(Subjects.user("alice@example.com")), eq(AccessLevel.USE), eq(true));
+            verify(service).share(eq(RESOURCE_ID), eq(Subjects.user("alice@example.com")), eq(AccessLevel.USE), eq(true), anyBoolean());
         }
 
         @Test
         @DisplayName("an explicit prefix is normalised, not passed through raw")
         void prefixesAreNormalised() {
-            when(service.share(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             // Keycloak wraps group paths in slashes; a subject stored with them would
             // never match the token it is meant to match.
             sut.share(RESOURCE_ID, "team:/engineering/", "VIEW", true);
 
-            verify(service).share(eq(RESOURCE_ID), eq(Subjects.team("engineering")), eq(AccessLevel.VIEW), eq(true));
+            verify(service).share(eq(RESOURCE_ID), eq(Subjects.team("engineering")), eq(AccessLevel.VIEW), eq(true), anyBoolean());
         }
 
         @Test
@@ -92,7 +104,7 @@ class RestResourceSharingTest {
                     () -> sut.share(RESOURCE_ID, "group:engineering", "USE", true));
 
             assertTrue(refusal.getMessage().contains("user:"), "the refusal must say what IS accepted");
-            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean());
+            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -102,7 +114,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.share(RESOURCE_ID, "user:   ", "USE", true));
             assertThrows(BadRequestException.class, () -> sut.share(RESOURCE_ID, "team:///", "USE", true));
 
-            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean());
+            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -111,7 +123,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.share(RESOURCE_ID, null, "USE", true));
             assertThrows(BadRequestException.class, () -> sut.share(RESOURCE_ID, "   ", "USE", true));
 
-            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean());
+            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -119,11 +131,11 @@ class RestResourceSharingTest {
         void revokeNormalisesIdentically() {
             // If the two normalised differently, a grant could be created under one
             // spelling and be un-revokable under the other.
-            when(service.revoke(anyString(), anyString(), anyBoolean())).thenReturn(empty());
+            when(service.revoke(anyString(), anyString(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.revoke(RESOURCE_ID, "  alice@example.com  ", true);
 
-            verify(service).revoke(eq(RESOURCE_ID), eq(Subjects.user("alice@example.com")), eq(true));
+            verify(service).revoke(eq(RESOURCE_ID), eq(Subjects.user("alice@example.com")), eq(true), anyBoolean());
         }
 
         @Test
@@ -132,7 +144,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.revoke(RESOURCE_ID, "group:engineering", true));
             assertThrows(BadRequestException.class, () -> sut.revoke(RESOURCE_ID, null, true));
 
-            verify(service, never()).revoke(anyString(), anyString(), anyBoolean());
+            verify(service, never()).revoke(anyString(), anyString(), anyBoolean(), anyBoolean());
         }
     }
 
@@ -143,11 +155,11 @@ class RestResourceSharingTest {
         @Test
         @DisplayName("every level the API documents round-trips")
         void allLevelsAccepted() {
-            when(service.share(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             for (AccessLevel level : AccessLevel.values()) {
                 sut.share(RESOURCE_ID, "alice", level.name(), true);
-                verify(service).share(eq(RESOURCE_ID), anyString(), eq(level), anyBoolean());
+                verify(service).share(eq(RESOURCE_ID), anyString(), eq(level), anyBoolean(), anyBoolean());
             }
         }
 
@@ -160,17 +172,17 @@ class RestResourceSharingTest {
                     () -> sut.share(RESOURCE_ID, "alice", "ADMIN", true));
 
             assertTrue(refusal.getMessage().contains("USE"), "the refusal must list what is accepted");
-            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean());
+            verify(service, never()).share(anyString(), anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test
         @DisplayName("every visibility the API documents round-trips")
         void allVisibilitiesAccepted() {
-            when(service.setVisibility(anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.setVisibility(anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             for (ResourceVisibility visibility : ResourceVisibility.values()) {
                 sut.setVisibility(RESOURCE_ID, visibility.wireName(), true);
-                verify(service).setVisibility(eq(RESOURCE_ID), eq(visibility), anyBoolean());
+                verify(service).setVisibility(eq(RESOURCE_ID), eq(visibility), anyBoolean(), anyBoolean());
             }
         }
 
@@ -182,7 +194,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.setVisibility(RESOURCE_ID, "world-readable", true));
             assertThrows(BadRequestException.class, () -> sut.setVisibility(RESOURCE_ID, null, true));
 
-            verify(service, never()).setVisibility(anyString(), any(), anyBoolean());
+            verify(service, never()).setVisibility(anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -193,13 +205,13 @@ class RestResourceSharingTest {
             // deliberately, so a client that read the constant name out of generated
             // code is not punished for it. Pinned because the leniency is easy to lose
             // in a refactor, and losing it would 400 a request that used to work.
-            when(service.setVisibility(anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.setVisibility(anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.setVisibility(RESOURCE_ID, "private", true);
             sut.setVisibility(RESOURCE_ID, "privateAccess", true);
             sut.setVisibility(RESOURCE_ID, "PRIVATE", true);
 
-            verify(service, times(3)).setVisibility(eq(RESOURCE_ID), eq(ResourceVisibility.privateAccess), anyBoolean());
+            verify(service, times(3)).setVisibility(eq(RESOURCE_ID), eq(ResourceVisibility.privateAccess), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -208,7 +220,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.setVisibility(RESOURCE_ID, "privat", true));
             assertThrows(BadRequestException.class, () -> sut.setVisibility(RESOURCE_ID, "public", true));
 
-            verify(service, never()).setVisibility(anyString(), any(), anyBoolean());
+            verify(service, never()).setVisibility(anyString(), any(), anyBoolean(), anyBoolean());
         }
     }
 
@@ -221,34 +233,34 @@ class RestResourceSharingTest {
         void absentCascadeIsTrue() {
             // An agent shared without its workflows and rule sets is a name pointing at
             // documents the recipient cannot open.
-            when(service.share(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.share(RESOURCE_ID, "alice", "USE", null);
 
-            verify(service).share(anyString(), anyString(), any(), eq(true));
+            verify(service).share(anyString(), anyString(), any(), eq(true), anyBoolean());
         }
 
         @Test
         @DisplayName("only an explicit false turns the cascade off")
         void explicitFalseHonoured() {
-            when(service.share(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.share(RESOURCE_ID, "alice", "USE", false);
 
-            verify(service).share(anyString(), anyString(), any(), eq(false));
+            verify(service).share(anyString(), anyString(), any(), eq(false), anyBoolean());
         }
 
         @Test
         @DisplayName("visibility and revoke default the same way")
         void otherOperationsDefaultIdentically() {
-            when(service.revoke(anyString(), anyString(), anyBoolean())).thenReturn(empty());
-            when(service.setVisibility(anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.revoke(anyString(), anyString(), anyBoolean(), anyBoolean())).thenReturn(empty());
+            when(service.setVisibility(anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.revoke(RESOURCE_ID, "alice", null);
             sut.setVisibility(RESOURCE_ID, "published", null);
 
-            verify(service).revoke(anyString(), anyString(), eq(true));
-            verify(service).setVisibility(anyString(), any(), eq(true));
+            verify(service).revoke(anyString(), anyString(), eq(true), anyBoolean());
+            verify(service).setVisibility(anyString(), any(), eq(true), anyBoolean());
         }
     }
 
@@ -262,7 +274,7 @@ class RestResourceSharingTest {
             assertThrows(BadRequestException.class, () -> sut.transferOwnership(RESOURCE_ID, null, null, true));
             assertThrows(BadRequestException.class, () -> sut.transferOwnership(RESOURCE_ID, "  ", null, true));
 
-            verify(service, never()).transferOwnership(anyString(), anyString(), anyString(), anyBoolean());
+            verify(service, never()).transferOwnership(anyString(), anyString(), anyString(), anyBoolean(), anyBoolean());
         }
 
         @Test
@@ -270,18 +282,18 @@ class RestResourceSharingTest {
         void ownerIsTrimmed() {
             // An owner stored with surrounding whitespace would never match its own
             // principal again, and the new owner would silently not own it.
-            when(service.transferOwnership(anyString(), anyString(), any(), anyBoolean())).thenReturn(empty());
+            when(service.transferOwnership(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
 
             sut.transferOwnership(RESOURCE_ID, "  bob@example.com  ", null, true);
 
-            verify(service).transferOwnership(eq(RESOURCE_ID), eq("bob@example.com"), any(), anyBoolean());
+            verify(service).transferOwnership(eq(RESOURCE_ID), eq("bob@example.com"), any(), anyBoolean(), anyBoolean());
         }
     }
 
     @Test
     @DisplayName("reading the sharing state passes the service's answer through unchanged")
     void readSharesReturnsServiceAnswer() {
-        var info = new ResourceSharingService.ShareInfo(RESOURCE_ID, "alice", "user:alice",
+        var info = new ResourceSharingService.ShareInfo(RESOURCE_ID, "alice", "Alice", "user:alice",
                 ResourceVisibility.space.wireName(), List.of(), AccessLevel.OWN.name());
         when(service.describe(RESOURCE_ID)).thenReturn(info);
 
@@ -289,5 +301,24 @@ class RestResourceSharingTest {
 
         assertEquals(200, response.getStatus());
         assertEquals(info, response.getEntity());
+    }
+
+    @Test
+    @DisplayName("dryRun reaches the service, and defaults to applying")
+    void dryRunPassesThrough() {
+        when(service.share(anyString(), anyString(), any(), anyBoolean(), anyBoolean())).thenReturn(empty());
+
+        sut.share(RESOURCE_ID, "alice", "USE", true, true);
+        sut.share(RESOURCE_ID, "alice", "USE", true, null);
+
+        verify(service).share(anyString(), anyString(), any(), anyBoolean(), eq(true));
+        verify(service).share(anyString(), anyString(), any(), anyBoolean(), eq(false));
+    }
+
+    @Test
+    @DisplayName("a move without a target space is refused before the service is called")
+    void moveNeedsSpace() {
+        assertThrows(BadRequestException.class, () -> sut.moveToSpace(RESOURCE_ID, " ", true, false));
+        verify(service, never()).moveToSpace(anyString(), anyString(), anyBoolean(), anyBoolean());
     }
 }

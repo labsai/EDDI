@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Result of a GDPR cascading user data deletion.
@@ -50,6 +51,9 @@ import java.util.List;
  *            number of schedules removed
  * @param failedSteps
  *            names of the cascade steps that threw; empty on a clean run
+ * @param additionalDeleted
+ *            records removed by each {@link IGdprParticipant}, keyed by its
+ *            name
  * @param completedAt
  *            timestamp of completion
  *
@@ -70,7 +74,21 @@ public record GdprDeletionResult(
         long sharedArtifactsDeleted,
         long schedulesDeleted,
         List<String> failedSteps,
-        Instant completedAt) {
+        Instant completedAt,
+        Map<String, Long> additionalDeleted) {
+
+    /**
+     * Compatibility constructor for the shape that predates
+     * {@link IGdprParticipant} counts.
+     */
+    public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
+            long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
+            long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
+            List<String> failedSteps, Instant completedAt) {
+        this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
+                attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, failedSteps, completedAt, Map.of());
+    }
 
     /**
      * Compatibility constructor for the original seven-component shape, so existing
@@ -85,6 +103,7 @@ public record GdprDeletionResult(
 
     public GdprDeletionResult {
         failedSteps = failedSteps == null ? List.of() : List.copyOf(failedSteps);
+        additionalDeleted = additionalDeleted == null ? Map.of() : Map.copyOf(additionalDeleted);
     }
 
     /**

@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -60,13 +63,15 @@ public class ResourceSharingService {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard accessGuard;
     private final ConfigGraphResolver graphResolver;
+    private final UserDirectory directory;
 
     @Inject
     public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
-            ConfigGraphResolver graphResolver) {
+            ConfigGraphResolver graphResolver, UserDirectory directory) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
         this.graphResolver = graphResolver;
+        this.directory = directory;
     }
 
     /**
@@ -76,17 +81,42 @@ public class ResourceSharingService {
      *            the resource
      * @param ownerId
      *            the recorded owner, or {@code null} for legacy data
+     * @param ownerLabel
+     *            the owner as a person would recognise them — their name from the
+     *            user directory, else the principal
      * @param spaceId
      *            the space the resource is filed under
      * @param visibility
      *            its {@link ResourceVisibility} wire name
      * @param grants
-     *            explicit shares
+     *            explicit shares, each with a display label
      * @param callerLevel
      *            what the calling user may do with it
      */
-    public record ShareInfo(String resourceId, String ownerId, String spaceId, String visibility, List<ResourceGrant> grants,
+    public record ShareInfo(String resourceId, String ownerId, String ownerLabel, String spaceId, String visibility, List<GrantView> grants,
             String callerLevel) {
+    }
+
+    /**
+     * One grant as the share dialog shows it.
+     *
+     * @param subject
+     *            {@code user:<principal>} or {@code team:<group>} — what a revoke
+     *            sends back
+     * @param kind
+     *            {@code user} or {@code team}
+     * @param label
+     *            a person's name, or a team's decoded name
+     * @param detail
+     *            a secondary line — the person's email, when the deployment exposes
+     *            it — or {@code null}
+     * @param known
+     *            whether the subject still names somebody the directory knows. A
+     *            grant made before the directory existed can name a principal that
+     *            never signs in; showing that lets the owner remove it
+     */
+    public record GrantView(String subject, String level, String grantedBy, Date grantedOn, String kind, String label, String detail,
+            boolean known) {
     }
 
     /**
@@ -109,12 +139,20 @@ public class ResourceSharingService {
      * The outcome of a share or revoke.
      *
      * @param updated
-     *            resources actually changed, including the root
+     *            resources actually changed, including the root — or, for a dry
+     *            run, the ones that would be
      * @param skipped
      *            resources reachable from the root that the caller may not
      *            re-share, and which were therefore left alone
+     * @param dryRun
+     *            whether this is a preview: nothing was written
      */
-    public record ShareResult(List<ShareTarget> updated, List<ShareTarget> skipped) {
+    public record ShareResult(List<ShareTarget> updated, List<ShareTarget> skipped, boolean dryRun) {
+
+        /** A result of a change that was actually applied. */
+        public ShareResult(List<ShareTarget> updated, List<ShareTarget> skipped) {
+            this(updated, skipped, false);
+        }
 
         /** Ids only — the shape callers that just need to count or compare want. */
         public List<String> updatedIds() {
@@ -143,9 +181,46 @@ public class ResourceSharingService {
         AccessLevel level = accessGuard.effectiveLevel(descriptor);
         boolean maySeeGrants = level != null && level.includes(AccessLevel.OWN);
         List<ResourceGrant> grants = maySeeGrants && descriptor.getGrants() != null ? List.copyOf(descriptor.getGrants()) : List.of();
-        return new ShareInfo(resourceId, descriptor.getOwnerId(), descriptor.getSpaceId(),
+
+        Set<String> principals = new LinkedHashSet<>();
+        if (descriptor.getOwnerId() != null) {
+            principals.add(descriptor.getOwnerId());
+        }
+        for (ResourceGrant grant : grants) {
+            if (grant != null && grant.getSubject() != null && grant.getSubject().startsWith(Subjects.USER_PREFIX)) {
+                principals.add(Subjects.decode(grant.getSubject().substring(Subjects.USER_PREFIX.length())));
+            }
+        }
+        Map<String, DirectoryUser> people = directory.lookup(principals);
+
+        List<GrantView> views = new ArrayList<>(grants.size());
+        for (ResourceGrant grant : grants) {
+            if (grant != null && grant.getSubject() != null) {
+                views.add(view(grant, people));
+            }
+        }
+        String ownerId = descriptor.getOwnerId();
+        DirectoryUser owner = ownerId == null ? null : people.get(ownerId);
+        return new ShareInfo(resourceId, ownerId, owner == null ? ownerId : owner.label(), descriptor.getSpaceId(),
                 descriptor.getVisibility() == null ? ResourceVisibility.space.wireName() : descriptor.getVisibility(),
-                grants, level == null ? null : level.name());
+                List.copyOf(views), level == null ? null : level.name());
+    }
+
+    private GrantView view(ResourceGrant grant, Map<String, DirectoryUser> people) {
+        String subject = grant.getSubject();
+        if (subject.startsWith(Subjects.TEAM_PREFIX)) {
+            String team = Subjects.decode(subject.substring(Subjects.TEAM_PREFIX.length()));
+            return new GrantView(subject, grant.getLevel(), grant.getGrantedBy(), grant.getGrantedOn(), "team", team, null, true);
+        }
+        String principal = subject.startsWith(Subjects.USER_PREFIX)
+                ? Subjects.decode(subject.substring(Subjects.USER_PREFIX.length()))
+                : subject;
+        DirectoryUser person = people.get(principal);
+        // Unknown is only a finding when the directory is running: without it,
+        // nobody is known and flagging every grant would be noise.
+        boolean known = person != null || !directory.isActive();
+        return new GrantView(subject, grant.getLevel(), grant.getGrantedBy(), grant.getGrantedOn(), "user",
+                person == null ? principal : person.label(), directory.detailFor(person), known);
     }
 
     /**
@@ -156,6 +231,18 @@ public class ResourceSharingService {
      *             if the caller does not own the root
      */
     public ShareResult share(String resourceId, String subject, AccessLevel level, boolean cascade) {
+        return share(resourceId, subject, level, cascade, false);
+    }
+
+    /**
+     * As {@link #share(String, String, AccessLevel, boolean)}; with {@code dryRun},
+     * reports what would change and writes nothing.
+     * <p>
+     * The preview exists because a cascade is invisible in the request: sharing a
+     * group also shares every agent in it, and every workflow and rule set beneath
+     * those. The share dialog shows that list before anything is granted.
+     */
+    public ShareResult share(String resourceId, String subject, AccessLevel level, boolean cascade, boolean dryRun) {
         // Re-sharing changes who can reach the resource, which is an owner's decision
         // — EDIT deliberately does not carry it. See AccessLevel.
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
@@ -164,25 +251,30 @@ public class ResourceSharingService {
         List<ShareTarget> updated = new ArrayList<>();
         List<ShareTarget> skipped = new ArrayList<>();
 
-        applyGrant(resourceId, subject, level, grantedBy, updated, skipped);
+        applyGrant(resourceId, subject, level, grantedBy, updated, skipped, dryRun);
         for (String referenced : targets(resourceId, cascade)) {
-            applyGrant(referenced, subject, level, grantedBy, updated, skipped);
+            applyGrant(referenced, subject, level, grantedBy, updated, skipped, dryRun);
         }
-        return new ShareResult(updated, skipped);
+        return new ShareResult(updated, skipped, dryRun);
     }
 
     /** Removes {@code subject}'s grant, mirroring {@link #share}. */
     public ShareResult revoke(String resourceId, String subject, boolean cascade) {
+        return revoke(resourceId, subject, cascade, false);
+    }
+
+    /** As {@link #revoke(String, String, boolean)}; a dry run writes nothing. */
+    public ShareResult revoke(String resourceId, String subject, boolean cascade, boolean dryRun) {
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         List<ShareTarget> updated = new ArrayList<>();
         List<ShareTarget> skipped = new ArrayList<>();
 
-        applyRevoke(resourceId, subject, updated, skipped);
+        applyRevoke(resourceId, subject, updated, skipped, dryRun);
         for (String referenced : targets(resourceId, cascade)) {
-            applyRevoke(referenced, subject, updated, skipped);
+            applyRevoke(referenced, subject, updated, skipped, dryRun);
         }
-        return new ShareResult(updated, skipped);
+        return new ShareResult(updated, skipped, dryRun);
     }
 
     /**
@@ -192,16 +284,62 @@ public class ResourceSharingService {
      * sets stay private publishes something nobody can actually use.
      */
     public ShareResult setVisibility(String resourceId, ResourceVisibility visibility, boolean cascade) {
+        return setVisibility(resourceId, visibility, cascade, false);
+    }
+
+    /**
+     * As {@link #setVisibility(String, ResourceVisibility, boolean)}; a dry run
+     * writes nothing.
+     */
+    public ShareResult setVisibility(String resourceId, ResourceVisibility visibility, boolean cascade, boolean dryRun) {
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         List<ShareTarget> updated = new ArrayList<>();
         List<ShareTarget> skipped = new ArrayList<>();
 
-        applyVisibility(resourceId, visibility, updated, skipped);
+        applyVisibility(resourceId, visibility, updated, skipped, dryRun);
         for (String referenced : targets(resourceId, cascade)) {
-            applyVisibility(referenced, visibility, updated, skipped);
+            applyVisibility(referenced, visibility, updated, skipped, dryRun);
         }
-        return new ShareResult(updated, skipped);
+        return new ShareResult(updated, skipped, dryRun);
+    }
+
+    /**
+     * Files a resource the caller owns — and, with {@code cascade}, everything
+     * beneath it that they also own — under another space they belong to.
+     * <p>
+     * This is how personal work becomes team work without an administrator:
+     * ownership stays with the caller, so delete and re-share stay theirs, while
+     * everybody in the team space gains edit access through the space. It was
+     * previously only reachable through the admin-only ownership transfer, which
+     * made the most common collaboration step a support ticket.
+     *
+     * @param spaceId
+     *            the target space — one of the caller's own, unless they are an
+     *            administrator
+     * @throws ForbiddenException
+     *             if the caller does not own the root, or does not belong to the
+     *             target space
+     */
+    public ShareResult moveToSpace(String resourceId, String spaceId, boolean cascade, boolean dryRun) {
+        accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
+        if (spaceId == null || spaceId.isBlank()) {
+            throw new IllegalArgumentException("A target space is required");
+        }
+        String target = spaceId.trim();
+        if (!accessGuard.isAdmin() && !accessGuard.callerSpaces().spaces().contains(target)) {
+            // Filing into a space you are not in would let anybody plant resources in a
+            // team's workspace, and hand its members edit access to your work.
+            throw new ForbiddenException("You can only move resources into a space you belong to");
+        }
+
+        List<ShareTarget> updated = new ArrayList<>();
+        List<ShareTarget> skipped = new ArrayList<>();
+        mutate(resourceId, updated, skipped, descriptor -> descriptor.setSpaceId(target), dryRun);
+        for (String referenced : targets(resourceId, cascade)) {
+            mutate(referenced, updated, skipped, descriptor -> descriptor.setSpaceId(target), dryRun);
+        }
+        return new ShareResult(updated, skipped, dryRun);
     }
 
     /**
@@ -210,6 +348,14 @@ public class ResourceSharingService {
      * that owner's cooperation.
      */
     public ShareResult transferOwnership(String resourceId, String newOwnerId, String newSpaceId, boolean cascade) {
+        return transferOwnership(resourceId, newOwnerId, newSpaceId, cascade, false);
+    }
+
+    /**
+     * As {@link #transferOwnership(String, String, String, boolean)}; a dry run
+     * writes nothing.
+     */
+    public ShareResult transferOwnership(String resourceId, String newOwnerId, String newSpaceId, boolean cascade, boolean dryRun) {
         if (!accessGuard.isAdmin()) {
             throw new ForbiddenException("Only an administrator may transfer ownership");
         }
@@ -240,21 +386,24 @@ public class ResourceSharingService {
                 DocumentDescriptor descriptor = loaded.descriptor();
                 descriptor.setOwnerId(owner);
                 descriptor.setSpaceId(newSpaceId == null || newSpaceId.isBlank() ? Subjects.personalSpace(owner) : newSpaceId.trim());
-                writeBack(id, descriptor, loaded.version());
+                if (!dryRun) {
+                    writeBack(id, descriptor, loaded.version());
+                }
                 updated.add(new ShareTarget(id, descriptor.getName()));
             } catch (Exception e) {
                 LOGGER.warnf("Could not transfer ownership of %s: %s", sanitize(id), e.getMessage());
                 skipped.add(new ShareTarget(id, null));
             }
         }
-        return new ShareResult(updated, skipped);
+        return new ShareResult(updated, skipped, dryRun);
     }
 
     private Set<String> targets(String resourceId, boolean cascade) {
         return cascade ? graphResolver.referencedResourceIds(resourceId) : Set.of();
     }
 
-    private void applyGrant(String id, String subject, AccessLevel level, String grantedBy, List<ShareTarget> updated, List<ShareTarget> skipped) {
+    private void applyGrant(String id, String subject, AccessLevel level, String grantedBy, List<ShareTarget> updated, List<ShareTarget> skipped,
+                            boolean dryRun) {
         mutate(id, updated, skipped, descriptor -> {
             List<ResourceGrant> grants = descriptor.getGrants() == null ? new ArrayList<>() : new ArrayList<>(descriptor.getGrants());
             // One grant per subject: re-sharing at a different level replaces rather than
@@ -262,10 +411,10 @@ public class ResourceSharingService {
             grants.removeIf(grant -> grant == null || subject.equals(grant.getSubject()));
             grants.add(new ResourceGrant(subject, level.name(), grantedBy, new Date(System.currentTimeMillis())));
             descriptor.setGrants(grants);
-        });
+        }, dryRun);
     }
 
-    private void applyRevoke(String id, String subject, List<ShareTarget> updated, List<ShareTarget> skipped) {
+    private void applyRevoke(String id, String subject, List<ShareTarget> updated, List<ShareTarget> skipped, boolean dryRun) {
         mutate(id, updated, skipped, descriptor -> {
             if (descriptor.getGrants() == null) {
                 return;
@@ -273,11 +422,12 @@ public class ResourceSharingService {
             List<ResourceGrant> grants = new ArrayList<>(descriptor.getGrants());
             grants.removeIf(grant -> grant == null || subject.equals(grant.getSubject()));
             descriptor.setGrants(grants);
-        });
+        }, dryRun);
     }
 
-    private void applyVisibility(String id, ResourceVisibility visibility, List<ShareTarget> updated, List<ShareTarget> skipped) {
-        mutate(id, updated, skipped, descriptor -> descriptor.setVisibility(visibility.wireName()));
+    private void applyVisibility(String id, ResourceVisibility visibility, List<ShareTarget> updated, List<ShareTarget> skipped,
+                                 boolean dryRun) {
+        mutate(id, updated, skipped, descriptor -> descriptor.setVisibility(visibility.wireName()), dryRun);
     }
 
     /**
@@ -285,7 +435,7 @@ public class ResourceSharingService {
      * the access index every time, because a descriptor whose structured fields and
      * index disagree is invisible in listings it should appear in.
      */
-    private void mutate(String id, List<ShareTarget> updated, List<ShareTarget> skipped, Consumer<DocumentDescriptor> change) {
+    private void mutate(String id, List<ShareTarget> updated, List<ShareTarget> skipped, Consumer<DocumentDescriptor> change, boolean dryRun) {
         VersionedDescriptor loaded;
         try {
             loaded = loadOrNull(id);
@@ -306,6 +456,13 @@ public class ResourceSharingService {
             return;
         }
         change.accept(descriptor);
+        if (dryRun) {
+            // Everything up to the write — including the ownership check that decides
+            // updated versus skipped — runs for a preview, so a preview and the real
+            // change report the same lists.
+            updated.add(new ShareTarget(id, descriptor.getName()));
+            return;
+        }
         try {
             writeBack(id, descriptor, loaded.version());
             updated.add(new ShareTarget(id, descriptor.getName()));

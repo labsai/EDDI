@@ -29,6 +29,10 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * rest — and the Manager learns one dialog rather than fifteen.
  *
  * <p>
+ * Every change takes {@code dryRun}: with it, the response lists what would be
+ * updated and skipped, and nothing is written — so a client can show a
+ * cascade's reach before anybody confirms it.
+ * <p>
  * {@code cascade} defaults to {@code true} for a reason: people share agents,
  * and an agent shared without its workflows, rule sets and output sets is a
  * name pointing at documents the recipient cannot open. Passing {@code false}
@@ -77,7 +81,14 @@ public interface IRestResourceSharing {
                    @QueryParam("level")
                    @DefaultValue("VIEW") String level,
                    @QueryParam("cascade")
-                   @DefaultValue("true") Boolean cascade);
+                   @DefaultValue("true") Boolean cascade,
+                   @QueryParam("dryRun")
+                   @DefaultValue("false") Boolean dryRun);
+
+    /** As above, applied rather than previewed. */
+    default Response share(String id, String subject, String level, Boolean cascade) {
+        return share(id, subject, level, cascade, false);
+    }
 
     /** Removes a subject's grant, mirroring {@link #share}. */
     @DELETE
@@ -87,7 +98,14 @@ public interface IRestResourceSharing {
     Response revoke(@PathParam("id") String id,
                     @QueryParam("subject") String subject,
                     @QueryParam("cascade")
-                    @DefaultValue("true") Boolean cascade);
+                    @DefaultValue("true") Boolean cascade,
+                    @QueryParam("dryRun")
+                    @DefaultValue("false") Boolean dryRun);
+
+    /** As above, applied rather than previewed. */
+    default Response revoke(String id, String subject, Boolean cascade) {
+        return revoke(id, subject, cascade, false);
+    }
 
     /**
      * Sets visibility: {@code private}, {@code space} or {@code published}.
@@ -101,7 +119,37 @@ public interface IRestResourceSharing {
     Response setVisibility(@PathParam("id") String id,
                            @QueryParam("visibility") String visibility,
                            @QueryParam("cascade")
-                           @DefaultValue("true") Boolean cascade);
+                           @DefaultValue("true") Boolean cascade,
+                           @QueryParam("dryRun")
+                           @DefaultValue("false") Boolean dryRun);
+
+    /** As above, applied rather than previewed. */
+    default Response setVisibility(String id, String visibility, Boolean cascade) {
+        return setVisibility(id, visibility, cascade, false);
+    }
+
+    /**
+     * Files a resource the caller owns — and, with {@code cascade}, what it
+     * references that they also own — under another of their spaces. How personal
+     * work becomes team work without an administrator: ownership stays, and the
+     * team gains edit access through the space.
+     *
+     * @param spaceId
+     *            one of the caller's spaces, as {@code GET /workspaces} lists them
+     */
+    @PUT
+    @Path("/space")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Move to another space",
+               description = "Owner only. The target must be one of the caller's spaces. Ownership is unchanged.")
+    @APIResponse(responseCode = "200", description = "Updated (or, for a dry run, would-be-updated) and skipped resources.")
+    @APIResponse(responseCode = "403", description = "The caller does not own the resource, or is not in the target space.")
+    Response moveToSpace(@PathParam("id") String id,
+                         @QueryParam("spaceId") String spaceId,
+                         @QueryParam("cascade")
+                         @DefaultValue("true") Boolean cascade,
+                         @QueryParam("dryRun")
+                         @DefaultValue("false") Boolean dryRun);
 
     /**
      * Reassigns ownership. Administrators only — this exists to recover resources
@@ -118,5 +166,12 @@ public interface IRestResourceSharing {
                                @QueryParam("ownerId") String ownerId,
                                @QueryParam("spaceId") String spaceId,
                                @QueryParam("cascade")
-                               @DefaultValue("true") Boolean cascade);
+                               @DefaultValue("true") Boolean cascade,
+                               @QueryParam("dryRun")
+                               @DefaultValue("false") Boolean dryRun);
+
+    /** As above, applied rather than previewed. */
+    default Response transferOwnership(String id, String ownerId, String spaceId, Boolean cascade) {
+        return transferOwnership(id, ownerId, spaceId, cascade, false);
+    }
 }

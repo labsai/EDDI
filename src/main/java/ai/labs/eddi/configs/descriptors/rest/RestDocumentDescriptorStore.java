@@ -48,7 +48,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             // has to carry the caller's scope for the same reason each typed store does.
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
                     accessGuard.listingScope(space, ownership));
-            descriptors.forEach(accessGuard::redactForCaller);
+            accessGuard.redactAllForCaller(descriptors);
             return descriptors;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

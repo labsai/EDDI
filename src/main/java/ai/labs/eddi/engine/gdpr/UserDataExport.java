@@ -52,6 +52,10 @@ import java.util.Map;
  *            still said the bundle was whole, so a DPO handed the data subject
  *            an Art. 15 answer the code knew was short. Counts against
  *            {@link #complete()}.
+ * @param additionalData
+ *            what each {@link IGdprParticipant} holds on the user — the user
+ *            directory entry, workspace notifications — keyed by the
+ *            participant's name. Empty when none of them holds anything
  *
  * @author ginccc
  * @since 6.0.0
@@ -66,10 +70,24 @@ public record UserDataExport(
         List<AttachmentExportEntry> attachments,
         int totalConversations,
         boolean conversationsTruncated,
-        List<String> failedConversationIds) {
+        List<String> failedConversationIds,
+        Map<String, Object> additionalData) {
 
     public UserDataExport {
         failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
+        additionalData = additionalData == null ? Map.of() : Map.copyOf(additionalData);
+    }
+
+    /**
+     * Backward-compatible constructor for the shape that predates
+     * {@link IGdprParticipant} sections.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
+                totalConversations, conversationsTruncated, failedConversationIds, Map.of());
     }
 
     /**

@@ -22,6 +22,7 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private List<ResourceGrant> grants;
     private String accessIndex;
     private String callerLevel;
+    private String ownerName;
 
     public String getName() {
         return name;
@@ -154,6 +155,25 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public void setCallerLevel(String callerLevel) {
         this.callerLevel = callerLevel;
+    }
+
+    /**
+     * The owner as a person would recognise them — their name from the user
+     * directory — or {@code null} when the directory does not know them or
+     * workspaces are not enforced.
+     * <p>
+     * Derived per request exactly like {@link #getCallerLevel()}, and for the same
+     * reasons never stored and never accepted: a name is a property of the
+     * directory, not of the resource, and a stale copy on the document would keep
+     * showing somebody's old name after they changed it.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public String getOwnerName() {
+        return ownerName;
+    }
+
+    public void setOwnerName(String ownerName) {
+        this.ownerName = ownerName;
     }
 
     /** The parsed caller level, or {@code null} when unset or unrecognised. */

@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.security.spaces.rest.model.SpaceInfo;
 import ai.labs.eddi.engine.security.spaces.rest.model.WorkspaceInfo;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -26,12 +27,19 @@ public class RestWorkspaces implements IRestWorkspaces {
     private final SpaceContext spaceContext;
     private final WorkspaceSettings settings;
     private final ResourceAccessGuard accessGuard;
+    private final UserDirectory directory;
 
     @Inject
-    public RestWorkspaces(SpaceContext spaceContext, WorkspaceSettings settings, ResourceAccessGuard accessGuard) {
+    public RestWorkspaces(SpaceContext spaceContext, WorkspaceSettings settings, ResourceAccessGuard accessGuard, UserDirectory directory) {
         this.spaceContext = spaceContext;
         this.settings = settings;
         this.accessGuard = accessGuard;
+        this.directory = directory;
+    }
+
+    @Override
+    public List<UserDirectory.Match> searchDirectory(String query, Integer limit) {
+        return directory.search(query, limit == null ? 10 : limit, spaceContext.current());
     }
 
     @Override
