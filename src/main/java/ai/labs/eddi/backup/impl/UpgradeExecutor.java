@@ -156,7 +156,7 @@ public class UpgradeExecutor {
                 ResourceDiff diff = diffMap.get(snippet.sourceId());
                 if (diff == null || !isSelected(selectedSourceIds, snippet.sourceId()))
                     continue;
-                processSnippet(snippet, diff, outcome);
+                processSnippet(snippet, diff, selectedSourceIds, outcome);
             }
 
             // 3. Process each workflow's extensions
@@ -172,7 +172,7 @@ public class UpgradeExecutor {
                 if (wfDiff.action() == DiffAction.CREATE) {
                     // New workflow — create it if selected
                     if (isSelected(selectedSourceIds, sourceWf.sourceId())) {
-                        URI newUri = createNewWorkflow(sourceWf, outcome);
+                        URI newUri = createNewWorkflow(sourceWf, selectedSourceIds, outcome);
                         if (newUri != null) {
                             newWorkflowUris.add(newUri);
                             outcome.created++;
@@ -196,9 +196,19 @@ public class UpgradeExecutor {
                     boolean adoptSourceConfig = wfDiff.action() == DiffAction.UPDATE
                             && isSelected(selectedSourceIds, sourceWf.sourceId());
 
+                    // Decided before anything is written: a resource for a step the
+                    // source adds may only be created when the adoption that places it
+                    // is certain to happen. Deciding it afterwards left the resource
+                    // behind, unreferenced, whenever the adoption was then refused.
+                    String adoptionBlocker = adoptSourceConfig
+                            ? adoptionBlocker(sourceWf, wfDiff, diffMap, selectedSourceIds)
+                            : wfDiff.action() == DiffAction.UPDATE
+                                    ? "the workflow was left out of the selection"
+                                    : "the source workflow itself did not change";
+
                     Set<String> createdForAdoption = new HashSet<>();
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
-                            sourceWf, wfDiff, diffMap, selectedSourceIds, adoptSourceConfig, createdForAdoption,
+                            sourceWf, wfDiff, diffMap, selectedSourceIds, adoptionBlocker, createdForAdoption,
                             outcome);
 
                     int failuresBefore = outcome.failures.size();
@@ -225,20 +235,48 @@ public class UpgradeExecutor {
             // byte-identical agent configuration and bumped its version, so a CI job
             // that syncs on every build inflated the version history forever and
             // 'v14' said nothing about whether anything had changed.
-            boolean agentNeedsUpdate = !updatedWorkflowUris.isEmpty()
+            // Workflows the source no longer has. They come off the agent; the documents
+            // stay in the store, because earlier agent versions still name them.
+            Set<String> removedWorkflowIds = new LinkedHashSet<>();
+            for (ResourceDiff diff : preview.resources()) {
+                if ("workflow".equals(diff.resourceType()) && diff.action() == DiffAction.REMOVE
+                        && diff.targetId() != null && isSelected(selectedSourceIds, diff.sourceId())) {
+                    removedWorkflowIds.add(diff.targetId());
+                }
+            }
+
+            // The agent's own settings — HITL, capabilities, memory policy, channels.
+            // Only workflows were ever written, so a changed setting showed as an
+            // agent UPDATE in the preview and then never arrived. The preview's
+            // source content is already rewritten onto the target (its workflows, its
+            // identity, its secrets), so it is exactly what is written.
+            ResourceDiff agentDiff = preview.resources().stream()
+                    .filter(diff -> "agent".equals(diff.resourceType()))
+                    .findFirst().orElse(null);
+            String agentSettings = agentDiff != null && agentDiff.action() == DiffAction.UPDATE
+                    && isSelected(selectedSourceIds, agentDiff.sourceId())
+                            ? agentDiff.sourceContent()
+                            : null;
+
+            boolean agentMayChange = !updatedWorkflowUris.isEmpty()
                     || !newWorkflowUris.isEmpty()
+                    || !removedWorkflowIds.isEmpty()
+                    || agentSettings != null
                     || (workflowOrder != null && !workflowOrder.isEmpty());
 
-            URI agentUri = agentNeedsUpdate
-                    ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, workflowOrder, outcome)
-                    : currentAgentUri(targetAgentId);
+            URI writtenAgentUri = agentMayChange
+                    ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, removedWorkflowIds,
+                            agentSettings, workflowOrder, outcome)
+                    : null;
+            boolean agentUpdated = writtenAgentUri != null;
+            URI agentUri = agentUpdated ? writtenAgentUri : currentAgentUri(targetAgentId);
 
-            if (!agentNeedsUpdate) {
-                LOGGER.infof("Agent '%s' upgrade wrote no workflow changes — agent version left at %s",
+            if (!agentUpdated) {
+                LOGGER.infof("Agent '%s' upgrade wrote no agent changes — agent version left at %s",
                         LogSanitizer.sanitize(targetAgentId), LogSanitizer.sanitize(String.valueOf(agentUri)));
             }
 
-            UpgradeResult result = outcome.toResult(agentUri, agentNeedsUpdate);
+            UpgradeResult result = outcome.toResult(agentUri, agentUpdated);
             metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(),
                     result.failures().size());
             return result;
@@ -287,9 +325,14 @@ public class UpgradeExecutor {
 
     // ==================== Snippet Processing ====================
 
-    private void processSnippet(SnippetSourceData sourceSnippet, ResourceDiff diff, Outcome outcome) {
+    private void processSnippet(SnippetSourceData sourceSnippet, ResourceDiff diff, Set<String> selectedSourceIds,
+                                Outcome outcome) {
+        DiffAction action = resolveConflict(diff, selectedSourceIds, "snippet", sourceSnippet.name(), outcome);
+        if (action == null) {
+            return;
+        }
         try {
-            if (diff.action() == DiffAction.UPDATE && diff.targetId() != null) {
+            if (action == DiffAction.UPDATE && diff.targetId() != null) {
                 // Update existing snippet. The store answers a non-200 without
                 // throwing, and advancing the descriptor past a write that did not
                 // happen points every reader at a version that does not exist.
@@ -306,7 +349,7 @@ public class UpgradeExecutor {
                 LOGGER.infof("Updated snippet '%s' (target=%s, v%d→v%d)",
                         LogSanitizer.sanitize(sourceSnippet.name()), LogSanitizer.sanitize(diff.targetId()), diff.targetVersion(),
                         diff.targetVersion() + 1);
-            } else if (diff.action() == DiffAction.CREATE) {
+            } else if (action == DiffAction.CREATE) {
                 // Create new snippet
                 Response created = snippetStore.createSnippet(sourceSnippet.snippet());
                 createDescriptorFor(created, "snippet", sourceSnippet.sourceId(), sourceSnippet.name(), outcome);
@@ -319,6 +362,34 @@ public class UpgradeExecutor {
             LOGGER.warnf(e, "Failed to process snippet '%s'", LogSanitizer.sanitize(sourceSnippet.name()));
             outcome.failed(sourceSnippet.sourceId(), "snippet", sourceSnippet.name(), e);
         }
+    }
+
+    /**
+     * What to do with a resource the preview called CONFLICT — changed on this
+     * instance since the last sync wrote it, and changed on the source too.
+     * <p>
+     * Written only when the caller named it in {@code selectedResources}: that is
+     * the operator deciding the source wins. A sync of everything leaves it alone
+     * and says so, because silently overwriting a production hotfix with the
+     * staging copy is the one outcome a promotion must never produce unasked.
+     *
+     * @return the action to carry out — the diff's own, UPDATE for a conflict the
+     *         caller chose to overwrite — or null when it is left alone (the reason
+     *         is recorded)
+     */
+    private static DiffAction resolveConflict(ResourceDiff diff, Set<String> selectedSourceIds, String resourceType,
+                                              String name, Outcome outcome) {
+        if (diff.action() != DiffAction.CONFLICT) {
+            return diff.action();
+        }
+        if (selectedSourceIds != null && selectedSourceIds.contains(diff.sourceId())) {
+            return DiffAction.UPDATE;
+        }
+        outcome.failed(diff.sourceId(), resourceType, name,
+                "it was changed on this instance since the last sync wrote it (now v" + diff.targetVersion()
+                        + "), and the source changed it too — it was left alone. To overwrite the local change,"
+                        + " select it explicitly (selectedResources); or carry that change back to the source first");
+        return null;
     }
 
     /**
@@ -354,6 +425,7 @@ public class UpgradeExecutor {
             // Named, so the Manager's list does not show a blank row and the matcher
             // can pair it by name on the next sync without reading the document.
             descriptor.setName(name);
+            descriptor.setSyncedVersion(resourceId.getVersion());
             documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(descriptor));
         } catch (Exception e) {
@@ -371,10 +443,11 @@ public class UpgradeExecutor {
      * For each extension in a matched workflow, update the target extension with
      * the source content.
      *
-     * @param adoptSourceConfig
-     *            whether the source workflow's steps will replace the target's; a
-     *            parser the target's step does not name by URI can then be created
-     *            and wired in by the adoption
+     * @param adoptionBlocker
+     *            null when the source workflow's steps will replace the target's —
+     *            a resource for a step the target does not have is then created and
+     *            wired in by the adoption; otherwise why they will not, for the
+     *            operator
      * @param createdForAdoption
      *            receives the key of every resource created for the adoption to
      *            place — the only references the adoption may add
@@ -388,7 +461,7 @@ public class UpgradeExecutor {
                                                        ResourceDiff wfDiff,
                                                        Map<String, ResourceDiff> diffMap,
                                                        Set<String> selectedSourceIds,
-                                                       boolean adoptSourceConfig,
+                                                       String adoptionBlocker,
                                                        Set<String> createdForAdoption,
                                                        Outcome outcome) {
 
@@ -420,7 +493,10 @@ public class UpgradeExecutor {
             if (!isSelected(selectedSourceIds, sourceExt.sourceId()))
                 continue;
 
-            DiffAction action = extDiff.action();
+            DiffAction action = resolveConflict(extDiff, selectedSourceIds, sourceExt.type(), sourceExt.name(), outcome);
+            if (action == null) {
+                continue;
+            }
             if (PARSER_EXT.equals(sourceExt.type())) {
                 // The source's parser names the source's dictionaries. Written as it
                 // is, the target's parser would name ids that exist only on the source
@@ -482,35 +558,31 @@ public class UpgradeExecutor {
                         WorkflowExtensions.ExtensionRef targetRef = targetRefs.get(extensionKey);
                         if (targetRef != null) {
                             created = healDanglingReference(sourceExt, targetRef, outcome);
-                        } else if (adoptSourceConfig && PARSER_EXT.equals(sourceExt.type())) {
-                            // Both workflows have the parser step; only the target's names
-                            // no parser document. The adoption about to happen writes the
-                            // source's step, which does — and it is repointed at this.
-                            created = createExtension(sourceExt, "the source's parser step names it", outcome);
+                        } else if (adoptionBlocker == null) {
+                            // A step the source added. The workflow's own row is an UPDATE
+                            // whose diff shows the new step — its steps are compared with
+                            // the target's references repointed, so the added step is the
+                            // difference — and the adoption about to happen writes the
+                            // source's steps, which name this. It is placed there, so it is
+                            // not an orphan.
+                            //
+                            // Refusing these made the ordinary way of working — add a step on
+                            // staging, promote — impossible without hand-editing production,
+                            // and once a sync had removed a step it could never add it back.
+                            created = createExtension(sourceExt, "the source workflow adds a step for it", outcome);
                             if (created != null) {
                                 createdForAdoption.add(extensionKey);
                             }
                         } else {
-                            // Deliberately NOT created. The only thing that would consume the
-                            // new URI is updateWorkflowExtensionUris, which can repoint a
-                            // reference the target workflow already has — and CREATE means,
-                            // by definition, that it has none. Creating the resource anyway
-                            // left it in the store with nothing pointing at it, counted it as
-                            // created, answered 201, changed the agent's behaviour not at
-                            // all, and previewed the same CREATE again on the next sync, so
-                            // every run added another unreferenced copy.
-                            //
-                            // Cloning the source's step into the target workflow instead was
-                            // considered and rejected: the preview has no row for "a step
-                            // will be added to your existing pipeline", so it would reshape a
-                            // live agent's pipeline off the back of a resource row the
-                            // operator approved as a config change.
+                            // Not created: nothing would place it. The source's steps are not
+                            // being adopted, so the new URI would have no reference, and an
+                            // unreferenced copy is created again by every later sync.
                             outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
-                                    "the target workflow has no step referencing this " + sourceExt.type()
-                                            + " — add the step to the target workflow, or import the source"
-                                            + " workflow as a new one, then sync again");
-                            LOGGER.warnf("Skipped %s '%s': the target workflow has no step to reference it",
-                                    LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()));
+                                    "the source adds a step for this " + sourceExt.type()
+                                            + ", but there is no step to put it in: " + adoptionBlocker);
+                            LOGGER.warnf("Skipped %s '%s': its step cannot be added — %s",
+                                    LogSanitizer.sanitize(sourceExt.type()), LogSanitizer.sanitize(sourceExt.name()),
+                                    LogSanitizer.sanitize(adoptionBlocker));
                         }
                     }
                     if (created != null) {
@@ -626,6 +698,7 @@ public class UpgradeExecutor {
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
+            descriptor.setSyncedVersion(created.getVersion());
             documentDescriptorStore.createDescriptor(created.getId(), created.getVersion(),
                     resourceAccessGuard.stampNewDescriptor(descriptor));
             outcome.created++;
@@ -855,7 +928,7 @@ public class UpgradeExecutor {
      * @return the source JSON, with scrubbed leaves replaced by the target's values
      */
     private String restoreRedactedSecrets(ExtensionSourceData source, String sourceJson, String targetJson) {
-        if (!ScrubbedSecrets.carriesPlaceholder(sourceJson)) {
+        if (!ScrubbedSecrets.carriesTargetBoundValue(sourceJson)) {
             return sourceJson;
         }
         if (targetJson == null) {
@@ -893,20 +966,78 @@ public class UpgradeExecutor {
     // ==================== Workflow Updates ====================
 
     /**
-     * Creates a new workflow using direct store access, bypassing
-     * Response.getLocation() which fails for eddi:// scheme URIs.
+     * Creates a workflow the source agent has and the target does not — its
+     * resources first, then the workflow itself naming them by their ids on this
+     * instance.
+     * <p>
+     * It used to store the source's workflow document as it was. Every step then
+     * named a resource id that exists only on the source, none of those resources
+     * were created, and the sync answered 201: the agent version it wrote could not
+     * be deployed ("Resource not found"), and no later sync could repair it.
+     * <p>
+     * All or nothing on the selection: a workflow whose steps name a resource the
+     * operator left out has nothing to point that step at, so it is refused before
+     * anything is written rather than created half-wired.
      */
-    private URI createNewWorkflow(WorkflowSourceData sourceWf, Outcome outcome) {
+    private URI createNewWorkflow(WorkflowSourceData sourceWf, Set<String> selectedSourceIds, Outcome outcome) {
+        for (ExtensionSourceData extension : sourceWf.extensions().values()) {
+            if (!isSelected(selectedSourceIds, extension.sourceId())) {
+                outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(),
+                        "it was not created: its " + extension.type() + " '" + extension.name()
+                                + "' was left out of the selection, and a new workflow needs every resource its steps name");
+                return null;
+            }
+        }
+
+        Map<String, URI> createdByKey = new HashMap<>();
+        Map<String, URI> createdBySourceId = new HashMap<>();
+        for (Map.Entry<String, ExtensionSourceData> entry : parsersLast(sourceWf.extensions())) {
+            ExtensionSourceData extension = entry.getValue();
+            if (PARSER_EXT.equals(extension.type())) {
+                // Its dictionaries were created just before it; it has to name those.
+                extension = new ExtensionSourceData(extension.sourceId(), extension.name(), extension.type(),
+                        extension.stepType(), NestedReferences.repointBySourceId(extension.contentJson(), createdBySourceId));
+            }
+            URI created = createExtension(extension, "the new workflow '" + sourceWf.name() + "' names it", outcome);
+            if (created == null) {
+                outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(),
+                        "it was not created, because a resource one of its steps names could not be");
+                return null;
+            }
+            createdBySourceId.put(extension.sourceId(), created);
+            if (!WorkflowExtensions.isInDocument(entry.getKey())) {
+                createdByKey.put(entry.getKey(), created);
+            }
+        }
+
         try {
+            WorkflowConfiguration config = jsonSerialization.deserialize(
+                    jsonSerialization.serialize(sourceWf.config()), WorkflowConfiguration.class);
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(config)) {
+                URI created = createdByKey.get(ref.key());
+                if (created == null) {
+                    // The source named it but could not serve it, so there is nothing
+                    // here to point the step at.
+                    outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(),
+                            "it was not created: its step at '" + ref.key() + "' names " + ref.extensionUri()
+                                    + ", which the source did not supply");
+                    return null;
+                }
+                ref.repointTo(created);
+            }
+
             IWorkflowStore store = CDI.current().select(IWorkflowStore.class).get();
-            IResourceId resourceId = store.create(sourceWf.config());
+            IResourceId resourceId = store.create(config);
             URI createdUri = RestUtilities.createURI(IRestWorkflowStore.resourceURI, resourceId.getId(),
                     IRestWorkflowStore.versionQueryParam, resourceId.getVersion());
 
             // Create the DocumentDescriptor that the DocumentDescriptorFilter would
             // normally create on a 201 response — ownership stamp included.
+            DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
+            descriptor.setName(sourceWf.name());
+            descriptor.setSyncedVersion(resourceId.getVersion());
             documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
-                    resourceAccessGuard.stampNewDescriptor(createDocumentDescriptor(createdUri)));
+                    resourceAccessGuard.stampNewDescriptor(descriptor));
 
             return createdUri;
         } catch (Exception e) {
@@ -1055,6 +1186,36 @@ public class UpgradeExecutor {
     }
 
     /**
+     * Why the source workflow's steps cannot replace the target's in this run, or
+     * null when they can. Mirrors what {@link #adoptableSourceConfig} will check
+     * after the extensions are written, but answered before anything is created,
+     * from what the run is about to do: every step the source has either names a
+     * resource the target already has at that place, or one this run will create
+     * because it was served by the source and selected.
+     */
+    private String adoptionBlocker(WorkflowSourceData sourceWf, ResourceDiff wfDiff, Map<String, ResourceDiff> diffMap,
+                                   Set<String> selectedSourceIds) {
+        if (!hasSteps(sourceWf.config())) {
+            return "the source workflow has no steps";
+        }
+        Map<String, WorkflowExtensions.ExtensionRef> targetRefs = targetReferences(wfDiff);
+        for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceWf.config())) {
+            if (targetRefs.containsKey(ref.key())) {
+                continue;
+            }
+            ExtensionSourceData added = sourceWf.extensions().get(ref.key());
+            if (added == null || diffMap.get(added.sourceId()) == null) {
+                return "its step at '" + ref.key() + "' names a " + ref.fileExtension()
+                        + " the source instance did not supply";
+            }
+            if (!isSelected(selectedSourceIds, added.sourceId())) {
+                return "its new " + added.type() + " '" + added.name() + "' was left out of the selection";
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether a source workflow carries a pipeline to apply at all.
      * <p>
      * A source with no steps is left alone rather than adopted. A workflow with
@@ -1110,14 +1271,25 @@ public class UpgradeExecutor {
     /**
      * Updates the agent configuration:
      * <ul>
+     * <li>Takes the source's agent-level settings, when the preview said they
+     * changed and the agent row was selected</li>
      * <li>Replaces workflow URIs with updated versions</li>
+     * <li>Takes off the workflows the source no longer has</li>
      * <li>Appends new workflows at specified positions</li>
      * <li>Applies custom workflow order if specified</li>
      * </ul>
+     *
+     * @param adoptedSettings
+     *            the source agent as the preview rewrote it onto this target, or
+     *            null to keep the target's own settings
+     * @return the agent's new URI, or null when the result is what the agent
+     *         already is — nothing is written and no version is burned
      */
     private URI updateAgentConfig(String agentId,
                                   Map<String, URI> updatedWorkflowUris,
                                   List<URI> newWorkflowUris,
+                                  Set<String> removedWorkflowIds,
+                                  String adoptedSettings,
                                   List<String> workflowOrder,
                                   Outcome outcome) {
         try {
@@ -1131,15 +1303,19 @@ public class UpgradeExecutor {
                         + " could not be established from its descriptor, so it was not written");
             }
             int currentVersion = resolved;
-            AgentConfiguration agentConfig = agentStore.readAgent(agentId, currentVersion);
+            AgentConfiguration current = agentStore.readAgent(agentId, currentVersion);
 
-            // Replace workflow URIs with updated versions
-            List<URI> workflows = new ArrayList<>(agentConfig.getWorkflows());
-            for (int i = 0; i < workflows.size(); i++) {
-                IResourceId wfResId = RestUtilities.extractResourceId(workflows.get(i));
-                if (wfResId != null && updatedWorkflowUris.containsKey(wfResId.getId())) {
-                    workflows.set(i, updatedWorkflowUris.get(wfResId.getId()));
+            // Replace workflow URIs with updated versions, and take off the ones the
+            // source no longer has
+            List<URI> workflows = new ArrayList<>();
+            for (URI workflow : current.getWorkflows() != null ? current.getWorkflows() : List.<URI>of()) {
+                IResourceId wfResId = RestUtilities.extractResourceId(workflow);
+                if (wfResId != null && removedWorkflowIds.contains(wfResId.getId())) {
+                    continue;
                 }
+                workflows.add(wfResId != null && updatedWorkflowUris.containsKey(wfResId.getId())
+                        ? updatedWorkflowUris.get(wfResId.getId())
+                        : workflow);
             }
 
             // Append new workflows
@@ -1150,11 +1326,31 @@ public class UpgradeExecutor {
                 workflows = reorderWorkflows(workflows, workflowOrder);
             }
 
+            List<URI> originalWorkflows = current.getWorkflows() != null ? List.copyOf(current.getWorkflows()) : List.of();
+            AgentConfiguration adopted = adoptedSettings != null
+                    ? jsonSerialization.deserialize(adoptedSettings, AgentConfiguration.class)
+                    : null;
+            boolean settingsChanged = false;
+            if (adopted != null) {
+                // Bound to this instance whatever the source says — see
+                // StructuralMatcher.adoptableAgentJson.
+                adopted.setIdentity(current.getIdentity());
+                adopted.setWorkflows(originalWorkflows);
+                String adoptedJson = jsonSerialization.serialize(adopted);
+                settingsChanged = adoptedJson == null || !adoptedJson.equals(jsonSerialization.serialize(current));
+            }
+            if (!settingsChanged && workflows.equals(originalWorkflows)) {
+                // Everything that could have changed did not — e.g. a new workflow
+                // whose creation failed was the only difference. Writing would burn a
+                // version to say nothing.
+                return null;
+            }
+            AgentConfiguration agentConfig = settingsChanged ? adopted : current;
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
             Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig);
-            if (resp.getStatus() == 200) {
+            if (resp != null && resp.getStatus() == 200) {
                 bumpDescriptorOrFail(agentId, currentVersion, "agent", agentId, null, outcome);
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
                 LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", LogSanitizer.sanitize(agentId), currentVersion,
@@ -1162,6 +1358,7 @@ public class UpgradeExecutor {
                 return updatedUri;
             }
 
+            outcome.failed(agentId, "agent", null, "the agent store did not accept the updated agent");
             return null;
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
@@ -1272,6 +1469,9 @@ public class UpgradeExecutor {
         }
         descriptor.setLastModifiedOn(new Date());
         descriptor.setResource(withVersion(descriptor.getResource(), previousVersion + 1));
+        // The baseline a later sync measures local edits against: this version came
+        // from the source, so a version past it was made here.
+        descriptor.setSyncedVersion(previousVersion + 1);
         // Mirrors DocumentDescriptorFilter: carrying the descriptor object forward
         // already carries ownership, and rebuilding lets a descriptor written before
         // the access index existed acquire one the first time it is touched.

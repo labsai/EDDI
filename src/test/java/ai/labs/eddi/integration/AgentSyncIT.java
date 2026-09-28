@@ -18,6 +18,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -212,6 +213,163 @@ public class AgentSyncIT extends BaseIntegrationIT {
                 "the refusal should explain itself, got: " + response.body().asString());
     }
 
+    // ==================== 7. Repeating a sync never duplicates
+    // ====================
+
+    @Test
+    @Order(7)
+    @DisplayName("a sync that names no target finds the agent it promoted, instead of creating another")
+    void syncWithoutTargetFindsThePromotedAgent() {
+        Response response = sync(null);
+
+        // "No target means create" made a copy on every call that did not remember
+        // the id the first one created — every CI job, every re-run.
+        response.then().statusCode(200);
+        assertEquals(targetAgentId, agentIdOf(response.jsonPath().getString("agentUri")));
+        assertEquals(1, agentsPromotedFrom(sourceAgentId), "exactly one local copy of the source agent");
+    }
+
+    // ==================== 8. A step added on the source ====================
+
+    @Test
+    @Order(8)
+    @DisplayName("a step added on the source is created on the target, with no credential of the source's")
+    void addedStepIsPromotedWithoutTheSourcesSecret() throws Exception {
+        String apiCallsUri = create("""
+                {"targetServerUrl":"https://api.example.com","httpCalls":[{"name":"lookup","actions":["never"],
+                  "request":{"path":"/l","method":"get","headers":{"Authorization":"Bearer plaintext-source-token"}}}]}""",
+                "/apicallstore/apicalls");
+        addSourceStep("{\"type\":\"eddi://ai.labs.httpcalls\",\"config\":{\"uri\":\"" + apiCallsUri + "\"}}");
+
+        Response preview = given().post("/backup/import/sync/preview?sourceUrl=" + SOURCE_URL
+                + "&sourceAgentId=" + sourceAgentId + "&targetAgentId=" + targetAgentId);
+        preview.then().statusCode(200);
+        assertTrue(!preview.body().asString().contains("plaintext-source-token"),
+                "the source's credential must not reach the preview: " + preview.body().asString());
+
+        // This used to be refused with 207, telling the operator to hand-edit the
+        // target — adding a step on the source could not be promoted at all.
+        Response response = sync(targetAgentId);
+        response.then().statusCode(201);
+        assertEquals(0, response.jsonPath().getList("failures").size(), response.body().asString());
+
+        String targetApiCalls = targetExtensionUri("eddi://ai.labs.httpcalls");
+        assertNotNull(targetApiCalls, "the target workflow must have the step");
+        assertNotEquals(idOf(apiCallsUri), idOf(targetApiCalls), "the step must name the target's own copy");
+        String header = given().get("/apicallstore/apicalls/" + idOf(targetApiCalls) + VERSION_STRING + versionOf(targetApiCalls))
+                .jsonPath().getString("httpCalls[0].request.headers.Authorization");
+        assertTrue(!header.contains("plaintext-source-token"), "the source's credential must not be written: " + header);
+
+        int version = currentVersionOf(targetAgentId);
+        deployAgent(targetAgentId, version);
+        given().get("/administration/production/deploymentstatus/" + targetAgentId + "?version=" + version + "&format=text")
+                .then().statusCode(200).body(containsString("READY"));
+        undeployAgentQuietly(targetAgentId, version);
+    }
+
+    // ==================== 9. The target's own secrets stay ====================
+
+    @Test
+    @Order(9)
+    @DisplayName("the target keeps its own vault reference when the source changes the same config")
+    void targetKeepsItsOwnVaultReference() {
+        // The operator points the target at its own vault entry...
+        String targetApiCalls = targetExtensionUri("eddi://ai.labs.httpcalls");
+        String withOwnSecret = given().get("/apicallstore/apicalls/" + idOf(targetApiCalls) + VERSION_STRING + versionOf(targetApiCalls))
+                .body().asString().replace("${vault:REDACTED}", "Bearer ${vault:target-token}");
+        String written = given().body(withOwnSecret).contentType(ContentType.JSON)
+                .put("/apicallstore/apicalls/" + idOf(targetApiCalls) + VERSION_STRING + versionOf(targetApiCalls))
+                .then().statusCode(200).extract().header("location");
+        repointTargetStep(targetApiCalls, written);
+
+        // ...and the source then changes something else in the same config.
+        String sourceApiCalls = sourceExtensionUri("eddi://ai.labs.httpcalls");
+        String changed = given().get("/apicallstore/apicalls/" + idOf(sourceApiCalls) + VERSION_STRING + versionOf(sourceApiCalls))
+                .body().asString().replace("\"/l\"", "\"/lookup-v2\"");
+        String sourceWritten = given().body(changed).contentType(ContentType.JSON)
+                .put("/apicallstore/apicalls/" + idOf(sourceApiCalls) + VERSION_STRING + versionOf(sourceApiCalls))
+                .then().statusCode(200).extract().header("location");
+        repointSourceStep(sourceApiCalls, sourceWritten);
+
+        Response response = sync(targetAgentId);
+        response.then().statusCode(201);
+        assertEquals(0, response.jsonPath().getList("failures").size(),
+                "setting the target's own secret is not a conflict: " + response.body().asString());
+
+        String now = targetExtensionUri("eddi://ai.labs.httpcalls");
+        var request = given().get("/apicallstore/apicalls/" + idOf(now) + VERSION_STRING + versionOf(now)).jsonPath();
+        assertEquals("/lookup-v2", request.getString("httpCalls[0].request.path"), "the source's change arrives");
+        assertEquals("Bearer ${vault:target-token}", request.getString("httpCalls[0].request.headers.Authorization"),
+                "the target's own vault reference stays");
+    }
+
+    // ==================== 10. A workflow added on the source ====================
+
+    @Test
+    @Order(10)
+    @DisplayName("a workflow added on the source arrives with its own resources and deploys")
+    void addedWorkflowDeploys() throws Exception {
+        String outputUri = create("""
+                {"outputSet":[{"action":"faq","timesOccurred":0,"outputs":[
+                  {"valueAlternatives":[{"type":"text","text":"FAQ"}]}]}]}""", "/outputstore/outputsets");
+        String workflowUri = create(String.format("""
+                {"workflowSteps":[{"type":"eddi://ai.labs.output","config":{"uri":"%s"}}]}""", outputUri),
+                "/workflowstore/workflows");
+        String mainWorkflow = given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion)
+                .jsonPath().getString("workflows[0]");
+        String agent = given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion).body().asString()
+                .replace("\"" + mainWorkflow + "\"", "\"" + mainWorkflow + "\",\"" + workflowUri + "\"");
+        given().body(agent).contentType(ContentType.JSON)
+                .put("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion)
+                .then().statusCode(200);
+        sourceAgentVersion++;
+
+        // It used to be stored as the source had it — naming resource ids only the
+        // source has — and the sync answered 201 for an agent that could not deploy.
+        Response response = sync(targetAgentId);
+        response.then().statusCode(201);
+        assertEquals(0, response.jsonPath().getList("failures").size(), response.body().asString());
+
+        int version = currentVersionOf(targetAgentId);
+        var workflows = given().get("/agentstore/agents/" + targetAgentId + VERSION_STRING + version)
+                .jsonPath().getList("workflows", String.class);
+        assertEquals(2, workflows.size());
+        String added = given().get("/workflowstore/workflows/" + idOf(workflows.get(1)) + VERSION_STRING + versionOf(workflows.get(1)))
+                .body().asString();
+        assertTrue(!added.contains(idOf(outputUri)), "the added workflow must name the target's own output: " + added);
+
+        deployAgent(targetAgentId, version);
+        given().get("/administration/production/deploymentstatus/" + targetAgentId + "?version=" + version + "&format=text")
+                .then().statusCode(200).body(containsString("READY"));
+        undeployAgentQuietly(targetAgentId, version);
+    }
+
+    // ==================== 11. A hotfix on the target ====================
+
+    @Test
+    @Order(11)
+    @DisplayName("a change made on the target is not overwritten unless named")
+    void localChangeIsAConflict() {
+        // The target is hotfixed...
+        String targetRules = targetExtensionUri("eddi://ai.labs.behavior");
+        String hotfixed = given().body(behaviorDocument("hotfix")).contentType(ContentType.JSON)
+                .put("/rulestore/rulesets/" + idOf(targetRules) + VERSION_STRING + versionOf(targetRules))
+                .then().statusCode(200).extract().header("location");
+        repointTargetStep(targetRules, hotfixed);
+        // ...and the source changes the same rule set.
+        changeSourceBehavior("fourth");
+
+        Response preview = given().post("/backup/import/sync/preview?sourceUrl=" + SOURCE_URL
+                + "&sourceAgentId=" + sourceAgentId + "&targetAgentId=" + targetAgentId);
+        assertEquals("CONFLICT", preview.jsonPath().getString("resources.find { it.resourceType == 'behavior' }.action"));
+
+        Response response = sync(targetAgentId);
+        response.then().statusCode(207);
+        String now = targetExtensionUri("eddi://ai.labs.behavior");
+        assertTrue(given().get("/rulestore/rulesets/" + idOf(now) + VERSION_STRING + versionOf(now)).body().asString()
+                .contains("hotfix"), "the hotfix must survive a sync of everything");
+    }
+
     // ==================== Fixtures ====================
 
     private Response sync(String targetId) {
@@ -269,9 +427,10 @@ public class AgentSyncIT extends BaseIntegrationIT {
                 .put("/workflowstore/workflows/" + workflowId + VERSION_STRING + workflowVersion)
                 .then().statusCode(200);
 
-        given().body(String.format("""
-                {"workflows":["%s"]}""",
-                workflowUri.replace(VERSION_STRING + workflowVersion, VERSION_STRING + (workflowVersion + 1))))
+        // The agent document edited in place, so a workflow added to it later is not
+        // dropped by a change to the first one.
+        given().body(given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + agentVersion).body().asString()
+                .replace(workflowUri, workflowUri.replace(VERSION_STRING + workflowVersion, VERSION_STRING + (workflowVersion + 1))))
                 .contentType(ContentType.JSON)
                 .put("/agentstore/agents/" + sourceAgentId + VERSION_STRING + agentVersion)
                 .then().statusCode(200);
@@ -316,6 +475,77 @@ public class AgentSyncIT extends BaseIntegrationIT {
                 .jsonPath().getString("find { it.resource.contains('" + agentId + "') }.resource");
         assertNotNull(resource, "no descriptor for agent " + agentId);
         return versionOf(resource);
+    }
+
+    /** How many live local agents record {@code sourceId} as their origin. */
+    private long agentsPromotedFrom(String sourceId) {
+        return given().get("/agentstore/agents/descriptors?index=0&limit=100")
+                .jsonPath().getList("findAll { it.originId == '" + sourceId + "' && !it.deleted }").size();
+    }
+
+    /**
+     * The URI the source's first workflow names for the first step of this type.
+     */
+    private String sourceExtensionUri(String stepType) {
+        return extensionUri(sourceAgentId, sourceAgentVersion, stepType);
+    }
+
+    private String targetExtensionUri(String stepType) {
+        return extensionUri(targetAgentId, currentVersionOf(targetAgentId), stepType);
+    }
+
+    private String extensionUri(String agentId, int agentVersion, String stepType) {
+        String workflowUri = given().get("/agentstore/agents/" + agentId + VERSION_STRING + agentVersion)
+                .jsonPath().getString("workflows[0]");
+        return given().get("/workflowstore/workflows/" + idOf(workflowUri) + VERSION_STRING + versionOf(workflowUri))
+                .jsonPath().getString("workflowSteps.find { it.type == '" + stepType + "' }.config.uri");
+    }
+
+    /**
+     * Appends a step to the source's first workflow and moves the agent onto it.
+     */
+    private void addSourceStep(String stepJson) {
+        editSourceWorkflow(workflow -> workflow.replaceFirst("\\]\\s*}\\s*$", "," + stepJson + "]}"));
+    }
+
+    private void repointSourceStep(String from, String to) {
+        editSourceWorkflow(workflow -> workflow.replace(from, to));
+    }
+
+    private void editSourceWorkflow(UnaryOperator<String> edit) {
+        String workflowUri = given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion)
+                .jsonPath().getString("workflows[0]");
+        String workflow = given().get("/workflowstore/workflows/" + idOf(workflowUri) + VERSION_STRING + versionOf(workflowUri))
+                .body().asString();
+        String written = given().body(edit.apply(workflow)).contentType(ContentType.JSON)
+                .put("/workflowstore/workflows/" + idOf(workflowUri) + VERSION_STRING + versionOf(workflowUri))
+                .then().statusCode(200).extract().header("location");
+        String agent = given().get("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion).body().asString()
+                .replace(workflowUri, written);
+        given().body(agent).contentType(ContentType.JSON)
+                .put("/agentstore/agents/" + sourceAgentId + VERSION_STRING + sourceAgentVersion)
+                .then().statusCode(200);
+        sourceAgentVersion++;
+    }
+
+    /**
+     * Moves the target's first workflow — and the agent — onto a hand-edited
+     * resource, as the Manager does.
+     */
+    private void repointTargetStep(String from, String to) {
+        int agentVersion = currentVersionOf(targetAgentId);
+        String workflowUri = given().get("/agentstore/agents/" + targetAgentId + VERSION_STRING + agentVersion)
+                .jsonPath().getString("workflows[0]");
+        String workflow = given().get("/workflowstore/workflows/" + idOf(workflowUri) + VERSION_STRING + versionOf(workflowUri))
+                .body().asString().replace(from, to);
+        String written = given().body(workflow).contentType(ContentType.JSON)
+                .put("/workflowstore/workflows/" + idOf(workflowUri) + VERSION_STRING + versionOf(workflowUri))
+                .then().statusCode(200).extract().header("location");
+        String agent = given().get("/agentstore/agents/" + targetAgentId + VERSION_STRING + agentVersion).body().asString()
+                .replace(workflowUri, written);
+        given().body(agent).contentType(ContentType.JSON)
+                .put("/agentstore/agents/" + targetAgentId + VERSION_STRING + agentVersion)
+                .then().statusCode(200);
     }
 
     private static String idOf(String uri) {

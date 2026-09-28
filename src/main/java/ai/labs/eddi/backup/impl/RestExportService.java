@@ -605,6 +605,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     /**
      * Resolves the resource id of each referenced snippet by name, using the same
      * access-scoped descriptor sweep the export itself performs.
+     * <p>
+     * When several snippets share a name, the one kept is the one a template
+     * renders: {@code PromptSnippetService} walks the same listing and lets a later
+     * entry replace an earlier one, so this does too. Keeping the first instead
+     * exported a different snippet from the one the agent actually runs with.
      */
     private Map<String, IResourceId> resolveSnippetIdsByName(Set<String> referencedNames) {
         Map<String, IResourceId> byName = new LinkedHashMap<>();
@@ -625,7 +630,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     }
                     PromptSnippet snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
                     if (snippet != null && referencedNames.contains(snippet.getName())) {
-                        byName.putIfAbsent(snippet.getName(), resourceId);
+                        byName.put(snippet.getName(), resourceId);
                     }
                 } catch (Exception e) {
                     LOGGER.debugf("Could not resolve snippet id for preview: %s", e.getMessage());
@@ -972,6 +977,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             return;
         }
 
+        // One per name — the one the agent's templates render. Writing every snippet
+        // that shared a name put several in the archive, and the importer kept
+        // whichever it happened to read first.
+        Map<String, IResourceId> rendered = resolveSnippetIdsByName(referencedNames);
         try {
             // Scoped: this sweeps every snippet in the deployment and the export only
             // filters by referenced NAME afterwards, so an unscoped listing would let an
@@ -997,6 +1006,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                     // Only export snippets actually referenced by this agent...
                     if (!referencedNames.contains(snippet.getName())) {
+                        continue;
+                    }
+                    // ...the one of each name that is rendered...
+                    IResourceId renderedId = rendered.get(snippet.getName());
+                    if (renderedId != null && !renderedId.getId().equals(resourceId.getId())) {
                         continue;
                     }
                     // ...and, when the caller expressed a snippet selection, only

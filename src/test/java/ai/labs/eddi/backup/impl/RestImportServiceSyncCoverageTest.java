@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -179,7 +180,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.previewSync("ftp://bad.server.com",
                             "aabbccddeeff112233445566",
-                            1, "aabbccddeeff112233445567", null));
+                            1, "aabbccddeeff112233445567", null, null));
         }
 
         @Test
@@ -188,7 +189,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.previewSync(null,
                             "aabbccddeeff112233445566", 1,
-                            "aabbccddeeff112233445567", null));
+                            "aabbccddeeff112233445567", null, null));
         }
 
         @Test
@@ -197,7 +198,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.previewSync("https://localhost:8443",
                             "aabbccddeeff112233445566", 1,
-                            "aabbccddeeff112233445567", null));
+                            "aabbccddeeff112233445567", null, null));
         }
 
         /**
@@ -271,7 +272,7 @@ class RestImportServiceSyncCoverageTest {
 
             var thrown = assertThrows(NotFoundException.class, this::preview);
 
-            assertSame(notFound, thrown, "the matcher's own 404 has to reach the caller unchanged");
+            assertPassedThroughWithBody(notFound, thrown);
         }
 
         /**
@@ -283,7 +284,7 @@ class RestImportServiceSyncCoverageTest {
         private ImportPreview preview() {
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
                 return importService.previewSync(PUBLIC_SOURCE_URL,
-                        "aabbccddeeff112233445566", 1, TARGET_A, null);
+                        "aabbccddeeff112233445566", 1, TARGET_A, null, null);
             }
         }
     }
@@ -302,7 +303,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.executeSync("ftp://bad.server.com",
                             "aabbccddeeff112233445566", 1,
-                            "aabbccddeeff112233445567", null, null, null));
+                            "aabbccddeeff112233445567", null, null, null, null));
         }
 
         @Test
@@ -311,7 +312,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.executeSync("   ",
                             "aabbccddeeff112233445566", 1,
-                            "aabbccddeeff112233445567", null, null, null));
+                            "aabbccddeeff112233445567", null, null, null, null));
         }
 
         @Test
@@ -320,7 +321,7 @@ class RestImportServiceSyncCoverageTest {
             assertThrows(BadRequestException.class,
                     () -> importService.executeSync("https://[::1]:8443",
                             "aabbccddeeff112233445566", 1,
-                            "aabbccddeeff112233445567", null, null, null));
+                            "aabbccddeeff112233445567", null, null, null, null));
         }
 
         /**
@@ -354,7 +355,7 @@ class RestImportServiceSyncCoverageTest {
 
             var thrown = assertThrows(NotFoundException.class, this::sync);
 
-            assertSame(notFound, thrown);
+            assertPassedThroughWithBody(notFound, thrown);
         }
 
         /**
@@ -373,7 +374,7 @@ class RestImportServiceSyncCoverageTest {
             Response response;
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
                 response = importService.executeSync(PUBLIC_SOURCE_URL,
-                        "aabbccddeeff112233445566", 1, TARGET_A, "res-1,res-2", "wf-b, wf-a", null);
+                        "aabbccddeeff112233445566", 1, TARGET_A, "res-1,res-2", "wf-b, wf-a", null, null);
             }
 
             assertEquals(201, response.getStatus(), "something was written, so it is a 201");
@@ -386,7 +387,7 @@ class RestImportServiceSyncCoverageTest {
         private Response sync() {
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
                 return importService.executeSync(PUBLIC_SOURCE_URL,
-                        "aabbccddeeff112233445566", 1, TARGET_A, null, null, null);
+                        "aabbccddeeff112233445566", 1, TARGET_A, null, null, null, null);
             }
         }
     }
@@ -503,8 +504,8 @@ class RestImportServiceSyncCoverageTest {
 
         private List<SyncRequest> twoRequests() {
             return List.of(
-                    new SyncRequest("aabbccddeeff112233445566", 1, TARGET_A, Set.of(), List.of()),
-                    new SyncRequest("aabbccddeeff112233445577", 1, TARGET_B, Set.of(), List.of()));
+                    new SyncRequest("aabbccddeeff112233445566", 1, TARGET_A, null, List.of()),
+                    new SyncRequest("aabbccddeeff112233445577", 1, TARGET_B, null, List.of()));
         }
     }
 
@@ -614,5 +615,16 @@ class RestImportServiceSyncCoverageTest {
         return new UpgradeResult(
                 URI.create("eddi://ai.labs.agent/agentstore/agents/" + targetAgentId + "?version=2"),
                 true, 1, 0, 0, List.of());
+    }
+
+    /**
+     * A 404 reaches the caller as the same status and message it was raised with —
+     * and, unlike a bare {@code NotFoundException}, which JAX-RS answers with an
+     * empty body, carries that message as JSON the operator can read.
+     */
+    private static void assertPassedThroughWithBody(NotFoundException raised, NotFoundException thrown) {
+        assertEquals(raised.getMessage(), thrown.getMessage());
+        assertEquals(404, thrown.getResponse().getStatus());
+        assertEquals(Map.of("error", raised.getMessage()), thrown.getResponse().getEntity());
     }
 }

@@ -26,6 +26,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +42,15 @@ import java.util.regex.Pattern;
  * <b>Security:</b> The bearer token is passed in each HTTP request's
  * {@code Authorization} header and is never persisted. The token comes from the
  * calling endpoint's {@code X-Source-Authorization} header.
+ * <p>
+ * <b>Every document is scrubbed as it is read.</b> The store endpoints answer
+ * with the raw configuration, credentials included — unlike the export, which
+ * runs everything through the secret scrubber on the way out. Reading them
+ * as-is put the source's plaintext secrets into the preview (shown in the
+ * operator's browser) and then wrote them into the target, replacing its own.
+ * The scrubber is applied here, before anything else sees the content, so a
+ * live sync hands the matcher exactly what an export archive would: a
+ * placeholder the target's own value is put back into.
  *
  * <h3>Remote API endpoints used</h3>
  *
@@ -90,6 +100,10 @@ public class RemoteApiResourceSource implements IResourceSource {
     private final String authToken;
     private final IJsonSerialization jsonSerialization;
     private final HttpClient httpClient;
+    /** Applied to every configuration document read — see the class comment. */
+    private final UnaryOperator<String> secretScrubber;
+    /** What the operator should know about this source; see {@link #warnings()}. */
+    private final List<String> warnings = new ArrayList<>();
 
     // Lazily loaded and cached
     private AgentSourceData agentData;
@@ -111,13 +125,21 @@ public class RemoteApiResourceSource implements IResourceSource {
     /** Whether this instance owns {@link #httpClient} and must close it. */
     private final boolean ownsHttpClient;
 
+    /**
+     * @param secretScrubber
+     *            applied to every configuration document before it leaves this
+     *            class — normally {@code SecretScrubber::scrubJson}. Required: a
+     *            live sync that does not scrub hands the source's credentials to
+     *            the preview and the target.
+     */
     public RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
-            String authToken, IJsonSerialization jsonSerialization) {
+            String authToken, IJsonSerialization jsonSerialization, UnaryOperator<String> secretScrubber) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.agentId = agentId;
         this.agentVersion = agentVersion;
         this.authToken = authToken;
         this.jsonSerialization = jsonSerialization;
+        this.secretScrubber = Objects.requireNonNull(secretScrubber, "secretScrubber");
         this.httpClient = configure(HttpClient.newBuilder()).build();
         this.ownsHttpClient = true;
     }
@@ -159,6 +181,14 @@ public class RemoteApiResourceSource implements IResourceSource {
     RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
             String authToken, IJsonSerialization jsonSerialization,
             HttpClient httpClient, boolean ownsHttpClient) {
+        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, httpClient, ownsHttpClient,
+                UnaryOperator.identity());
+    }
+
+    /** Visible for testing — the scrubbing path. */
+    RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
+            String authToken, IJsonSerialization jsonSerialization,
+            HttpClient httpClient, boolean ownsHttpClient, UnaryOperator<String> secretScrubber) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.agentId = agentId;
         this.agentVersion = agentVersion;
@@ -166,6 +196,22 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.jsonSerialization = jsonSerialization;
         this.httpClient = httpClient;
         this.ownsHttpClient = ownsHttpClient;
+        this.secretScrubber = Objects.requireNonNull(secretScrubber, "secretScrubber");
+    }
+
+    /**
+     * Reads a configuration document and scrubs it before anything else sees it.
+     * Everything this class hands out goes through here, not {@link #httpGet}.
+     */
+    private String readDocument(String path) throws IOException {
+        String json = httpGet(path);
+        return json == null ? null : secretScrubber.apply(json);
+    }
+
+    @Override
+    public List<String> warnings() {
+        readSnippets();
+        return List.copyOf(warnings);
     }
 
     /**
@@ -190,7 +236,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             // Resolve version if not specified
             int version = agentVersion != null ? agentVersion : resolveLatestAgentVersion();
 
-            String agentJson = httpGet("/agentstore/agents/" + agentId + "?version=" + version);
+            String agentJson = readDocument("/agentstore/agents/" + agentId + "?version=" + version);
             AgentConfiguration config = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
             String agentName = readRemoteDescriptorName("/agentstore/agents/descriptors", agentId);
@@ -261,6 +307,14 @@ public class RemoteApiResourceSource implements IResourceSource {
             if (descriptors == null)
                 return snippetDataList;
 
+            // Keyed by name, and a later entry replaces an earlier one: the listing is
+            // in the same order PromptSnippetService reads it, and that is its rule
+            // too, so the snippet offered is the one the source's templates render.
+            // Offering every snippet that shares a name wrote each of them, in turn,
+            // over the target's single copy — the last write won by accident and the
+            // version history churned on every sync.
+            Map<String, SnippetSourceData> byName = new LinkedHashMap<>();
+            Map<String, Integer> sharing = new LinkedHashMap<>();
             for (DocumentDescriptor desc : descriptors) {
                 try {
                     IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
@@ -275,18 +329,25 @@ public class RemoteApiResourceSource implements IResourceSource {
                         continue;
                     }
 
-                    String snippetJson = httpGet("/snippetstore/snippets/" + resId.getId() + "?version=" + resId.getVersion());
+                    String snippetJson = readDocument("/snippetstore/snippets/" + resId.getId() + "?version=" + resId.getVersion());
                     PromptSnippet snippet = jsonSerialization.deserialize(snippetJson, PromptSnippet.class);
 
                     if (snippet != null && snippet.getName() != null && referencedNames.contains(snippet.getName())) {
-                        snippetDataList.add(new SnippetSourceData(
-                                resId.getId(), snippet.getName(), snippet));
+                        byName.put(snippet.getName(), new SnippetSourceData(resId.getId(), snippet.getName(), snippet));
+                        sharing.merge(snippet.getName(), 1, Integer::sum);
                     }
                 } catch (Exception e) {
                     LOGGER.debugf("Could not read remote snippet %s: %s",
                             LogSanitizer.sanitize(desc.getName()), LogSanitizer.sanitize(e.getMessage()));
                 }
             }
+            snippetDataList.addAll(byName.values());
+            sharing.forEach((name, count) -> {
+                if (count > 1) {
+                    warnings.add(count + " snippets on the source are named '" + name + "'. Only the one its templates"
+                            + " render (" + byName.get(name).sourceId() + ") is synced — give each snippet a unique name.");
+                }
+            });
         } catch (Exception e) {
             LOGGER.warnf("Failed to read snippets from remote %s: %s",
                     LogSanitizer.sanitize(baseUrl), LogSanitizer.sanitize(e.getMessage()));
@@ -639,7 +700,7 @@ public class RemoteApiResourceSource implements IResourceSource {
         String workflowId = wfResId.getId();
         int version = wfResId.getVersion();
 
-        String workflowJson = httpGet("/workflowstore/workflows/" + workflowId + "?version=" + version);
+        String workflowJson = readDocument("/workflowstore/workflows/" + workflowId + "?version=" + version);
         WorkflowConfiguration config = jsonSerialization.deserialize(workflowJson, WorkflowConfiguration.class);
 
         String workflowName = readRemoteDescriptorName("/workflowstore/workflows/descriptors", workflowId);
@@ -692,7 +753,7 @@ public class RemoteApiResourceSource implements IResourceSource {
         String restPath = ref.type().restPath();
         String extId = ref.resourceId().getId();
         try {
-            String contentJson = httpGet(restPath + extId + "?version=" + ref.resourceId().getVersion());
+            String contentJson = readDocument(restPath + extId + "?version=" + ref.resourceId().getVersion());
             String name = readRemoteDescriptorName(descriptorsPathOf(restPath), extId);
 
             into.put(ref.key(), new ExtensionSourceData(
