@@ -32,7 +32,7 @@
         <surefire-plugin.version>3.6.0</surefire-plugin.version>
         <failsafe-plugin.version>3.6.0</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>2.0.1</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
