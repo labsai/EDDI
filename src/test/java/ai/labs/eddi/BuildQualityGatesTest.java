@@ -27,10 +27,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
@@ -194,6 +196,17 @@ class BuildQualityGatesTest {
             "${langchain4j.version}", "${langchain4j-beta.version}");
 
     /**
+     * The deliberate exceptions to {@link #LANGCHAIN4J_VERSION_PROPERTIES}:
+     * artifacts whose reactor skipped a release, pinned to an exact literal. Each
+     * is tolerated only on the same {@code major.minor} line as
+     * {@code langchain4j.version}, so the next minor bump fails here and forces the
+     * linkage re-check the pom comment above {@code langchain4j.version} describes.
+     * Remove an entry as soon as the artifact is back on a property.
+     */
+    private static final Map<String, String> LANGCHAIN4J_PINNED_EXCEPTIONS = Map.of(
+            "langchain4j-community-oci-genai", "1.20.0-beta30");
+
+    /**
      * checkstyle.xml carries a DOCTYPE pointing at puppycrawl.com, so the doctype
      * cannot simply be disallowed — but this test must never reach the network (it
      * would make a build gate depend on a third-party host being up). External DTDs
@@ -252,6 +265,13 @@ class BuildQualityGatesTest {
                 .filter(plugin -> artifactId.equals(childText(plugin, "artifactId")))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no <plugin> with artifactId " + artifactId + " in <build><plugins>"));
+    }
+
+    /** {@code "1.20.2"} and {@code "1.20.0-beta30"} both give {@code "1.20"}. */
+    private static String majorMinor(String version) {
+        Matcher matcher = Pattern.compile("^(\\d+\\.\\d+)\\.").matcher(version);
+        assertTrue(matcher.find(), "not a major.minor.patch version: " + version);
+        return matcher.group(1);
     }
 
     private static Element execution(Element plugin, String id) {
@@ -394,19 +414,34 @@ class BuildQualityGatesTest {
     void langchain4jArtifactsUseOneOfTwoProperties() throws Exception {
         Document pom = parse(POM);
         Element dependencies = child(pom.getDocumentElement(), "dependencies").orElseThrow();
+        String coreVersion = childText(child(pom.getDocumentElement(), "properties").orElseThrow(), "langchain4j.version");
+        assertNotNull(coreVersion, "pom.xml must define <langchain4j.version>");
+        String coreLine = majorMinor(coreVersion);
         List<String> offenders = new ArrayList<>();
+        Set<String> exceptionsInUse = new HashSet<>();
 
         for (Element dependency : children(dependencies, "dependency")) {
             if (!"dev.langchain4j".equals(childText(dependency, "groupId"))) {
                 continue;
             }
+            String artifactId = childText(dependency, "artifactId");
             String version = childText(dependency, "version");
             if (version == null) {
-                offenders.add(childText(dependency, "artifactId") + " -> no <version>");
+                offenders.add(artifactId + " -> no <version>");
+            } else if (version.equals(LANGCHAIN4J_PINNED_EXCEPTIONS.get(artifactId))) {
+                exceptionsInUse.add(artifactId);
+                if (!coreLine.equals(majorMinor(version))) {
+                    offenders.add(artifactId + " -> " + version + " (pinned exception is off the " + coreLine
+                            + " line of langchain4j.version " + coreVersion + "; re-check linkage or move it back"
+                            + " onto a property)");
+                }
             } else if (!LANGCHAIN4J_VERSION_PROPERTIES.contains(version)) {
-                offenders.add(childText(dependency, "artifactId") + " -> " + version);
+                offenders.add(artifactId + " -> " + version);
             }
         }
+        assertEquals(LANGCHAIN4J_PINNED_EXCEPTIONS.keySet(), exceptionsInUse,
+                "every entry in LANGCHAIN4J_PINNED_EXCEPTIONS must match a pom dependency exactly — drop an entry"
+                        + " once its artifact is back on a property, rather than leaving a standing allowance");
 
         assertEquals(List.of(), offenders,
                 "langchain4j artifacts must pin " + LANGCHAIN4J_VERSION_PROPERTIES + " and nothing else — a third"

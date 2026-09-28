@@ -24,9 +24,22 @@
              properties for these two values (langchain4j-libs.version and
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
-             half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.20.0</langchain4j.version>
-        <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
+             half-finished bump the likely outcome of any upgrade.
+
+             ONE deliberate exception: langchain4j-community-oci-genai is pinned
+             to a literal version below, because the community reactor did not
+             publish a release for every core patch (there is no 1.20.2-beta30).
+             That is safe only while BOTH hold: Maven mediates the module's own
+             langchain4j-core dependency up to ${langchain4j.version} (check with
+             `dependency:tree -Dverbose -Dincludes=dev.langchain4j:langchain4j-core`,
+             expect "omitted for conflict"), and the core API the module links
+             against did not change across the gap. For 1.20.0 to 1.20.2 the
+             second holds trivially: every .class in langchain4j-core 1.20.2 is
+             byte-identical to 1.20.0. Re-check both on every bump, and move the
+             module back onto ${langchain4j-beta.version} as soon as a matching
+             release exists. -->
+        <langchain4j.version>1.20.2</langchain4j.version>
+        <langchain4j-beta.version>1.20.2-beta30</langchain4j-beta.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.6.0</surefire-plugin.version>
@@ -328,7 +341,9 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-beta.version}</version>
+            <!-- The one artifact NOT on a langchain4j property; see the comment
+                 above langchain4j.version for why, and what to re-check. -->
+            <version>1.20.0-beta30</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
