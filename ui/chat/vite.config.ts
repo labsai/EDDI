@@ -7,7 +7,7 @@ export default defineConfig({
   base: "/",
   resolve: {
     alias: {
-      "@": resolve(__dirname, "src"),
+      "@": resolve(import.meta.dirname, "src"),
     },
   },
   build: {
@@ -16,8 +16,8 @@ export default defineConfig({
     // checkout, which is why emptyOutDir had to be off.
     outDir: "dist",
     emptyOutDir: true,
-    rollupOptions: {
-      input: resolve(__dirname, "chat.html"),
+    rolldownOptions: {
+      input: resolve(import.meta.dirname, "chat.html"),
       output: {
         // Put JS/CSS into scripts/ to match existing EDDI structure
         entryFileNames: "scripts/js/chat-ui.[hash].js",
