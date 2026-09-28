@@ -52,7 +52,7 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const handleTabKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>) => {
       const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
-      let nextIndex: number | null = null;
+      let nextIndex: number;
 
       switch (e.key) {
         case "ArrowRight":

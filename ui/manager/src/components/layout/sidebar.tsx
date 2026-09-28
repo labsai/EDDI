@@ -534,7 +534,7 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
     const itemArray = Array.from(items);
     const currentIndex = itemArray.indexOf(document.activeElement as HTMLElement);
 
-    let nextIndex: number | null = null;
+    let nextIndex: number;
     switch (e.key) {
       case "ArrowDown":
         nextIndex = (currentIndex + 1) % itemArray.length;

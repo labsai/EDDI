@@ -624,7 +624,7 @@ export function listTimeZones(): string[] {
   const svo = (
     Intl as unknown as { supportedValuesOf?: (key: string) => string[] }
   ).supportedValuesOf;
-  let all: string[] | null = null;
+  let all: string[] | null;
   try {
     all = typeof svo === "function" ? svo("timeZone") : null;
   } catch {

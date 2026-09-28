@@ -780,7 +780,7 @@ function handleSSEEvent(
       // dead code — the event was dropped, so a failing stage stuck on "running").
       store.getState().setThinking(false);
       let taskId = "unknown";
-      let taskType = "unknown";
+      let taskType: string;
       let index = 0;
       let durationMs: number | undefined;
       let errorType: string | undefined;
@@ -826,7 +826,7 @@ function handleSSEEvent(
       store.getState().setThinking(true);
       // Parse event data for structured pipeline info
       let taskId = "unknown";
-      let taskType = "unknown";
+      let taskType: string;
       let index = 0;
       try {
         const parsed = JSON.parse(event.data);
@@ -849,7 +849,7 @@ function handleSSEEvent(
     case "task_complete": {
       store.getState().setThinking(false);
       let taskId = "unknown";
-      let taskType = "unknown";
+      let taskType: string;
       let index = 0;
       let durationMs: number | undefined;
       let actions: string[] | undefined;

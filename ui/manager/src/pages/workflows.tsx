@@ -77,7 +77,7 @@ export function WorkflowsPage() {
       access: accessFor(wf.callerLevel),
     }));
     return [...grouped].sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
       else if (sortField === "version") cmp = a.version - b.version;
       else cmp = new Date(a.lastModifiedOn).getTime() - new Date(b.lastModifiedOn).getTime();

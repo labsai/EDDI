@@ -73,7 +73,7 @@ export function GroupHitlEditor({
 
   const save = () => {
     if (timeoutInvalid || noPhaseSelected) return;
-    let phases = config.phases;
+    let phases: AgentGroupConfiguration["phases"];
     let hitlConfig: GroupHitlConfig | undefined;
     if (enabled) {
       phases = applyApprovalPhases(basePhases, [...approvalPhases]);
