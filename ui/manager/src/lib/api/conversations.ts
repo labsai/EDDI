@@ -170,6 +170,45 @@ export function extractOutputParts(conversationOutput?: ConversationOutput): str
   return texts;
 }
 
+/**
+ * Why a turn failed, from the `taskErrors` the backend records in the turn's
+ * output — one line per failed task, already redacted server-side. `null` when
+ * nothing failed.
+ */
+export function extractTaskErrors(conversationOutput?: ConversationOutput): string | null {
+  const entries = conversationOutput?.taskErrors;
+  if (!Array.isArray(entries)) return null;
+  const texts = entries
+    .map((entry) =>
+      entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).text === "string"
+        ? ((entry as Record<string, unknown>).text as string).trim()
+        : "",
+    )
+    .filter(Boolean);
+  return texts.length > 0 ? texts.join("\n") : null;
+}
+
+/**
+ * The notice to show for a failed turn, or `null` for one that did not fail.
+ *
+ * A turn whose LLM call was rejected used to come back as `ERROR` with an empty
+ * output and render as nothing at all — the spinner stopped and no bubble
+ * appeared. The backend's reason is preferred; `fallback` covers a turn that
+ * errored without one.
+ */
+export function describeTurnFailure(
+  conversationOutput: ConversationOutput | undefined,
+  conversationState: string | undefined,
+  fallback: string,
+): string | null {
+  const reported = extractTaskErrors(conversationOutput);
+  if (reported) return reported;
+  if (conversationState === "ERROR" && extractOutputParts(conversationOutput).length === 0) {
+    return fallback;
+  }
+  return null;
+}
+
 /** Extract agent output from a conversationOutput map as a single string.
  * Multiple parts are joined with double-newline for proper markdown paragraphs.
  * For multi-bubble rendering, use extractOutputParts() instead.

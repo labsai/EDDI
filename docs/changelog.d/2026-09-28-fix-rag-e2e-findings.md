@@ -88,3 +88,33 @@ Tests: `SitemapParsingTest` (20 — every form, encoding, gzip bound), `WebCrawl
 line, `/sitemap.xml` fallback and its absence when a sitemap is named, gzip end to end,
 scope), `IngestionSourceSitemapValidationTest`. Mutation-checked: without the index
 distinction or the gzip branch, six of them fail.
+
+### A failed turn no longer comes back silent
+
+A Claude agent configured with `temperature`, which Sonnet 5 rejects, answered every message
+with nothing: `POST /agents/{id}` returned `200`, `conversationState: "ERROR"` and an output
+holding only the actions; the streaming path sent `task_failed` with `"Streaming chat failed"`
+and a `done` with the same empty output. The reason — "`temperature` is deprecated for this
+model." — was only in the server log, and the Manager rendered an empty bubble.
+
+- **The caller is told** — without strict write discipline (the default), the failed step's
+  output now carries the same `taskErrors` entry strict write's `digest` mode writes. It is
+  caller-facing only: nothing reads `taskErrors` back into the model's view, and no data or
+  `task_failed_*` action is written, so agent prompts are unchanged. Under strict write the
+  configured `onFailure` still decides — `exclude_all` stays silent.
+- **With the actual reason** — `LifecycleManager.describeFailure` appends the most specific
+  cause to the wrapper's message and pulls `message` out of a provider's JSON error body. It
+  feeds both the digest (redacted, URLs removed, 200 chars) and `summarizeForAudit`, so the
+  streaming `task_failed` event and the audit ledger carry the reason too.
+- **Manager** — both chat paths show `⚠️ <reason>` in place of the empty reply, or a generic
+  line when an `ERROR` turn carries none (`chat.turnFailed`, 11 locales).
+- **Chat UI unchanged, on purpose** — it already shows end users a "Something went wrong"
+  banner with Try again on an `ERROR` turn, and the provider's wording is for operators.
+
+Files: `LifecycleManager`, `ui/manager` `use-chat.ts` and `lib/api/conversations.ts`,
+[`docs/memory-policy.md`](../memory-policy.md#a-failed-turn-always-tells-the-caller-why).
+Tests: `LifecycleManagerTest` (reported without strict write with the unwrapped reason, model
+view untouched, `exclude_all` silent, redaction — the first and last fail with the report
+removed), `LifecycleManagerErrorClassificationTest` (`describeFailure`), Manager
+`conversations.test.ts`, `use-chat-sse-handling.test.tsx`, `use-chat.test.tsx` (all three
+chat cases fail with the notice removed).

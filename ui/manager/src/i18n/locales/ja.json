@@ -747,7 +747,8 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",

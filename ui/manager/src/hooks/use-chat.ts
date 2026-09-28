@@ -33,6 +33,7 @@ import {
   extractInput,
   extractOutput,
   extractOutputParts,
+  describeTurnFailure,
   extractInputField,
   extractQuickReplies,
 } from "@/lib/api/conversations";
@@ -539,6 +540,7 @@ export function useSendMessage() {
           (snapshot.conversationOutputs?.length ?? 1) - 1
         ];
         const parts = extractOutputParts(lastOutput);
+        const failure = describeTurnFailure(lastOutput, snapshot.conversationState, turnFailedFallback(t));
 
         // Replace the typing placeholder with one bubble per part
         store.setState((s) => {
@@ -548,6 +550,14 @@ export function useSendMessage() {
               id: `agent-${Date.now()}-${Math.random()}`,
               role: "agent",
               content: part,
+              timestamp: Date.now(),
+            });
+          }
+          if (failure) {
+            msgs.push({
+              id: `agent-error-${Date.now()}`,
+              role: "agent",
+              content: `⚠️ ${failure}`,
               timestamp: Date.now(),
             });
           }
@@ -643,6 +653,14 @@ export function useSendMessage() {
  * unrecognised one falls back to the message it came with, which is more useful
  * than a generic apology.
  */
+/** What a failed turn says when the backend gave no reason. */
+function turnFailedFallback(t: TFunction): string {
+  return t(
+    "chat.turnFailed",
+    "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
+  );
+}
+
 export function translateStreamError(
   code: string | undefined,
   t: TFunction,
@@ -708,6 +726,16 @@ function handleSSEEvent(
           // supplies the rendered reason.
           if (snapshot.conversationState === "AWAITING_HUMAN") {
             store.getState().setPaused(true, null);
+          }
+          const failure = describeTurnFailure(
+            snapshot.conversationOutputs?.[snapshot.conversationOutputs.length - 1],
+            snapshot.conversationState,
+            turnFailedFallback(t),
+          );
+          if (failure) {
+            // Into the (usually empty) streaming bubble rather than beside it, so a
+            // failed turn does not leave a blank bubble above its explanation.
+            store.getState().appendToLastAgentMessage(`⚠️ ${failure}`);
           }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[

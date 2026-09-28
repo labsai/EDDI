@@ -774,7 +774,8 @@
     "errorConversationEnded": "This conversation has ended.",
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
-    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment."
+    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",

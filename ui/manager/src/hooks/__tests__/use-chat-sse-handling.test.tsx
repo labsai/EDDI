@@ -164,6 +164,78 @@ describe("use-chat handleSSEEvent — canonical snapshot text on done", () => {
   });
 });
 
+describe("use-chat handleSSEEvent — a failed turn says so", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    useChatStore.setState({
+      selectedAgentId: "agent1",
+      conversationId: "conv1",
+      streamingEnabled: true,
+    });
+  });
+
+  async function send() {
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "hello" });
+    });
+    const messages = useChatStore.getState().messages;
+    return [...messages].reverse().find((m) => m.role === "agent");
+  }
+
+  it("shows the backend's reason in the bubble instead of leaving it empty", async () => {
+    // Observed live: a provider rejection streamed task_failed + done(ERROR) with
+    // no tokens and no output, and the Manager rendered an empty bubble.
+    h.frames = [
+      {
+        type: "task_failed",
+        data: JSON.stringify({ taskId: "eddi://ai.labs.llm", taskType: "langchain", error: "Streaming chat failed" }),
+      },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "ERROR",
+          conversationOutputs: [
+            {
+              actions: ["send_message"],
+              taskErrors: [{ type: "errorDigest", text: "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated" }],
+            },
+          ],
+        }),
+      },
+    ];
+
+    const agentMessage = await send();
+
+    expect(agentMessage?.content).toBe("⚠️ Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated");
+    expect(useChatStore.getState().isProcessing).toBe(false);
+  });
+
+  it("falls back to a generic notice when the ERROR turn carries no reason", async () => {
+    h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "ERROR", conversationOutputs: [{}] }) }];
+
+    const agentMessage = await send();
+
+    expect(agentMessage?.content).toMatch(/^⚠️ .*could not answer/);
+  });
+
+  it("adds nothing to a successful turn", async () => {
+    h.frames = [
+      { type: "token", data: "Hi!" },
+      {
+        type: "done",
+        data: JSON.stringify({ conversationState: "READY", conversationOutputs: [{ output: [{ type: "text", text: "Hi!" }] }] }),
+      },
+    ];
+
+    const agentMessage = await send();
+
+    expect(agentMessage?.content).toBe("Hi!");
+  });
+});
+
 describe("use-chat — turn boundary on abnormal stream endings", () => {
   beforeEach(() => {
     useChatStore.getState().reset();

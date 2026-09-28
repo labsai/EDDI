@@ -757,7 +757,8 @@
     "errorConversationEnded": "Esta conversación ha terminado.",
     "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
     "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
-    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento."
+    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento.",
+    "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo."
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",

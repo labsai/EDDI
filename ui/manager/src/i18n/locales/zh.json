@@ -747,7 +747,8 @@
     "errorConversationEnded": "该会话已结束。",
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
-    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。"
+    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
+    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
   },
   "resources": {
     "backToWorkflow": "返回工作流",

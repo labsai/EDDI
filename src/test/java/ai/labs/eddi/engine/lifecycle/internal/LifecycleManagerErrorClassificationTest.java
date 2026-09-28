@@ -133,6 +133,60 @@ class LifecycleManagerErrorClassificationTest {
         }
     }
 
+    // ==================== describeFailure ====================
+
+    @Nested
+    @DisplayName("describeFailure")
+    class DescribeFailureTests {
+
+        @Test
+        @DisplayName("appends the innermost cause to the wrapper's message")
+        void appendsInnermostCause() {
+            var e = new RuntimeException("Streaming chat failed",
+                    new IllegalStateException("middle", new IllegalArgumentException("model not found: claude-x")));
+
+            assertEquals("Streaming chat failed: model not found: claude-x", LifecycleManager.describeFailure(e));
+        }
+
+        @Test
+        @DisplayName("pulls the message out of a provider's JSON error body")
+        void providerJson() {
+            var e = new RuntimeException("Chat failed", new RuntimeException(
+                    "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"say \\\"hi\\\" first\"}}"));
+
+            assertEquals("Chat failed: say \"hi\" first", LifecycleManager.describeFailure(e));
+        }
+
+        @Test
+        @DisplayName("a JSON body as the only message is unwrapped too")
+        void providerJsonAtTheTop() {
+            assertEquals("quota exceeded",
+                    LifecycleManager.describeFailure(new RuntimeException("{\"error\":{\"message\":\"quota exceeded\"}}")));
+        }
+
+        @Test
+        @DisplayName("a cause that repeats the wrapper is not appended twice")
+        void noRepetition() {
+            var e = new RuntimeException("timeout after 30s", new RuntimeException("timeout after 30s"));
+
+            assertEquals("timeout after 30s", LifecycleManager.describeFailure(e));
+        }
+
+        @Test
+        @DisplayName("no message anywhere gives the class name")
+        void noMessage() {
+            assertEquals("IllegalStateException", LifecycleManager.describeFailure(new IllegalStateException()));
+        }
+
+        @Test
+        @DisplayName("summarizeForAudit carries the innermost cause as well")
+        void auditSummaryUnwraps() {
+            var e = new RuntimeException("Streaming chat failed", new RuntimeException("`temperature` is deprecated"));
+
+            assertEquals("Streaming chat failed: `temperature` is deprecated", LifecycleManager.summarizeForAudit(e));
+        }
+    }
+
     // ==================== summarizeForAudit ====================
 
     @Nested

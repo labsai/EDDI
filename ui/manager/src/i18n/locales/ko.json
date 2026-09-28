@@ -747,7 +747,8 @@
     "errorConversationEnded": "이 대화는 종료되었습니다.",
     "errorAgentNotReady": "이 에이전트는 선택한 환경에 아직 배포되지 않았습니다.",
     "errorAgentMismatch": "이 대화는 에이전트의 다른 버전에 속해 있습니다.",
-    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요."
+    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+    "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요."
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",

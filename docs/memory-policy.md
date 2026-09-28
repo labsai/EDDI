@@ -91,6 +91,28 @@ The error digest is stored as a special output type:
 
 The UI can render error digests with distinct styling (warning icon, collapsible panel). The LLM receives the concise `text` summary rather than raw error noise.
 
+### A failed turn always tells the caller why
+
+The same `taskErrors` entry is written **without** strict write discipline too — so by default, not
+only in `digest` mode. Before, a turn whose task failed (a model provider rejecting the request, an
+unreachable API) came back as `conversationState: "ERROR"` with an output that was simply empty, on
+the plain and the streaming path alike: the client had no reply and no reason, and the reason was only
+in the server log.
+
+In that default mode the entry is for the **caller only**. Nothing reads `taskErrors` back into what
+the model sees, no data is stored and no `task_failed_*` action is emitted — those remain strict-write
+behaviour. With strict write enabled, the modes above decide as before, so `exclude_all` still
+reports nothing.
+
+The `text` names the task and the most specific reason in the failure's cause chain — for a provider
+rejection, the `message` from the provider's error body, e.g. `` Task 'eddi://ai.labs.llm' failed:
+Streaming chat failed: `temperature` is deprecated for this model. `` It is redacted with the same
+secret filter as the logs, URLs are removed, and it is capped at 200 characters. The streaming
+`task_failed` event carries the same unwrapped reason.
+
+The Manager's chat shows it in place of the empty reply. The Chat UI shows end users its own generic
+"Something went wrong" banner with **Try again** instead, and never the provider's text.
+
 ## Behavior Rule Integration
 
 When a task fails with strict write discipline enabled, the action `task_failed_<taskId>` is emitted. You can use this in behavior rules to route to fallback logic:
