@@ -26,6 +26,7 @@ const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 let seq = 0;
 
+/** Whether the timer or frame being scheduled right now was requested from sonner's code. */
 function fromSonner() {
   return (new Error().stack ?? "").includes("sonner");
 }

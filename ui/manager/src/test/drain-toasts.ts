@@ -35,6 +35,7 @@ async function nextMacrotask() {
  */
 let toasterSeen = false;
 
+/** Sets `toasterSeen` if any of these DOM additions is, or contains, a Toaster. */
 function noteToasters(records: MutationRecord[]) {
   for (const record of records) {
     for (const node of record.addedNodes) {
