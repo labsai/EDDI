@@ -46,7 +46,12 @@
              package, verify and install always build both UIs unless -DskipUi=true.
              CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
-        <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+        <!-- 2.x needs Java 17 and Maven 3.6 (both far below this build) and changes no
+             goal or parameter we use; 2.0.0 also fixed archive extraction on Windows
+             under Java 25. Since 2.0.2 everything npm and Vite write to stderr is logged
+             as [ERROR] - their warnings included - so read BUILD SUCCESS/FAILURE, not
+             the [ERROR] count. -->
+        <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
         <!-- Node 24 (LTS "Krypton") matches CI (every setup-node step in ci.yml) and
              mise.toml; change all three together. Node 24 is LTS until 2028-04-30,
              Node 22 only until 2027-04-30. The UIs' own floor is lower - 22.18: Vitest 5
