@@ -814,3 +814,46 @@ describe("SyncPage — the promotion loop", () => {
     expect(screen.getByTestId("sync-redeploy-hint")).toBeInTheDocument();
   });
 });
+
+describe("SyncPage — after a create", () => {
+  it("adopts the agent the backend names, so the next sync updates it instead of making another copy", async () => {
+    // The backend now fills targetAgentId with the agent it wrote. Adoption used
+    // to key on that field being empty, so an explicit "Create new" stayed armed
+    // and the next sync created a second copy.
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<Record<string, unknown>>;
+        sent.push(...requests);
+        return HttpResponse.json(
+          requests.map((r) => ({
+            sourceAgentId: r.sourceAgentId,
+            targetAgentId: r.targetAgentId ?? `made-for-${String(r.sourceAgentId)}`,
+            result: {
+              agentUri: `eddi://ai.labs.agent/agentstore/agents/made-for-${String(r.sourceAgentId)}?version=1`,
+              agentUpdated: true, updated: 0, created: 3, skipped: 0, failures: [],
+            },
+          }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    const target = screen.getAllByRole("combobox")[1]!;
+    await user.selectOptions(target, "");
+    for (let run = 0; run < 2; run++) {
+      const before = sent.length;
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+      await user.click(screen.getByTestId("sync-execute-btn"));
+      await waitFor(() => expect(sent.length).toBeGreaterThan(before));
+    }
+
+    const first = sent.find((r) => r.createNew === true)!;
+    const ofThatAgent = sent.filter((r) => r.sourceAgentId === first.sourceAgentId);
+    const again = ofThatAgent[ofThatAgent.length - 1]!;
+    expect(again.createNew).toBe(false);
+    expect(again.targetAgentId).toBe(`made-for-${String(first.sourceAgentId)}`);
+  });
+});

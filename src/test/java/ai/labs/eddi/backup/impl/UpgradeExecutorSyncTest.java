@@ -281,6 +281,52 @@ class UpgradeExecutorSyncTest {
     }
 
     @Test
+    @DisplayName("agent settings changed here are left alone, while the workflow changes still land")
+    void agentSettingsConflictLeavesSettingsButWritesWorkflows() throws Exception {
+        targetAgent.setDescription("production hotfix");
+        var fromSource = new AgentConfiguration();
+        fromSource.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        fromSource.setDescription("from staging");
+        Map<String, ExtensionSourceData> extensions = Map.of("eddi://ai.labs.llm#0/config",
+                new ExtensionSourceData(SRC_LLM, "LLM", "langchain", "eddi://ai.labs.llm", LLM_JSON));
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), extensions));
+        givenPreview(new ResourceDiff("src-agent", "agent", "Agent", DiffAction.CONFLICT, AGENT, 5, "targetAgent",
+                mapper.writeValueAsString(fromSource), null, -1),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0),
+                row(SRC_LLM, "langchain", DiffAction.UPDATE, LLM, 3, -1));
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture());
+        assertEquals("production hotfix", agent.getValue().getDescription(), "the local settings stay");
+        assertEquals(List.of(uri("workflow", WF, 3)), agent.getValue().getWorkflows(), "the workflow update lands");
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType())), result.failures().toString());
+    }
+
+    @Test
+    @DisplayName("a workflow changed here keeps its steps, while its extensions are still updated")
+    void workflowConflictKeepsStepsButWritesExtensions() throws Exception {
+        var local = workflow(step("llm", uri("llm", LLM, 3)), step("output", uri("output", "d1d1d1d1d1d1d1d1d1d1d1d1", 1)));
+        when(workflowStore.readWorkflow(WF, 2)).thenReturn(local);
+        Map<String, ExtensionSourceData> extensions = Map.of("eddi://ai.labs.llm#0/config",
+                new ExtensionSourceData(SRC_LLM, "LLM", "langchain", "eddi://ai.labs.llm", LLM_JSON));
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), extensions));
+        givenPreview(agentRow(DiffAction.SKIP, null),
+                row(SRC_WF, "workflow", DiffAction.CONFLICT, WF, 2, 0),
+                row(SRC_LLM, "langchain", DiffAction.UPDATE, LLM, 3, -1));
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+
+        var written = ArgumentCaptor.forClass(WorkflowConfiguration.class);
+        verify(workflowStore).updateWorkflow(eq(WF), eq(2), written.capture());
+        assertEquals(List.of(uri("llm", LLM, 4).toString(), uri("output", "d1d1d1d1d1d1d1d1d1d1d1d1", 1).toString()),
+                WorkflowExtensions.scan(written.getValue()).stream().map(ref -> ref.extensionUri().toString()).toList(),
+                "the step added here stays, and the LLM step moves to the version this sync wrote");
+        assertTrue(result.failures().stream().anyMatch(f -> "workflow".equals(f.resourceType())), result.failures().toString());
+    }
+
+    @Test
     @DisplayName("every version a sync writes is recorded as the baseline for the next")
     void writtenVersionBecomesTheBaseline() throws Exception {
         Map<String, ExtensionSourceData> extensions = Map.of("eddi://ai.labs.llm#0/config",

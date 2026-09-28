@@ -352,7 +352,15 @@ synced one in anything other than its own secrets, and the source has changed th
 same resource, the preview reports it as `CONFLICT` and a sync of everything leaves
 it alone, answering `207` with the reason. Setting the target's own API keys or
 vault references after a first promotion is not such a change: a sync keeps them
-anyway, so it does not hold anything up. To take the source's version, name the row
+anyway, so it does not hold anything up.
+
+The same holds for the agent's own settings (HITL, capabilities, memory policy…)
+and for a workflow's steps: a gate added in production, or a step added there,
+makes that row a `CONFLICT` rather than being dropped by the next promotion.
+Moving onto newer versions — what editing an extension in the Manager does to its
+workflow and agent — is not counted as an edit. When the agent or a workflow is
+left alone this way, everything else in the sync still lands: extension updates
+are written and the workflow and agent are repointed at them. To take the source's version, name the row
 in `selectedResources` (in the Manager: tick **Overwrite local change** on the
 row). To keep the hotfix, carry it back to the source first.
 

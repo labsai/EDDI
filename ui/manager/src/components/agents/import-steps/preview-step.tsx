@@ -77,9 +77,14 @@ export function PreviewStep({
               <th className="px-3 py-2 text-start w-8">
                 <input
                   type="checkbox"
-                  checked={selected.size === preview.resources.length}
+                  // Checked when every non-conflict row is: conflicts are never part of
+                  // "select all" (see ImportAgentDialog.toggleAll).
+                  checked={preview.resources
+                    .filter((r) => r.action !== "CONFLICT")
+                    .every((r) => selected.has(r.sourceId))}
                   onChange={onToggleAll}
                   className="accent-primary"
+                  data-testid="preview-toggle-all"
                 />
               </th>
               <th className="px-3 py-2 text-start text-xs font-medium text-muted-foreground uppercase">

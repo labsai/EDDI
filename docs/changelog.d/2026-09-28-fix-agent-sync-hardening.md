@@ -57,7 +57,13 @@ executor writes the agent's settings — keeping the target's instance-bound
 **A production hotfix was overwritten silently.** `DocumentDescriptor.syncedVersion`
 now records the version a sync or import wrote; a target version past it was made
 locally, and a resource changed on both sides is a `CONFLICT`, written only when
-named in `selectedResources` (the Manager's **Overwrite local change**).
+named in `selectedResources` (the Manager's **Overwrite local change**). The agent's own
+settings and a workflow's steps are guarded the same way, each compared with its
+synced version rewritten onto today's references so that Manager edits cascading
+new versions do not count; when they are left alone, the rest of the sync still
+lands. A dictionary only a parser document names is created or updated only when
+that document will be written, and a batch entry names the agent it was written
+into.
 
 **Smaller ones.** A sync without `targetAgentId` now finds the agent an earlier
 promotion made (by `originId`) instead of creating a copy on every call — `409`

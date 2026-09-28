@@ -265,12 +265,19 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     });
   }
 
+  /**
+   * The header checkbox manages every row except CONFLICT ones: "select all" must
+   * not overwrite a local change behind the operator's back. A conflict ticked on
+   * its own row stays as the operator left it either way.
+   */
   function toggleAll() {
     if (!preview) return;
-    if (selected.size === preview.resources.length) {
-      setSelected(new Set());
+    const defaults = defaultSelection(preview);
+    const conflictsChosen = [...selected].filter((id) => !defaults.has(id));
+    if ([...defaults].every((id) => selected.has(id))) {
+      setSelected(new Set(conflictsChosen));
     } else {
-      setSelected(new Set(preview.resources.map((r) => r.sourceId)));
+      setSelected(new Set([...defaults, ...conflictsChosen]));
     }
   }
 

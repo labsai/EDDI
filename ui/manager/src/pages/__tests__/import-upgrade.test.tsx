@@ -144,6 +144,21 @@ describe("ImportAgentDialog — changes made on this instance", () => {
     expect(conflictRow.querySelector("input[type=checkbox]")).not.toBeChecked();
     expect(updateRow.querySelector("input[type=checkbox]")).toBeChecked();
     expect(screen.getByTestId("preview-notices")).toHaveTextContent(/changed on this instance/);
+
+    // "Select all" is every row except a conflict: it must not overwrite a local
+    // change behind the operator's back — in either direction.
+    const toggleAll = screen.getByTestId("preview-toggle-all");
+    expect(toggleAll).toBeChecked();
+    await user.click(toggleAll);
+    expect(updateRow.querySelector("input[type=checkbox]")).not.toBeChecked();
+    await user.click(toggleAll);
+    expect(updateRow.querySelector("input[type=checkbox]")).toBeChecked();
+    expect(conflictRow.querySelector("input[type=checkbox]")).not.toBeChecked();
+
+    // A conflict ticked on its own row survives the header toggle.
+    await user.click(conflictRow.querySelector("input[type=checkbox]")!);
+    await user.click(toggleAll);
+    expect(conflictRow.querySelector("input[type=checkbox]")).toBeChecked();
   });
 });
 

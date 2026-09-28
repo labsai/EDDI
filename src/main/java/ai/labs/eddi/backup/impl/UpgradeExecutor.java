@@ -193,7 +193,14 @@ public class UpgradeExecutor {
                     // changed step config, a condition — and the preview said so.
                     // Counting that as "skipped" and writing nothing told the
                     // operator the sync was a no-op while their edit was dropped.
-                    boolean adoptSourceConfig = wfDiff.action() == DiffAction.UPDATE
+                    //
+                    // A CONFLICT — steps changed on this instance since the last sync —
+                    // is adopted only when named; otherwise the extensions below are
+                    // still written and repointed, and only the step structure stays.
+                    DiffAction workflowAction = isSelected(selectedSourceIds, sourceWf.sourceId())
+                            ? resolveConflict(wfDiff, selectedSourceIds, "workflow", sourceWf.name(), outcome)
+                            : wfDiff.action();
+                    boolean adoptSourceConfig = workflowAction == DiffAction.UPDATE
                             && isSelected(selectedSourceIds, sourceWf.sourceId());
 
                     // Decided before anything is written: a resource for a step the
@@ -202,9 +209,11 @@ public class UpgradeExecutor {
                     // behind, unreferenced, whenever the adoption was then refused.
                     String adoptionBlocker = adoptSourceConfig
                             ? adoptionBlocker(sourceWf, wfDiff, diffMap, selectedSourceIds)
-                            : wfDiff.action() == DiffAction.UPDATE
-                                    ? "the workflow was left out of the selection"
-                                    : "the source workflow itself did not change";
+                            : workflowAction == null
+                                    ? "the workflow was changed on this instance and is left alone"
+                                    : wfDiff.action() == DiffAction.SKIP
+                                            ? "the source workflow itself did not change"
+                                            : "the workflow was left out of the selection";
 
                     Set<String> createdForAdoption = new HashSet<>();
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
@@ -253,10 +262,12 @@ public class UpgradeExecutor {
             ResourceDiff agentDiff = preview.resources().stream()
                     .filter(diff -> "agent".equals(diff.resourceType()))
                     .findFirst().orElse(null);
-            String agentSettings = agentDiff != null && agentDiff.action() == DiffAction.UPDATE
-                    && isSelected(selectedSourceIds, agentDiff.sourceId())
-                            ? agentDiff.sourceContent()
-                            : null;
+            // A CONFLICT — settings changed here since the last sync — is taken only
+            // when named; the workflow changes above are written either way.
+            DiffAction agentAction = agentDiff != null && isSelected(selectedSourceIds, agentDiff.sourceId())
+                    ? resolveConflict(agentDiff, selectedSourceIds, "agent", agentDiff.name(), outcome)
+                    : null;
+            String agentSettings = agentAction == DiffAction.UPDATE ? agentDiff.sourceContent() : null;
 
             boolean agentMayChange = !updatedWorkflowUris.isEmpty()
                     || !newWorkflowUris.isEmpty()
@@ -497,6 +508,22 @@ public class UpgradeExecutor {
             if (action == null) {
                 continue;
             }
+            if (inDocument && (action == DiffAction.CREATE || action == DiffAction.UPDATE)) {
+                // Only its parser document names this dictionary, and that document is
+                // written after it. When the document will not be written this run, a
+                // created dictionary is an orphan the next sync creates again, and an
+                // updated one is a version nothing loads — so neither is written.
+                if (targetRefs == null) {
+                    targetRefs = targetReferences(wfDiff);
+                }
+                String ownerBlocker = documentOwnerBlocker(extensionKey, sourceWf, diffMap, selectedSourceIds,
+                        adoptionBlocker, targetRefs);
+                if (ownerBlocker != null) {
+                    outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
+                            "only its parser document names it, and that document is not written this run: " + ownerBlocker);
+                    continue;
+                }
+            }
             if (PARSER_EXT.equals(sourceExt.type())) {
                 // The source's parser names the source's dictionaries. Written as it
                 // is, the target's parser would name ids that exist only on the source
@@ -600,6 +627,34 @@ public class UpgradeExecutor {
         }
 
         return updates;
+    }
+
+    /**
+     * Why the parser document that names an in-document resource will not be
+     * written this run, or null when it will. Mirrors the decisions the loop makes
+     * for the document itself, taken before either is written.
+     */
+    private String documentOwnerBlocker(String extensionKey, WorkflowSourceData sourceWf,
+                                        Map<String, ResourceDiff> diffMap, Set<String> selectedSourceIds,
+                                        String adoptionBlocker, Map<String, WorkflowExtensions.ExtensionRef> targetRefs) {
+        int marker = extensionKey.indexOf(WorkflowExtensions.DOCUMENT_MARKER);
+        String ownerKey = marker < 0 ? null : extensionKey.substring(0, marker);
+        ExtensionSourceData owner = ownerKey == null ? null : sourceWf.extensions().get(ownerKey);
+        ResourceDiff ownerDiff = owner == null ? null : diffMap.get(owner.sourceId());
+        if (ownerDiff == null) {
+            return "the source did not supply the parser document";
+        }
+        if (!isSelected(selectedSourceIds, owner.sourceId())) {
+            return "the parser document was left out of the selection";
+        }
+        if (ownerDiff.action() == DiffAction.CONFLICT
+                && (selectedSourceIds == null || !selectedSourceIds.contains(owner.sourceId()))) {
+            return "the parser document was changed on this instance and is left alone";
+        }
+        if (ownerDiff.action() == DiffAction.CREATE && !targetRefs.containsKey(ownerKey) && adoptionBlocker != null) {
+            return adoptionBlocker;
+        }
+        return null;
     }
 
     /**

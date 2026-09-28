@@ -201,6 +201,27 @@ class UpgradeExecutorParserTest {
                 "the parser must name the dictionary created for it, was: " + parserJson);
     }
 
+    /**
+     * The parser document is the only thing that will ever point at such a
+     * dictionary. When that document is left alone — here a CONFLICT the caller did
+     * not name — a created dictionary would be an orphan the next sync creates
+     * again, so it is not created.
+     */
+    @Test
+    @DisplayName("a dictionary only the parser document names is not created when that document is left alone")
+    void dictionaryIsNotCreatedForAParserThatIsNotWritten() throws Exception {
+        givenPreviewWithDocumentDictionary(DiffAction.CREATE, DiffAction.CONFLICT);
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(sourceWithDocumentDictionary(),
+                AGENT_ID, null, null));
+
+        verify(dictionaryDocuments, never()).create(any());
+        verify(parserStore, never()).updateParser(anyString(), anyInt(), any());
+        assertEquals(0, result.created());
+        assertTrue(result.failures().stream().anyMatch(f -> f.reason().contains("only its parser document names it")),
+                "got: " + result.failures());
+    }
+
     @Test
     @DisplayName("a dictionary only the parser document names is updated in place, without touching the workflow")
     void dictionaryNamedOnlyByTheParserIsUpdated() throws Exception {
@@ -328,12 +349,17 @@ class UpgradeExecutorParserTest {
     }
 
     private void givenPreviewWithDocumentDictionary(DiffAction dictionaryAction) throws Exception {
+        givenPreviewWithDocumentDictionary(dictionaryAction, DiffAction.UPDATE);
+    }
+
+    private void givenPreviewWithDocumentDictionary(DiffAction dictionaryAction, DiffAction parserAction)
+            throws Exception {
         var diffs = List.of(
                 new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 3,
                         "targetAgent", null, null, -1),
                 new ResourceDiff("src-wf", "workflow", "Workflow", DiffAction.SKIP, WF_ID, 2, "position",
                         null, null, 0),
-                new ResourceDiff("src-parser", "parser", "Parser", DiffAction.UPDATE, PARSER_T, 2, "type",
+                new ResourceDiff("src-parser", "parser", "Parser", parserAction, PARSER_T, 2, "type",
                         parserNaming(DICT + DICT_S + "?version=1"), parserNaming(DICT + DICT_T + "?version=2"), -1),
                 dictionaryAction == DiffAction.CREATE
                         ? new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", DiffAction.CREATE, null, null,

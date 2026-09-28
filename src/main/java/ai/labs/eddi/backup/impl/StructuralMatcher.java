@@ -202,13 +202,24 @@ public class StructuralMatcher {
         String targetJson = serializeSafe(targetConfig);
         String sourceJson = secretNeutral(adoptableAgentJson(sourceAgent.config(), targetConfig), targetJson);
 
-        DiffAction action = contentEquals(sourceJson, targetJson)
-                ? DiffAction.SKIP
-                : DiffAction.UPDATE;
-
         // The same authority the content was read at, so the row states the version
         // the operator is actually upgrading from.
         Integer targetVersion = currentVersionOf(targetAgentId);
+
+        // Agent-level settings are written now, so a hotfix to them here (a HITL
+        // gate, a capability) is guarded like any other resource's. The synced
+        // version is rewritten onto today's workflows first: an extension edited in
+        // the Manager moves the agent's workflow URIs, and that is not an edit to
+        // the agent's own settings.
+        DiffAction action;
+        if (contentEquals(sourceJson, targetJson)) {
+            action = DiffAction.SKIP;
+        } else if (targetVersion != null && changedLocally(targetAgentId, targetVersion, targetJson,
+                version -> adoptableAgentJson(agentStore.readAgent(targetAgentId, version), targetConfig))) {
+            action = DiffAction.CONFLICT;
+        } else {
+            action = DiffAction.UPDATE;
+        }
 
         return new ResourceDiff(
                 sourceAgent.sourceId(), "agent", sourceAgent.name(),
@@ -284,9 +295,20 @@ public class StructuralMatcher {
         // pipeline was identical.
         String sourceJson = repointedWorkflowJson(sourceWf.config(), targetExtensions);
         String targetJson = readTargetWorkflowJson(targetId, targetVersion);
-        DiffAction wfAction = contentEquals(sourceJson, targetJson)
-                ? DiffAction.SKIP
-                : DiffAction.UPDATE;
+        // A step added or reconfigured here would be dropped by adopting the source's
+        // steps, so a structural edit on this instance is a CONFLICT too. The synced
+        // version's steps are pointed at today's resources before comparing: an
+        // extension edited in the Manager moves a step's URI, and that is not a
+        // change to the pipeline.
+        DiffAction wfAction;
+        if (contentEquals(sourceJson, targetJson)) {
+            wfAction = DiffAction.SKIP;
+        } else if (changedLocally(targetId, targetVersion, targetJson,
+                version -> repointedWorkflowJson(workflowStore.readWorkflow(targetId, version), targetExtensions))) {
+            wfAction = DiffAction.CONFLICT;
+        } else {
+            wfAction = DiffAction.UPDATE;
+        }
 
         diffs.add(new ResourceDiff(
                 sourceWf.sourceId(), "workflow",
@@ -296,11 +318,12 @@ public class StructuralMatcher {
                 includeContent ? targetJson : null, sourceWf.positionIndex()));
 
         // Steps the target has and the source no longer does. They leave with the
-        // adoption of the source's steps, which only an UPDATE triggers. Only the
+        // adoption of the source's steps — an UPDATE, or a CONFLICT the operator
+        // chooses to overwrite. Only the
         // workflow's own references are listed: a dictionary a parser document
         // stops naming shows in that parser's diff, and a reference the source
         // still makes but could not serve is not a removal.
-        if (wfAction == DiffAction.UPDATE) {
+        if (wfAction != DiffAction.SKIP) {
             Set<String> sourceKeys = new HashSet<>(sourceExtensions.keySet());
             WorkflowExtensions.scan(sourceWf.config()).forEach(ref -> sourceKeys.add(ref.key()));
             for (Map.Entry<String, TargetExtension> entry : targetExtensions.entrySet()) {

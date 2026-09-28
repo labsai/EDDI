@@ -167,20 +167,24 @@ export function SyncPage() {
           // A mapping that had no local target now has one — the agent this run
           // created. Without adopting it, the next Preview + Sync sends
           // targetAgentId: null again and creates a SECOND copy of the same agent.
-          const createdBySource = new Map<string, string>();
+          // The backend names the agent it wrote in targetAgentId — the one it
+          // created, or the earlier promotion it found — and in agentUri; older
+          // backends only in agentUri.
+          const syncedInto = new Map<string, string>();
           for (const result of execution.results) {
-            if (!result.targetAgentId && result.result?.agentUri) {
-              const { id } = parseResourceUri(result.result.agentUri);
-              if (id) createdBySource.set(result.sourceAgentId, id);
-            }
+            const id =
+              result.targetAgentId ??
+              (result.result?.agentUri ? parseResourceUri(result.result.agentUri).id : null);
+            if (id) syncedInto.set(result.sourceAgentId, id);
           }
           setMappings((prev) =>
             prev.map((m) => {
-              const created = createdBySource.get(m.remoteId);
+              const adopted = m.localTargetId ? undefined : syncedInto.get(m.remoteId);
               return {
                 ...m,
-                localTargetId: m.localTargetId ?? created ?? null,
-                createNew: created ? false : m.createNew,
+                localTargetId: m.localTargetId ?? adopted ?? null,
+                // The copy exists now; syncing it again must update it, not make another.
+                createNew: adopted ? false : m.createNew,
                 preview: null,
                 overwrite: [],
               };

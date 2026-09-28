@@ -3361,7 +3361,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 if (result.hasFailures()) {
                     failed++;
                 }
-                results.add(new BatchSyncResult(request.sourceAgentId(), request.targetAgentId(), result, null));
+                results.add(new BatchSyncResult(request.sourceAgentId(), syncedInto(result, request), result, null));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch sync failed for agent %s to %s",
                         LogSanitizer.sanitize(request.sourceAgentId()), LogSanitizer.sanitize(request.targetAgentId()));
@@ -3380,6 +3380,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return Response.status(207, "Multi-Status").entity(results).type(MediaType.APPLICATION_JSON).build();
         }
         return Response.ok(results).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * The local agent a batch entry was written into. With no target named it is
+     * the one found by originId, or the one this run created — neither of which the
+     * request carries — so it is read from the result, falling back to the request
+     * only when the result names none.
+     */
+    private static String syncedInto(UpgradeResult result, SyncRequest request) {
+        IResourceId written = result.agentUri() != null ? RestUtilities.extractResourceId(result.agentUri()) : null;
+        return written != null && written.getId() != null ? written.getId() : request.targetAgentId();
     }
 
     /**

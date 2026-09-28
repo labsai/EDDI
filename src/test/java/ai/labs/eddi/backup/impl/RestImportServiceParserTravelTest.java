@@ -347,6 +347,10 @@ class RestImportServiceParserTravelTest {
 
     @SuppressWarnings("unchecked")
     private AutoCloseable stubCdi(Object... classThenStore) {
+        // Checked before the static mock opens, so a malformed call cannot leak it.
+        if (classThenStore.length % 2 != 0) {
+            throw new IllegalArgumentException("stubCdi takes (Class, store) pairs, got " + classThenStore.length + " arguments");
+        }
         var cdiMock = mockStatic(CDI.class);
         var cdi = mock(CDI.class);
         cdiMock.when(CDI::current).thenReturn(cdi);

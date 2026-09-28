@@ -460,6 +460,32 @@ class RestImportServiceSyncCoverageTest {
             assertEquals(2, ((List<?>) response.getEntity()).size());
         }
 
+        /**
+         * With no target named, the batch syncs onto the agent an earlier promotion
+         * made — found by originId — and the caller cannot know which one unless the
+         * entry says so. Echoing the request's null left a client unable to deploy or
+         * open what it had just synced.
+         */
+        @Test
+        @DisplayName("an entry names the agent it was written into, even when the request named none")
+        void entryNamesTheAgentFoundByOrigin() throws Exception {
+            String sourceId = "aabbccddeeff112233445566";
+            var promoted = new DocumentDescriptor();
+            promoted.setOriginId(sourceId);
+            promoted.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET_A + "?version=1"));
+            when(documentDescriptorStore.findByOriginId(sourceId)).thenReturn(List.of(promoted));
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenReturn(cleanResult(TARGET_A));
+
+            Response response;
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                response = importService.executeSyncBatch(PUBLIC_SOURCE_URL,
+                        List.of(new SyncRequest(sourceId, 1, null, null, List.of())), null);
+            }
+
+            var entry = (RestImportService.BatchSyncResult) ((List<?>) response.getEntity()).getFirst();
+            assertEquals(TARGET_A, entry.targetAgentId());
+        }
+
         @Test
         @DisplayName("an agent whose own resources failed counts as failed, even though the sync ran")
         void resourceFailuresCountTowardsTheBatchStatus() {

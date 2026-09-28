@@ -210,6 +210,74 @@ class StructuralMatcherSyncTest {
         assertEquals(DiffAction.SKIP, row(matcher.buildPreview(source(LLM_JSON), TARGET_AGENT, true), "langchain").action());
     }
 
+    /**
+     * Agent-level settings are written now, so a hotfix to them here — a HITL gate,
+     * a capability — is guarded like any other resource's.
+     */
+    @Test
+    @DisplayName("an agent setting changed here, and changed on the source too, is a CONFLICT")
+    void localAgentSettingIsAConflict() throws Exception {
+        var baseline = new AgentConfiguration();
+        baseline.setWorkflows(new ArrayList<>(List.of(uri("workflow", TARGET_WF, 3))));
+        when(agentStore.readAgent(TARGET_AGENT, 6)).thenReturn(baseline);
+        descriptorWithSyncedVersion(TARGET_AGENT, 7, 6);
+        targetAgent.setDescription("production hotfix");
+        var sourceAgent = sourceAgentConfig();
+        sourceAgent.setDescription("from staging");
+
+        assertEquals(DiffAction.CONFLICT,
+                row(matcher.buildPreview(source(sourceAgent, LLM_JSON), TARGET_AGENT, true), "agent").action());
+    }
+
+    /**
+     * Editing an extension in the Manager moves the agent onto a new workflow
+     * version. That is not an edit to the agent's own settings.
+     */
+    @Test
+    @DisplayName("an agent that moved here only onto newer workflow versions is no conflict")
+    void workflowVersionMoveIsNoAgentConflict() throws Exception {
+        var baseline = new AgentConfiguration();
+        baseline.setWorkflows(new ArrayList<>(List.of(uri("workflow", TARGET_WF, 3))));
+        when(agentStore.readAgent(TARGET_AGENT, 6)).thenReturn(baseline);
+        descriptorWithSyncedVersion(TARGET_AGENT, 7, 6);
+        var sourceAgent = sourceAgentConfig();
+        sourceAgent.setDescription("from staging");
+
+        assertEquals(DiffAction.UPDATE,
+                row(matcher.buildPreview(source(sourceAgent, LLM_JSON), TARGET_AGENT, true), "agent").action());
+    }
+
+    /**
+     * Adopting the source's steps drops a step added here. That has to be a choice,
+     * not a side effect of an unrelated promotion.
+     */
+    @Test
+    @DisplayName("a step added here, where the source's steps differ, makes the workflow a CONFLICT")
+    void localStepMakesTheWorkflowAConflict() throws Exception {
+        when(workflowStore.readWorkflow(TARGET_WF, 4)).thenReturn(workflow(
+                step("llm", uri("llm", TARGET_LLM, 3)), step("output", uri("output", TARGET_OUT, 2))));
+        when(workflowStore.readWorkflow(TARGET_WF, 3)).thenReturn(workflow(step("llm", uri("llm", TARGET_LLM, 2))));
+        descriptorWithSyncedVersion(TARGET_WF, 4, 3);
+
+        ImportPreview preview = matcher.buildPreview(source(LLM_JSON), TARGET_AGENT, true);
+
+        assertEquals(DiffAction.CONFLICT, row(preview, "workflow").action());
+        assertEquals(DiffAction.REMOVE, row(preview, "output").action(),
+                "what overwriting it would remove is still listed");
+    }
+
+    @Test
+    @DisplayName("a workflow that moved here only onto newer extension versions is no conflict")
+    void extensionVersionMoveIsNoWorkflowConflict() throws Exception {
+        when(workflowStore.readWorkflow(TARGET_WF, 4)).thenReturn(workflow(
+                step("llm", uri("llm", TARGET_LLM, 3)), step("output", uri("output", TARGET_OUT, 2))));
+        when(workflowStore.readWorkflow(TARGET_WF, 3)).thenReturn(workflow(
+                step("llm", uri("llm", TARGET_LLM, 2)), step("output", uri("output", TARGET_OUT, 1))));
+        descriptorWithSyncedVersion(TARGET_WF, 4, 3);
+
+        assertEquals(DiffAction.UPDATE, row(matcher.buildPreview(source(LLM_JSON), TARGET_AGENT, true), "workflow").action());
+    }
+
     @Test
     @DisplayName("a target agent that does not exist is a 404, not a 500 with no body")
     void missingTargetIsNotFound() throws Exception {
