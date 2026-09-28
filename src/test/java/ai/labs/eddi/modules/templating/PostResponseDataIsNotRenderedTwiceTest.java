@@ -135,7 +135,7 @@ class PostResponseDataIsNotRenderedTwiceTest {
         IData<Object> contextOutput = memory.getCurrentStep().getLatestData("output:text:context");
         assertNotNull(contextOutput, "the postResponse output must have been stored");
         assertEquals("Found: " + UPSTREAM, ((TextOutputItem) contextOutput.getResult()).getText());
-        assertTrue(contextOutput.isPreRendered());
+        assertTrue(contextOutput.isVerbatim());
 
         IData<List<QuickReply>> quickReplies = memory.getCurrentStep().getLatestData("quickReplies:context");
         assertNotNull(quickReplies, "the postResponse quick replies must have been stored");

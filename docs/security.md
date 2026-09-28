@@ -150,19 +150,21 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 ### RestAgentManagement Gate
 
-`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):
 
 ```java
 if (checkForUserAuthentication &&
-        !production.equals(userConversation.getEnvironment()) &&
+        !production.equals(environment) &&
         identity.isAnonymous()) {
     throw new UnauthorizedException();
 }
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`test`) must be authenticated; `production` conversations are exempt from this particular gate (the legacy `unrestricted`/`restricted` names are read as `production`)
 - Requests to `/production/` environments always pass regardless of auth status
+
+**The check runs before any side effect.** The managed `GET` and `POST /agents/managed/{intent}/{userId}` create the user's conversation when none exists and replace it when it has ended. The environment checked is the one the request acts on: a live conversation's stored environment, or — for a conversation about to be created or to replace an ended one — the environment of the trigger deployment it will be started with, which is picked *before* the check and then used for the start. So a `401` from these endpoints means nothing was created, deleted or replaced. The `POST` hands the `UnauthorizedException` to the JAX-RS exception mappers, so it answers `401` like the `GET` does (it used to answer an opaque `500`).
 
 ### Local Development Keycloak
 
@@ -479,7 +481,7 @@ primary    → NUMBER | FUNCTION '(' args ')' | '(' expression ')' | CONSTANT
 A template string comes from agent configuration. Everything that reaches a template at render time — the user's message, conversation properties, context, API and MCP responses, model output — is **data**: it is substituted into the template and written out literally, whatever braces it contains. EDDI keeps that boundary in three places where it used to be crossed:
 
 - **Property instructions.** A value read through `fromObjectPath` (in `property.json`, and in the `postResponse.propertyInstructions` of httpcalls, LLM and MCP tasks) is stored exactly as found. Only `valueString` and the property `name` are rendered as templates. A configuration that relied on a navigated value being rendered a second time no longer gets that; write the template in `valueString` instead.
-- **Output built from a response.** Output and quick replies that a `postResponse` builds (`outputBuildInstructions`, `qrBuildInstructions`) are rendered once — the author's `outputValue` with the response substituted — and marked as already rendered. The templating task (`eddi://ai.labs.templating`) leaves them alone; output authored in an output configuration is rendered as before.
+- **Output supplied as data.** Output and quick replies sent as `context` on a turn, and those a `postResponse` builds (`outputBuildInstructions`, `qrBuildInstructions` — rendered once, the author's `outputValue` with the response substituted), are stored verbatim (`IData#isVerbatim`, persisted with the step so it survives a HITL resume). The templating task (`eddi://ai.labs.templating`) leaves them alone and marks everything it renders verbatim, so a second templating pass cannot re-evaluate substituted values; output authored in an output configuration is rendered once, as before.
 - **Generated agents.** The system prompt a model chooses for a sub-agent (`create_sub_agent`) is stored inside a Qute unparsed block, so the new agent receives exactly the text the model wrote. Parameter names from an OpenAPI specification (MCP API tools, the setup wizard) are reduced to plain identifiers (`[A-Za-z_][A-Za-z0-9_]*`, e.g. `pet-id` → `pet_id`) before they become `{...}` placeholders.
 
 ### A restricted engine

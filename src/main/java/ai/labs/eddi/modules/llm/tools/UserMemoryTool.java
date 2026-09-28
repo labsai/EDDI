@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 /**
@@ -45,7 +46,10 @@ public class UserMemoryTool {
      */
     private static final String ON_CAP_EVICT_OLDEST = "evict_oldest";
     /** GDPR bookkeeping keys are never evicted (mirrors the retention sweep). */
-    private static final String GDPR_KEY_PREFIX = "_gdpr_";
+    private static final String GDPR_KEY_PREFIX = IUserMemoryStore.RESERVED_KEY_PREFIX;
+    private static final String TURN_DISCARDED_REFUSAL = "⚠️ This turn has been cancelled; nothing was stored or changed.";
+    private static final String RESERVED_KEY_REFUSAL = "⚠️ Keys starting with '%s' are reserved for GDPR bookkeeping and cannot be "
+            + "written or forgotten by an agent.";
 
     private final IUserMemoryStore store;
     private final String userId;
@@ -54,10 +58,25 @@ public class UserMemoryTool {
     private final List<String> groupIds;
     private final AgentConfiguration.UserMemoryConfig config;
     private final AgentConfiguration.Guardrails guardrails;
+    private final BooleanSupplier turnDiscarded;
     private int writesThisTurn = 0;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config) {
+        this(store, userId, agentId, conversationId, groupIds, config, () -> false);
+    }
+
+    /**
+     * @param turnDiscarded
+     *            whether the turn this tool serves has been cancelled — by the
+     *            user, or by a GDPR erasure of the user. Checked before every
+     *            write: this tool writes straight to the store mid-turn, so a turn
+     *            told to stop would otherwise still recreate memories the erasure
+     *            had just deleted while its tool loop wound down.
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded) {
+        this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
         this.userId = userId;
         this.agentId = agentId;
@@ -87,6 +106,14 @@ public class UserMemoryTool {
         if (key.length() > guardrails.getMaxKeyLength()) {
             return "⚠️ Key too long. Maximum %d characters.".formatted(guardrails.getMaxKeyLength());
         }
+        // Checked here as well as in the store so the model gets a readable refusal
+        // instead of a store failure. Without it a model could write
+        // _gdpr_processing_restricted=true and lock its own user out with a GDPR 403
+        // no admin had applied — or, as a global entry, overwrite the admin's real
+        // restriction row in place.
+        if (IUserMemoryStore.isReservedKey(key.trim())) {
+            return RESERVED_KEY_REFUSAL.formatted(IUserMemoryStore.RESERVED_KEY_PREFIX);
+        }
 
         // Guardrail: value length
         if (value != null && value.length() > guardrails.getMaxValueLength()) {
@@ -104,6 +131,10 @@ public class UserMemoryTool {
             vis = (visibility != null && !visibility.isBlank()) ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
         } catch (IllegalArgumentException e) {
             vis = Visibility.self;
+        }
+
+        if (turnDiscarded.getAsBoolean()) {
+            return TURN_DISCARDED_REFUSAL;
         }
 
         try {
@@ -174,6 +205,11 @@ public class UserMemoryTool {
         if (key == null || key.isBlank()) {
             return "⚠️ Key must not be empty.";
         }
+        // A model must not be able to lift an Art. 18 restriction either: deleting the
+        // row is what the admin unrestrict endpoint does, with an audit entry.
+        if (IUserMemoryStore.isReservedKey(key.trim())) {
+            return RESERVED_KEY_REFUSAL.formatted(IUserMemoryStore.RESERVED_KEY_PREFIX);
+        }
 
         try {
             // getByKey is scoped by userId ONLY and returns the FIRST match, which may
@@ -187,6 +223,9 @@ public class UserMemoryTool {
             }
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
+            }
+            if (turnDiscarded.getAsBoolean()) {
+                return TURN_DISCARDED_REFUSAL;
             }
 
             store.deleteEntry(target.id());

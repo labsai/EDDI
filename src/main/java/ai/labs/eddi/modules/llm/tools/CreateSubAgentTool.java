@@ -242,13 +242,13 @@ public class CreateSubAgentTool {
 
             // --- Build and execute setup ---
             String prefixedName = parentAgentId + "/" + name.trim();
-            // The prompt is the MODEL's text, not an author's: the stored system
-            // message is rendered as a Qute template on every turn of the new agent,
-            // so any template syntax in it — put there by the model, or by whatever
-            // injected the model — would be evaluated. An unparsed block keeps it
-            // literal; the rendered prompt is byte-identical to what the model wrote.
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
+                    // The prompt is written by the parent MODEL, which a chat user can steer,
+                    // and it is stored as the sub-agent's system prompt — a template LlmTask
+                    // renders on every turn. Unescaped, "{vars.apiKey}" or a "{#for}" loop in
+                    // it would be evaluated with the server's template data. An unparsed
+                    // block makes it literal text; the rendered prompt is byte-identical.
                     TemplateEscaping.unparsedBlock(systemPrompt),
                     resolvedProvider,
                     resolvedModel,

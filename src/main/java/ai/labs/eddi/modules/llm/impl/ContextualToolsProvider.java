@@ -202,7 +202,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
 
         List<String> groupIds = resolveGroupIds(memory);
 
-        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
+        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
+                memory::isCancelled);
         tools.add(tool);
         // Conversation id, not user id: sanitize() strips control characters, it does
         // not make an identifier non-personal, and this line fires on every turn that

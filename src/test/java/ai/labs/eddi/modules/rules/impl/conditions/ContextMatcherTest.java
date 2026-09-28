@@ -497,6 +497,16 @@ public class ContextMatcherTest {
         }
 
         @Override
+        public boolean isVerbatim() {
+            return false;
+        }
+
+        @Override
+        public void setVerbatim(boolean verbatim) {
+
+        }
+
+        @Override
         public boolean equals(Object o) {
             if (this == o)
                 return true;

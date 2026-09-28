@@ -151,7 +151,7 @@ class GroupConversationServiceHitlCoverageTest {
     private ConcurrentHashMap<String, DiscussionControlToken> activeTokens(
                                                                            GroupConversationService svc)
             throws Exception {
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         return (ConcurrentHashMap<String, DiscussionControlToken>) field.get(svc);
     }

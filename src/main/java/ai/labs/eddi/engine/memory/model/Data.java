@@ -22,7 +22,7 @@ public class Data<T> implements IData<T> {
     private String originWorkflowId;
     private boolean isPublic;
     private boolean committed = true;
-    private boolean preRendered;
+    private boolean verbatim;
 
     public Data(String key, T result) {
         this(key, result, Collections.singletonList(result), new Date(System.currentTimeMillis()));
@@ -120,12 +120,12 @@ public class Data<T> implements IData<T> {
     }
 
     @Override
-    public boolean isPreRendered() {
-        return preRendered;
+    public boolean isVerbatim() {
+        return verbatim;
     }
 
     @Override
-    public void setPreRendered(boolean preRendered) {
-        this.preRendered = preRendered;
+    public void setVerbatim(boolean verbatim) {
+        this.verbatim = verbatim;
     }
 }

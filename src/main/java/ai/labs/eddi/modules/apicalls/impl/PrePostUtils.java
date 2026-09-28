@@ -109,10 +109,10 @@ public class PrePostUtils {
                     Property.Scope scope = propertyInstruction.getScope();
                     Object propertyValue;
                     try {
-                        // Only the author-written valueString is a template. A value reached
-                        // through fromObjectPath is DATA — an API response, a model's reply, an
-                        // MCP tool result — and rendering it would evaluate whatever template
-                        // syntax that upstream content carries.
+                        // Only the authored valueString is a template. A value reached through
+                        // fromObjectPath is conversation data — typically the HTTP response this
+                        // instruction runs against — and is used as resolved: rendering it would
+                        // evaluate whatever "{vars.x}" or "{#for ...}" the upstream API returned.
                         boolean fromPath = !isNullOrEmpty(path);
                         if (fromPath) {
                             propertyValue = PathNavigator.getValue(path, templateDataObjects);

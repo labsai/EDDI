@@ -94,10 +94,9 @@ public class OutputTemplateTask implements ILifecycleTask {
         outputDataList.forEach(output -> {
             String outputKey = output.getKey();
             TemplateMode templateMode = resolveTemplateMode(outputKey);
-            if (templateMode == null || output.isPreRendered()) {
-                // Pre-rendered entries are data that was already rendered once (e.g. a
-                // postResponse's output built from an API response). A second render
-                // would evaluate template syntax that arrived inside that data.
+            if (templateMode == null || output.isVerbatim()) {
+                // Verbatim = supplied as data (turn context, postResponse), not authored:
+                // delivered exactly as it arrived. See IData#isVerbatim.
                 return;
             }
 
@@ -117,6 +116,11 @@ public class OutputTemplateTask implements ILifecycleTask {
 
             if (postTemplated != null) {
                 output.setResult(postTemplated);
+                // Rendered once, now data: an agent whose workflows each end with the
+                // templating step runs this task again on the same step, and a second
+                // pass would evaluate whatever the first substituted in — a property
+                // captured from user input, say, that reads "{vars.apiKey}".
+                output.setVerbatim(true);
                 templateData(currentStep, output, outputKey, preTemplated, postTemplated);
                 currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
             }
@@ -177,7 +181,7 @@ public class OutputTemplateTask implements ILifecycleTask {
     private void templatingQuickReplies(IWritableConversationStep currentStep, List<IData<List<QuickReply>>> quickReplyDataList,
                                         Map<String, Object> contextMap) {
         quickReplyDataList.forEach(quickReplyData -> {
-            if (quickReplyData.isPreRendered()) {
+            if (quickReplyData.isVerbatim()) {
                 return;
             }
             var preTemplating = quickReplyData.getResult();
@@ -190,6 +194,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                 return quickReply;
             }).collect(Collectors.toList());
 
+            quickReplyData.setVerbatim(true); // rendered once — see templateOutputTexts
             templateData(currentStep, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
             quickReplyData.setResult(postTemplating);
         });
@@ -211,6 +216,9 @@ public class OutputTemplateTask implements ILifecycleTask {
 
         String newOutputKey = joinStrings(":", originalKey, templateAppendix);
         IData<Object> processedData = dataFactory.createData(newOutputKey, dataValue);
+        // The pre/post twins share the "output"/"quickReplies" prefix, so a later
+        // templating pass would pick them up too. Record only, never render.
+        processedData.setVerbatim(true);
         currentStep.storeData(processedData);
     }
 

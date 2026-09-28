@@ -59,28 +59,39 @@ public interface IData<T> {
     void setCommitted(boolean committed);
 
     /**
-     * Whether this entry's result is already-rendered <em>data</em> rather than an
-     * author-written template — e.g. output items an httpcall, LLM or MCP
-     * {@code postResponse} built from upstream content. The templating task leaves
-     * such entries untouched: rendering them again would evaluate template syntax
-     * that arrived inside the data.
+     * Whether the value of this entry must be delivered verbatim — never rendered
+     * as a template by the templating task ({@code OutputTemplateTask}).
      * <p>
-     * A per-turn marker: it is not part of the persisted memory snapshot.
+     * {@code true} for data that was supplied from outside the configuration rather
+     * than authored in it: output and quick replies sent as {@code context} on a
+     * turn, and output built from an HTTP response by {@code postResponse} (which
+     * has already been rendered once, with the response substituted in). Those
+     * values are data. Rendering them again would let whoever controls them write
+     * Qute: read {@code {snippets.*}} and {@code {vars.*}}, or loop and allocate
+     * until the worker stalls.
+     * <p>
+     * The templating task also sets it on every entry it has rendered, so a second
+     * templating pass in the same turn (one per workflow) cannot evaluate what the
+     * first one substituted in.
+     * <p>
+     * <b>Persisted</b> with the step ({@code ResultSnapshot#isVerbatim}): a
+     * tool-call HITL resume reloads memory and re-enters the pipeline after the
+     * output task, so a flag that did not survive the reload would let a later
+     * templating task render the entry.
+     * <p>
+     * Default: {@code false}. Phrased this way round so that the safe answer for
+     * every existing entry — authored output, templated as before — is also the
+     * default of a Mockito mock.
      *
-     * @return true if the result must not be passed through the template engine
+     * @return true if the value must not be templated
      */
-    default boolean isPreRendered() {
-        return false;
-    }
+    boolean isVerbatim();
 
     /**
-     * Marks this entry's result as already-rendered data, see
-     * {@link #isPreRendered()}.
+     * Marks this entry as verbatim (or not). See {@link #isVerbatim()}.
      *
-     * @param preRendered
-     *            true if the result must not be templated again
+     * @param verbatim
+     *            true for data supplied from outside the configuration
      */
-    default void setPreRendered(boolean preRendered) {
-        throw new UnsupportedOperationException("setPreRendered is not supported by " + getClass().getName());
-    }
+    void setVerbatim(boolean verbatim);
 }

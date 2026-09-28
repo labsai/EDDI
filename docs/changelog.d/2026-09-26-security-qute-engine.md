@@ -6,13 +6,9 @@
 
 EDDI renders Qute templates parsed at runtime from agent configuration. Two things about that path were hardened.
 
-**1. Data is no longer treated as template text.** A template is what an author wrote; what reaches it at render time is data. Three places crossed that line:
+**1. Data is no longer treated as template text.** A template is what an author wrote; what reaches it at render time is data. This layer converged on the implementation that landed on `main` with #832 (`fix/template-injection`): `fromObjectPath` values are stored as resolved in both `PropertySetterTask` and `PrePostUtils.executePropertyInstructions`, and output and quick replies that arrive through context (caller-supplied, or built by a `postResponse`) carry #832's persisted `IData#isVerbatim()` marker, which `OutputTemplateTask` honours and also sets on every entry it renders. This branch originally carried its own per-turn marker (`isPreRendered`); it was dropped in favour of `isVerbatim`, which is a superset (it survives a HITL resume). This PR's own contribution is layer 2 below plus the MCP variable-name sanitizing; its data-path tests (`PropertySetterTaskDataIsNotTemplateTest`, `PostResponseDataIsNotRenderedTwiceTest`, now asserting `isVerbatim`) are kept as additional coverage of #832's fix.
 
-- `PropertySetterTask` rendered a value it read through `fromObjectPath` (typically `memory.current.input`, the user's message) as a template. It is now stored verbatim; only `valueString` and the property name are templates.
-- `PrePostUtils.executePropertyInstructions` did the same for values taken from API, LLM and MCP responses in `postResponse.propertyInstructions`. Same fix.
-- Output and quick replies built by a `postResponse` were rendered once in `PrePostUtils` and a second time by `OutputTemplateTask`. `OutputGenerationTask` now marks items that arrive through context as pre-rendered (`IData#isPreRendered`, a per-turn marker), and `OutputTemplateTask` skips them. Output authored in output configurations is rendered as before.
-
-Generated text that does end up in a template's source is now kept literal: the system prompt a model chooses in `create_sub_agent` is stored inside an unparsed block (`TemplateEscaping.unparsedBlock`), and `McpApiToolBuilder` reduces OpenAPI parameter names to plain identifiers before copying them into `{...}` placeholders (collisions get distinct suffixes; the query key itself keeps the spec's name).
+Generated text that does end up in a template's source is kept literal: the system prompt a model chooses in `create_sub_agent` is stored inside an unparsed block (`TemplateEscaping.unparsedBlock`, also from #832), and `McpApiToolBuilder` reduces OpenAPI parameter names to plain identifiers before copying them into `{...}` placeholders (collisions get distinct suffixes; the query key itself keeps the spec's name).
 
 **2. Runtime templates use EDDI's own, restricted engine.** The Quarkus-injected engine is meant for build-time-validated application templates and exposes more than agent configuration should reach, including the `config:` namespace. `RuntimeTemplateEngineFactory` now builds a separate engine from it through allow-lists:
 
@@ -38,7 +34,6 @@ The audit of shipped configs, `docs/agent-configs`, the docs and the tests found
 
 ### Known limits / next
 
-- The pre-rendered marker is per turn and not persisted; a pause between output generation and templating within one turn would lose it on resume (no shipped workflow orders tasks that way).
 - An OpenAPI `servers[0].url` containing braces still reaches the httpcall URL template; with the restricted engine it can no longer read anything, but it is not escaped.
 - A model-written sub-agent prompt that itself mentions a `${vault:…}` reference renders with visible `{|`/`|}` markers around it (the known double-wrap limit of `LlmTask.escapeConfigReferenceMentions`); nothing is evaluated.
 
