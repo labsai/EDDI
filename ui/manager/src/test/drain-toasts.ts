@@ -25,6 +25,46 @@ async function nextMacrotask() {
   });
 }
 
+/**
+ * Whether a Toaster has been added to the document since the last drain. A
+ * test may render a Toaster and unmount it itself before afterEach runs; the
+ * drain then finds none in the DOM, but the callbacks it scheduled while it
+ * was mounted are still pending. A MutationObserver's records keep the added
+ * node even after it is removed again, and `takeRecords()` hands over those
+ * not yet delivered, so the drain sees every mount of the test.
+ */
+let toasterSeen = false;
+
+function noteToasters(records: MutationRecord[]) {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node instanceof Element && (node.matches(TOASTER) || node.querySelector(TOASTER))) {
+        toasterSeen = true;
+        return;
+      }
+    }
+  }
+}
+
+const toasterWatch = new MutationObserver(noteToasters);
+toasterWatch.observe(document.documentElement, { childList: true, subtree: true });
+
+/**
+ * Let the callbacks of a Toaster that is already gone run out: the insertion
+ * macrotask, a dismissal frame, and the 200 ms removal timer, the longest of
+ * the three. They touch only the unmounted Toaster, so they do nothing, but
+ * they must do it while the environment still exists.
+ */
+async function outlastUnmountedToaster() {
+  await act(async () => {
+    if (vi.isFakeTimers()) {
+      await vi.advanceTimersByTimeAsync(1_000);
+    } else {
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    }
+  });
+}
+
 /** One animation frame: every frame requested before it runs first. */
 async function nextFrame() {
   await act(async () => {
@@ -55,17 +95,32 @@ async function nextFrame() {
  * defined`, which vitest reports as an unhandled error that fails the run with
  * every test green (CI run 36418007466).
  *
- * All of those callbacks come from a MOUNTED Toaster's subscription, so the
- * gate is the Toaster rather than what it currently shows. A toast created and
- * dismissed in the same tick, or one aimed at another Toaster, leaves nothing
- * visible and still has a callback in flight. With a Toaster mounted, the drain
- * flushes a macrotask (insertions), dismisses, flushes a frame (dismissals),
- * and waits until no toast is left in the DOM (removals). With none mounted
- * there is no subscriber, so nothing can be pending. It only clears sonner's
- * module-global store, so one test's toast cannot turn up in the next.
+ * All of those callbacks are scheduled by a Toaster, so the gate is whether a
+ * Toaster was mounted during the test, not what it currently shows. A toast
+ * created and dismissed in the same tick, or one aimed at another Toaster,
+ * leaves nothing visible and still has a callback in flight. Three cases:
+ *
+ * - a Toaster is mounted: flush a macrotask (insertions), dismiss, flush a
+ *   frame (dismissals), and wait until no toast is left in the DOM (removals);
+ * - a Toaster WAS mounted this test and the test unmounted it itself: nothing
+ *   is left to dismiss (its subscription is gone), but the callbacks it
+ *   scheduled before unmounting are not cancelled, so let the longest of them,
+ *   the 200 ms removal, run out;
+ * - no Toaster this test: nothing ever subscribed, so nothing can be pending.
+ *
+ * In every case sonner's module-global store is cleared, so one test's toast
+ * cannot turn up in the next.
  */
 export async function drainToasts() {
-  if (!document.querySelector(TOASTER)) {
+  noteToasters(toasterWatch.takeRecords());
+  const mounted = document.querySelector(TOASTER) !== null;
+  const wasMounted = toasterSeen;
+  toasterSeen = false;
+
+  if (!mounted) {
+    if (wasMounted) {
+      await outlastUnmountedToaster();
+    }
     if (toast.getToasts().length > 0) {
       toast.dismiss();
     }

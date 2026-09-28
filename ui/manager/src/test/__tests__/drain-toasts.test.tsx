@@ -145,6 +145,32 @@ describe("drainToasts", () => {
     expect(toast.getToasts()).toHaveLength(0);
   });
 
+  it("outlasts the callbacks of a Toaster the test unmounted itself", async () => {
+    const { unmount } = render(<Toaster />);
+    // The insertion is queued while the Toaster is mounted; unmounting does not
+    // cancel it, and by the time afterEach runs there is no Toaster to find.
+    toast("toasted, then the Toaster went away");
+    unmount();
+    expect(document.querySelector(TOASTER)).toBeNull();
+
+    await drainToasts();
+
+    expect([...pending]).toEqual([]);
+    expect(toast.getToasts()).toHaveLength(0);
+  });
+
+  it("outlasts a dismissal queued just before the Toaster was unmounted", async () => {
+    const { unmount } = render(<Toaster duration={600_000} />);
+    toast("on screen, then dismissed and unmounted");
+    expect(await screen.findByText("on screen, then dismissed and unmounted")).toBeInTheDocument();
+    toast.dismiss();
+    unmount();
+
+    await drainToasts();
+
+    expect([...pending]).toEqual([]);
+  });
+
   it("clears sonner's store when no Toaster is mounted", async () => {
     toast("no toaster to show me");
 

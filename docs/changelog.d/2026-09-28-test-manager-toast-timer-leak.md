@@ -33,8 +33,14 @@ ended with **1** still pending at teardown.
   - **With a Toaster mounted, it drains all three paths:** one macrotask (queued insertions),
     `toast.dismiss()` inside `act`, one animation frame (dismissals), then a wait until no toast
     is left in the DOM (the 200 ms removals).
-  - **With none mounted,** nothing subscribes, so nothing can be pending; it only clears sonner's
-    module-global store.
+  - **A Toaster was mounted earlier in the test and the test unmounted it itself:** its
+    subscription is gone, so there is nothing to dismiss. The callbacks it scheduled before
+    unmounting are still pending, so the drain waits out the longest of them, the 200 ms removal.
+    A `MutationObserver` records every Toaster the test mounts, and `takeRecords()` includes
+    mounts that were removed again before the drain ran. CodeRabbit caught this case on the PR.
+  - **No Toaster this test:** nothing ever subscribed, so nothing can be pending. The drain only
+    clears sonner's module-global store, which it does in every case, so one test's toast cannot
+    turn up in the next.
   - **Under fake timers** it advances the clock, because RTL's `waitFor` would otherwise poll a
     frozen clock.
   - **Why the Toaster, not the visible toast:** CodeRabbit found three cases on the PR where a
@@ -50,6 +56,8 @@ ended with **1** still pending at teardown.
   scheduled from sonner's code (by stack), and asserts none is still pending after
   `drainToasts()`. It covers:
   - each of the three cases above;
+  - two where the test unmounts its own Toaster first (a pending insertion, and a dismissal
+    queued just before the unmount);
   - a toast already on screen;
   - a store with no Toaster mounted;
   - that the Toaster selector still matches, so a sonner upgrade that changes the container fails
