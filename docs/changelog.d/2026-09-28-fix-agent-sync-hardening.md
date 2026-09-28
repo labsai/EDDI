@@ -62,7 +62,8 @@ settings and a workflow's steps are guarded the same way, each compared with its
 synced version rewritten onto today's references so that Manager edits cascading
 new versions do not count; when they are left alone, the rest of the sync still
 lands. A dictionary only a parser document names is created or updated only when
-that document will be written, and a batch entry names the agent it was written
+that document will be written (for a parser the target's step names but no longer
+has, only once the store confirms it is gone), and a batch entry names the agent it was written
 into.
 
 **Smaller ones.** A sync without `targetAgentId` now finds the agent an earlier

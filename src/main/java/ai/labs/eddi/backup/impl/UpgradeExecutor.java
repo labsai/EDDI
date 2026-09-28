@@ -651,8 +651,12 @@ public class UpgradeExecutor {
                 && (selectedSourceIds == null || !selectedSourceIds.contains(owner.sourceId()))) {
             return "the parser document was changed on this instance and is left alone";
         }
-        if (ownerDiff.action() == DiffAction.CREATE && !targetRefs.containsKey(ownerKey) && adoptionBlocker != null) {
-            return adoptionBlocker;
+        if (ownerDiff.action() == DiffAction.CREATE) {
+            // A CREATE is written either by repairing the reference the target's step
+            // already has, or by the adoption that adds the step — whichever applies
+            // has to be able to proceed.
+            WorkflowExtensions.ExtensionRef targetRef = targetRefs.get(ownerKey);
+            return targetRef != null ? danglingRepairBlocker(owner, targetRef) : adoptionBlocker;
         }
         return null;
     }
@@ -712,11 +716,27 @@ public class UpgradeExecutor {
      */
     private URI healDanglingReference(ExtensionSourceData source, WorkflowExtensions.ExtensionRef targetRef,
                                       Outcome outcome) {
+        String blocker = danglingRepairBlocker(source, targetRef);
+        if (blocker != null) {
+            outcome.failed(source.sourceId(), source.type(), source.name(), blocker);
+            return null;
+        }
+        // The one case this is for — recreate it.
+        return createExtension(source, "the target's workflow names " + targetRef.extensionUri()
+                + ", which it does not have", outcome);
+    }
+
+    /**
+     * Why a resource the target's step names cannot be recreated from the source,
+     * or null when the store confirms it is gone and it can. Answered without
+     * writing anything, so a dictionary that only this resource would name can be
+     * decided on before either is written.
+     */
+    private String danglingRepairBlocker(ExtensionSourceData source, WorkflowExtensions.ExtensionRef targetRef) {
         String couldNotCompare = "the target's " + source.type() + " at " + targetRef.extensionUri()
                 + " could not be read, so it was neither compared nor replaced — sync again";
         if (!targetRef.fileExtension().equals(source.type())) {
-            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
-            return null;
+            return couldNotCompare;
         }
         ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
         IResourceStore<Object> store = getStore(ops.storeClass());
@@ -724,17 +744,13 @@ public class UpgradeExecutor {
             store.read(targetRef.resourceId().getId(), targetRef.resourceId().getVersion());
             // It is there after all: the preview's read of it failed for some other
             // reason, and nothing it said about this resource can be trusted.
-            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
-            return null;
+            return couldNotCompare;
         } catch (IResourceStore.ResourceNotFoundException missing) {
-            // The one case this is for — recreate it.
-            return createExtension(source, "the target's workflow names " + targetRef.extensionUri()
-                    + ", which it does not have", outcome);
+            return null;
         } catch (Exception e) {
             LOGGER.debugf("Could not confirm whether %s is missing: %s",
                     LogSanitizer.sanitize(String.valueOf(targetRef.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
-            outcome.failed(source.sourceId(), source.type(), source.name(), couldNotCompare);
-            return null;
+            return couldNotCompare;
         }
     }
 

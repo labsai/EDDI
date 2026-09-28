@@ -313,6 +313,46 @@ class UpgradeExecutorParserTest {
                         + result.failures().getFirst().reason());
     }
 
+    /**
+     * The target's step names a parser the preview could not read, so the parser is
+     * a CREATE written by repairing that reference. Only a confirmed-missing parser
+     * is repaired; when the read merely failed, the parser is left alone — and so
+     * must be the dictionary only it would name.
+     */
+    @Test
+    @DisplayName("a dictionary only a dangling parser names is not created when that parser cannot be repaired")
+    void dictionaryIsNotCreatedForAParserThatCannotBeRepaired() throws Exception {
+        givenPreviewWithDanglingParserAndDocumentDictionary();
+        when(parserDocuments.read(PARSER_T, 2)).thenThrow(new IResourceStore.ResourceStoreException("unavailable"));
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(sourceWithDocumentDictionary(),
+                AGENT_ID, null, null));
+
+        verify(parserDocuments, never()).create(any());
+        verify(dictionaryDocuments, never()).create(any());
+        assertEquals(0, result.created());
+        assertTrue(result.failures().stream()
+                .anyMatch(f -> f.resourceType().equals("regulardictionary") && f.reason().contains("could not be read")),
+                "the dictionary must be reported with the parser's reason, got: " + result.failures());
+    }
+
+    @Test
+    @DisplayName("a dictionary only a dangling parser names is created along with the repaired parser")
+    void dictionaryIsCreatedForARepairedParser() throws Exception {
+        givenPreviewWithDanglingParserAndDocumentDictionary();
+        when(parserDocuments.read(PARSER_T, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        when(parserDocuments.create(any())).thenReturn(resourceId("0123456789abcdef01234567", 1));
+        when(dictionaryDocuments.create(any())).thenReturn(resourceId("abcdef0123456789abcdef01", 1));
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(sourceWithDocumentDictionary(),
+                AGENT_ID, null, null));
+
+        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
+        verify(dictionaryDocuments).create(any());
+        verify(parserDocuments).create(any());
+        assertEquals(2, result.created());
+    }
+
     // ==================== Fixtures ====================
 
     private static String parserNaming(String dictionaryUri) {
@@ -344,6 +384,20 @@ class UpgradeExecutorParserTest {
                         parserNaming(DICT + DICT_S + "?version=1"), null, -1),
                 new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", DiffAction.SKIP, DICT_T, 2, "type",
                         "{\"words\":[]}", "{\"words\":[]}", -1));
+        when(structuralMatcher.buildPreview(any(), eq(AGENT_ID), eq(true)))
+                .thenReturn(new ImportPreview("src-agent", "Agent", AGENT_ID, "Agent", diffs));
+    }
+
+    private void givenPreviewWithDanglingParserAndDocumentDictionary() throws Exception {
+        var diffs = List.of(
+                new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 3,
+                        "targetAgent", null, null, -1),
+                new ResourceDiff("src-wf", "workflow", "Workflow", DiffAction.SKIP, WF_ID, 2, "position",
+                        null, null, 0),
+                new ResourceDiff("src-parser", "parser", "Parser", DiffAction.CREATE, null, null, null,
+                        parserNaming(DICT + DICT_S + "?version=1"), null, -1),
+                new ResourceDiff(DICT_S, "regulardictionary", "Dictionary", DiffAction.CREATE, null, null, null,
+                        "{\"words\":[]}", null, -1));
         when(structuralMatcher.buildPreview(any(), eq(AGENT_ID), eq(true)))
                 .thenReturn(new ImportPreview("src-agent", "Agent", AGENT_ID, "Agent", diffs));
     }
