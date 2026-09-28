@@ -207,4 +207,4 @@ the first two fail with the reap removed).
   now a plain `lock(); try { … } finally { unlock(); }` on its own branch.
 - **Store URLs in logs** (CodeRabbit): `sanitize()` neutralises control characters but kept
   `user:password@` and query-string tokens. The Chroma and Elasticsearch builders now log
-  `endpointForLog(url)` — scheme, host, port and path only.
+  `endpointForLog(url)` — scheme, host and port only; a path can carry a token too.

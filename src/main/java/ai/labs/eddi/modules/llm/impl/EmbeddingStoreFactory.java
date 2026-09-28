@@ -446,10 +446,11 @@ public class EmbeddingStoreFactory {
     }
 
     /**
-     * A store URL as it may be logged: scheme, host, port and path. A URL in
-     * {@code storeParameters} can carry credentials — {@code user:password@} or a
-     * token in the query — and {@link ai.labs.eddi.utils.LogSanitizer#sanitize}
-     * only neutralises control characters, so it left both in the log line.
+     * A store URL as it may be logged: scheme, host and port. A URL in
+     * {@code storeParameters} can carry credentials — {@code user:password@}, a
+     * token in the query, or one in the path — and
+     * {@link ai.labs.eddi.utils.LogSanitizer#sanitize} only neutralises control
+     * characters, so it left both in the log line.
      */
     static String endpointForLog(String url) {
         if (url == null) {
@@ -461,8 +462,7 @@ public class EmbeddingStoreFactory {
                 return "<unparseable URL>";
             }
             String port = parsed.getPort() >= 0 ? ":" + parsed.getPort() : "";
-            String path = parsed.getRawPath() == null ? "" : parsed.getRawPath();
-            return sanitize(parsed.getScheme() + "://" + parsed.getHost() + port + path);
+            return sanitize(parsed.getScheme() + "://" + parsed.getHost() + port);
         } catch (IllegalArgumentException e) {
             return "<unparseable URL>";
         }

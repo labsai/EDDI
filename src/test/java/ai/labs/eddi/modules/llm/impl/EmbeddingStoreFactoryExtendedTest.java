@@ -48,10 +48,12 @@ class EmbeddingStoreFactoryExtendedTest {
     class EndpointForLogTests {
 
         @Test
-        @DisplayName("drops credentials in the user info and in the query")
+        @DisplayName("drops credentials in the user info, the query and the path")
         void dropsCredentials() {
-            assertEquals("http://chroma:8000/api", EmbeddingStoreFactory.endpointForLog(
+            assertEquals("http://chroma:8000", EmbeddingStoreFactory.endpointForLog(
                     "http://admin:s3cret@chroma:8000/api?token=abc#frag"));
+            assertEquals("https://es.example.com:9243", EmbeddingStoreFactory.endpointForLog(
+                    "https://es.example.com:9243/tenant/s3cret-token/"));
         }
 
         @Test
