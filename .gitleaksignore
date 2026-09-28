@@ -123,4 +123,4 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # name matches generic-api-key. Not a credential. A later commit of the same PR
 # replaced it with a low-entropy value under another name; this entry covers the
 # commit that introduced it, which stays in the scan range.
-062e1d4d540cddae5675c64d84eece16e09688c1:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
+8f0cf257a751dbfad5e5795dce125a8eef2d521e:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
