@@ -158,6 +158,19 @@ class LifecycleManagerErrorClassificationTest {
         }
 
         @Test
+        @DisplayName("a wrapper that quotes the raw JSON body gets the message instead")
+        void wrapperQuotingTheBody() {
+            // Observed live on the plain say path: RetryConfiguration's wrapper embeds
+            // the provider's body verbatim.
+            String body = "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+                    + "\"message\":\"`temperature` is deprecated for this model.\"},\"request_id\":\"req_1\"}";
+            var e = new RuntimeException("Chat model execution failed: " + body, new RuntimeException(body));
+
+            assertEquals("Chat model execution failed: `temperature` is deprecated for this model.",
+                    LifecycleManager.describeFailure(e));
+        }
+
+        @Test
         @DisplayName("a JSON body as the only message is unwrapped too")
         void providerJsonAtTheTop() {
             assertEquals("quota exceeded",

@@ -106,15 +106,25 @@ model." — was only in the server log, and the Manager rendered an empty bubble
   cause to the wrapper's message and pulls `message` out of a provider's JSON error body. It
   feeds both the digest (redacted, URLs removed, 200 chars) and `summarizeForAudit`, so the
   streaming `task_failed` event and the audit ledger carry the reason too.
+- **And it survives the response** — non-detailed responses (the default, and what the
+  Manager and the streaming `done` event carry) keep only whitelisted output keys, and
+  `taskErrors` was not one of them. The entry was written and then stripped, so the fix
+  above did nothing on its own, and **strict write's `digest` mode has never reached a
+  default client either**, whatever `docs/memory-policy.md` said. Found by running the
+  change live; the unit tests, which stop at `LifecycleManager`, passed throughout.
+  `MemoryKeys.TASK_ERRORS` is now on the list. A wrapper that quotes the provider's raw
+  JSON body ("Chat model execution failed: {…}") gets the message swapped in as well.
 - **Manager** — both chat paths show `⚠️ <reason>` in place of the empty reply, or a generic
   line when an `ERROR` turn carries none (`chat.turnFailed`, 11 locales).
 - **Chat UI unchanged, on purpose** — it already shows end users a "Something went wrong"
   banner with Try again on an `ERROR` turn, and the provider's wording is for operators.
 
-Files: `LifecycleManager`, `ui/manager` `use-chat.ts` and `lib/api/conversations.ts`,
+Files: `LifecycleManager`, `MemoryKeys`, `ConversationMemoryUtilities`, `ui/manager` `use-chat.ts` and `lib/api/conversations.ts`,
 [`docs/memory-policy.md`](../memory-policy.md#a-failed-turn-always-tells-the-caller-why).
 Tests: `LifecycleManagerTest` (reported without strict write with the unwrapped reason, model
 view untouched, `exclude_all` silent, redaction — the first and last fail with the report
-removed), `LifecycleManagerErrorClassificationTest` (`describeFailure`), Manager
+removed), `LifecycleManagerErrorClassificationTest` (`describeFailure`),
+`ConversationMemoryUtilitiesTaskErrorsTest` (the whitelist), `TaskFailureReportIT` (both
+paths over HTTP), Manager
 `conversations.test.ts`, `use-chat-sse-handling.test.tsx`, `use-chat.test.tsx` (all three
 chat cases fail with the notice removed).

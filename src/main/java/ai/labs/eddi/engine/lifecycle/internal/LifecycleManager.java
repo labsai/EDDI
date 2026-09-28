@@ -44,6 +44,7 @@ import java.net.UnknownHostException;
 import java.net.SocketTimeoutException;
 import java.net.ConnectException;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_ERRORS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CONFIDENCE;
@@ -943,7 +944,7 @@ public class LifecycleManager implements ILifecycleManager {
         errorOutput.put("taskId", task.getId().name());
         errorOutput.put("taskType", task.getType());
         errorOutput.put("text", digestText);
-        step.addConversationOutputList("taskErrors", List.of(errorOutput));
+        step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
         return digestText;
     }
 
@@ -996,6 +997,11 @@ public class LifecycleManager implements ILifecycleManager {
             cause = cause.getCause();
         }
         String specific = innermost == null ? null : providerMessage(innermost);
+        if (innermost != null && !innermost.equals(specific) && outer.contains(innermost)) {
+            // The wrapper already quotes the raw body ("Chat model execution failed:
+            // {json}") — swap the body for the message inside it.
+            return outer.replace(innermost, specific);
+        }
         if (specific == null || outer.contains(specific)) {
             return providerMessage(outer);
         }
