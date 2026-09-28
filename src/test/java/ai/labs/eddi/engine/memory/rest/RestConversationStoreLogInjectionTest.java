@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.utils.LogCaptureSupport;
 import jakarta.enterprise.inject.Instance;
@@ -94,7 +95,7 @@ class RestConversationStoreLogInjectionTest {
 
         store = new RestConversationStore(mock(IDocumentDescriptorStore.class), conversationDescriptorStore,
                 conversationMemoryStore, mock(IConversationService.class), mock(IUserMemoryStore.class),
-                mock(IRuntime.class), guard, 30, 90, attachmentStorageInstance);
+                mock(IRuntime.class), guard, mock(ResourceAccessGuard.class), 30, 90, attachmentStorageInstance);
     }
 
     /** A descriptor the listing picks up and tries to populate. */

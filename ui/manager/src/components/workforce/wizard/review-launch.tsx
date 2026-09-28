@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { GroupSaveProblems } from "@/components/groups/group-save-problems";
+import type { GroupSaveProblem } from "@/lib/group-config";
 import { Check, Clock, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,8 @@ interface ReviewLaunchProps {
   isCreating: boolean;
   creationProgress: CreationProgressItem[];
   onCreateClick: () => void;
+  /** What the backend would refuse about this team — Create waits until it is empty. */
+  saveProblems?: GroupSaveProblem[];
 }
 
 // ─── StatusIcon (internal) ──────────────────────────────────────────────────
@@ -152,6 +156,7 @@ function ReviewLaunch({
   isCreating,
   creationProgress,
   onCreateClick,
+  saveProblems = [],
 }: ReviewLaunchProps) {
   const { t } = useTranslation();
 
@@ -318,12 +323,17 @@ function ReviewLaunch({
         </div>
       </div>
 
-      {/* Create button */}
+      <GroupSaveProblems problems={saveProblems} testId="workforce-wizard-save-problems" />
+
+      {/* Create button. It is never on screen while a create runs: `isCreating`
+          swaps this whole view for the progress view above, and the wizard's
+          `creatingRef` refuses a second click that lands before that re-render. */}
       <Button
         className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
         size="lg"
-        disabled={isCreating}
+        disabled={saveProblems.length > 0}
         onClick={onCreateClick}
+        data-testid="workforce-wizard-create"
       >
         {t("Workforce.wizard.createWorkforce", "Create Workforce")}
       </Button>

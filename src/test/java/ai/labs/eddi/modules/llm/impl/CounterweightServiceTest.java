@@ -30,7 +30,7 @@ class CounterweightServiceTest {
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
         promptSnippetService = mock(PromptSnippetService.class);
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
         service = new CounterweightService(promptSnippetService, meterRegistry);
         service.initMetrics();
     }
@@ -196,7 +196,7 @@ class CounterweightServiceTest {
 
     @Test
     void apply_cautiousLevel_resolvesFromSnippetWhenConfigured() {
-        when(promptSnippetService.getAll()).thenReturn(
+        when(promptSnippetService.getForAgent(any())).thenReturn(
                 Map.of("counterweight-cautious", "## CUSTOM CAUTIOUS FROM SNIPPET\n- Be very careful."));
 
         var config = new CounterweightConfig();
@@ -211,9 +211,27 @@ class CounterweightServiceTest {
     }
 
     @Test
+    void apply_presetSnippetIsResolvedForTheAgent() {
+        // C4c: the preset override must come from a snippet THIS agent may use, not
+        // from any workspace that happens to own a snippet with the preset's name.
+        when(promptSnippetService.getForAgent("agent-a")).thenReturn(Map.of("counterweight-strict", "## TEAM A STRICT"));
+        when(promptSnippetService.getForAgent("agent-b")).thenReturn(Collections.emptyMap());
+
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("strict");
+
+        assertTrue(service.apply("Base prompt", config, null, "agent-a").contains("TEAM A STRICT"));
+        String forB = service.apply("Base prompt", config, null, "agent-b");
+        assertFalse(forB.contains("TEAM A STRICT"));
+        assertTrue(forB.contains("STRICT MODE"), "agent-b falls back to the built-in preset");
+        verify(promptSnippetService, never()).getAll();
+    }
+
+    @Test
     void apply_strictLevel_fallsBackWhenSnippetMissing() {
         // No snippets configured — should use fallback
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var config = new CounterweightConfig();
         config.setEnabled(true);
