@@ -18,15 +18,16 @@ import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useUserProperties, useDeleteProperties } from "@/hooks/use-properties";
-import type { Property } from "@/lib/api/properties";
-
-function getValueDisplay(prop: Property): { type: string; value: string; icon: React.ElementType } {
-  if (prop.valueString != null) return { type: "string", value: String(prop.valueString), icon: Type };
-  if (prop.valueInt != null) return { type: "number", value: String(prop.valueInt), icon: Hash };
-  if (prop.valueFloat != null) return { type: "number", value: String(prop.valueFloat), icon: Hash };
-  if (prop.valueBoolean != null) return { type: "boolean", value: String(prop.valueBoolean), icon: ToggleRight };
-  if (prop.valueList != null) return { type: "array", value: JSON.stringify(prop.valueList), icon: List };
-  if (prop.valueObject != null) return { type: "object", value: JSON.stringify(prop.valueObject), icon: Braces };
+/**
+ * Type and display text for one property. The endpoint returns RAW values (see
+ * `Properties`), so the type is the value's own JavaScript type.
+ */
+function getValueDisplay(value: unknown): { type: string; value: string; icon: React.ElementType } {
+  if (typeof value === "string") return { type: "string", value, icon: Type };
+  if (typeof value === "number" || typeof value === "bigint") return { type: "number", value: String(value), icon: Hash };
+  if (typeof value === "boolean") return { type: "boolean", value: String(value), icon: ToggleRight };
+  if (Array.isArray(value)) return { type: "array", value: JSON.stringify(value), icon: List };
+  if (value != null && typeof value === "object") return { type: "object", value: JSON.stringify(value), icon: Braces };
   return { type: "null", value: "—", icon: Type };
 }
 
@@ -188,7 +189,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
         open={showDeleteAll}
         onOpenChange={setShowDeleteAll}
         title={t("properties.deleteAllTitle", "Delete All Properties")}
-        description={t("properties.deleteAllDesc", "This will permanently delete ALL properties for this user.")}
+        description={t("properties.deleteAllDesc", "This permanently deletes ALL global properties of this user: every global user-memory entry, including those agents saved, not only the rows listed here.")}
         confirmLabel={t("common.delete")}
         variant="destructive"
         onConfirm={() => {

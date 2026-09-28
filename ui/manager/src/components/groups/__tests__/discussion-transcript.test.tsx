@@ -229,6 +229,9 @@ describe("DiscussionTranscript", () => {
       artifactUpdates: [],
       memberCosts: new Map(),
       stances: new Map(),
+      interrupted: false,
+      cancelRequested: false,
+      cancelError: null,
       roundStartIndex: 0,
     };
 
@@ -275,6 +278,9 @@ describe("DiscussionTranscript", () => {
       artifactUpdates: [],
       memberCosts: new Map(),
       stances: new Map(),
+      interrupted: false,
+      cancelRequested: false,
+      cancelError: null,
       roundStartIndex: 0,
     };
 
