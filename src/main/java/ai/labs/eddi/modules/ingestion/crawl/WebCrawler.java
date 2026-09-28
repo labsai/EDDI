@@ -720,14 +720,47 @@ public class WebCrawler {
      * sitemap, lists nothing, and must not stop deletions for a site that has none.
      */
     private static boolean endsWithClosingRoot(byte[] bytes, Charset charset, String root) {
-        String text = new String(bytes, charset).stripTrailing();
-        int open = text.lastIndexOf("</");
-        if (open < 0 || !text.endsWith(">")) {
+        // XML allows comments, processing instructions and whitespace after the root
+        // element, and generators append them ("<!-- generated in 0.2s -->"), so they
+        // are skipped first; a self-closing root (<urlset/>) is complete too. Flagging
+        // either stopped deletions for that site on every run. A trailing comment
+        // that was itself cut off does not end in "-->", so that truncation is caught.
+        String text = new String(bytes, charset);
+        int end = text.length();
+        while (true) {
+            while (end > 0 && Character.isWhitespace(text.charAt(end - 1))) {
+                end--;
+            }
+            if (end >= 3 && text.startsWith("-->", end - 3)) {
+                end = text.lastIndexOf("<!--", end - 3);
+            } else if (end >= 2 && text.startsWith("?>", end - 2)) {
+                end = text.lastIndexOf("<?", end - 2);
+            } else {
+                break;
+            }
+            if (end < 0) {
+                return false;
+            }
+        }
+        if (end == 0 || text.charAt(end - 1) != '>') {
             return false;
         }
-        String closing = text.substring(open + 2, text.length() - 1).strip();
-        int colon = closing.indexOf(':');
-        return (colon >= 0 ? closing.substring(colon + 1) : closing).equalsIgnoreCase(root);
+        int open = text.lastIndexOf('<', end - 1);
+        if (open < 0) {
+            return false;
+        }
+        String tag = text.substring(open + 1, end - 1).strip();
+        String name;
+        if (tag.startsWith("/")) {
+            name = tag.substring(1).strip();
+        } else if (tag.endsWith("/")) {
+            // A self-closing root: its name is the tag's first token.
+            name = tag.substring(0, tag.length() - 1).strip().split("\\s+", 2)[0];
+        } else {
+            return false;
+        }
+        int colon = name.indexOf(':');
+        return (colon >= 0 ? name.substring(colon + 1) : name).equalsIgnoreCase(root);
     }
 
     private static void collectText(Document xml, String element, String parent, Set<String> into) {

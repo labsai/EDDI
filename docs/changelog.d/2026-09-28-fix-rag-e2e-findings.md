@@ -242,3 +242,10 @@ Tests: `unreadableSitemapIsNotCoverage`, `sitemapIndexBudget` (both fail with th
   answer that path with a 200 "not found" page keep reconciling. `truncatedSitemapIsNotCoverage`,
   `truncatedTextSitemapIsNotCoverage` (fails if the truncation flag is ignored),
   `cutShortIsIncomplete` (fails without the closing-tag check), `htmlPageIsNotASitemap`.
+- **…without flagging valid XML as cut short** (CodeRabbit, sixth pass). XML allows comments,
+  processing instructions and whitespace after the root, generators append them, and `<urlset/>`
+  is a valid empty sitemap — the first version of the closing-tag check rejected all three, which
+  would have stopped deletions for such sites on every run. Trailing misc is now skipped first and
+  a self-closing root accepted; a trailing comment that was itself cut off still reads as
+  truncation. `trailingMiscIsComplete`, `selfClosingRoot` (both fail against the strict check),
+  `truncatedInsideTrailingComment`.

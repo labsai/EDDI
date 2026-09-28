@@ -418,7 +418,8 @@ limit. `maxPages` still decides how many pages are ingested.
 
 A run that hit one of these bounds — or found a sitemap it could not read (a 5xx, 429, 401 or 403,
 a transport error, a body that would not parse) or that arrived cut short (past the 1 MB fetch cap,
-or an XML sitemap that does not end with its closing root tag) — **concludes nothing about deletions**, like a run
+or an XML sitemap that does not end with its closing root tag — trailing comments, processing
+instructions and a self-closing root are fine) — **concludes nothing about deletions**, like a run
 that stopped at a limit: the unread part may list pages the crawl never queued. A sitemap answering
 404 is not such a case; that is a definite "no sitemap here".
 
