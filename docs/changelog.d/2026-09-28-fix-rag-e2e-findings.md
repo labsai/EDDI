@@ -155,3 +155,21 @@ chat cases fail with the notice removed).
   "processing" for ever under `npm run dev`. Production builds do not double-mount, which is why
   it went unnoticed; the e2e spec is what surfaced it.
 - The ingestion warning uses the `text-warning` token rather than raw amber classes.
+
+### A dead ingestion run no longer reads as running, or blocks purge and file delete
+
+Only claiming a new run reaped an abandoned one. A crawl killed by a restart therefore stayed
+`RUNNING` in the run history until somebody started another — observed live an hour past its
+25-minute threshold — and, because `activeRun` is also the guard purge and file delete answer 409
+on, it refused both for as long. On a source with no cron, indefinitely.
+
+`RagSourceIngestionService.listRuns` and `activeRun` now reap first: the same
+`reapStaleRuns`, the same per-source threshold (`IngestionPipeline.staleBefore`, now shared by
+every caller so a read and a claim cannot disagree about which runs are dead), the same fencing.
+Best effort on a read — a reap that fails is logged and the read proceeds. What it deliberately
+does not change: before the threshold a crashed run still reads as `RUNNING`, because runs record
+no owner or heartbeat and a dead run cannot be told from a live one on another instance.
+Tests: `RagSourceIngestionServiceTest.AbandonedRuns` (history shows it failed, no longer active,
+a live run untouched, the threshold follows the budget, a failing reap does not break the read —
+the first two fail with the reap removed).
+

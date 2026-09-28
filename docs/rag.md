@@ -448,6 +448,13 @@ refused while a run is in flight, because it would delete the very row that guar
 whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
 of one configured for hours.
 
+A run counts as dead once it has been in flight for its `timeBudgetMinutes` plus 15 minutes. It is
+reaped at that point by whatever touches the source next — a run starting, **reading the run history,
+or a purge or file delete** — and shows as `FAILED` with "Run abandoned". Only a run starting used to
+reap, so on a source with no cron a dead run read as `RUNNING`, and refused purges and file deletes
+with a 409, until someone started another. Before that threshold a crashed run is indistinguishable
+from a live one on another instance, and still shows as `RUNNING`.
+
 **Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
 new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name

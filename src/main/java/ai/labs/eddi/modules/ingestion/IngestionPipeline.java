@@ -164,7 +164,7 @@ public class IngestionPipeline {
         // A run whose process died is still marked RUNNING and would block this
         // source indefinitely; nothing else calls this.
         String sourceKey = stateKey(ragConfigId, source);
-        stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
+        stateStore.reapStaleRuns(sourceKey, staleBefore(source));
         return stateStore.startRun(sourceKey);
     }
 
@@ -216,7 +216,7 @@ public class IngestionPipeline {
             if (reservedRunId != null) {
                 runId = reservedRunId;
             } else {
-                stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
+                stateStore.reapStaleRuns(sourceKey, staleBefore(source));
                 var claimed = stateStore.startRun(sourceKey);
                 if (claimed.isEmpty()) {
                     // Not an error: an operator clicking "run now" while a scheduled run
@@ -686,6 +686,16 @@ public class IngestionPipeline {
      * How long a run may be in flight before it is treated as abandoned: its own
      * time budget plus a margin, so a slow but healthy run is never reaped.
      */
+    /**
+     * The start time before which a still-RUNNING run of this source counts as
+     * abandoned — for {@link IIngestionStateStore#reapStaleRuns}. Every caller
+     * reaps against this one cut-off, so a read that reaps cannot disagree with a
+     * claim about which runs are dead.
+     */
+    public static Instant staleBefore(IngestionSource source) {
+        return Instant.now().minus(staleRunThreshold(source));
+    }
+
     private static Duration staleRunThreshold(IngestionSource source) {
         return Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()).plus(STALE_RUN_MARGIN);
     }
