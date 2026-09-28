@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.configs.properties.mongo;
 
+import java.util.Set;
+import com.mongodb.MongoClientSettings;
+import org.bson.BsonDocument;
+import org.mockito.ArgumentCaptor;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -378,5 +382,37 @@ class MongoUserMemoryStoreTest {
                 .append("accessCount", 0)
                 .append("createdAt", timestamp.toString())
                 .append("updatedAt", timestamp.toString());
+    }
+
+    // ==================== insertIfAbsent ====================
+
+    @Test
+    @DisplayName("insertIfAbsent — one upserting updateOne whose update is $setOnInsert only, so an existing value is never replaced")
+    void insertIfAbsentNeverReplaces() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(null); // an entry was already there
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        boolean inserted = store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "OLD-v5", "legacy", Visibility.global, null,
+                List.of(), null, false, 0, null, null));
+
+        assertFalse(inserted);
+        var update = ArgumentCaptor.forClass(Bson.class);
+        var options = ArgumentCaptor.forClass(UpdateOptions.class);
+        verify(collection).updateOne(any(Bson.class), update.capture(), options.capture());
+        var json = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), json.keySet(), json.toJson());
+        assertTrue(options.getValue().isUpsert());
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — reports an insert when the upsert created the document")
+    void insertIfAbsentInserts() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(new BsonObjectId(TEST_OID));
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        assertTrue(store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
+                false, 0, null, null)));
     }
 }

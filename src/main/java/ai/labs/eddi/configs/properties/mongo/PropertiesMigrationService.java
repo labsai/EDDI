@@ -113,21 +113,6 @@ public class PropertiesMigrationService {
                 if ("_id".equals(key) || "userId".equals(key))
                     continue;
 
-                // A user who already has this key in usermemories wrote it AFTER the v5
-                // data was frozen — or a previous (partial) run of this migration did.
-                // Either way the existing entry wins: upserting the legacy value over
-                // it replaced a newer answer with a stale one, on every retry.
-                try {
-                    if (userMemoryStore.getByKey(userId, key).isPresent()) {
-                        keptNewerEntries++;
-                        continue;
-                    }
-                } catch (Exception e) {
-                    failedCount++;
-                    LOGGER.warnf("[MIGRATION] Could not check key='%s' for userId='%s': %s", key, userId, e.getMessage());
-                    continue;
-                }
-
                 Object value = doc.get(key);
                 UserMemoryEntry entry = new UserMemoryEntry(null, // id — generated on insert
                         userId, key, value, "legacy", // category — easy to identify migrated entries
@@ -141,9 +126,19 @@ public class PropertiesMigrationService {
                         null // updatedAt — set by upsert
                 );
 
+                // A user who already has a GLOBAL entry for this key wrote it after the
+                // v5 data was frozen — or a previous (partial) run of this migration did.
+                // Either way the existing entry wins: upserting the legacy value over it
+                // replaced a newer answer with a stale one, on every retry. Only the
+                // global identity counts — a self or group entry with the same key is a
+                // different memory and does not stand in for the shared one. The insert
+                // is atomic, so a value another node writes meanwhile cannot be lost.
                 try {
-                    userMemoryStore.upsert(entry);
-                    entryCount++;
+                    if (userMemoryStore.insertIfAbsent(entry)) {
+                        entryCount++;
+                    } else {
+                        keptNewerEntries++;
+                    }
                 } catch (Exception e) {
                     failedCount++;
                     LOGGER.warnf("[MIGRATION] Failed to migrate key='%s' for userId='%s': %s", key, userId, e.getMessage());

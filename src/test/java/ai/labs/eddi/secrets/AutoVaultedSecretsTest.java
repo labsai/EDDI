@@ -160,6 +160,25 @@ class AutoVaultedSecretsTest {
     }
 
     @Test
+    @DisplayName("deleteForUser finishes the sweep past a failing slot and tenant, then reports the first failure")
+    void deleteForUserContinuesPastFailures() throws Exception {
+        String failing = AutoVaultedSecrets.newSlotName(AGENT, "user-1", "apiKey");
+        String next = AutoVaultedSecrets.newSlotName(AGENT, "user-1", "token");
+        String inAcme = AutoVaultedSecrets.newSlotName(AGENT, "user-1", "other");
+        when(provider.listKeys("default")).thenReturn(List.of(metadata("default", failing), metadata("default", next)));
+        when(provider.listKeys("broken")).thenThrow(new ISecretProvider.SecretProviderException("tenant down"));
+        when(provider.listKeys("acme")).thenReturn(List.of(metadata("acme", inAcme)));
+        doThrow(new ISecretProvider.SecretProviderException("vault down")).when(provider).delete(new SecretReference("default", failing));
+
+        var thrown = assertThrows(ISecretProvider.SecretProviderException.class,
+                () -> secrets.deleteForUser("user-1", List.of("broken", "acme")));
+
+        assertEquals("vault down", thrown.getMessage());
+        verify(provider).delete(new SecretReference("default", next));
+        verify(provider).delete(new SecretReference("acme", inAcme));
+    }
+
+    @Test
     @DisplayName("deleteForUser is a no-op when the vault is disabled")
     void deleteForUserWithoutVault() throws Exception {
         when(provider.isAvailable()).thenReturn(false);

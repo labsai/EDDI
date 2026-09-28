@@ -7,7 +7,6 @@ package ai.labs.eddi.configs.properties.mongo;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import org.mockito.ArgumentCaptor;
-import java.util.Optional;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
@@ -28,6 +27,8 @@ import java.util.List;
 
 import com.mongodb.client.ListCollectionNamesIterable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 class PropertiesMigrationServiceTest {
@@ -146,7 +147,7 @@ class PropertiesMigrationServiceTest {
             service.onStartup(startupEvent);
 
             // Then — upsert called for each non-system key
-            verify(userMemoryStore, times(2)).upsert(any(UserMemoryEntry.class));
+            verify(userMemoryStore, times(2)).insertIfAbsent(any(UserMemoryEntry.class));
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
         }
 
@@ -182,7 +183,7 @@ class PropertiesMigrationServiceTest {
             service.onStartup(startupEvent);
 
             // Then — upsert NOT called since there's no userId
-            verify(userMemoryStore, never()).upsert(any());
+            verify(userMemoryStore, never()).insertIfAbsent(any());
         }
 
         /**
@@ -223,13 +224,13 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(doc);
 
             // upsert throws
-            doThrow(new RuntimeException("DB error")).when(userMemoryStore).upsert(any());
+            doThrow(new RuntimeException("DB error")).when(userMemoryStore).insertIfAbsent(any());
 
             // When — should not throw
             service.onStartup(startupEvent);
 
             // Then — the loop still runs to the end, but the source is NOT retired
-            verify(userMemoryStore).upsert(any(UserMemoryEntry.class));
+            verify(userMemoryStore).insertIfAbsent(any(UserMemoryEntry.class));
             verify(legacyCollection, never()).renameCollection(any(MongoNamespace.class));
         }
 
@@ -267,7 +268,7 @@ class PropertiesMigrationServiceTest {
 
             service.onStartup(startupEvent);
 
-            verify(userMemoryStore, never()).upsert(any());
+            verify(userMemoryStore, never()).insertIfAbsent(any());
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
         }
 
@@ -297,16 +298,18 @@ class PropertiesMigrationServiceTest {
             when(cursor.hasNext()).thenReturn(true, false);
             when(cursor.next()).thenReturn(doc);
 
-            var newer = new UserMemoryEntry("id-1", "user-1", "lang", "NEW-v6", "preference", Visibility.global, "agent-a", List.of(), null, false,
-                    0, null, null);
-            when(userMemoryStore.getByKey("user-1", "lang")).thenReturn(Optional.of(newer));
-            when(userMemoryStore.getByKey("user-1", "color")).thenReturn(Optional.empty());
+            // "lang" already has a global entry: the store declines the insert
+            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "lang".equals(e.key())))).thenReturn(false);
+            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "color".equals(e.key())))).thenReturn(true);
 
             service.onStartup(startupEvent);
 
+            // Never an updating upsert: an existing value must not be replaced, and the
+            // insert-if-absent is what makes that atomic.
+            verify(userMemoryStore, never()).upsert(any());
             var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
-            verify(userMemoryStore).upsert(written.capture());
-            assertEquals("color", written.getValue().key(), "only the key the user does not have yet is migrated");
+            verify(userMemoryStore, times(2)).insertIfAbsent(written.capture());
+            assertTrue(written.getAllValues().stream().allMatch(e -> e.visibility() == Visibility.global));
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
         }
 

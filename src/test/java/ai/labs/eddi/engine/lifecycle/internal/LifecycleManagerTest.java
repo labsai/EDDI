@@ -2121,4 +2121,13 @@ class LifecycleManagerTest {
             verify(task).execute(any(), any());
         }
     }
+
+    @Test
+    @DisplayName("a JSON error body contributes its message, not a string error category beside it")
+    void jsonErrorBody_prefersMessageOverErrorString() {
+        assertEquals("HTTP 400: Unsupported model",
+                LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"error\":\"invalid_request_error\",\"message\":\"Unsupported model\"}"));
+        assertEquals("HTTP 400: quota exceeded", LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"error\":\"quota exceeded\"}"));
+        assertEquals("HTTP 400: (details omitted)", LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"code\":17}"));
+    }
 }

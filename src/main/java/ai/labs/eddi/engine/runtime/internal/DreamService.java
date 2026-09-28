@@ -684,7 +684,13 @@ public class DreamService {
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
                             earliestCreated, Instant.now()));
-                    if (id != null && reusedOriginals.containsKey(id)) {
+                    if (id == null) {
+                        // The write cannot be confirmed, so it may have landed on an original
+                        // with this key: restore that one too, then roll everything back.
+                        reusedOriginals.values().stream().filter(o -> entry.key().equals(o.key()))
+                                .forEach(o -> overwrittenOriginalIds.add(o.id()));
+                        throw new IllegalStateException("user memory upsert returned no id for key '" + entry.key() + "'");
+                    } else if (reusedOriginals.containsKey(id)) {
                         overwrittenOriginalIds.add(id);
                     } else {
                         createdIds.add(id);

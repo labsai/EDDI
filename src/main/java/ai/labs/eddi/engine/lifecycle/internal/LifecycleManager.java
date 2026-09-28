@@ -128,8 +128,8 @@ public class LifecycleManager implements ILifecycleManager {
     private static final int MAX_ERROR_DIGEST_LENGTH = 200;
     private static final Pattern FQCN_EXCEPTION = Pattern
             .compile("(?:[a-z][a-z0-9_]*\\.)+[A-Z][A-Za-z0-9_$]*(?:Exception|Error)\\s*:?\\s*");
-    private static final Pattern JSON_MESSAGE = Pattern
-            .compile("\"(?:message|error)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+    private static final Pattern JSON_MESSAGE = Pattern.compile("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+    private static final Pattern JSON_ERROR_STRING = Pattern.compile("\"error\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
 
     /**
      * Replaces an embedded JSON error body with the text of its {@code message} (or
@@ -144,8 +144,12 @@ public class LifecycleManager implements ILifecycleManager {
             return msg;
         }
         String body = msg.substring(start, end + 1);
-        var matcher = JSON_MESSAGE.matcher(body);
-        String replacement = matcher.find() ? matcher.group(1) : "(details omitted)";
+        // message first: {"error":"invalid_request_error","message":"Unsupported
+        // model"}
+        // carries the actionable text in message, the category in error.
+        var message = JSON_MESSAGE.matcher(body);
+        var error = JSON_ERROR_STRING.matcher(body);
+        String replacement = message.find() ? message.group(1) : error.find() ? error.group(1) : "(details omitted)";
         return (msg.substring(0, start) + replacement + msg.substring(end + 1)).trim();
     }
 
@@ -341,10 +345,10 @@ public class LifecycleManager implements ILifecycleManager {
                     : List.of();
 
             Map<String, IData<?>> dataIdentitiesBefore = Map.of();
-            Set<String> outputKeysBefore = Set.of();
+            Map<String, Object> outputBefore = Map.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                 dataIdentitiesBefore = cs.snapshotDataIdentities();
-                outputKeysBefore = cs.snapshotOutputKeys();
+                outputBefore = snapshotOutput(cs.getConversationOutput());
             }
 
             // === OpenTelemetry: create span per task ===
@@ -447,7 +451,7 @@ public class LifecycleManager implements ILifecycleManager {
                     // === Strict Write Discipline: handle task failure ===
                     String onFailureMode = resolveOnFailureMode(memoryPolicy);
                     handleTaskFailure(cs, task, e, dataIdentitiesBefore,
-                            outputKeysBefore, actionsBefore, onFailureMode);
+                            outputBefore, actionsBefore, onFailureMode);
                 } else if (strictWriteConfigured && currentStep instanceof ConversationStep cs) {
                     // keep_all: the failed task's data stays, but the failure is still
                     // announced — on top of whatever actions the task itself added.
@@ -884,7 +888,10 @@ public class LifecycleManager implements ILifecycleManager {
      * <ol>
      * <li>Marks all IData entries added or overwritten by the failed task as
      * uncommitted (using identity comparison against pre-execution snapshot)</li>
-     * <li>Rolls back ConversationOutput entries added by the failed task</li>
+     * <li>Rolls back the ConversationOutput to its pre-task state: entries the
+     * failed task added are removed, entries it changed get their previous value
+     * back — otherwise, under {@code continueOnFailure}, the failed task's output
+     * would become part of the reply</li>
      * <li>Injects an error digest (if mode is "digest") under a separate
      * "taskErrors" key, and a {@code task_failed_<taskId>} action rebuilt from the
      * pre-failure action state</li>
@@ -892,7 +899,7 @@ public class LifecycleManager implements ILifecycleManager {
      */
     private void handleTaskFailure(ConversationStep step, ILifecycleTask task, Exception exception,
                                    Map<String, IData<?>> dataIdentitiesBefore,
-                                   Set<String> outputKeysBefore, List<String> actionsBefore,
+                                   Map<String, Object> outputBefore, List<String> actionsBefore,
                                    String onFailureMode) {
 
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
@@ -909,20 +916,49 @@ public class LifecycleManager implements ILifecycleManager {
             }
         }
 
-        // 2. Rollback ConversationOutput entries added by the failed task
-        var output = step.getConversationOutput();
-        Set<String> currentKeys = new LinkedHashSet<>(output.keySet());
-        for (String key : currentKeys) {
-            if (!outputKeysBefore.contains(key)) {
-                output.remove(key);
-            }
-        }
+        // 2. Roll the ConversationOutput back to its pre-task state
+        restoreOutput(step.getConversationOutput(), outputBefore);
 
         // 3. Inject error digest and task_failed action
         if ("digest".equals(onFailureMode)) {
             injectErrorDigest(step, task, exception);
         }
         injectFailureAction(step, task, actionsBefore);
+    }
+
+    /**
+     * The ConversationOutput values, for {@link #restoreOutput}. Lists and maps are
+     * copied one level deep: {@code addConversationOutputList} and
+     * {@code addConversationOutputMap} append to the existing container in place,
+     * so a snapshot holding the same instance would change along with it.
+     */
+    static Map<String, Object> snapshotOutput(Map<String, Object> output) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        output.forEach((key, value) -> snapshot.put(key, shallowCopy(value)));
+        return snapshot;
+    }
+
+    /**
+     * Puts the ConversationOutput back to a {@link #snapshotOutput} state: keys
+     * added since are removed, keys changed since get their snapshot value back.
+     */
+    static void restoreOutput(Map<String, Object> output, Map<String, Object> snapshot) {
+        output.keySet().removeIf(key -> !snapshot.containsKey(key));
+        snapshot.forEach((key, value) -> {
+            if (!Objects.equals(output.get(key), value)) {
+                output.put(key, shallowCopy(value));
+            }
+        });
+    }
+
+    private static Object shallowCopy(Object value) {
+        if (value instanceof List<?> list) {
+            return new ArrayList<>(list);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>(map);
+        }
+        return value;
     }
 
     /**

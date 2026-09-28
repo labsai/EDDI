@@ -256,11 +256,6 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     /**
-     * The property changes recorded on {@code step}: key → {@code {before, after}}
-     * as {@link Property} objects ({@code null} = absent). Empty when the step
-     * recorded none.
-     */
-    /**
      * Every property value this conversation can still bring back: the current
      * ones, plus both sides of every recorded change in the step history and the
      * redo cache — undo and redo restore those. Whatever such a value points to (an
@@ -288,6 +283,11 @@ public class ConversationMemory implements IConversationMemory {
         return versions;
     }
 
+    /**
+     * The property changes recorded on {@code step}: key → {@code {before, after}}
+     * as {@link Property} objects ({@code null} = absent). Empty when the step
+     * recorded none.
+     */
     public static Map<String, Property[]> propertyChanges(IConversationStep step) {
         Map<String, Property[]> changes = new LinkedHashMap<>();
         if (step == null) {

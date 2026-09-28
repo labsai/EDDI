@@ -6,6 +6,8 @@ package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.secrets.model.SecretReference;
+import java.util.List;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -211,8 +213,9 @@ public class AutoVaultedSecrets {
      *
      * @return the number of slots deleted
      * @throws ISecretProvider.SecretProviderException
-     *             when a tenant cannot be listed — the caller reports the erasure
-     *             step as failed rather than claiming it complete
+     *             the first failure to list a tenant or delete a slot, after the
+     *             rest of the sweep has run — the caller reports the erasure step
+     *             as failed rather than claiming it complete
      */
     public int deleteForUser(String userId, Collection<String> tenants) throws ISecretProvider.SecretProviderException {
         if (!secretProvider.isAvailable()) {
@@ -223,9 +226,19 @@ public class AutoVaultedSecrets {
         if (tenants != null) {
             tenants.stream().filter(t -> t != null && !t.isBlank()).forEach(allTenants::add);
         }
+        // One failing tenant or slot does not end the sweep: every erasure attempt
+        // deletes as much as it can, and the first failure is reported at the end.
         int deleted = 0;
+        ISecretProvider.SecretProviderException firstFailure = null;
         for (String tenant : allTenants) {
-            for (var metadata : secretProvider.listKeys(tenant)) {
+            List<SecretMetadata> keys;
+            try {
+                keys = secretProvider.listKeys(tenant);
+            } catch (ISecretProvider.SecretProviderException e) {
+                firstFailure = firstFailure == null ? e : firstFailure;
+                continue;
+            }
+            for (var metadata : keys) {
                 if (!belongsToUser(metadata.keyName(), userId)) {
                     continue;
                 }
@@ -234,8 +247,13 @@ public class AutoVaultedSecrets {
                     deleted++;
                 } catch (ISecretProvider.SecretNotFoundException e) {
                     // Deleted concurrently — the outcome we wanted.
+                } catch (ISecretProvider.SecretProviderException e) {
+                    firstFailure = firstFailure == null ? e : firstFailure;
                 }
             }
+        }
+        if (firstFailure != null) {
+            throw firstFailure;
         }
         return deleted;
     }

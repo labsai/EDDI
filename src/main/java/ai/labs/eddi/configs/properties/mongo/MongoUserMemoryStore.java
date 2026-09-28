@@ -423,6 +423,27 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
      * {@code self} — every other agent silently lost it. A model saving "a private
      * note" under a key it had once shared was enough to trigger it.
      */
+    /**
+     * Atomic: every field is {@code $setOnInsert}, so an existing entry at the
+     * identity is left exactly as it is — a writer that lands between a lookup and
+     * this call can no longer be overwritten.
+     */
+    @Override
+    public boolean insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
+        RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
+        String now = Instant.now().toString();
+        Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
+                Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),
+                Updates.setOnInsert(FIELD_VISIBILITY, entry.visibility().name()),
+                Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
+                Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
+                Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
+        return memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId() != null;
+    }
+
     static Bson buildUpsertFilter(UserMemoryEntry entry) {
         if (entry.visibility() == Visibility.global) {
             // Global: single shared entry per (userId, key)

@@ -15,6 +15,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,7 +42,7 @@ class DreamServiceTest {
     private AgentConfiguration.DreamConfig dreamConfig;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         store = mock(IUserMemoryStore.class);
         agentStore = mock(IAgentStore.class);
         summarizationService = mock(SummarizationService.class);
@@ -54,6 +55,9 @@ class DreamServiceTest {
         dreamConfig.setPruneStaleAfterDays(30);
         dreamConfig.setDetectContradictions(true);
         dreamConfig.setSummarizeInteractions(false);
+        // A store returns the id of the entry it wrote; a null one is an unconfirmed
+        // write that DreamService rolls back.
+        when(store.upsert(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
     }
 
     // === Existing tests (updated for new constructor) ===
@@ -762,6 +766,25 @@ class DreamServiceTest {
 
         assertEquals(0, result.entriesSummarized());
         verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * An upsert that returns no id is an unconfirmed write: it must roll the group
+     * back rather than be counted as a created entry and let the originals go.
+     */
+    @Test
+    void summarize_upsertReturnsNoId_rollsBackAndKeepsOriginals() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"coffee\",\"value\":\"black, no sugar, oat milk, large\"}]"));
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn(null);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
         verify(store, never()).deleteEntry(anyString());
     }
 

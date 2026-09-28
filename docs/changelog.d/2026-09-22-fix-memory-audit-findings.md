@@ -30,6 +30,8 @@ observed there, and carries a regression test.
   An answer that only repeats some originals verbatim merged nothing, so it may drop an original
   only if that original duplicated a kept value; otherwise the group is skipped. Seen live on
   qwen2.5:3b, which returned three of four coffee preferences unchanged and lost "no sugar".
+  An upsert that returns no id is treated as a failed write — the group rolls back, restoring any
+  original with that key — instead of being counted as a created entry.
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
 - **`scope: "secret"` values of different users shared one vault slot.** The slot was
   `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to
@@ -93,8 +95,11 @@ observed there, and carries a regression test.
   legacy value over whatever the user already had — reproduced live: a v6 `NEW-v6-value` became
   `OLD-v5-value` — and a single legacy document without a `userId` counted as a failure, so the
   source was never retired and the clobbering repeated at each boot. A key the user already has in
-  `usermemories` now keeps its value (which also keeps retries idempotent), and an unowned document
-  is skipped instead of failed — it stays readable in `properties_migrated_v6`.
+  `usermemories` as a **global** entry now keeps its value (which also keeps retries idempotent) —
+  a self or group entry with the same key is a different memory and no longer suppresses the
+  global one. The write is a new `IUserMemoryStore.insertIfAbsent`, atomic in MongoDB
+  (`$setOnInsert` only), so a value another node writes meanwhile cannot be replaced either. An
+  unowned document is skipped instead of failed — it stays readable in `properties_migrated_v6`.
   [`PropertiesMigrationService.java`](../../src/main/java/ai/labs/eddi/configs/properties/mongo/PropertiesMigrationService.java)
 - **`rememberFact`: corrections refused at the cap, budget spent on re-saves.** With
   `onCapReached: "reject"`, updating an existing fact was refused although an update adds no row
@@ -133,8 +138,11 @@ observed there, and carries a regression test.
   `strictWriteDiscipline.continueOnFailure` keeps running the remaining tasks after the failure is
   recorded, so an output keyed on `task_failed_<taskId>` — or an LLM task after a failed HTTP call —
   answers in the same turn; the default still stops the pipeline as before. The digest now strips
-  exception class names and reduces a JSON error body to its `message`, and `keep_all` emits the
-  action on top of the actions the task itself added.
+  exception class names and reduces a JSON error body to its `message` (a string `error` only when
+  there is no `message`), and `keep_all` emits the action on top of the actions the task itself
+  added. The rollback now restores the conversation output to its pre-task state — a key the failed
+  task changed gets its previous value back, where only added keys used to be removed — so under
+  `continueOnFailure` the failed task's output cannot reach the reply.
   [`LifecycleManager.java`](../../src/main/java/ai/labs/eddi/engine/lifecycle/internal/LifecycleManager.java)
 - **Undo did not undo properties.** It popped the step and nothing else, so a slot filled by the
   undone turn stayed filled — in the conversation and in long-term memory (reproduced live: after
