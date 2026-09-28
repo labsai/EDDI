@@ -1919,9 +1919,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private int maxTurnsPerUpdate = 20;
 
         /**
-         * Character ceiling on the new turns sent in a single update (the previous
-         * summary is bounded separately by {@code maxSummaryTokens}). The batch is
-         * shortened turn by turn to fit; a single turn larger than this is cut.
+         * Character ceiling on the complete content sent in a single update: the
+         * previous summary, its section headings and the new turns. The previous
+         * summary's share is reserved first and the batch of new turns is shortened
+         * turn by turn to fit the rest; a single turn larger than the rest is cut. The
+         * previous summary itself is never cut — when it leaves the new turns less than
+         * a quarter of this budget, the update is skipped with a WARN and the
+         * unsummarized turns keep reaching the model verbatim.
          */
         private int maxCharsPerUpdate = 60_000;
 

@@ -101,7 +101,15 @@ key. No other key is added, since it would trip the unrecognised-parameter WARN.
 backlog is caught up in bounded batches, each batch is shortened turn by turn to fit, and a single
 turn larger than the budget is cut (the cut notice counts toward the budget). The stored `summary_through_step` records what the summary
 actually covers. A window with no renderable text is stepped over without an LLM call, so a bounded
-batch cannot stall on it.
+batch cannot stall on it — judged on the new turns alone, so a previous summary no longer makes a
+blank window look non-empty and cost a call that re-summarizes an unchanged summary.
+
+`maxCharsPerUpdate` bounds the **complete** request: the previous summary and its section headings
+are reserved first, and the new turns get the rest. The previous summary is never cut to make room —
+it is the only record of the turns it covers, and the reply replaces it. When it leaves the new turns
+less than a quarter of the budget, the update is skipped with a WARN naming `maxCharsPerUpdate` and
+`maxSummaryTokens`, with no model call; the boundary stays put, so the turns past it keep reaching the
+model verbatim — the same fallback as a failed summarizer call.
 
 ### M-L4 — `convertToObject` failed the turn on `[` or on malformed JSON
 
@@ -122,7 +130,12 @@ unsupported" falls back.
 (`FAILURE_BACKOFF_MS`), so an outage does not put a driver timeout on every turn; an explicit
 `invalidateCache()` retries at once. A reload is single-flight (`ReentrantLock`): a caller that
 finds one in flight gets the last good map instead of starting its own store read, so an outage
-cannot tie up a burst of request threads before the first failure sets the back-off. Unchecked store exceptions are covered too. Conflict note: `fix/template-injection` (C4c) also touches this class.
+cannot tie up a burst of request threads before the first failure sets the back-off. Unchecked store exceptions are covered too.
+The fallback is fail-stale, and that includes an explicit invalidation: if a snippet is edited or
+withdrawn and the reload right after it fails, prompts keep the previous set — withdrawn content
+included — until the first successful read (retried every 10 seconds). The old behaviour was
+fail-empty, which dropped every snippet, safety instructions included. Which of the two a
+withdrawal should get is open for a maintainer decision (raised in CodeRabbit's security review). Conflict note: `fix/template-injection` (C4c) also touches this class.
 This change is confined to `getAll` / `loadAllSnippets`.
 
 ### Tool cache: HTTP / MCP / A2A tools were cached by default (NEW), and the key lacked agent and source (M-T3)

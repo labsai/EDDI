@@ -377,4 +377,100 @@ class ConversationSummarizerTest {
         assertEquals(3, ConversationSummarizer.readSummaryThroughStep(memory));
         assertNull(ConversationSummarizer.readSummary(memory));
     }
+
+    private static void presetSummary(IConversationMemory memory, String summary, int throughStep) {
+        var props = memory.getConversationProperties();
+        props.put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
+                new Property(ConversationSummarizer.PROP_RUNNING_SUMMARY, summary, Scope.conversation));
+        props.put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
+                new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, throughStep, Scope.conversation));
+    }
+
+    /**
+     * M-L3 follow-up: {@code maxCharsPerUpdate} bounds the whole request. The
+     * previous summary and its headings used to be added after the new turns had
+     * already been fitted to the full budget, so an incremental update could exceed
+     * it by the size of the summary.
+     */
+    @Test
+    void updateIfNeeded_withPreviousSummary_wholeRequestFitsMaxChars() {
+        String previous = "p".repeat(400);
+        var memory = createMockMemory(30);
+        presetSummary(memory, previous, 2);
+        var config = createConfig(2);
+        config.setMaxCharsPerUpdate(1000);
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        assertTrue(content.getValue().length() <= 1000, "request of " + content.getValue().length() + " chars");
+        assertTrue(content.getValue().contains(previous), "the previous summary is sent whole, never cut");
+        assertTrue(ConversationSummarizer.readSummaryThroughStep(memory) > 2, "the update still makes progress");
+
+        // The cut of a single oversized turn is sized to what the summary leaves.
+        var hugeTurn = createMockMemory(30);
+        presetSummary(hugeTurn, previous, 2);
+        hugeTurn.getConversationOutputs().get(2).put("input", "y".repeat(5000));
+        summarizer.updateIfNeeded(hugeTurn, config, null);
+
+        var inputs = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService, times(2)).summarize(inputs.capture(), anyString(), anyString(), anyString(), any());
+        String cut = inputs.getAllValues().get(1);
+        assertTrue(cut.length() <= 1000, "request with a cut turn was " + cut.length() + " chars");
+        assertTrue(cut.contains(previous));
+        assertTrue(cut.endsWith("input budget ...]"));
+        assertEquals(3, ConversationSummarizer.readSummaryThroughStep(hugeTurn));
+    }
+
+    /**
+     * A previous summary that leaves the new turns less than a quarter of the
+     * budget is neither cut nor sent over budget: the update is skipped, with no
+     * model call, and the boundary stays put so those turns keep reaching the model
+     * verbatim.
+     */
+    @Test
+    void updateIfNeeded_previousSummaryFillsTheBudget_skipsWithoutCallingTheLlm() {
+        String previous = "p".repeat(900);
+        var memory = createMockMemory(30);
+        presetSummary(memory, previous, 2);
+        var config = createConfig(2);
+        config.setMaxCharsPerUpdate(1000);
+        // An empty reply is the failure mode that made the retry loop: stub it so a
+        // call, if one is made, is caught by the interaction check below.
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verifyNoInteractions(summarizationService);
+        assertEquals(2, ConversationSummarizer.readSummaryThroughStep(memory));
+        assertEquals(previous, ConversationSummarizer.readSummary(memory));
+    }
+
+    /**
+     * A blank window must be stepped over even when a running summary exists.
+     * Combined with the summary the content was never blank, so the guard did not
+     * fire: the model was paid to re-summarize an unchanged summary, and an empty
+     * reply left the boundary in place to retry the same blank window next turn.
+     */
+    @Test
+    void updateIfNeeded_blankWindowWithPreviousSummary_advancesWithoutCallingTheLlm() {
+        var memory = createMockMemory(10);
+        presetSummary(memory, "Previous summary", 2);
+        for (var output : memory.getConversationOutputs().subList(2, 5)) {
+            output.remove("input");
+            output.remove("output");
+        }
+        var config = createConfig(5);
+        // An empty reply is the failure mode that made the retry loop: stub it so a
+        // call, if one is made, is caught by the interaction check below.
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verifyNoInteractions(summarizationService);
+        assertEquals(5, ConversationSummarizer.readSummaryThroughStep(memory));
+        assertEquals("Previous summary", ConversationSummarizer.readSummary(memory));
+    }
 }
