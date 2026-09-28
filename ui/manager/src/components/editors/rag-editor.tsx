@@ -383,8 +383,12 @@ function IngestionPanel({
   const [replaceSameName, setReplaceSameName] = useState(false);
   const mountedRef = useRef(true);
 
-  // Cleanup: mark unmounted so polling stops updating state
+  // Cleanup: mark unmounted so polling stops updating state. Set on mount as well,
+  // not only initialised: StrictMode mounts, unmounts and mounts again, and a ref
+  // that only the cleanup writes stays false from then on — every poll returned
+  // at once and an ingestion sat at "processing" for ever in development.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -618,7 +622,7 @@ function IngestionPanel({
                 {ing.status}
               </span>
               {ing.warning && (
-                <span className="basis-full text-[10px] text-amber-600 dark:text-amber-400" role="status">
+                <span className="basis-full text-[10px] text-warning" role="status">
                   {ing.warning}
                 </span>
               )}

@@ -140,3 +140,18 @@ chat cases fail with the notice removed).
   installed MongoDB on 27017, DevServices could not bind and every `@QuarkusTest` IT failed
   at startup; `-Dquarkus.mongodb.devservices.port=27018` now moves both DevServices and the
   profile's connection string, rather than pointing the tests at the real local database.
+
+### Manager e2e, and document ingestion stuck at "processing" in development
+
+- `ui/manager/e2e/rag-ingestion.spec.ts` (MSW tier) — the Sitemaps field, a dropped file with
+  and without "replace" (the mock answers `replace=true` with a warning, so the test proves the
+  flag was sent), and a failed chat turn on the plain and the streaming path. Each case fails
+  with its fix reverted. The seams live in `src/test/mocks/handlers.ts`
+  (`TASK_FAILURE_TRIGGER`, a new `/agents/:id/stream` mock), because `page.route` cannot see
+  requests the MSW service worker answers.
+- **Fixed on the way:** the knowledge-base ingestion panel's `mountedRef` was set `false` by its
+  effect cleanup and never back to `true`. React StrictMode mounts, unmounts and remounts in
+  development, so every status poll returned immediately and every direct ingestion showed
+  "processing" for ever under `npm run dev`. Production builds do not double-mount, which is why
+  it went unnoticed; the e2e spec is what surfaced it.
+- The ingestion warning uses the `text-warning` token rather than raw amber classes.
