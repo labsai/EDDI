@@ -124,16 +124,24 @@ public class ConversationMemory implements IConversationMemory {
         return result;
     }
 
+    /**
+     * Starts a new TURN. A new turn branches the history: whatever was undone is no
+     * longer "next". Keeping it let a redo after undo → new message graft a step
+     * from the abandoned timeline — and, with property changes recorded per step,
+     * restore property values that timeline had set.
+     * <p>
+     * The clear lives here and NOT in {@link #startNextStep(ConversationOutput)}:
+     * that overload also rebuilds the step stack when a stored conversation is
+     * loaded ({@code ConversationMemoryUtilities.convertConversationMemorySnapshot}
+     * restores the redo cache first), so clearing there wiped the redo history on
+     * every load and every redo through the API was refused.
+     */
     public IConversationStep startNextStep() {
+        redoCache.clear();
         return startNextStep(null);
     }
 
     IConversationStep startNextStep(ConversationOutput conversationOutput) {
-        // A new turn branches the history: whatever was undone is no longer "next".
-        // Keeping it let a redo after undo → new message graft a step from the
-        // abandoned timeline — and, with property changes recorded per step, restore
-        // property values that timeline had set.
-        redoCache.clear();
         ((ConversationStep) currentStep).conversationStepNumber = previousSteps.size();
         previousSteps.push(currentStep);
         if (conversationOutput == null) {

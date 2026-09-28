@@ -104,6 +104,28 @@ class ConversationMemoryUndoPropertiesTest {
         assertEquals("3", value("v"));
     }
 
+    /**
+     * Live-reproduced: undo and redo are separate requests, so the memory is stored
+     * and reloaded in between. Loading rebuilds the step stack through
+     * {@code startNextStep(ConversationOutput)} after restoring the redo cache, and
+     * a redo-cache clear placed there wiped it on every load — every redo through
+     * the API answered 409.
+     */
+    @Test
+    @DisplayName("redo survives the store/load between the undo request and the redo request")
+    void redoSurvivesReload() {
+        turn(() -> memory.getConversationProperties().put("agentName", new Property("agentName", "Alpha", Scope.conversation)));
+        turn(() -> memory.getConversationProperties().put("agentName", new Property("agentName", "Beta", Scope.conversation)));
+        memory.undoLastStep();
+
+        var reloaded = (ConversationMemory) ConversationMemoryUtilities
+                .convertConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        assertTrue(reloaded.isRedoAvailable(), "loading must not discard the redo history");
+        reloaded.redoLastStep();
+        assertEquals("Beta", reloaded.getConversationProperties().get("agentName").getValueString());
+    }
+
     @Test
     @DisplayName("the recorded changes survive the snapshot round trip the store performs between requests")
     void survivesSnapshotRoundTrip() {
