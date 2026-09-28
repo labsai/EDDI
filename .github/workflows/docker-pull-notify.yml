@@ -2,18 +2,20 @@ name: Project Metrics Tracker
 
 on:
   schedule:
-    # Offset to :05 to avoid overlapping with daily (07:00) and weekly (07:00)
-    - cron: '5,20,35,50 * * * *' # every 15 min — collect metrics + push to analytics
-    - cron: '0 7 * * *'           # daily — 7am UTC (9am CEST), digest (only if activity)
-    - cron: '0 7 * * 1'           # weekly — Monday 7am UTC (9am CEST), Slack digest
+    # Every 15 min: collect metrics, push to analytics, and send whichever
+    # Slack digest is due. The digests deliberately have no cron of their own —
+    # GitHub delays and drops scheduled runs, so a digest tied to one 07:00
+    # event was lost whenever that event was. See "Plan digests".
+    - cron: '5,20,35,50 * * * *'
   workflow_dispatch:
     inputs:
       force_digest:
-        description: 'Send weekly digest now'
+        description: 'Send the weekly digest now (week ending the most recent Monday)'
         type: boolean
         default: false
 
-# Prevent overlapping runs from racing on the shared cache
+# Serialise runs: they share the metrics cache, push to the `metrics` branch,
+# and read the digest markers there — two runs at once could both send a digest.
 concurrency:
   group: project-metrics
   cancel-in-progress: false
@@ -25,7 +27,7 @@ jobs:
   track:
     runs-on: ubuntu-latest
     permissions:
-      # write: the daily run commits the metrics history to the `metrics` branch.
+      # write: runs commit the metrics history and digest markers to the `metrics` branch.
       # `main` cannot be used — it requires a PR + review and enforces admins,
       # so a CI push there is impossible without weakening branch protection.
       contents: write
@@ -47,7 +49,7 @@ jobs:
       # baselines live: the repo's Actions cache sits at its 10 GB cap and
       # evicts this entry routinely, and a miss used to reseed the week/day
       # baselines to "now" — so the next digest reported +0 across the board.
-      # See "Load digest baseline" below.
+      # See "Plan digests" below.
       - name: Load previous metrics
         id: prev
         run: |
@@ -88,10 +90,16 @@ jobs:
           # digits-only guard is the one "Persist metrics history" already gets
           # right: jq prints the literal `null` for a missing field, which is
           # non-empty, so an emptiness check alone would let it through.
+          #
+          # ok=false marks a carried value as not fresh. "Persist metrics
+          # history" then leaves the day's row to a later run: on a cache miss
+          # the carried value is 0, and a 0 row would become a digest baseline.
+          OK=true
           PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
           case "${PULLS:-}" in
             ''|*[!0-9]*)
               echo "::warning::Docker Hub returned no usable pull_count - carrying the previous value forward"
+              OK=false
               PULLS="${PREV_PULLS:-0}"
               ;;
           esac
@@ -99,19 +107,31 @@ jobs:
             ''|*[!0-9]*) PULLS=0 ;;
           esac
           echo "pulls=$PULLS" >> "$GITHUB_OUTPUT"
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
           echo "Docker pulls: $PULLS"
 
       - name: Fetch GitHub stats
         id: github
         env:
           GH_TOKEN: ${{ github.token }}
+          PREV_STARS: ${{ steps.prev.outputs.stars }}
+          PREV_FORKS: ${{ steps.prev.outputs.forks }}
         run: |
+          set -uo pipefail
+          # Same shape as the Docker Hub step. Unguarded, a failed call left
+          # STARS empty, so "Compute deltas" evaluated `$(( - 380 ))` and the
+          # analytics payloads carried `"github_stars": ,`.
+          OK=true
           REPO_DATA=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/labsai/EDDI)
-          STARS=$(echo "$REPO_DATA" | jq '.stargazers_count')
-          FORKS=$(echo "$REPO_DATA" | jq '.forks_count')
+            https://api.github.com/repos/labsai/EDDI) || REPO_DATA=""
+          STARS=$(printf '%s' "$REPO_DATA" | jq -r '.stargazers_count // empty' 2>/dev/null)
+          FORKS=$(printf '%s' "$REPO_DATA" | jq -r '.forks_count // empty' 2>/dev/null)
+          case "${STARS:-x}" in *[!0-9]*) OK=false; STARS="${PREV_STARS:-0}" ;; esac
+          case "${FORKS:-x}" in *[!0-9]*) OK=false; FORKS="${PREV_FORKS:-0}" ;; esac
+          [ "$OK" = true ] || echo "::warning::GitHub repo API returned no usable counts - carrying the previous values forward"
           echo "stars=$STARS" >> "$GITHUB_OUTPUT"
           echo "forks=$FORKS" >> "$GITHUB_OUTPUT"
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
           echo "Stars: $STARS, Forks: $FORKS"
 
       - name: Fetch GitHub traffic (views + clones)
@@ -143,24 +163,6 @@ jobs:
           echo "clones=$CLONES" >> "$GITHUB_OUTPUT"
           echo "Views: $VIEWS (uniques: $UNIQUES), Clones: $CLONES"
 
-      # ── Detect trigger type ──────────────────────────────────
-      - name: Detect schedule type
-        id: schedule
-        run: |
-          SCHEDULE="${{ github.event.schedule }}"
-          FORCE="${{ github.event.inputs.force_digest }}"
-
-          # Determine which schedule triggered this run
-          if [ "$SCHEDULE" = "0 7 * * *" ]; then
-            TYPE="daily"
-          elif [ "$SCHEDULE" = "0 7 * * 1" ] || [ "$FORCE" = "true" ]; then
-            TYPE="weekly"
-          else
-            TYPE="collect"
-          fi
-          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
-          echo "Schedule: '$SCHEDULE' → type=$TYPE"
-
       # ── Compute deltas ──────────────────────────────────────
       - name: Compute deltas
         id: delta
@@ -188,64 +190,6 @@ jobs:
           else
             echo "milestone=0" >> "$GITHUB_OUTPUT"
           fi
-
-      # ── Load digest baseline ─────────────────────────────────
-      # The baseline comes from the durable `metrics` branch, one row per UTC
-      # day (see "Persist metrics history"): the weekly digest compares against
-      # the row from 7 days ago, the daily one against yesterday's.
-      #
-      # It used to be carried in the Actions cache as week_*/day_* fields, but
-      # that cache is evicted routinely, and every miss reseeded the baseline
-      # to the current values. On 2026-09-28 a cold-start run at 14:55 did
-      # exactly that, the delayed Monday run followed at 15:03, found a
-      # non-zero baseline eight minutes old, and posted "(0)" for every metric.
-      # No zero-baseline heuristic can catch that; only a durable source can.
-      #
-      # The rows are first-run-of-the-day snapshots and GitHub drops scheduled
-      # runs under load, so a day can be missing: take the latest row at or
-      # before the target date, within a two-day tolerance. Outside it, skip
-      # the digest — a missing message is visible, a wrong one is not.
-      - name: Load digest baseline
-        id: baseline
-        if: steps.schedule.outputs.type != 'collect'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TYPE: ${{ steps.schedule.outputs.type }}
-        run: |
-          set -uo pipefail
-          if [ "$TYPE" = "weekly" ]; then DAYS=7; else DAYS=1; fi
-          TARGET=$(date -u -d "-${DAYS} days" +%F)
-          OLDEST=$(date -u -d "-$(( DAYS + 2 )) days" +%F)
-
-          # A failed fetch leaves CSV empty, which yields no row and a skip.
-          CSV=$(gh api -H "Accept: application/vnd.github.raw+json" \
-            "repos/${GITHUB_REPOSITORY}/contents/data/metrics.csv?ref=metrics") || CSV=""
-          # ISO dates compare correctly as strings; rows are appended in date
-          # order, so the last match is the latest row in the window.
-          ROW=$(printf '%s\n' "$CSV" \
-            | awk -F, -v t="$TARGET" -v o="$OLDEST" 'NR > 1 && $1 <= t && $1 >= o { r = $0 } END { print r }')
-
-          IFS=, read -r DATE PULLS STARS FORKS VIEWS _uniques CLONES <<< "$ROW"
-          for value in "$PULLS" "$STARS" "$FORKS" "$VIEWS" "$CLONES"; do
-            case "$value" in
-              ''|*[!0-9]*)
-                echo "::warning::No usable ${TYPE} baseline in metrics:data/metrics.csv between ${OLDEST} and ${TARGET} (row: '${ROW}') — skipping digest"
-                echo "valid=false" >> "$GITHUB_OUTPUT"
-                exit 0
-                ;;
-            esac
-          done
-
-          {
-            echo "valid=true"
-            echo "date=$DATE"
-            echo "pulls=$PULLS"
-            echo "stars=$STARS"
-            echo "forks=$FORKS"
-            echo "views=$VIEWS"
-            echo "clones=$CLONES"
-          } >> "$GITHUB_OUTPUT"
-          echo "${TYPE} baseline: ${ROW}"
 
       # ── Push to analytics (always, if data changed) ─────────
       - name: Send to Google Analytics 4
@@ -325,149 +269,6 @@ jobs:
               ]
             }"
 
-      # ── Weekly digest (Monday or manual) ────────────────────
-      - name: Weekly digest
-        if: >-
-          steps.schedule.outputs.type == 'weekly'
-          && steps.baseline.outputs.valid == 'true'
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK" ]; then
-            echo "No SLACK_WEBHOOK_URL configured, skipping"
-            exit 0
-          fi
-
-          PULLS=${{ steps.docker.outputs.pulls }}
-          STARS=${{ steps.github.outputs.stars }}
-          FORKS=${{ steps.github.outputs.forks }}
-          VIEWS=${{ steps.traffic.outputs.views }}
-          UNIQUES=${{ steps.traffic.outputs.uniques }}
-          CLONES=${{ steps.traffic.outputs.clones }}
-          BASE_DATE="${{ steps.baseline.outputs.date }}"
-
-          WEEK_PULL_DIFF=$(( PULLS - ${{ steps.baseline.outputs.pulls }} ))
-          WEEK_STAR_DIFF=$(( STARS - ${{ steps.baseline.outputs.stars }} ))
-          WEEK_FORK_DIFF=$(( FORKS - ${{ steps.baseline.outputs.forks }} ))
-          WEEK_VIEW_DIFF=$(( VIEWS - ${{ steps.baseline.outputs.views }} ))
-          WEEK_CLONE_DIFF=$(( CLONES - ${{ steps.baseline.outputs.clones }} ))
-
-          PULLS_FMT=$(printf "%'d" "$PULLS")
-
-          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
-          pull_sign=""; [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
-          star_sign=""; [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
-          fork_sign=""; [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
-
-          # Views/clones: suppress the delta against a 0 baseline — the traffic
-          # step writes 0 when the API is unavailable, so it is not a real value
-          view_delta=""; if [ "${{ steps.baseline.outputs.views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
-            vs=""; [ "$WEEK_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=", ${vs}${WEEK_VIEW_DIFF}"
-          fi
-          clone_delta=""; if [ "${{ steps.baseline.outputs.clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
-            cs=""; [ "$WEEK_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${WEEK_CLONE_DIFF})"
-          fi
-
-          curl -sf -X POST "$SLACK_WEBHOOK" \
-            -H 'Content-type: application/json' \
-            -d "{
-              \"blocks\": [
-                {
-                  \"type\": \"header\",
-                  \"text\": { \"type\": \"plain_text\", \"text\": \"📊  EDDI Weekly Digest\", \"emoji\": true }
-                },
-                {
-                  \"type\": \"section\",
-                  \"fields\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS_FMT} (${pull_sign}${WEEK_PULL_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${star_sign}${WEEK_STAR_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${fork_sign}${WEEK_FORK_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique${view_delta})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }
-                  ]
-                },
-                {
-                  \"type\": \"context\",
-                  \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"Changes since ${BASE_DATE} · <https://hub.docker.com/r/labsai/eddi|Docker Hub> · <https://github.com/labsai/EDDI|GitHub> · <https://eddi.labs.ai|Website>\" }
-                  ]
-                }
-              ]
-            }"
-
-      # ── Daily digest (only if activity) ──────────────────────
-      - name: Daily digest
-        if: >-
-          steps.schedule.outputs.type == 'daily'
-          && steps.baseline.outputs.valid == 'true'
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK" ]; then
-            echo "No SLACK_WEBHOOK_URL configured, skipping"
-            exit 0
-          fi
-
-          PULLS=${{ steps.docker.outputs.pulls }}
-          STARS=${{ steps.github.outputs.stars }}
-          FORKS=${{ steps.github.outputs.forks }}
-          VIEWS=${{ steps.traffic.outputs.views }}
-          CLONES=${{ steps.traffic.outputs.clones }}
-
-          DAY_PULL_DIFF=$(( PULLS - ${{ steps.baseline.outputs.pulls }} ))
-          DAY_STAR_DIFF=$(( STARS - ${{ steps.baseline.outputs.stars }} ))
-          DAY_FORK_DIFF=$(( FORKS - ${{ steps.baseline.outputs.forks }} ))
-          DAY_VIEW_DIFF=$(( VIEWS - ${{ steps.baseline.outputs.views }} ))
-          DAY_CLONE_DIFF=$(( CLONES - ${{ steps.baseline.outputs.clones }} ))
-
-          # Only send if something actually changed today
-          if [ "$DAY_PULL_DIFF" -eq 0 ] && [ "$DAY_STAR_DIFF" -eq 0 ] && [ "$DAY_FORK_DIFF" -eq 0 ]; then
-            echo "No daily activity — skipping digest"
-            exit 0
-          fi
-
-          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
-          pull_sign=""; [ "$DAY_PULL_DIFF" -gt 0 ] && pull_sign="+"
-          star_sign=""; [ "$DAY_STAR_DIFF" -gt 0 ] && star_sign="+"
-          fork_sign=""; [ "$DAY_FORK_DIFF" -gt 0 ] && fork_sign="+"
-
-          # Views/clones: suppress the delta against a 0 baseline — the traffic
-          # step writes 0 when the API is unavailable, so it is not a real value
-          view_delta=""; if [ "${{ steps.baseline.outputs.views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
-            vs=""; [ "$DAY_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=" (${vs}${DAY_VIEW_DIFF})"
-          fi
-          clone_delta=""; if [ "${{ steps.baseline.outputs.clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
-            cs=""; [ "$DAY_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${DAY_CLONE_DIFF})"
-          fi
-
-          PULLS_FMT=$(printf "%'d" "$PULLS")
-
-          curl -sf -X POST "$SLACK_WEBHOOK" \
-            -H 'Content-type: application/json' \
-            -d "{
-              \"blocks\": [
-                {
-                  \"type\": \"header\",
-                  \"text\": { \"type\": \"plain_text\", \"text\": \"📈  EDDI Daily Update\", \"emoji\": true }
-                },
-                {
-                  \"type\": \"section\",
-                  \"text\": {
-                    \"type\": \"mrkdwn\",
-                    \"text\": \"🐳 *Pulls:* ${PULLS_FMT} (${pull_sign}${DAY_PULL_DIFF})  ·  ⭐ *Stars:* ${STARS} (${star_sign}${DAY_STAR_DIFF})  ·  🍴 *Forks:* ${FORKS} (${fork_sign}${DAY_FORK_DIFF})\"
-                  }
-                },
-                {
-                  \"type\": \"context\",
-                  \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views (14d): ${VIEWS}${view_delta} · 📥 Clones (14d): ${CLONES}${clone_delta} · <https://github.com/labsai/EDDI|GitHub>\" }
-                  ]
-                }
-              ]
-            }"
-
       # ── Save updated metrics ────────────────────────────────
       - name: Build metrics snapshot
         run: |
@@ -478,7 +279,12 @@ jobs:
           # Current milestone marker
           CURRENT_MS=$(( CUR_PULLS / 10000 * 10000 ))
 
-          jq -n             --argjson docker_pulls "$CUR_PULLS"             --argjson stars "$CUR_STARS"             --argjson forks "$CUR_FORKS"             --argjson last_milestone "$CURRENT_MS"             '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
+          jq -n \
+            --argjson docker_pulls "$CUR_PULLS" \
+            --argjson stars "$CUR_STARS" \
+            --argjson forks "$CUR_FORKS" \
+            --argjson last_milestone "$CURRENT_MS" \
+            '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
               last_milestone: $last_milestone}' > metrics.json
 
           echo "Saved metrics:"
@@ -506,14 +312,19 @@ jobs:
       # scheduled runs under load (observed: ~48 min median spacing against a
       # 15 min cron, and one 9.6 h gap), and a dropped 07:00 run would lose
       # that day permanently — the values cannot be backfilled. Instead the
-      # first run of each UTC day writes the row; every later run that day
-      # sees it and exits. That also makes a failed push self-healing, since
-      # the next run simply retries.
+      # first run of each UTC day with fresh values writes the row; every later
+      # run that day sees it and leaves it alone. That also makes a failed push
+      # self-healing, since the next run simply retries.
+      #
+      # The checkout it leaves in hist/ is what the digest steps below read,
+      # so it is kept even when no row is written or the push fails.
       - name: Persist metrics history
+        id: history
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: metrics
+          FRESH: ${{ steps.docker.outputs.ok == 'true' && steps.github.outputs.ok == 'true' }}
           PULLS: ${{ steps.docker.outputs.pulls }}
           STARS: ${{ steps.github.outputs.stars }}
           FORKS: ${{ steps.github.outputs.forks }}
@@ -522,22 +333,6 @@ jobs:
           CLONES: ${{ steps.traffic.outputs.clones }}
         run: |
           set -euo pipefail
-
-          # Never commit a malformed row: a gap is visible, a bad value is not.
-          # Must test for digits, not just non-emptiness — the upstream steps
-          # read these with `jq '.pull_count'` etc., and jq prints the literal
-          # `null` when a field is missing from an otherwise-200 response.
-          # `null` is non-empty, so an emptiness check would let it through and
-          # the roster arithmetic below would then abort on it.
-          for name in PULLS STARS FORKS VIEWS UNIQUES CLONES; do
-            value="${!name:-}"
-            case "$value" in
-              ''|*[!0-9]*)
-                echo "::warning::Metric ${name} is not a number ('${value}') — skipping persist"
-                exit 0
-                ;;
-            esac
-          done
 
           rm -rf hist && mkdir hist && cd hist
           git init -q
@@ -550,12 +345,30 @@ jobs:
           # --depth=1 keeps the fetch O(1) as the series grows; the remote
           # still retains full history because the pushed commit's ancestors
           # are already there.
-          if git fetch -q --depth=1 origin "$BRANCH" 2>/dev/null; then
-            git checkout -q -B "$BRANCH" FETCH_HEAD
-          else
-            echo "Branch '$BRANCH' not found — creating it"
-            git checkout -q -b "$BRANCH"
-          fi
+          #
+          # "Missing" and "unreachable" must not be confused: treating any
+          # fetch error as a missing branch started a fresh orphan with one row.
+          # Its push is rejected as non-fast-forward, so no data was lost, but
+          # the digest steps would have read an empty history. ls-remote exits
+          # 2 only when the ref does not exist.
+          set +e
+          git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null
+          REMOTE_STATUS=$?
+          set -e
+          case "$REMOTE_STATUS" in
+            0)
+              git fetch -q --depth=1 origin "$BRANCH"
+              git checkout -q -B "$BRANCH" FETCH_HEAD
+              ;;
+            2)
+              echo "Branch '$BRANCH' not found — creating it"
+              git checkout -q -b "$BRANCH"
+              ;;
+            *)
+              echo "::error::Could not read branch '$BRANCH' from origin (git ls-remote exit ${REMOTE_STATUS})"
+              exit 1
+              ;;
+          esac
 
           mkdir -p data
           HEADER="date,docker_pulls,stars,forks,views_14d,uniques_14d,clones_14d"
@@ -570,40 +383,66 @@ jobs:
             echo >> data/metrics.csv
           fi
 
-          TODAY=$(date -u +%F)
-          if grep -q "^${TODAY}," data/metrics.csv; then
-            echo "Row for ${TODAY} already present — nothing to do"
-            exit 0
-          fi
+          # The history is readable from here on, whatever happens below.
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
-          echo "${TODAY},${PULLS},${STARS},${FORKS},${VIEWS},${UNIQUES},${CLONES}" >> data/metrics.csv
-          echo "Appended row for ${TODAY}"
-
-          # Roster sorted by login so a diff shows membership changes only,
-          # never reordering. Git history then *is* the churn record:
-          #   git log -p metrics -- data/stargazers.csv
-          #
-          # Kept non-fatal on purpose: the count row above is already written,
-          # and losing it to a stargazer API hiccup would trade the reliable
-          # data for the optional data.
-          if gh api -H "Accept: application/vnd.github.star+json" \
-                    --paginate "repos/${GITHUB_REPOSITORY}/stargazers?per_page=100" \
-                    --jq '.[] | [.user.login, .starred_at] | @csv' \
-               | sort -f > data/stargazers.new; then
-            # Guard against a truncated page set silently reading as a mass
-            # unstar. Allow drift (stars move between the two API calls) but
-            # reject a roster that is nowhere near the count we just fetched.
-            ROSTER_N=$(wc -l < data/stargazers.new)
-            if [ "$ROSTER_N" -gt 0 ] && [ "$ROSTER_N" -ge $(( STARS * 9 / 10 )) ]; then
-              { echo "login,starred_at"; cat data/stargazers.new; } > data/stargazers.csv
-              echo "Roster snapshot: ${ROSTER_N} entries"
-            else
-              echo "::warning::Roster looks truncated (${ROSTER_N} rows vs ${STARS} stars) — keeping previous"
+          # Never commit a malformed row: a gap is visible, a bad value is not.
+          # Must test for digits, not just non-emptiness — jq prints the
+          # literal `null` for a missing field, which is non-empty. A value
+          # carried forward after a failed fetch (FRESH=false) is refused too:
+          # on a cache miss it is 0, and a 0 row would later serve as a digest
+          # baseline ("+400,871 pulls this week"). A later run writes the row.
+          append_today() {
+            local name value
+            if grep -q "^${TODAY}," data/metrics.csv; then
+              echo "Row for ${TODAY} already present"
+              return 1
             fi
-          else
-            echo "::warning::Stargazer API call failed — keeping previous roster"
+            if [ "$FRESH" != "true" ]; then
+              echo "::warning::A metrics fetch failed this run — leaving the ${TODAY} row to a later run"
+              return 1
+            fi
+            for name in PULLS STARS FORKS VIEWS UNIQUES CLONES; do
+              value="${!name:-}"
+              case "$value" in
+                ''|*[!0-9]*)
+                  echo "::warning::Metric ${name} is not a number ('${value}') — not writing the ${TODAY} row"
+                  return 1
+                  ;;
+              esac
+            done
+            echo "${TODAY},${PULLS},${STARS},${FORKS},${VIEWS},${UNIQUES},${CLONES}" >> data/metrics.csv
+            echo "Appended row for ${TODAY}"
+          }
+
+          TODAY=$(date -u +%F)
+          if append_today; then
+            # Roster sorted by login so a diff shows membership changes only,
+            # never reordering. Git history then *is* the churn record:
+            #   git log -p metrics -- data/stargazers.csv
+            #
+            # Kept non-fatal on purpose: the count row above is already written,
+            # and losing it to a stargazer API hiccup would trade the reliable
+            # data for the optional data. Refreshed once a day, with the row.
+            if gh api -H "Accept: application/vnd.github.star+json" \
+                      --paginate "repos/${GITHUB_REPOSITORY}/stargazers?per_page=100" \
+                      --jq '.[] | [.user.login, .starred_at] | @csv' \
+                 | sort -f > data/stargazers.new; then
+              # Guard against a truncated page set silently reading as a mass
+              # unstar. Allow drift (stars move between the two API calls) but
+              # reject a roster that is nowhere near the count we just fetched.
+              ROSTER_N=$(wc -l < data/stargazers.new)
+              if [ "$ROSTER_N" -gt 0 ] && [ "$ROSTER_N" -ge $(( STARS * 9 / 10 )) ]; then
+                { echo "login,starred_at"; cat data/stargazers.new; } > data/stargazers.csv
+                echo "Roster snapshot: ${ROSTER_N} entries"
+              else
+                echo "::warning::Roster looks truncated (${ROSTER_N} rows vs ${STARS} stars) — keeping previous"
+              fi
+            else
+              echo "::warning::Stargazer API call failed — keeping previous roster"
+            fi
+            rm -f data/stargazers.new
           fi
-          rm -f data/stargazers.new
 
           # Orient anyone who lands on the branch; it is machine-written and
           # has no source tree, which is otherwise confusing.
@@ -617,6 +456,8 @@ jobs:
 
           - `data/metrics.csv` — one row per UTC day: Docker pulls, stars,
             forks, and GitHub's rolling 14-day views/clones.
+          - `data/digests.json` — the last daily and weekly Slack digest
+            sent, by window end date. Deleting it re-sends both.
           - `data/stargazers.csv` — the stargazer roster, sorted by login.
             GitHub publishes no unstar event, so the commit history of this
             file is the only record of who unstarred and when:
@@ -670,3 +511,342 @@ jobs:
             git push -q origin "$BRANCH"
             echo "Pushed to '$BRANCH'"
           fi
+
+      # ── Plan digests ─────────────────────────────────────────
+      # Decides which Slack digest is due and computes it, from the `metrics`
+      # branch alone (hist/, checked out above):
+      #
+      #   daily   due from 07:00 UTC — yesterday's row → today's row
+      #   weekly  due from Monday 07:00 UTC — the previous Monday's row → this
+      #           Monday's row
+      #
+      # Both used to hang off their own 07:00 cron and keep their baselines in
+      # the Actions cache. That failed twice over. The cache is evicted
+      # routinely and a miss reseeded the baseline to "now": on 2026-09-28 a
+      # cold-start run at 14:55 did exactly that, the Monday run GitHub had
+      # delayed to 15:03 found an eight-minute-old baseline, and every metric
+      # read "(0)". And GitHub drops scheduled runs, so a dropped 07:00 event
+      # lost that day's or week's digest outright.
+      #
+      # Now any run may send a digest once it is due, and data/digests.json
+      # records the window end date of the last one of each kind, so each goes
+      # out exactly once, however late the first run after 07:00 arrives.
+      # Rows are first-run-of-the-day snapshots, so consecutive windows are
+      # contiguous and a re-run computes the same numbers. A day without a row
+      # falls back to the latest row up to two days earlier; the message names
+      # the dates it actually compares. With no usable row the digest is
+      # skipped and recorded rather than posted with made-up numbers, unless
+      # the missing row is today's, which a later run still writes.
+      #
+      # A daily digest not sent by midnight UTC is superseded by the next
+      # day's rather than sent late; that takes 17 hours without a single run.
+      - name: Plan digests
+        id: plan
+        if: steps.history.outputs.ready == 'true'
+        env:
+          FORCE: ${{ github.event.inputs.force_digest == 'true' }}
+        run: |
+          set -uo pipefail
+          CSV=hist/data/metrics.csv
+          MARKERS=hist/data/digests.json
+          DUE_HOUR=7
+          read -r TODAY HOUR DOW <<< "$(date -u '+%F %H %u')"
+          HOUR=$(( 10#$HOUR ))
+          MONDAY=$(date -u -d "$TODAY -$(( DOW - 1 )) days" +%F)
+
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+
+          # An unreadable marker file would read as "never sent" and make both
+          # digests due on every run, so refuse it outright.
+          if [ -f "$MARKERS" ] && ! jq -e 'type == "object"' "$MARKERS" > /dev/null; then
+            echo "::error::${MARKERS#hist/} on the metrics branch is not a JSON object — sending no digest until it is fixed"
+            exit 1
+          fi
+
+          last_sent() {
+            if [ -f "$MARKERS" ]; then jq -r --arg k "$1" '.[$k] // ""' "$MARKERS"; fi
+          }
+
+          # Latest usable row dated within [target - 2 days, target]. ISO dates
+          # compare correctly as strings, and rows are appended in date order.
+          pick() {
+            local oldest row
+            oldest=$(date -u -d "$1 -2 days" +%F)
+            while IFS= read -r row; do
+              usable "$row" && { echo "$row"; return; }
+            done < <(awk -F, -v t="$1" -v o="$oldest" \
+              'NR > 1 && $1 <= t && $1 >= o { r[++n] = $0 } END { while (n) print r[n--] }' "$CSV")
+          }
+
+          # A date and six counters. Docker pulls are never 0 for this image,
+          # so a 0 there is a failed fetch that reached the history (rows
+          # written before "Persist" refused carried values can hold one).
+          usable() {
+            local p s f v u c x
+            IFS=, read -r _ p s f v u c <<< "$1"
+            for x in "$p" "$s" "$f" "$v" "$u" "$c"; do
+              case "$x" in ''|*[!0-9]*) return 1 ;; esac
+            done
+            [ "$p" -gt 0 ]
+          }
+
+          signed() { if [ "$1" -gt 0 ]; then echo "+$1"; else echo "$1"; fi; }
+
+          plan() {
+            local kind=$1 end_target=$2 days=$3 start_target end start
+            local ed ep es ef ev eu ec sd sp ss sf sv sc view_delta="" clone_delta=""
+            start_target=$(date -u -d "$end_target -$days days" +%F)
+            end=$(pick "$end_target")
+            start=$(pick "$start_target")
+            # A window ending today needs today's row itself: falling back to
+            # yesterday's would end the window early and, for the daily digest,
+            # compare a row with itself and record "no activity".
+            if [ "$end_target" = "$TODAY" ] && [ "${end%%,*}" != "$TODAY" ]; then
+              end=""
+            fi
+
+            if ! usable "$end"; then
+              if [ "$end_target" = "$TODAY" ]; then
+                echo "::warning::${kind} digest: no usable row for ${TODAY} yet — a later run will retry"
+              else
+                echo "::warning::${kind} digest: no usable row near ${end_target} — skipping it"
+                out "${kind}_record" true
+              fi
+              return
+            fi
+            if ! usable "$start"; then
+              echo "::warning::${kind} digest: no usable baseline row near ${start_target} — skipping it"
+              out "${kind}_record" true
+              return
+            fi
+
+            IFS=, read -r ed ep es ef ev eu ec <<< "$end"
+            IFS=, read -r sd sp ss sf sv _ sc <<< "$start"
+            echo "${kind} digest: ${start} → ${end}"
+
+            if [ "$kind" = daily ] && [ "$ep" -eq "$sp" ] && [ "$es" -eq "$ss" ] && [ "$ef" -eq "$sf" ]; then
+              echo "daily digest: no activity — nothing to send"
+              out "${kind}_record" true
+              return
+            fi
+
+            # 0 is what the traffic step writes when that API is unavailable,
+            # so a delta against it would be noise, not a change.
+            if [ "$sv" -gt 0 ] && [ "$ev" -gt 0 ]; then view_delta=$(signed $(( ev - sv ))); fi
+            if [ "$sc" -gt 0 ] && [ "$ec" -gt 0 ]; then clone_delta=$(signed $(( ec - sc ))); fi
+
+            {
+              echo "${kind}_send=true"
+              echo "${kind}_from=$sd"
+              echo "${kind}_to=$ed"
+              echo "${kind}_pulls=$ep"
+              echo "${kind}_stars=$es"
+              echo "${kind}_forks=$ef"
+              echo "${kind}_views=$ev"
+              echo "${kind}_uniques=$eu"
+              echo "${kind}_clones=$ec"
+              echo "${kind}_pull_delta=$(signed $(( ep - sp )))"
+              echo "${kind}_star_delta=$(signed $(( es - ss )))"
+              echo "${kind}_fork_delta=$(signed $(( ef - sf )))"
+              echo "${kind}_view_delta=$view_delta"
+              echo "${kind}_clone_delta=$clone_delta"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          DAILY_LAST=$(last_sent daily)
+          WEEKLY_LAST=$(last_sent weekly)
+          out daily_window "$TODAY"
+          out daily_prev "$DAILY_LAST"
+          out weekly_window "$MONDAY"
+          out weekly_prev "$WEEKLY_LAST"
+
+          if [ "$HOUR" -ge "$DUE_HOUR" ] && [[ "$DAILY_LAST" < "$TODAY" ]]; then
+            plan daily "$TODAY" 1
+          else
+            echo "daily digest: not due (last sent for '${DAILY_LAST}', ${HOUR}:xx UTC)"
+          fi
+
+          if [ "$FORCE" = "true" ]; then
+            echo "weekly digest: forced"
+            plan weekly "$MONDAY" 7
+          elif { [[ "$TODAY" > "$MONDAY" ]] || [ "$HOUR" -ge "$DUE_HOUR" ]; } \
+               && [[ "$WEEKLY_LAST" < "$MONDAY" ]]; then
+            plan weekly "$MONDAY" 7
+          else
+            echo "weekly digest: not due (last sent for '${WEEKLY_LAST}')"
+          fi
+
+      # ── Claim, send, release ─────────────────────────────────
+      # A digest is recorded and pushed BEFORE it is posted, and un-recorded
+      # if the post fails. Recording it afterwards would re-post it every 15
+      # minutes for as long as the push kept failing. This way a failed push
+      # sends nothing, a failed post is retried by the next run, and only a
+      # failed post followed by a failed release loses a digest.
+      - name: Claim digests
+        id: claim
+        if: >-
+          steps.plan.outputs.daily_send == 'true' || steps.plan.outputs.daily_record == 'true'
+          || steps.plan.outputs.weekly_send == 'true' || steps.plan.outputs.weekly_record == 'true'
+        continue-on-error: true
+        env:
+          BRANCH: metrics
+          DAILY: >-
+            ${{ (steps.plan.outputs.daily_send == 'true' || steps.plan.outputs.daily_record == 'true')
+            && steps.plan.outputs.daily_window || '' }}
+          WEEKLY: >-
+            ${{ (steps.plan.outputs.weekly_send == 'true' || steps.plan.outputs.weekly_record == 'true')
+            && steps.plan.outputs.weekly_window || '' }}
+        run: |
+          set -euo pipefail
+          cd hist
+          [ -f data/digests.json ] || echo '{}' > data/digests.json
+          jq --arg d "$DAILY" --arg w "$WEEKLY" '
+            (if $d != "" then .daily = $d else . end)
+            | (if $w != "" then .weekly = $w else . end)' \
+            data/digests.json > data/digests.json.new
+          mv data/digests.json.new data/digests.json
+
+          git add data/digests.json
+          if git diff --quiet --cached; then
+            echo "Markers already up to date"
+          else
+            git commit -q -m "chore(metrics): record digests (daily ${DAILY:-unchanged}, weekly ${WEEKLY:-unchanged})"
+            git push -q origin "$BRANCH"
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Weekly digest
+        id: weekly
+        if: steps.plan.outputs.weekly_send == 'true' && steps.claim.outputs.ok == 'true'
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          FROM: ${{ steps.plan.outputs.weekly_from }}
+          TO: ${{ steps.plan.outputs.weekly_to }}
+          PULLS: ${{ steps.plan.outputs.weekly_pulls }}
+          STARS: ${{ steps.plan.outputs.weekly_stars }}
+          FORKS: ${{ steps.plan.outputs.weekly_forks }}
+          VIEWS: ${{ steps.plan.outputs.weekly_views }}
+          UNIQUES: ${{ steps.plan.outputs.weekly_uniques }}
+          CLONES: ${{ steps.plan.outputs.weekly_clones }}
+          PULL_DELTA: ${{ steps.plan.outputs.weekly_pull_delta }}
+          STAR_DELTA: ${{ steps.plan.outputs.weekly_star_delta }}
+          FORK_DELTA: ${{ steps.plan.outputs.weekly_fork_delta }}
+          VIEW_DELTA: ${{ steps.plan.outputs.weekly_view_delta }}
+          CLONE_DELTA: ${{ steps.plan.outputs.weekly_clone_delta }}
+        run: |
+          set -uo pipefail
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=", ${VIEW_DELTA}"
+          clone_delta=""; [ -z "$CLONE_DELTA" ] || clone_delta=" (${CLONE_DELTA})"
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"📊  EDDI Weekly Digest\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"fields\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS} (${PULL_DELTA})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${STAR_DELTA})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${FORK_DELTA})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique${view_delta})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }
+                  ]
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"${FROM} → ${TO} · <https://hub.docker.com/r/labsai/eddi|Docker Hub> · <https://github.com/labsai/EDDI|GitHub> · <https://eddi.labs.ai|Website>\" }
+                  ]
+                }
+              ]
+            }"
+
+      - name: Daily digest
+        id: daily
+        if: steps.plan.outputs.daily_send == 'true' && steps.claim.outputs.ok == 'true'
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          FROM: ${{ steps.plan.outputs.daily_from }}
+          TO: ${{ steps.plan.outputs.daily_to }}
+          PULLS: ${{ steps.plan.outputs.daily_pulls }}
+          STARS: ${{ steps.plan.outputs.daily_stars }}
+          FORKS: ${{ steps.plan.outputs.daily_forks }}
+          VIEWS: ${{ steps.plan.outputs.daily_views }}
+          CLONES: ${{ steps.plan.outputs.daily_clones }}
+          PULL_DELTA: ${{ steps.plan.outputs.daily_pull_delta }}
+          STAR_DELTA: ${{ steps.plan.outputs.daily_star_delta }}
+          FORK_DELTA: ${{ steps.plan.outputs.daily_fork_delta }}
+          VIEW_DELTA: ${{ steps.plan.outputs.daily_view_delta }}
+          CLONE_DELTA: ${{ steps.plan.outputs.daily_clone_delta }}
+        run: |
+          set -uo pipefail
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=" (${VIEW_DELTA})"
+          clone_delta=""; [ -z "$CLONE_DELTA" ] || clone_delta=" (${CLONE_DELTA})"
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"📈  EDDI Daily Update\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"🐳 *Pulls:* ${PULLS} (${PULL_DELTA})  ·  ⭐ *Stars:* ${STARS} (${STAR_DELTA})  ·  🍴 *Forks:* ${FORKS} (${FORK_DELTA})\"
+                  }
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views (14d): ${VIEWS}${view_delta} · 📥 Clones (14d): ${CLONES}${clone_delta} · ${FROM} → ${TO} · <https://github.com/labsai/EDDI|GitHub>\" }
+                  ]
+                }
+              ]
+            }"
+
+      # Not continue-on-error: if this fails, a claimed digest was never
+      # posted, and a red run is the only place that shows.
+      - name: Release unsent digests
+        if: >-
+          steps.claim.outputs.ok == 'true'
+          && ((steps.plan.outputs.daily_send == 'true' && steps.daily.outcome != 'success')
+          || (steps.plan.outputs.weekly_send == 'true' && steps.weekly.outcome != 'success'))
+        env:
+          BRANCH: metrics
+          RELEASE_DAILY: ${{ steps.plan.outputs.daily_send == 'true' && steps.daily.outcome != 'success' }}
+          RELEASE_WEEKLY: ${{ steps.plan.outputs.weekly_send == 'true' && steps.weekly.outcome != 'success' }}
+          DAILY_PREV: ${{ steps.plan.outputs.daily_prev }}
+          WEEKLY_PREV: ${{ steps.plan.outputs.weekly_prev }}
+        run: |
+          set -euo pipefail
+          cd hist
+          jq --arg rd "$RELEASE_DAILY" --arg dp "$DAILY_PREV" \
+             --arg rw "$RELEASE_WEEKLY" --arg wp "$WEEKLY_PREV" '
+            def restore(k; p): if p == "" then del(.[k]) else .[k] = p end;
+            (if $rd == "true" then restore("daily"; $dp) else . end)
+            | (if $rw == "true" then restore("weekly"; $wp) else . end)' \
+            data/digests.json > data/digests.json.new
+          mv data/digests.json.new data/digests.json
+          git add data/digests.json
+          git commit -q -m "chore(metrics): release unsent digests so the next run retries"
+          git push -q origin "$BRANCH"
+          echo "::warning::Slack post failed — released the claim; the next run retries (daily=${RELEASE_DAILY}, weekly=${RELEASE_WEEKLY})"
