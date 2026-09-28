@@ -1,0 +1,34 @@
+{
+  "//": [
+    "Every place outside pom.xml that names the PUBLISHED EDDI release a reader should deploy:",
+    "the Helm appVersion, the k8s manifests, and the copy-pasteable commands in the docs.",
+    "",
+    "One definition, two readers. scripts/bump-version.py rewrites every match to the new",
+    "release; ReleaseVersionSourceTest fails the build unless every match names the same",
+    "version as helm/eddi/Chart.yaml's appVersion. A new doc that writes labsai/eddi:<x.y.z>",
+    "is picked up by both without anyone having to remember to list it.",
+    "",
+    "Each pattern is a regular expression whose FIRST capture group is the version. Keep them",
+    "to the syntax Java and Python share: no named groups, no possessive quantifiers.",
+    "",
+    "The exclusions are pages whose version numbers are worked examples of the tagging scheme",
+    "(6.3.0-RC1, 6.0.0-b42), and the changelog, which is history."
+  ],
+  "roots": ["README.md", "docs", "k8s", "helm"],
+  "extensions": [".md", ".yaml", ".yml", ".tpl", ".txt"],
+  "exclude": [
+    "docs/changelog.md",
+    "docs/changelog/",
+    "docs/changelog.d/",
+    "docs/release-signing.md",
+    "docs/release-versioning.md"
+  ],
+  "patterns": [
+    "labsai/eddi:(\\d+\\.\\d+\\.\\d+)(?![\\w.-])",
+    "EDDI_VERSION=(\\d+\\.\\d+\\.\\d+)(?![\\w.-])",
+    "eddi-(\\d+\\.\\d+\\.\\d+)\\.jar",
+    "app\\.kubernetes\\.io/version: \"(\\d+\\.\\d+\\.\\d+)\"",
+    "newTag: \"(\\d+\\.\\d+\\.\\d+)\"",
+    "appVersion: \"(\\d+\\.\\d+\\.\\d+)\""
+  ]
+}

@@ -1,0 +1,164 @@
+name: Post-Release Version Bump
+
+# Opens the PR that follows every stable release. It does two things, and
+# scripts/bump-version.py decides both (`post-release <tag>`):
+#
+#   1. Points the release pointers — the Helm appVersion, the k8s manifests, the
+#      copy-pasteable commands in the docs (scripts/release-pointers.json) — at
+#      the release that was just published. This can only happen AFTER the
+#      release: before it, the image they name does not exist, and a quickstart
+#      followed from main would pull a tag that is not there.
+#   2. Moves pom.xml to the next minor, so every snapshot main builds from now
+#      on (labsai/eddi:<pom>-b<N>) carries the version it is heading towards.
+#      Left alone, main kept publishing <released>-b<N> for a whole cycle — a
+#      version that sorts BEFORE the release it came after.
+#
+# A patch release off an older line moves only what is behind it: the script
+# never pulls pom.xml backwards.
+#
+# Called by ci.yml's post-release job on every stable tag, after the image is
+# published and smoke-tested. Dispatch it by hand to redo a run that failed.
+#
+# It opens a PR rather than pushing: main requires one.
+#
+# TOKEN: RELEASE_BOT_TOKEN, else CHANGELOG_BOT_TOKEN (the same kind of bot PAT —
+# see changelog-collate.yml's header), else the default GITHUB_TOKEN. A PR opened
+# with the default token does not start its required checks: GitHub does not fire
+# `pull_request` workflows for events that token creates. The run summary and
+# the PR body say so when that is the case.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        # No default, for the same reason as redhat-certify.yml: it names an
+        # already published tag, and a default would be a stale copy of one.
+        description: "Stable EDDI release that was just published (MAJOR.MINOR.PATCH, no 'v')"
+        required: true
+
+concurrency:
+  group: post-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Open the post-release PR
+    runs-on: ubuntu-latest
+    if: github.repository == 'labsai/EDDI'
+    permissions:
+      contents: write       # git push for the PR branch
+      pull-requests: write  # gh pr create
+    env:
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Validate the version
+        run: |
+          set -euo pipefail
+          # Only a stable release moves anything. An RC is not what a reader
+          # should deploy, and the next version is already the RC's own.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'${VERSION}' is not a stable MAJOR.MINOR.PATCH release"
+            exit 1
+          fi
+          echo "BRANCH=chore/post-release-${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: main
+          # Persisted for the push below, so the branch — and therefore the PR —
+          # is authored by whoever owns this token. See the TOKEN note above.
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Check for an open post-release PR
+        id: open_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A failed lookup must not read as "none open": the next step deletes
+          # the branch, which would close the PR this check exists to protect.
+          if ! EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number'); then
+            echo "::error::Could not list open PRs for ${BRANCH}; refusing to continue"
+            exit 1
+          fi
+          echo "number=${EXISTING}" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXISTING" ]; then
+            echo "### PR #${EXISTING} already carries the ${VERSION} post-release bump" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Bump
+        if: steps.open_pr.outputs.number == ''
+        id: bump
+        run: |
+          set -euo pipefail
+          python3 scripts/bump-version.py post-release "$VERSION" --changelog | tee bump.log
+          # The script ends with the same check the unit suite runs; a non-zero
+          # exit above already failed the step, this just shows the result.
+          python3 scripts/bump-version.py check
+          {
+            echo "### Post-release ${VERSION}"
+            echo '```'
+            cat bump.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "notes<<EOF_NOTES"
+            grep -v '^  \|^changed:$\|^nothing to change$' bump.log || true
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+          rm -f bump.log
+
+      - name: Open the PR
+        if: steps.open_pr.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          HAVE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN != '' || secrets.CHANGELOG_BOT_TOKEN != '' }}
+          NOTES: ${{ steps.bump.outputs.notes }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Tracked files the script rewrote, plus the changelog fragment it
+          # wrote. Never `git add -A`: nothing else belongs in this commit.
+          git add -u
+          git add docs/changelog.d
+
+          if git diff --cached --quiet; then
+            echo "### Nothing to change — main already reflects ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ "$HAVE_BOT_TOKEN" = "true" ]; then
+            CHECKS_NOTE="CI runs on this PR normally."
+          else
+            CHECKS_NOTE="**The required checks will not start on their own.** This PR was opened with the default \`GITHUB_TOKEN\`, and GitHub does not fire \`pull_request\` workflows for events that token creates. Close and reopen it (or push an empty commit) to start them. Setting a \`RELEASE_BOT_TOKEN\` secret removes this step — see the header of \`.github/workflows/post-release.yml\`."
+            echo "⚠️ No bot token: the PR's required checks need a manual close/reopen." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git checkout -B "$BRANCH"
+          git commit -m "chore(release): after ${VERSION}"
+          git push -u origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "chore(release): after ${VERSION}" \
+            --body "${VERSION} is published. This moves main on from it:
+
+          ${NOTES}
+
+          Generated by \`python scripts/bump-version.py post-release ${VERSION}\` in [\`post-release.yml\`](${{ github.server_url }}/${{ github.repository }}/blob/main/.github/workflows/post-release.yml) — see the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). \`ReleaseVersionSourceTest\` checks the result on this PR's build.
+
+          ${CHECKS_NOTE}")
+
+          echo "### ✅ Created ${PR_URL}" >> "$GITHUB_STEP_SUMMARY"

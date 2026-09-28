@@ -2622,6 +2622,23 @@ jobs:
       submit: "true"
     secrets: inherit
 
+  # ─── Job 6c: Post-Release Version Bump ─────────────────────────
+  # Opens the PR that points the docs and manifests at the release just published
+  # and moves pom.xml to the next minor (scripts/bump-version.py post-release).
+  # Stable tags only, and only once the image exists and passed its smoke test —
+  # the PR is what sends readers to it.
+  post-release:
+    name: Post-Release Version Bump
+    needs: [docker, smoke-test, release]
+    if: startsWith(github.ref, 'refs/tags/') && needs.docker.outputs.is-stable == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/post-release.yml
+    with:
+      version: ${{ needs.docker.outputs.primary-tag }}
+    secrets: inherit
+
   # ─── Job 7: Slack Notification ─────────────────────────────────
   notify-slack:
     name: Slack Notification

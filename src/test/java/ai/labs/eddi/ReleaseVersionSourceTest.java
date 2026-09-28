@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,12 +15,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -242,5 +248,198 @@ class ReleaseVersionSourceTest {
                         + " tag to certify, so any default is a hand-copied release number that goes stale on the"
                         + " next pom bump — and dispatching with it certifies the wrong release silently. Require"
                         + " the operator to type the tag.");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Release pointers — the PUBLISHED version a reader deploys
+    // ─────────────────────────────────────────────────────────────
+
+    private static final Path CHART = Path.of("helm", "eddi", "Chart.yaml");
+    private static final Path HELM_VALUES = Path.of("helm", "eddi", "values.yaml");
+    private static final Path HELM_DEPLOYMENT = Path.of("helm", "eddi", "templates", "deployment.yaml");
+    private static final Path K8S_KUSTOMIZATION = Path.of("k8s", "base", "kustomization.yaml");
+    private static final Path K8S_DEPLOYMENT = Path.of("k8s", "base", "eddi-deployment.yaml");
+    private static final Path MANAGER_PACKAGE_JSON = Path.of("ui", "manager", "package.json");
+
+    /**
+     * Where the release pointers are and what they look like — the same file
+     * {@code scripts/bump-version.py} rewrites from, so the two cannot disagree
+     * about scope.
+     */
+    static final Path RELEASE_POINTERS = Path.of("scripts", "release-pointers.json");
+
+    /** A pointer match: where it is and the version it names. */
+    record ReleasePointer(String file, int line, String version) {
+    }
+
+    /**
+     * Every release pointer in the repository, found exactly as the bump script
+     * finds them: each file under a configured root with a configured extension and
+     * not excluded, each line, each pattern's first capture group.
+     */
+    static List<ReleasePointer> releasePointers(Path root) throws IOException {
+        JsonNode config = new ObjectMapper().readTree(read(root.resolve(RELEASE_POINTERS)));
+        List<String> extensions = new ArrayList<>();
+        config.path("extensions").forEach(e -> extensions.add(e.asText()));
+        List<String> excludes = new ArrayList<>();
+        config.path("exclude").forEach(e -> excludes.add(e.asText()));
+        List<Pattern> patterns = new ArrayList<>();
+        config.path("patterns").forEach(p -> patterns.add(Pattern.compile(p.asText())));
+
+        List<Path> files = new ArrayList<>();
+        for (JsonNode entry : config.path("roots")) {
+            Path base = root.resolve(entry.asText());
+            if (Files.isRegularFile(base)) {
+                files.add(base);
+            } else if (Files.isDirectory(base)) {
+                try (Stream<Path> walk = Files.walk(base)) {
+                    walk.filter(Files::isRegularFile).sorted().forEach(files::add);
+                }
+            }
+        }
+
+        List<ReleasePointer> found = new ArrayList<>();
+        for (Path file : files) {
+            String rel = root.relativize(file).toString().replace('\\', '/');
+            if (extensions.stream().noneMatch(rel::endsWith)
+                    || excludes.stream().anyMatch(ex -> rel.equals(ex) || (ex.endsWith("/") && rel.startsWith(ex)))) {
+                continue;
+            }
+            List<String> lines = read(file).lines().toList();
+            for (int i = 0; i < lines.size(); i++) {
+                for (Pattern pattern : patterns) {
+                    Matcher m = pattern.matcher(lines.get(i));
+                    while (m.find()) {
+                        found.add(new ReleasePointer(rel, i + 1, m.group(1)));
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    private static String chartAppVersion() throws IOException {
+        Matcher m = Pattern.compile("(?m)^appVersion:\\s*\"([^\"]+)\"").matcher(read(CHART));
+        assertTrue(m.find(), CHART + " has no appVersion: \"<x.y.z>\" line");
+        return m.group(1);
+    }
+
+    private static int[] semver(String version) {
+        Matcher m = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)").matcher(version);
+        assertTrue(m.find(), "'" + version + "' does not start with MAJOR.MINOR.PATCH");
+        return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+    }
+
+    /**
+     * The drift this replaces: each release hand-edited a dozen lines across the
+     * chart, the k8s manifests and four docs, and whichever one was missed stayed
+     * wrong — {@code docs/kubernetes.md} named 6.3.0 through the whole 6.4.0 cycle.
+     * Now every such line is found by one definition
+     * ({@code scripts/release-pointers.json}), moved by one command
+     * ({@code scripts/bump-version.py release}) and checked here, including in a
+     * doc nobody thought to list.
+     */
+    @Test
+    @DisplayName("every release pointer names the chart's appVersion")
+    void releasePointersAgreeWithTheChart() throws IOException {
+        String appVersion = chartAppVersion();
+        List<ReleasePointer> pointers = releasePointers(Path.of(""));
+
+        List<String> stray = pointers.stream()
+                .filter(p -> !p.version().equals(appVersion))
+                .map(p -> p.file() + ":" + p.line() + " names " + p.version())
+                .toList();
+        assertEquals(List.of(), stray,
+                "these release pointers disagree with helm/eddi/Chart.yaml's appVersion " + appVersion
+                        + ". Run `python scripts/bump-version.py release <version>` rather than editing them by"
+                        + " hand; it rewrites every one of them");
+
+        // Not vacuous: a pattern or a root that silently stopped matching would
+        // leave the list above empty and this test green.
+        List<String> files = pointers.stream().map(ReleasePointer::file).distinct().toList();
+        for (Path required : List.of(CHART, K8S_KUSTOMIZATION, Path.of("k8s", "quickstart.yaml"),
+                Path.of("docs", "developer-quickstart.md"))) {
+            assertTrue(files.contains(required.toString().replace('\\', '/')),
+                    required + " must carry a release pointer that " + RELEASE_POINTERS
+                            + " matches; found pointers only in " + files);
+        }
+    }
+
+    /**
+     * The pointers name what a reader should deploy, so they may only name a
+     * release that exists. pom.xml is the version main is BUILDING — equal to the
+     * pointers on the release commit, ahead of them the rest of the cycle, never
+     * behind.
+     */
+    @Test
+    @DisplayName("the release pointers are never ahead of the build version")
+    void releasePointersAreNotAheadOfThePom() throws IOException {
+        String appVersion = chartAppVersion();
+        String pomVersion = projectVersion();
+        int[] app = semver(appVersion);
+        int[] pom = semver(pomVersion);
+
+        assertTrue(Arrays.compare(app, pom) <= 0,
+                "helm/eddi/Chart.yaml's appVersion " + appVersion + " is ahead of pom.xml's " + pomVersion
+                        + ": the docs and manifests would send readers to an image that has not been built");
+    }
+
+    /**
+     * The chart's image tag used to be a second copy of appVersion; now it defaults
+     * to it, so a release moves one line.
+     */
+    @Test
+    @DisplayName("the Helm image tag defaults to appVersion instead of repeating it")
+    void helmImageTagDefaultsToAppVersion() throws IOException {
+        JsonNode values = new YAMLMapper().readTree(read(HELM_VALUES));
+        assertEquals("", values.path("eddi").path("image").path("tag").asText("<missing>"),
+                HELM_VALUES + " sets eddi.image.tag. Leave it empty: the chart falls back to Chart.yaml's"
+                        + " appVersion, so a release has one line to move, not two that can disagree");
+        assertTrue(read(HELM_DEPLOYMENT).contains("include \"eddi.imageTag\""),
+                HELM_DEPLOYMENT + " must take the tag from the eddi.imageTag helper, or an empty"
+                        + " eddi.image.tag renders the image as `labsai/eddi:`");
+    }
+
+    /**
+     * The same for kustomize: the base Deployment names no tag, the kustomization's
+     * {@code images:} entry does. The placeholder is a tag that does not exist, so
+     * applying the file without kustomize fails loudly instead of pulling
+     * {@code latest}.
+     */
+    @Test
+    @DisplayName("the k8s base pins its image in the kustomization, not the Deployment")
+    void k8sBasePinsTheImageInTheKustomization() throws IOException {
+        List<String> images = read(K8S_DEPLOYMENT).lines()
+                .map(String::strip)
+                .filter(l -> l.startsWith("image:"))
+                .toList();
+        assertEquals(List.of("image: labsai/eddi:pinned-by-kustomization"), images,
+                K8S_DEPLOYMENT + " must leave the tag to kustomization.yaml's images: entry");
+
+        JsonNode kustomization = new YAMLMapper().readTree(read(K8S_KUSTOMIZATION));
+        JsonNode eddiImage = null;
+        for (JsonNode image : kustomization.path("images")) {
+            if ("labsai/eddi".equals(image.path("name").asText())) {
+                eddiImage = image;
+            }
+        }
+        assertNotNull(eddiImage, K8S_KUSTOMIZATION + " has no images: entry for labsai/eddi");
+        assertEquals(chartAppVersion(), eddiImage.path("newTag").asText(),
+                K8S_KUSTOMIZATION + " must pin labsai/eddi to the chart's appVersion");
+    }
+
+    /**
+     * The Manager's sidebar reads the EDDI version from pom.xml (vite.config.ts). A
+     * version in its package.json would be one more copy to move every release, and
+     * a wrong one the moment it was not.
+     */
+    @Test
+    @DisplayName("the Manager's package.json carries no version of its own")
+    void managerPackageJsonCarriesNoVersion() throws IOException {
+        JsonNode pkg = new ObjectMapper().readTree(read(MANAGER_PACKAGE_JSON));
+        assertFalse(pkg.has("version"),
+                MANAGER_PACKAGE_JSON + " declares \"version\": " + pkg.path("version")
+                        + ". The Manager is a private package inside this repository and takes its version from"
+                        + " pom.xml; remove the field (and the matching root entries in package-lock.json)");
     }
 }
