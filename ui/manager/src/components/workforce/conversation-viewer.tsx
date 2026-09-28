@@ -20,6 +20,7 @@ import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import {
   entryTypeInfo,
+  type DiscussionStyle,
   type TaskDefinition,
   type TranscriptEntry,
   type GroupConversationState,
@@ -34,6 +35,12 @@ interface ConversationViewerProps {
   groupName?: string;
   /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
   preConfiguredTasks?: TaskDefinition[];
+  /**
+   * The group's discussion style. The overview picks its per-style emphasis
+   * from it (a TASK_FORCE opens on the task board, a DEBATE on the verdict);
+   * without it the history view rendered every discussion as a generic one.
+   */
+  style?: DiscussionStyle | null;
   onClose?: () => void;
   className?: string;
 }
@@ -586,6 +593,7 @@ function ConversationViewer({
   conversationId,
   groupName,
   preConfiguredTasks,
+  style,
   onClose,
   className,
 }: ConversationViewerProps) {
@@ -770,6 +778,7 @@ function ConversationViewer({
         className="flex-1 min-h-0"
         surface="workforce-history"
         conversation={conversation}
+        style={style}
         // No group config on this surface: it opens a stored conversation by
         // id and never fetches the group. The digest derives phases from the
         // transcript instead, so the rail shows the phases that ran — only

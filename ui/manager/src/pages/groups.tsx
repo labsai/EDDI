@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate } from "lucide-react";
@@ -64,7 +65,15 @@ export function GroupsPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100, 0, search);
+  // Debounced: every distinct filter is a fresh enriched listing — one
+  // descriptor request plus one config read per listed group, up to 101 — so
+  // querying on each keystroke fired that whole fan-out per character typed.
+  const debouncedSearch = useDebounce(search.trim(), 300);
+  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(
+    100,
+    0,
+    debouncedSearch,
+  );
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
   const duplicateMutation = useDuplicateGroup();

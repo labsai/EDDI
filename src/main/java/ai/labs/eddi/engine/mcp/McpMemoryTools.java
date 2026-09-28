@@ -179,6 +179,8 @@ public class McpMemoryTools {
             return errorJson("value is required");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
+        if (IUserMemoryStore.isReservedKey(key))
+            return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage());
         try {
             var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.toLowerCase()) : Visibility.self;
 
@@ -201,6 +203,12 @@ public class McpMemoryTools {
         if (entryId == null || entryId.isBlank())
             return errorJson("entryId is required");
         try {
+            var existing = userMemoryStore.findEntryById(entryId);
+            if (existing.isPresent() && IUserMemoryStore.isReservedKey(existing.get().key())) {
+                // The Art. 18 flag is lifted through the GDPR admin unrestrict endpoint, which
+                // audits it.
+                return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()).getMessage());
+            }
             userMemoryStore.deleteEntry(entryId);
             return jsonSerialization.serialize(Map.of("entryId", entryId, "status", "deleted"));
         } catch (Exception e) {
@@ -209,8 +217,9 @@ public class McpMemoryTools {
         }
     }
 
-    @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user (GDPR right-to-erasure). "
-            + "This action is irreversible!")
+    @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user. "
+            + "This action is irreversible! GDPR bookkeeping entries (keys starting with '_gdpr_') are kept; "
+            + "use delete_user_data for a full GDPR Art. 17 erasure.")
     public String deleteAllUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                         @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
         requireRole(identity, authEnabled, "eddi-admin");
@@ -220,8 +229,10 @@ public class McpMemoryTools {
             return errorJson("You must pass confirmation='CONFIRM' to delete all memories. This action is irreversible.");
         }
         try {
-            long count = userMemoryStore.countEntries(userId);
-            userMemoryStore.deleteAllForUser(userId);
+            // Keeps the GDPR bookkeeping rows: this is memory housekeeping, and an Art. 18
+            // restriction must not disappear as a side effect of it (delete_user_data is
+            // the full Art. 17 erasure, and it does remove them).
+            long count = userMemoryStore.deleteAllExceptReserved(userId);
             return jsonSerialization.serialize(Map.of("userId", userId, "entriesDeleted", count, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_all_user_memories failed", e);
