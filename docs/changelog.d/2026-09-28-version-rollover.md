@@ -46,7 +46,9 @@ suffix sorts before the release, so every snapshot looked older than the version
     release, together with `EXPECTED_CHART_VERSION`. `release <current> --force` repairs strays
     without bumping the chart.
   - `post-release <tag>`, which moves the pom first (so a tag main's pom has not reached still
-    works), then the pointers, and never moves the pom backwards.
+    works), then the pointers, and never moves the pom backwards. Both `release` and
+    `post-release` validate every value they will parse or rewrite before the first write, so a
+    refusal never leaves a half-applied bump.
 - `ReleaseVersionSourceTest` reads the same JSON. Every pointer must name the chart's
   `appVersion`, which may never be ahead of the pom. The test also requires:
   - the Helm tag defaults to `appVersion`;
@@ -56,7 +58,7 @@ suffix sorts before the release, so every snapshot looked older than the version
   - CI's path filters trigger the check for every root the JSON sweeps.
 
   It found the stale `kubernetes.md` line on its first run, and was mutation-checked against it.
-- `BumpVersionScriptTest` runs the script against a synthetic repository in eleven tests covering transitions
+- `BumpVersionScriptTest` runs the script against a synthetic repository in twelve tests covering transitions
   and refusals. It feeds the generated changelog fragment through the collator. It also checks
   that the Python and Java sweeps find exactly the same pointers in the real repository, since the
   walk and matching are implemented twice. On CI a missing Python fails it rather than skipping it.
