@@ -5,6 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
@@ -1174,7 +1175,7 @@ export function ChatWidget() {
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
           <div className="chat-empty">
-            <div className="chat-empty__icon">💬</div>
+            <MessagesSquare className="chat-empty__icon" size="1em" />
             <p className="chat-empty__text">
               Starting conversation…
             </p>
@@ -1270,7 +1271,7 @@ export function ChatWidget() {
                       data-testid="undo-btn"
                       style={{ opacity: state.undoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
-                      ↩
+                      <Undo2 size="1em" />
                     </button>
                   )}
                   {state.config.enableRedo !== false && (
@@ -1282,7 +1283,7 @@ export function ChatWidget() {
                       data-testid="redo-btn"
                       style={{ opacity: state.redoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
-                      ↪
+                      <Redo2 size="1em" />
                     </button>
                   )}
                 </div>
@@ -1295,7 +1296,7 @@ export function ChatWidget() {
                       aria-label="Stop generating"
                       data-testid="chat-stop"
                     >
-                      ■
+                      <Square size="1em" fill="currentColor" />
                     </button>
                   )}
                   {state.config.enableNewConversation !== false && (
@@ -1305,7 +1306,9 @@ export function ChatWidget() {
                       title="New conversation"
                       data-testid="restart-btn"
                     >
-                      ↻
+                      {/* Not a circular arrow: that reads as retry, and this discards the
+                          conversation. The Manager uses the same icon for it. */}
+                      <MessageSquarePlus size="1em" />
                     </button>
                   )}
                 </div>
