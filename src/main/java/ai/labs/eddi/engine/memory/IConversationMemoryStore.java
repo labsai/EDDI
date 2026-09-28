@@ -94,6 +94,24 @@ public interface IConversationMemoryStore {
 
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 
+    /**
+     * How much an agent is used, across all its versions — counts only, no content.
+     * What an agent's maintainers may see without being able to read anybody's
+     * conversation.
+     *
+     * @param total
+     *            conversations ever started
+     * @param active
+     *            conversations not yet ended
+     * @param distinctUsers
+     *            how many different users started them
+     */
+    record ConversationUsage(long total, long active, long distinctUsers) {
+    }
+
+    /** Usage counts for one agent — see {@link ConversationUsage}. */
+    ConversationUsage getConversationUsage(String agentId);
+
     List<String> getEndedConversationIds();
 
     // === HITL ===

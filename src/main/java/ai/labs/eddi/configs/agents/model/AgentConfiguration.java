@@ -269,6 +269,68 @@ public class AgentConfiguration {
     }
 
     /**
+     * Whether the people who maintain this agent may read the conversations others
+     * have with it. Absent or disabled — the default — keeps every conversation
+     * private to the person who had it, as it has always been.
+     *
+     * @since 6.5.0
+     */
+    private ConversationReview conversationReview;
+
+    public ConversationReview getConversationReview() {
+        return conversationReview;
+    }
+
+    public void setConversationReview(ConversationReview conversationReview) {
+        this.conversationReview = conversationReview;
+    }
+
+    /**
+     * Opt-in review of this agent's conversations by its maintainers — everyone who
+     * holds {@code EDIT} on the agent (its owner, people it was shared with at edit
+     * level, and the members of the team space it is filed in).
+     *
+     * <h3>Why an opt-in, and why it is announced</h3> A conversation is personal
+     * data of the person who had it. Letting whoever maintains an agent read it is
+     * useful — it is how an agent gets better — but it is a decision about other
+     * people's data, so it is off unless the agent's designer turns it on. When it
+     * is on, the Chat UI and the Manager's chat show the person chatting a notice
+     * before they type ({@code GET /agents/{id}/profile} carries it). Channels EDDI
+     * does not render — Slack, Teams, the {@code /v1} API, MCP clients — cannot
+     * show it, so an agent reachable there should say so itself, in its greeting.
+     * Only conversations started while the agent version they ran on had review
+     * enabled are readable: switching it on later does not expose what was said
+     * before anybody was told.
+     * <p>
+     * Every review read is logged with who read what. Reviewers can read; they
+     * cannot continue, delete or otherwise act on somebody else's conversation.
+     */
+    public static class ConversationReview {
+        private boolean enabled = false;
+        private String notice;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * What the person chatting is told. Absent uses a standard wording; a designer
+         * may replace it to name who reviews and why.
+         */
+        public String getNotice() {
+            return notice;
+        }
+
+        public void setNotice(String notice) {
+            this.notice = notice;
+        }
+    }
+
+    /**
      * Cryptographic identity for an agent. The public key is stored in the agent
      * configuration; the private key is in SecretsVault.
      *

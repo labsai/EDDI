@@ -359,7 +359,7 @@ class RestConversationStoreTest {
         @DisplayName("readRawConversationLog denies a foreign conversation and never loads it")
         void rawReadIsGuarded() throws Exception {
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationReader("conv-of-user-a");
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.readRawConversationLog("conv-of-user-a"));
@@ -371,7 +371,7 @@ class RestConversationStoreTest {
         @DisplayName("readSimpleConversationLog denies a foreign conversation and never loads it")
         void simpleReadIsGuarded() throws Exception {
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationReader("conv-of-user-a");
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.readSimpleConversationLog("conv-of-user-a", false, false, null));
@@ -405,7 +405,9 @@ class RestConversationStoreTest {
             restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
             restConversationStore.deleteConversationLog("conv-1", false);
 
-            verify(conversationAccessGuard, times(3)).requireConversationOwner("conv-1");
+            // Reads admit a reviewing maintainer; the delete stays owner-only.
+            verify(conversationAccessGuard, times(2)).requireConversationReader("conv-1");
+            verify(conversationAccessGuard, times(1)).requireConversationOwner("conv-1");
         }
     }
 

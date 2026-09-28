@@ -534,6 +534,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public ConversationUsage getConversationUsage(String agentId) {
+        Bson byAgent = Filters.eq(KEY_AGENT_ID, agentId);
+        long total = conversationCollectionDocument.countDocuments(byAgent);
+        long active = conversationCollectionDocument.countDocuments(Filters.and(byAgent, Filters.ne(KEY_CONVERSATION_STATE, ENDED.toString())));
+        long users = 0;
+        for (String ignored : conversationCollectionDocument.distinct("userId", byAgent, String.class)) {
+            users++;
+        }
+        return new ConversationUsage(total, active, users);
+    }
+
+    @Override
     public List<String> getEndedConversationIds() {
         List<String> ids = new ArrayList<>();
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))

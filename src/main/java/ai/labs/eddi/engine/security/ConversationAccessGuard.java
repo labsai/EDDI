@@ -10,9 +10,12 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
+
+import java.net.URI;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -44,6 +47,13 @@ public class ConversationAccessGuard {
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IConversationDescriptorStore conversationDescriptorStore;
+
+    /**
+     * Field-injected and optional, so the many tests that build this guard with its
+     * constructor keep working and simply have no review access.
+     */
+    @Inject
+    Instance<ConversationReviewPolicy> reviewPolicyInstance;
 
     @Inject
     public ConversationAccessGuard(SecurityIdentity identity,
@@ -120,6 +130,52 @@ public class ConversationAccessGuard {
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
             throw new ForbiddenException("Access denied: unable to verify conversation ownership");
         }
+    }
+
+    /**
+     * As {@link #requireConversationOwner}, but also admits somebody who maintains
+     * the agent the conversation ran on, when that agent version opted in to
+     * conversation review — see {@link ConversationReviewPolicy}.
+     * <p>
+     * For <b>reading</b> only. Continuing, deleting or otherwise acting on a
+     * conversation stays with its owner, so every write path keeps calling
+     * {@link #requireConversationOwner}. Each review read is logged naming the
+     * reader, because it is one person reading another's conversation.
+     */
+    public String requireConversationReader(String conversationId) {
+        try {
+            return requireConversationOwner(conversationId);
+        } catch (ForbiddenException denied) {
+            ConversationReviewPolicy policy = reviewPolicy();
+            if (policy == null) {
+                throw denied;
+            }
+            try {
+                var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+                if (descriptor != null && policy.mayReview(descriptor.getAgentResource())) {
+                    LOGGER.infof("[REVIEW] '%s' read conversation %s of agent %s (conversation review is enabled for it)",
+                            sanitize(identity.getPrincipal() == null ? null : identity.getPrincipal().getName()), sanitize(conversationId),
+                            sanitize(String.valueOf(descriptor.getAgentResource())));
+                    return descriptor.getUserId();
+                }
+            } catch (ResourceNotFoundException | ResourceStoreException e) {
+                LOGGER.debugf("Could not check review access to %s: %s", sanitize(conversationId), e.getMessage());
+            }
+            throw denied;
+        }
+    }
+
+    /**
+     * Whether the caller may review conversations that ran on this agent resource —
+     * the listing counterpart of {@link #requireConversationReader}.
+     */
+    public boolean canReview(URI agentResource) {
+        ConversationReviewPolicy policy = reviewPolicy();
+        return policy != null && policy.mayReview(agentResource);
+    }
+
+    private ConversationReviewPolicy reviewPolicy() {
+        return reviewPolicyInstance != null && reviewPolicyInstance.isResolvable() ? reviewPolicyInstance.get() : null;
     }
 
     /**
