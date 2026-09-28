@@ -266,12 +266,17 @@ public class UserDirectory {
      *             when nobody or more than one person matches
      */
     public String resolvePrincipal(String name) {
+        // "user:bob" and "bob" name the same person; a caller that passes the
+        // subject form must not end up with an owner literally called "user:bob".
+        String trimmed = name.trim();
+        if (trimmed.startsWith(Subjects.USER_PREFIX)) {
+            trimmed = Subjects.decode(trimmed.substring(Subjects.USER_PREFIX.length()).trim());
+        }
         if (!isActive()) {
             // Nothing is recorded, so nothing can be checked. The caller gets exactly
             // what it asked for, which is the behaviour before the directory existed.
-            return name.trim();
+            return trimmed;
         }
-        String trimmed = name.trim();
         Optional<DirectoryUser> exact = store.find(trimmed);
         if (exact.isPresent()) {
             return exact.get().principal();

@@ -221,7 +221,10 @@ class SpaceResourcesTest {
             String theirs = SpaceTenants.tenantFor(FINANCE);
             when(checker.referencedTenants("agent", 1)).thenReturn(Set.of(SpaceTenants.tenantFor(ENGINEERING), theirs));
 
-            var refusal = assertThrows(io.quarkus.security.ForbiddenException.class, () -> sut.requireMayDeploy("agent", 1));
+            // Quarkus's ForbiddenException, not the JAX-RS one imported above — both
+            // map to 403; asserting on RuntimeException keeps the two out of one file.
+            var refusal = assertThrows(RuntimeException.class, () -> sut.requireMayDeploy("agent", 1));
+            assertTrue(refusal.getClass().getSimpleName().contains("Forbidden"), refusal.getClass().getName());
             assertTrue(refusal.getMessage().contains(theirs));
         }
 

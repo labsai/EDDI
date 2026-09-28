@@ -109,7 +109,7 @@ public interface IRestResourceSharing {
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
     @Operation(summary = "Request access from the owner",
                description = "Notifies the owner. The response never reveals whether the resource exists or who owns it.")
-    @APIResponse(responseCode = "202", description = "{outcome: SENT | ALREADY_HAS_ACCESS | ALREADY_REQUESTED}")
+    @APIResponse(responseCode = "200", description = "{outcome: SENT | ALREADY_HAS_ACCESS | ALREADY_REQUESTED}")
     @APIResponse(responseCode = "429", description = "Too many access requests today.")
     Response requestAccess(@PathParam("id") String id,
                            @QueryParam("level")

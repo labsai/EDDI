@@ -155,6 +155,25 @@ class UserDirectoryTest {
             assertEquals(Subjects.user("anyone@example.com"), off.resolveSubject("anyone@example.com", ALICE, false));
             verify(store, never()).find(anyString());
         }
+
+        @Test
+        @DisplayName("a new owner named in subject form is stored as the principal, not as \"user:bob\"")
+        void principalFromSubjectForm() {
+            // The Manager sent "user:bob" as the new owner for a whole release; an
+            // owner id that is literally "user:bob" matches nobody's principal.
+            when(store.find("bob")).thenReturn(Optional.of(user("bob", "bob", null, false, "Bob")));
+
+            assertEquals("bob", directory.resolvePrincipal("user:bob"));
+            assertEquals("bob", directory.resolvePrincipal(" bob "));
+        }
+
+        @Test
+        @DisplayName("with the directory off, the subject prefix is still stripped from a new owner")
+        void principalFromSubjectFormWhenInactive() {
+            var off = new UserDirectory(store, identity, spaceContext, settings, executor, false, true);
+
+            assertEquals("bob", off.resolvePrincipal("user:bob"));
+        }
     }
 
     @Nested

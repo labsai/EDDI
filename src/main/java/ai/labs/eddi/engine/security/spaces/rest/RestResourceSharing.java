@@ -59,7 +59,9 @@ public class RestResourceSharing implements IRestResourceSharing {
                     "You have sent " + WorkspaceNotifications.MAX_REQUESTS_PER_DAY + " access requests in the last day. Try again later."))
                     .build();
         }
-        return Response.accepted(Map.of("outcome", outcome.name())).build();
+        // 200 with the outcome rather than 202: clients read the outcome, and a
+        // 202's body is commonly discarded as "accepted, nothing to say".
+        return Response.ok(Map.of("outcome", outcome.name())).build();
     }
 
     @Override

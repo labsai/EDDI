@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.security.spaces.notifications.WorkspaceNotifications;
 import ai.labs.eddi.engine.security.spaces.rest.RestResourceSharing;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -49,6 +51,8 @@ class RestResourceSharingTest {
 
     private ResourceSharingService service;
     private RestResourceSharing sut;
+    private UserDirectory directory;
+    private ResourceAccessGuard guard;
 
     @BeforeEach
     void setUp() {
@@ -57,9 +61,9 @@ class RestResourceSharingTest {
         // existed, which is what the normalisation tests below pin down. Resolution
         // against recorded users is covered in UserDirectoryTest.
         var settings = mock(WorkspaceSettings.class);
-        var directory = new UserDirectory(mock(IUserDirectoryStore.class), mock(SecurityIdentity.class), mock(SpaceContext.class), settings,
+        directory = new UserDirectory(mock(IUserDirectoryStore.class), mock(SecurityIdentity.class), mock(SpaceContext.class), settings,
                 mock(ManagedExecutor.class), false, true);
-        var guard = mock(ResourceAccessGuard.class);
+        guard = mock(ResourceAccessGuard.class);
         when(guard.callerSpaces()).thenReturn(CallerSpaces.ANONYMOUS);
         sut = new RestResourceSharing(service, directory, guard);
     }
@@ -320,5 +324,48 @@ class RestResourceSharingTest {
     void moveNeedsSpace() {
         assertThrows(BadRequestException.class, () -> sut.moveToSpace(RESOURCE_ID, " ", true, false));
         verify(service, never()).moveToSpace(anyString(), anyString(), anyBoolean(), anyBoolean());
+    }
+
+    @Nested
+    @DisplayName("access requests")
+    class AccessRequests {
+
+        private WorkspaceNotifications notifications;
+        private RestResourceSharing withNotifications;
+
+        @BeforeEach
+        void setUp() {
+            notifications = mock(WorkspaceNotifications.class);
+            withNotifications = new RestResourceSharing(service, directory, guard, notifications);
+        }
+
+        @Test
+        @DisplayName("the outcome comes back in a 200 body, which clients actually read")
+        void outcomeInBody() {
+            // It was a 202, and the Manager's ApiClient hands back no body for a
+            // 202 — so "you already have access" reached the page as "sent".
+            when(notifications.requestAccess(RESOURCE_ID, AccessLevel.VIEW, "please"))
+                    .thenReturn(WorkspaceNotifications.RequestOutcome.ALREADY_HAS_ACCESS);
+
+            var response = withNotifications.requestAccess(RESOURCE_ID, "view", "please");
+
+            assertEquals(200, response.getStatus());
+            assertEquals(Map.of("outcome", "ALREADY_HAS_ACCESS"), response.getEntity());
+        }
+
+        @Test
+        @DisplayName("a requester over the daily limit gets a 429 that says so")
+        void rateLimited() {
+            when(notifications.requestAccess(anyString(), any(), any())).thenReturn(WorkspaceNotifications.RequestOutcome.RATE_LIMITED);
+
+            assertEquals(429, withNotifications.requestAccess(RESOURCE_ID, "USE", null).getStatus());
+        }
+
+        @Test
+        @DisplayName("ownership cannot be requested")
+        void ownRefused() {
+            assertThrows(BadRequestException.class, () -> withNotifications.requestAccess(RESOURCE_ID, "OWN", null));
+            verify(notifications, never()).requestAccess(anyString(), any(), any());
+        }
     }
 }
