@@ -135,14 +135,26 @@ will pass as `mongodb.rootPassword` at the prompt:
 kubectl exec -it -n eddi eddi-mongodb-0 -- mongosh admin --quiet \
   --eval 'db.createUser({user: "eddi", pwd: passwordPrompt(), roles: ["root"]})'
 
+# Release WITH OIDC (eddi.oidc.enabled=true):
 helm upgrade eddi ./helm/eddi --namespace eddi --reuse-values \
   --set mongodb.rootPassword='<the same password>' \
   --set mongodb.authMigrated=true
+
+# Release WITHOUT OIDC: --reuse-values cannot carry values the old chart never
+# had, so the two high-value opt-ins must be added here too, or the chart
+# refuses to render (see Option C).
+helm upgrade eddi ./helm/eddi --namespace eddi --reuse-values \
+  --set mongodb.rootPassword='<the same password>' \
+  --set mongodb.authMigrated=true \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true
 ```
 
 (`eddi-mongodb-0` and `user: "eddi"` assume release `eddi` and the default
 `mongodb.rootUsername`; the render error prints the exact names for yours.)
-Existing data is untouched.
+Existing data is untouched. Leave the opt-ins off an OIDC release: OIDC already
+satisfies the guard there, and the opt-ins are escape hatches, not settings to
+carry by default.
 
 ## Deployment Options
 

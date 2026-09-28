@@ -156,4 +156,5 @@ Follow-ups from adversarial review of the change above:
   (`mongodb.authMigrated`, procedure in [`docs/kubernetes.md`](../../docs/kubernetes.md)).
   MongoDB credentials are URL-encoded in the connection string.
 - `auto-approve-copilot.yml` also treats a rename **out of** `.github/` as a CI
-  change (`previous_filename`).
+  change (`previous_filename`), and fails closed when the changed-file list hits
+  the API's 3,000-file cap.

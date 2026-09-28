@@ -237,6 +237,15 @@ jobs:
                 // would otherwise read as a change outside CI config entirely.
                 const touchesGithub = f => [f.filename, f.previous_filename]
                   .some(p => typeof p === 'string' && p.startsWith('.github/'));
+                // The files endpoint stops at 3,000 entries, in no guaranteed order.
+                // At that size the list may be missing the very .github/** path the
+                // check below looks for, so fail closed instead of trusting it.
+                const LIST_FILES_CAP = 3000;
+                if (changedFiles.length >= LIST_FILES_CAP) {
+                  core.info(`PR #${number}: ${changedFiles.length} changed files reaches the list-files cap `
+                    + `(${LIST_FILES_CAP}); the .github/** check cannot be trusted. Leaving to a human reviewer.`);
+                  continue;
+                }
                 if (changedFiles.some(touchesGithub)) {
                   core.info(`PR #${number}: modifies .github/** (CI/workflow config); leaving to a human reviewer.`);
                   continue;

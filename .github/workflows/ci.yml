@@ -545,9 +545,12 @@ jobs:
           # The password sits in URI userinfo, and the recommended base64 generator
           # emits / and +. Rendered raw, such a password broke the connection string.
           echo "--- MongoDB credentials are percent-encoded in the connection string"
-          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
-            --set 'mongodb.rootPassword=a/b+c@d' "${optin[@]}" \
-            | grep -q 'mongodb://eddi:a%2Fb%2Bc%40d@' \
+          # Captured first, then matched: piping helm into `grep -q` lets grep close
+          # the pipe on the first match, and under pipefail a SIGPIPE'd helm would
+          # fail the step even though the URI was right.
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
+            --set 'mongodb.rootPassword=a/b+c@d' "${optin[@]}")
+          grep -qF 'mongodb://eddi:a%2Fb%2Bc%40d@' <<<"$rendered" \
             || { echo "::error::mongodb.rootPassword is not URL-encoded in mongodb.connectionString"; exit 1; }
 
           echo "--- PostgreSQL + in-chart Keycloak"
