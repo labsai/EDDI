@@ -1,4 +1,4 @@
-## 🧪 test(manager): no sonner timer outlives a test (2026-09-28)
+## 🧪 test(manager): no sonner callback outlives a test (2026-09-28)
 
 **Repo:** EDDI (`test/manager-toast-timer-leak`)
 
@@ -27,26 +27,36 @@ ended with **1** still pending at teardown.
 ### What changed
 
 - New [`src/test/drain-toasts.ts`](../../ui/manager/src/test/drain-toasts.ts), awaited by the
-  shared `afterEach` in `setup.ts` before `cleanup()`. `drainToasts()` does four things:
-  - It first lets a pending insertion land. CodeRabbit caught this case on the PR: a toast created
-    in a test's last moments is in sonner's store but not yet in the DOM.
-  - It dismisses every toast inside `act`.
-  - It waits until sonner has removed them from the DOM, which happens only after the removal timer
-    has fired.
-  - Under fake timers it advances the clock instead, because RTL's `waitFor` would otherwise poll a
+  shared `afterEach` in `setup.ts` before `cleanup()`. Every deferred callback comes from a
+  *mounted Toaster's* subscription, so `drainToasts()` gates on the Toaster, not on what it is
+  showing.
+  - **With a Toaster mounted, it drains all three paths:** one macrotask (queued insertions),
+    `toast.dismiss()` inside `act`, one animation frame (dismissals), then a wait until no toast
+    is left in the DOM (the 200 ms removals).
+  - **With none mounted,** nothing subscribes, so nothing can be pending; it only clears sonner's
+    module-global store.
+  - **Under fake timers** it advances the clock, because RTL's `waitFor` would otherwise poll a
     frozen clock.
-
-  The gate is sonner's own store, which `toast()` updates synchronously, together with the DOM. A
-  test that never toasted therefore pays nothing. The drain also clears the module-global store
-  between tests.
+  - **Why the Toaster, not the visible toast:** CodeRabbit found three cases on the PR where a
+    callback is in flight with nothing visible. The first version of this fix gated on the DOM and
+    missed all three:
+    - a toast created in a test's last moments;
+    - a toast created and dismissed in the same tick;
+    - a toast aimed at another `toasterId`, which a Toaster never renders but still schedules a
+      dismissal frame for.
 - [`src/test/__tests__/drain-toasts.test.tsx`](../../ui/manager/src/test/__tests__/drain-toasts.test.tsx)
-  covers three cases:
-  - a toast created synchronously right before the drain;
+  tests the actual contract: no sonner callback outlives the drain. It wraps `setTimeout`,
+  `clearTimeout`, `requestAnimationFrame` and `cancelAnimationFrame`, tracks the callbacks
+  scheduled from sonner's code (by stack), and asserts none is still pending after
+  `drainToasts()`. It covers:
+  - each of the three cases above;
   - a toast already on screen;
-  - toasts in the store with no Toaster mounted.
+  - a store with no Toaster mounted;
+  - that the Toaster selector still matches, so a sonner upgrade that changes the container fails
+    loudly.
 
-  Each checks that nothing changes after the drain returns. Reverting to the first version of the
-  fix (DOM-only gate, no insertion flush) fails 2 of the 3.
+  Run against the previous version, the two newest cases fail, naming the leaked `setTimeout(0)`
+  and `requestAnimationFrame`.
 - `resource-detail-save-not-live.test.tsx`: its own undrained `toast.dismiss()` is gone.
 
 This covers all four files that render `<Toaster>` (`resource-detail-save-not-live`,
