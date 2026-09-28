@@ -120,14 +120,14 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 # operator's OpenWeatherMap key never reaches the model or the log, so it needs a
 # stand-in key, held in a constant whose name matches generic-api-key. Not a
 # credential: it is injected by reflection and only ever compared as a string.
-ae0653cbcacdb0d85bc1b3f6964c8fd4a28d7b84:src/test/java/ai/labs/eddi/modules/llm/tools/impl/WeatherToolExtendedTest.java:generic-api-key:349
+83925a9d79578ba48035d498809a9170cce6bc9c:src/test/java/ai/labs/eddi/modules/llm/tools/impl/WeatherToolExtendedTest.java:generic-api-key:349
 
 # PR #838 (fix/secret-scope-vault): the same fixture token in two secret-scope
 # tests, standing in for a value a user enters under scope "secret" so the tests
 # can assert it is vaulted and scrubbed, never stored in plaintext. Not a
 # credential: the vault in these tests is a mock and nothing authenticates.
-879d661e347cc6834e5290d6dc423f898ca006c0:src/test/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtilsSecretScopeTest.java:generic-api-key:46
-879d661e347cc6834e5290d6dc423f898ca006c0:src/test/java/ai/labs/eddi/modules/properties/impl/PropertySetterTaskSecretScopePathsTest.java:generic-api-key:57
+17dc35a03839d54d53899cbcd45b0f531d2dacd9:src/test/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtilsSecretScopeTest.java:generic-api-key:46
+17dc35a03839d54d53899cbcd45b0f531d2dacd9:src/test/java/ai/labs/eddi/modules/properties/impl/PropertySetterTaskSecretScopePathsTest.java:generic-api-key:57
 
 # PR #847 (fix/deployment-defaults): install.sh probes a running Grafana with the
 # factory-default admin/admin login and, if it still answers, rotates it to the
@@ -135,10 +135,10 @@ ae0653cbcacdb0d85bc1b3f6964c8fd4a28d7b84:src/test/java/ai/labs/eddi/modules/llm/
 # those two requests (the probe and the password change), in the two installer
 # paths that do this (already-running and fresh install). Not a secret: it is
 # Grafana's published default, and the code exists to retire it.
-15f3a5c6c5437e6a32835a10b0f358a042852423:install.sh:curl-auth-user:1391
-15f3a5c6c5437e6a32835a10b0f358a042852423:install.sh:curl-auth-user:1398
-8c177f296f257966cb6f826f1648d6656550da76:install.sh:curl-auth-user:1798
-8c177f296f257966cb6f826f1648d6656550da76:install.sh:curl-auth-user:1805
+d3314417def3ce358c67a97523f222dcd043c0ae:install.sh:curl-auth-user:1391
+d3314417def3ce358c67a97523f222dcd043c0ae:install.sh:curl-auth-user:1398
+a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1798
+a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 
 # PR #750 (fix/e2e-test-findings): fake keys in two audit-redaction test fixtures,
 # assigned to a constant whose name matches generic-api-key. Not credentials. The
@@ -153,4 +153,4 @@ ae0653cbcacdb0d85bc1b3f6964c8fd4a28d7b84:src/test/java/ai/labs/eddi/modules/llm/
 # name matches generic-api-key. Not a credential. A later commit of the same PR
 # replaced it with a low-entropy value under another name; this entry covers the
 # commit that introduced it, which stays in the scan range.
-062e1d4d540cddae5675c64d84eece16e09688c1:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
+8f0cf257a751dbfad5e5795dce125a8eef2d521e:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
