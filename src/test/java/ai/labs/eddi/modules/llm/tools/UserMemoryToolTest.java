@@ -56,6 +56,43 @@ class UserMemoryToolTest {
         verifyNoInteractions(store);
     }
 
+    /**
+     * H9c: a model writing {@code _gdpr_processing_restricted=true} locked its own
+     * user out with a GDPR 403 no admin had applied; as a global entry the same
+     * call overwrote an admin's real restriction row in place.
+     */
+    @Test
+    void rememberFact_refusesAReservedGdprKey() {
+        String result = tool.rememberFact(" _gdpr_processing_restricted ", "true", "fact", "global");
+
+        assertTrue(result.contains("reserved"), result);
+        verifyNoInteractions(store);
+    }
+
+    /**
+     * H9b: the tool writes straight to the store mid-turn, so a turn cancelled by a
+     * GDPR erasure would otherwise recreate memories while its tool loop wound
+     * down.
+     */
+    @Test
+    void rememberFact_writesNothingOnceTheTurnIsCancelled() {
+        var cancelledTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, () -> true);
+
+        String result = cancelledTool.rememberFact("favorite_color", "blue", "preference", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        verifyNoInteractions(store);
+    }
+
+    /** H9c: nor may a model lift a restriction by forgetting the row. */
+    @Test
+    void forgetFact_refusesAReservedGdprKey() {
+        String result = tool.forgetFact("_gdpr_processing_restricted");
+
+        assertTrue(result.contains("reserved"), result);
+        verifyNoInteractions(store);
+    }
+
     @Test
     void rememberFact_shouldRejectKeyTooLong() {
         String longKey = "a".repeat(101);

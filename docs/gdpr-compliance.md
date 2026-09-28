@@ -32,6 +32,7 @@ the cascade actually finished:
   "groupConversationsDeleted": 1,
   "sharedArtifactsDeleted": 0,
   "schedulesDeleted": 0,
+  "connectionGrantsDeleted": 1,
   "failedSteps": [],
   "complete": true,
   "completedAt": "2026-04-02T15:30:00Z"
@@ -47,13 +48,15 @@ the cascade actually finished:
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
 >
-> The step names are `userMemories`, `restrictionCache`, `conversationIdLookup`,
+> The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
+> `userMemories`, `restrictionCache`, `conversationIdLookup`,
 > `attachments`, `hitlToolJournal`, `conversationDescriptors`,
 > `conversationCheckpoints`, `conversations`, `conversationMappingIntents`,
 > `conversationMappings`, `conversationMappingCache`, `groupConversations`,
-> `sharedArtifacts`, `schedules`, `databaseLogs` and `auditLedger`, and they name
-> the stores in the list below plus the two cache evictions and the two lookups
-> the cascade needs to reach them. `conversationIdLookup` is the worst one to
+> `sharedArtifacts`, `schedules`, `oauthStates`, `connectionGrants`, `userMemoriesResweep`,
+> `databaseLogs` and `auditLedger`, and they name the stores in the list below
+> plus the two cache evictions, the two lookups the cascade needs to reach them,
+> and the two signals that stop in-flight work first. `conversationIdLookup` is the worst one to
 > see: the id resolution the per-conversation sweeps depend on failed, so those
 > sweeps ran over nothing and their zero counts mean "not attempted", not
 > "nothing to do".
@@ -63,7 +66,21 @@ reports the same outcome: `status` is `"completed"` only when every step
 succeeded and `"partially_completed"` otherwise, alongside the same `complete`
 and `failedSteps`.
 
+`__service__` (the owner of service-bound connection grants) is a reserved system
+principal, not a user: erasing or exporting it is refused with 400.
+
 **What happens:**
+0. The user's in-flight work on the node serving the request is **stopped first**:
+   running conversation turns are cancelled (they then skip their write-back to
+   user memory and their snapshot is discarded) and running group discussions are
+   cancelled immediately. Without this, a turn or discussion still running wrote
+   the data back seconds after the erasure reported success. Work running on
+   another replica is not reachable from here; it is stopped by the stores
+   refusing to recreate a deleted conversation or group discussion, and step 12
+   removes any memory it managed to write in the meantime. From this point the
+   node's audit ledger also writes the user's pseudonym instead of their id for an
+   hour, so audit entries that cancelled work still flushes while it unwinds — or
+   that were already queued — do not land raw after step 14.
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
@@ -74,8 +91,11 @@ and `failedSteps`.
 8. Group conversation transcripts — **permanently deleted**
 9. Shared artifacts owned by the user — **permanently deleted**
 10. Schedules owned by the user — **permanently deleted**
-11. Database logs — userId **pseudonymized** (SHA-256 hash)
-12. Audit ledger — userId **pseudonymized** (SHA-256 hash)
+11. Pending OAuth authorization flows the user started are invalidated first (a
+    callback completing afterwards would otherwise mint a new grant), then the OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
+12. User memories — **re-swept**, for writes that landed while the cascade ran
+13. Database logs — userId **pseudonymized** (SHA-256 hash)
+14. Audit ledger — userId **pseudonymized** (SHA-256 hash)
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -93,6 +113,8 @@ The export includes all user data in a structured, machine-readable JSON format:
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —
   the binaries themselves are not inlined and must be fetched via the attachment
   download API
+- Linked OAuth accounts (`connectionGrants`: tenant, connection, status, scopes and
+  dates) — never token material
 
 > **Check `complete` before handing the bundle to the data subject.** The endpoint
 > answers **200** only when the bundle covers everything EDDI holds on the user,
@@ -150,7 +172,13 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - New conversation creation is blocked → returns **403 Forbidden**
 - Message processing (`say`) is blocked → returns **403 Forbidden**
 - Existing data is preserved (not deleted)
-- Restriction status is stored as a user memory entry
+- Restriction status is stored as a user memory entry under the reserved key
+  `_gdpr_processing_restricted` (category `gdpr`). Keys starting with `_gdpr_` are
+  reserved for this bookkeeping: agents (`rememberFact`/`forgetFact`), property
+  setters, the user-memory and properties REST endpoints and the MCP memory tools
+  all refuse to write or delete them, the "delete all memories" surfaces keep them,
+  and retention and Dream maintenance never touch them. Only this admin endpoint
+  sets or lifts a restriction, and lifting removes every row under the key
 - All restriction/unrestriction events are logged in the audit ledger
 
 **Caching the restriction flag — `eddi.gdpr.restriction-cache-ttl-seconds` (default `0`, i.e. no caching)**
