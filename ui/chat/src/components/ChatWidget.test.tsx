@@ -732,6 +732,8 @@ describe("ChatWidget — resume after approval", () => {
         return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
       }
       if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      // Not a conversation read: kept out of the count below.
+      if (href.includes("/profile")) return new Response("{}", { status: 200 });
       if (href.includes("/approval-status")) {
         approvalPolls += 1;
         // First poll: still paused. Second: settled, so the widget refreshes.
@@ -1024,5 +1026,62 @@ describe("ChatWidget — New Conversation during a live stream", () => {
     const fresh = screen.getByTestId("chat-input");
     fireEvent.change(fresh, { target: { value: "second turn" } });
     await waitFor(() => expect(screen.getByTestId("chat-send")).toBeEnabled());
+  });
+});
+
+describe("ChatWidget — conversation review notice", () => {
+  const snapshot = {
+    conversationState: "READY",
+    conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hello!"] }], timestamp: "2026-07-21T10:00:00Z" }],
+  };
+
+  function backendWithProfile(profile: Response) {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) return profile.clone();
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/descriptorstore/") || href.includes("/agentstore/")) {
+        return new Response(JSON.stringify({ name: "Descriptor Name" }), { status: 200 });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+    return calls;
+  }
+
+  it("tells the person, before they type, that the maintainers may read the chat", async () => {
+    backendWithProfile(
+      new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this conversation." }), {
+        status: 200,
+      }),
+    );
+
+    renderWidget();
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent(
+      "The support team may read this conversation.",
+    );
+  });
+
+  it("shows no notice for an agent that did not opt in", async () => {
+    backendWithProfile(new Response(JSON.stringify({ name: "Support", reviewNotice: null }), { status: 200 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the descriptor for the name on an EDDI without the profile endpoint", async () => {
+    const calls = backendWithProfile(new Response(JSON.stringify({ message: "not found" }), { status: 404 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.includes("/descriptorstore/") || c.includes("/agentstore/"))).toBe(true));
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
   });
 });

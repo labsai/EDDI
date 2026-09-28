@@ -26,6 +26,7 @@ import {
   undoConversation,
   redoConversation,
   fetchAgentDescriptor,
+  fetchAgentProfile,
   rerunLastStep,
   setBaseUrl,
 } from "@/api/chat-api";
@@ -543,14 +544,29 @@ export function ChatWidget() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Fetch agent name ────────────────────────── */
+  /* ─── Fetch agent name and review notice ─────── */
   useEffect(() => {
-    if (isDemo || !agentId || state.config.showAgentName === false) return;
-    fetchAgentDescriptor(agentId).then((desc) => {
-      if (desc.name) {
-        dispatch({ type: "SET_AGENT_NAME", name: desc.name });
-      }
-    }).catch(() => { /* swallow */ });
+    if (isDemo || !agentId) return;
+    const showName = state.config.showAgentName !== false;
+    fetchAgentProfile(agentId, environment ?? "production")
+      .then((profile) => {
+        // The notice is shown whatever the name setting: it is about the
+        // person's data, not decoration.
+        dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+        if (showName && profile?.name) {
+          dispatch({ type: "SET_AGENT_NAME", name: profile.name });
+        }
+      })
+      .catch(() => {
+        // An EDDI older than the profile endpoint: the name still comes from the
+        // descriptor, and there is no review to announce.
+        if (!showName) return;
+        fetchAgentDescriptor(agentId).then((desc) => {
+          if (desc.name) {
+            dispatch({ type: "SET_AGENT_NAME", name: desc.name });
+          }
+        }).catch(() => { /* swallow */ });
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, isDemo]);
 
@@ -1166,6 +1182,11 @@ export function ChatWidget() {
   return (
     <div className="chat-root">
       <ChatHeader />
+      {state.reviewNotice && (
+        <div className="chat-review-notice" role="note" data-testid="chat-review-notice">
+          {state.reviewNotice}
+        </div>
+      )}
 
       <div
         className="chat-messages"

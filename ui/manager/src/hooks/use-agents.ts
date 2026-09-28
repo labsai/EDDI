@@ -16,6 +16,7 @@ import {
   type Agent,
   type AgentDescriptor,
   type EnvironmentStatus,
+  type Ownership,
   parseResourceUri,
 } from "@/lib/api/agents";
 
@@ -33,12 +34,12 @@ export function useAgentDescriptors(
 }
 
 /** Infinite-scroll agent list with offset-based pagination */
-export function useInfiniteAgentDescriptors(filter = "", space = "") {
+export function useInfiniteAgentDescriptors(filter = "", space = "", ownership: Ownership = "") {
   return useInfiniteQuery({
-    // The space is part of the key: switching workspace must refetch rather
-    // than re-render a cached page belonging to the previous one.
-    queryKey: [...agentKeys.descriptorsInfinite(filter), space],
-    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
+    // The space and ownership are part of the key: switching either must
+    // refetch rather than re-render a cached page belonging to the previous one.
+    queryKey: [...agentKeys.descriptorsInfinite(filter), space, ownership],
+    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space, ownership),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more

@@ -1,3 +1,5 @@
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -137,7 +139,7 @@ export function ResourceDetailPage() {
   }, [currentVersion, versionDescriptors]);
 
   // Data hooks
-  const { data, isLoading, isError, refetch } = useResource(
+  const { data, isLoading, isError, error: resourceError, refetch } = useResource(
     type ?? "",
     id ?? "",
     currentVersion ?? 0
@@ -542,7 +544,11 @@ export function ResourceDetailPage() {
         </div>
       )}
 
-      {(isError || isVersionsError) && !isLoading && !isVersionsLoading && (
+      {isForbidden(resourceError) && !isLoading && (
+        <RequestAccessPanel resourceId={id!} />
+      )}
+
+      {(isError || isVersionsError) && !isForbidden(resourceError) && !isLoading && !isVersionsLoading && (
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetch()}

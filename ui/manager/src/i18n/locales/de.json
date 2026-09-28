@@ -75,7 +75,8 @@
     "workforce": "Belegschaft",
     "monitoring": "Gesprächsüberwachung",
     "analytics": "Auswertungen",
-    "connections": "Verbindungen"
+    "connections": "Verbindungen",
+    "workspaces": "Arbeitsbereiche"
   },
   "theme": {
     "light": "Hell",
@@ -444,7 +445,18 @@
     "toolPauseReasonPlaceholder": "z. B. Freigabe erforderlich für {toolNames}",
     "toolPendingMessage": "Endbenutzer-Nachricht während der Pause ({toolNames} erlaubt)",
     "toolPendingMessagePlaceholder": "z. B. Warte auf menschliche Freigabe für {toolNames}…",
-    "toolInGroupTurns": "Innerhalb eines Gruppenzugs wird der gesperrte Tool-Aufruf eines Mitglieds automatisch abgelehnt (REJECT)."
+    "toolInGroupTurns": "Innerhalb eines Gruppenzugs wird der gesperrte Tool-Aufruf eines Mitglieds automatisch abgelehnt (REJECT).",
+    "review": {
+      "title": "Nutzung & Gesprächseinsicht",
+      "total": "Gespräche",
+      "active": "Gerade aktiv",
+      "users": "Personen",
+      "description": "Gespräche sind nur für die Person sichtbar, die sie geführt hat. Schalten Sie dies ein, damit alle, die diesen Agenten bearbeiten dürfen, seine Gespräche lesen können — um zu sehen, was gefragt wird, und ihn zu verbessern. Der Chat weist die Personen darauf hin, bevor sie schreiben.",
+      "enable": "Betreuer dieses Agenten dürfen seine Gespräche lesen",
+      "notice": "Was der Chat den Personen mitteilt (leer lassen für den Standardtext)",
+      "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
+      "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
+    }
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -747,7 +759,8 @@
     "errorConversationEnded": "Dieses Gespräch ist beendet.",
     "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
     "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
-    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut."
+    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut.",
+    "reviewNoticeLabel": "Gesprächseinsicht"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -4868,7 +4881,9 @@
       "published": "Veröffentlicht",
       "shared": "Geteilt",
       "sharedTitle": "Gehört {{owner}} · in {{space}}",
-      "ownedBy": "Gehört {{owner}}"
+      "ownedBy": "Gehört {{owner}}",
+      "internal": "Alle Angemeldeten",
+      "sharedBy": "Geteilt von {{owner}}"
     },
     "level": {
       "use": "Darf chatten",
@@ -4886,7 +4901,9 @@
       "space": "Arbeitsbereich",
       "spaceHint": "Alle im Arbeitsbereich dieser Ressource.",
       "published": "Veröffentlicht",
-      "publishedHint": "Alle mit Zugang zu dieser Installation."
+      "publishedHint": "Alle mit Zugang zu dieser Installation können es lesen — auch anonyme Chat-Besucher.",
+      "internal": "Alle Angemeldeten",
+      "internalHint": "Alle, die sich anmelden, können damit chatten. Die Konfiguration bleibt privat. Anonym nicht erreichbar."
     },
     "share": {
       "title": "Teilen",
@@ -4894,7 +4911,7 @@
       "visibility": "Sichtbarkeit",
       "peopleAndTeams": "Personen und Teams",
       "subjectLabel": "Person oder Team",
-      "subjectPlaceholder": "name@example.com oder team:engineering",
+      "subjectPlaceholder": "Name, E-Mail oder Team",
       "levelLabel": "Zugriffsstufe",
       "add": "Teilen",
       "shared": "Geteilt",
@@ -4920,7 +4937,13 @@
       "cascadeRevoked_one": "Aus {{count}} Ressource entfernt",
       "andMore_one": "und {{count}} weitere",
       "cascadeRevoked_other": "Aus {{count}} Ressourcen entfernt",
-      "andMore_other": "und {{count}} weitere"
+      "andMore_other": "und {{count}} weitere",
+      "unknownGrant": "Niemand, der sich anmeldet, passt dazu — diese Freigabe erreicht niemanden. Entfernen Sie sie und teilen Sie erneut.",
+      "copyFailed": "Kopieren fehlgeschlagen — markieren Sie die Adresse und kopieren Sie sie selbst.",
+      "chatLink": "Chat-Link",
+      "copied": "Kopiert",
+      "copy": "Kopieren",
+      "chatLinkHint": "Funktioniert für alle, mit denen der Agent mindestens mit „Darf chatten“ geteilt ist."
     },
     "emptySpace": "Keine Agenten in diesem Arbeitsbereich",
     "emptySpaceDescription": "In anderen Arbeitsbereichen gibt es möglicherweise Agenten, die Sie sehen können.",
@@ -4938,12 +4961,106 @@
       "warning": "Dies ersetzt den aktuellen Eigentümer ({{owner}}). Er verliert die Kontrolle über diese Ressource.",
       "cascade_one": "Eigentümer bei {{count}} Ressource geändert",
       "cascade_other": "Eigentümer bei {{count}} Ressourcen geändert"
-    }
+    },
+    "notifications": {
+      "granted": "Zugriff für {{name}} gewährt",
+      "labelUnread_one": "Benachrichtigungen — {{count}} ungelesen",
+      "labelUnread_other": "Benachrichtigungen — {{count}} ungelesen",
+      "label": "Benachrichtigungen",
+      "markAll": "Alle als gelesen markieren",
+      "empty": "Nichts Neues. Freigaben für Sie und Zugriffsanfragen erscheinen hier.",
+      "unnamed": "eine unbenannte Ressource",
+      "requested": "{{who}} bittet um „{{level}}“-Zugriff auf {{what}}",
+      "shared": "{{who}} hat {{what}} mit Ihnen geteilt — {{level}}",
+      "grant": "Gewähren",
+      "openChat": "Chat öffnen",
+      "open": "Öffnen",
+      "dismiss": "Verwerfen"
+    },
+    "request": {
+      "alreadyHas": "Sie haben diesen Zugriff bereits — laden Sie die Seite neu.",
+      "chatOnlyTitle": "Sie können mit diesem Agenten chatten",
+      "title": "Sie haben keinen Zugriff darauf",
+      "chatOnly": "Er wurde zum Chatten mit Ihnen geteilt, daher bleibt seine Konfiguration privat.",
+      "subtitle": "Es ist möglicherweise privat oder nur mit anderen Personen geteilt. Sie können Zugriff anfragen.",
+      "sent": "Anfrage gesendet. Falls dies existiert und einen Eigentümer hat, sieht er sie in seinen Benachrichtigungen — und sobald er den Zugriff gewährt, sehen Sie es auch.",
+      "messagePlaceholder": "Wofür benötigen Sie es? (optional)",
+      "message": "Nachricht an den Eigentümer",
+      "action": "Zugriff anfragen"
+    },
+    "move": {
+      "done": "Verschoben",
+      "title": "In ein Team verschieben",
+      "team": "Team",
+      "action": "Verschieben",
+      "hint": "Alle im Team können es dann finden und bearbeiten. Sie bleiben Eigentümer — nur Sie können es löschen oder weiter teilen.",
+      "cascade_one": "{{count}} Ressource verschoben",
+      "cascade_other": "{{count}} Ressourcen verschoben"
+    },
+    "preview": {
+      "title_one": "Diese Änderung betrifft {{count}} Ressource",
+      "title_other": "Diese Änderung betrifft {{count}} Ressourcen",
+      "confirm": "Auf alle anwenden"
+    },
+    "ownership": {
+      "mine": "Meine",
+      "shared": "Mit mir geteilt",
+      "any": "Alles, was ich sehen kann",
+      "label": "Anzeigen"
+    },
+    "create": {
+      "default": "Ihrem Standard-Arbeitsbereich",
+      "hint": "Neue Elemente werden in {{space}} erstellt."
+    },
+    "emptyShared": "Bisher wurde nichts mit Ihnen geteilt",
+    "emptySharedDescription": "Wenn jemand aus dem Kollegium einen Agenten mit Ihnen oder Ihrem Team teilt, erscheint er hier — und in Ihren Benachrichtigungen.",
+    "showEverything": "Alles anzeigen, was ich sehen kann"
   },
   "connectionRef": {
     "wrapped": "Eine Verbindung liefert den gesamten Header-Wert inklusive Schema. Verwenden Sie ${connection:name} allein und setzen Sie „Bearer “ stattdessen in den Header-Wert der Verbindung.",
     "headerMismatch": "Diese Verbindung sendet ihre Zugangsdaten als „{{expected}}“, also muss der Header so heißen – sonst zeigt die Konfiguration einen Namen und die Anfrage trägt einen anderen.",
     "refusedInRequest": "${connection:…} wird in Pfad, Query-Parameter oder Body abgelehnt – Zugangsdaten in einer URL landen in jedem Proxy-Log, und im Body werden sie nicht gelesen. Verweisen Sie stattdessen aus einem Header auf die Verbindung.",
     "refusedInModel": "Sprachmodelle, Embeddings und Vektorspeicher akzeptieren kein ${connection:…}: Eine Verbindung wird in einen ganzen Header aufgelöst, diese brauchen aber ein nacktes Geheimnis. Verwenden Sie hier ${vault:…}."
+  },
+  "workspacesPage": {
+    "title": "Arbeitsbereiche",
+    "subtitle": "Ihre Arbeitsbereiche, die darin gespeicherten Geheimnisse und Variablen und wie neue Arbeit geteilt wird.",
+    "notEnforced": "Arbeitsbereiche werden in dieser Installation nicht durchgesetzt, daher sieht jeder alles. Ein Betreiber aktiviert sie mit eddi.workspaces.enabled=true.",
+    "yourSpaces": "Ihre Arbeitsbereiche",
+    "yourSpacesHint": "Jeder Arbeitsbereich hat eigene Geheimnisse und Variablen. Nur seine Mitglieder können sie sehen oder ändern, und nur ein Mitglied kann einen Agenten bereitstellen, der sie verwendet.",
+    "referenceCopied": "Referenz kopiert",
+    "copyReference": "Referenz zur Verwendung in einem Agenten kopieren",
+    "secretStored": "Geheimnis gespeichert",
+    "secrets": "Geheimnisse",
+    "noSecrets": "Noch keine Geheimnisse in diesem Arbeitsbereich",
+    "deleteNamed": "{{name}} löschen",
+    "secretName": "Name, z. B. openai-key",
+    "secretValue": "Wert — verschlüsselt gespeichert, nie wieder angezeigt",
+    "add": "Hinzufügen",
+    "deleteSecretTitle": "Dieses Geheimnis löschen?",
+    "deleteSecretDescription": "Agenten, die es verwenden, funktionieren nicht mehr, bis es erneut gespeichert wird. Dies kann nicht rückgängig gemacht werden.",
+    "variableStored": "Variable gespeichert",
+    "variables": "Variablen",
+    "noVariables": "Noch keine Variablen in diesem Arbeitsbereich",
+    "variableName": "Name, z. B. model",
+    "variableValue": "Wert",
+    "pinned": "Festgelegt durch {{property}}",
+    "stored": "Hier gesetzt",
+    "default": "Standard",
+    "settings": "Einstellungen",
+    "settingsHint": "Werden sofort wirksam, auf jeder Replik innerhalb von fünf Sekunden. Ob Arbeitsbereiche durchgesetzt werden und welcher Token-Claim die Teams enthält, sind Starteinstellungen und werden nur zur Information angezeigt.",
+    "enforcing": "Durchgesetzt",
+    "enforcedYes": "Ja",
+    "enforcedNo": "Nein",
+    "groupsClaim": "Teams stammen aus dem Token-Claim",
+    "defaultSpace": "Wo neue Arbeit standardmäßig landet",
+    "defaultSpacePlaceholder": "Leer: der eigene Arbeitsbereich jeder Person — oder ein Teamname",
+    "defaultSpaceHelp": "Ein Teamname macht die Installation teamorientiert: Kolleginnen und Kollegen sehen die Arbeit der anderen, sofern sie nicht privat gemacht wird. Der von einer Person ausgewählte Arbeitsbereich hat immer Vorrang.",
+    "legacy": "Ressourcen, die erstellt wurden, bevor Eigentum erfasst wurde",
+    "legacyShared": "Für alle sichtbar — nach einem Upgrade verschwindet nichts",
+    "legacyAdminOnly": "Nur für Administratoren sichtbar — sobald Eigentümer zugewiesen wurden",
+    "lastChanged": "Zuletzt geändert von {{who}}",
+    "neverChanged": "Hier noch nicht geändert",
+    "saved": "Einstellungen gespeichert"
   }
 }

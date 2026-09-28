@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";
+import { NotificationBell } from "@/components/workspaces/notification-bell";
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -268,6 +269,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           operator sits outside the tour target — the tour step is about theme
           and language, not about the operator. */}
       <div className="flex min-w-0 items-center gap-2">
+        <NotificationBell />
         <OperatorDrawer />
 
         <div className="flex items-center gap-2" data-tour="topbar-personalize">

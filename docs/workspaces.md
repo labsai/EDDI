@@ -24,8 +24,10 @@ Two switches, and they mean different things.
 | `authorization.enabled` | tracks `quarkus.oidc.tenant-enabled` | Authentication and role checks. Ownership is **recorded** whenever this is on. |
 | `eddi.workspaces.enabled` | `false` | Whether ownership is **enforced** — listings filtered, reads and writes checked. |
 | `eddi.workspaces.groups-claim` | `groups` | JWT claim carrying Keycloak group membership, which becomes team spaces. |
-| `eddi.workspaces.legacy-visibility` | `shared` | What happens to resources created before ownership was recorded: `shared` or `admin-only`. |
-| `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. Set to a group name for a team-first deployment. |
+| `eddi.workspaces.legacy-visibility` | `shared` | What happens to resources created before ownership was recorded: `shared` or `admin-only`. **Changeable at runtime** — see [Runtime settings](#runtime-settings). |
+| `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment. **Changeable at runtime.** |
+| `eddi.workspaces.directory.enabled` | `true` | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
+| `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
 
 **Recording and enforcing are deliberately separate.** Deploy the release,
 let attribution accumulate, confirm in the Manager that agents show the owners
@@ -79,6 +81,7 @@ and re-sharing stay with whoever created it.
 | --- | --- |
 | `private` | The owner, and explicit grants only. |
 | `space` | Everyone whose spaces include the resource's space. **Default for new resources.** |
+| `internal` | Everyone who is **signed in** may chat with it (`USE`). The configuration stays private, and anonymous callers are refused. The right setting for an agent meant for a whole organisation. |
 | `published` | Everyone with access to the deployment, including anonymous callers on the public production chat endpoints. |
 
 ### Access levels
@@ -102,7 +105,7 @@ One endpoint family covers every resource type, keyed by resource id.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "$EDDI/descriptorstore/descriptors/$AGENT_ID/shares?subject=user:alice@example.com&level=USE"
+  "$EDDI/descriptorstore/descriptors/$AGENT_ID/shares?subject=alice&level=USE"
 ```
 
 ```bash
@@ -113,10 +116,17 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/descriptorstore/descriptors/{id}/shares` | Owner, space, visibility, grants, and the caller's effective level. |
-| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` (`user:…` or `team:…`) a `level`. |
+| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level`. The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
 | `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke a subject's grant. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `private` / `space` / `published`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `private` / `space` / `internal` / `published`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces — personal work becoming team work. Ownership does not change. |
 | `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership. **Administrators only.** |
+| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, optional `message`). See [Notifications](#notifications-and-access-requests). |
+
+Every change except a request takes `dryRun=true`, which answers with the same
+`updated` / `skipped` lists and changes nothing. The Manager uses it to show what
+a cascading change will reach before it is applied — a share of a group quietly
+reaching a dozen agents is the surprise it exists to prevent.
 
 **Sharing cascades by default.** An agent is a thin document pointing at
 workflows, which point at rule sets, LLM configs, output sets and api calls. A
@@ -133,6 +143,65 @@ Two things it deliberately will not do:
 - **It will not share more than 500 resources from one root.** A cyclic or
   generated config cannot turn one share into unbounded write amplification; the
   cut-off is logged.
+
+**Sharing a lot at once is what team spaces are for.** Rather than sharing
+twenty agents with the same five people, move them into a team space (or
+create them there) — everyone in the Keycloak group then has edit access, and
+people joining the group get it without anyone re-sharing.
+
+### Finding people: the user directory
+
+A grant is stored against a **principal** — the stable id the identity provider
+puts in the token. People are not addressed that way, so EDDI records every
+user who signs in (principal, display name, username, email, whether the
+provider **verified** that email, and teams) and resolves a share against it:
+
+1. an exact principal,
+2. else a username, refused if two accounts share it,
+3. else an email address — **verified ones only**.
+
+A name that matches nobody is refused with a message saying the person has to
+sign in once first, rather than storing a grant that reaches no one — which is
+what sharing with an email address used to do. An unverified email is never a
+way to find somebody: whoever can set their own address could otherwise collect
+shares meant for someone else.
+
+`GET /workspaces/directory?q=` powers the share box's suggestions. The share
+dialog labels each grant with the person's name, and flags grants that match no
+recorded user (typically ones made before the directory existed) so an owner can
+remove them. The directory is covered by GDPR erasure and export. Set
+`eddi.workspaces.directory.enabled=false` to take shares exactly as typed.
+
+### Where new resources land
+
+A new resource is filed in the first of:
+
+1. the space named by the request's `X-EDDI-Space` header — the Manager sends
+   the workspace currently in view, and says so in the workspace switcher
+   ("New items are created in …");
+2. the deployment's default space ([runtime setting](#runtime-settings));
+3. the creator's personal space.
+
+A header naming a space the caller is not a member of is refused with 403
+before anything is created.
+
+### Notifications and access requests
+
+A share tells the recipient: it lands in their notifications (the bell in the
+Manager), with a link straight to the resource — or to its chat, when the share
+is `USE`. Following a link to something you cannot open shows a **Request
+access** panel instead of an error; the request reaches the owner's
+notifications, and they grant it in one click.
+
+The request endpoint never reveals whether the resource exists or who owns it —
+an id matching nothing is answered exactly like a delivered request. A person
+may send 20 requests a day; notifications are kept for 90 days.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first. |
+| `GET` | `/workspaces/notifications/count` | `{"unread": n}` — cheap enough to poll. |
+| `POST` | `/workspaces/notifications/read` | Mark `{"ids": [...]}` read, or all of them with `{}`. |
 
 ---
 
@@ -180,6 +249,11 @@ curl -H "Authorization: Bearer $TOKEN"   "$EDDI/agentstore/agents/descriptors?sp
 nothing rather than granting it, and it narrows an administrator's view too. It
 is a query parameter rather than a client-side filter because page 2 of
 "everything" is not page 2 of "this space".
+
+`ownership=mine` narrows to what the caller owns, and `ownership=shared` to what
+somebody else owns and the caller can reach — the Manager's **Shared with me**.
+Both combine with `space`. Descriptors carry a read-only `ownerName`, the
+owner's display name from the directory, so a row can say who shared it.
 
 ### What a listing tells a client it may do
 
@@ -262,21 +336,76 @@ mode its tool calls carry no credentials and get 401 as soon as OIDC is on —
 before workspaces enter the picture at all.
 
 **2. The Operator agent itself must be reachable by everyone who uses it.** It
-is provisioned by whoever activates it, so under enforcement it lands in *that
-person's* space and every other user gets 403 when they open the drawer. It is a
-platform tool, not a personal one — publish it once after activation:
+is provisioned by whoever activates it, so under enforcement it would land in
+*that person's* space and every other user would get 403 when they opened the
+drawer. Activation therefore sets it to `internal`: everyone signed in may chat
+with it, nobody else may read its configuration, and anonymous callers are
+refused. If that fails (an older server, say), activation still succeeds and the
+share dialog on the agent does the same by hand.
 
-```bash
-curl -X PUT -H "Authorization: Bearer $TOKEN"   "$EDDI/descriptorstore/descriptors/$OPERATOR_AGENT_ID/shares/visibility?visibility=published&cascade=true"
-```
-
-Publishing makes its configuration readable by everyone who can reach the API —
-its system prompt and tool definitions, though not its vault-referenced
-credentials. If that is more than you want, share it with a team at `USE`
-instead: `POST .../shares?subject=team:staff&level=USE&cascade=true`.
+To limit it to one team instead, set it back to `space` and share it at `USE`:
+`POST .../shares?subject=team:staff&level=USE&cascade=true`.
 
 The same applies to any agent meant to serve a whole deployment rather than one
-person.
+person — `internal` is usually the right visibility, `published` only when
+anonymous visitors must reach it too.
+
+### Secrets and variables that belong to a space
+
+The vault and the global variables are deployment-wide, so under enforcement
+**writing a global variable is administrator-only** (reading stays open to
+editors), and an editor could never store their own LLM key at all. Each space
+now has a tenant of its own in both, managed by its members without an
+administrator — in the Manager's **Workspaces** page, or:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/spacestore/tenant?space=` | The tenant id to use in references. |
+| `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. |
+| `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
+
+Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
+`${vars:<tenant>/model}`, where every response names the tenant. Membership is
+what authorizes, and it is checked where a human acts: **deploying an agent that
+references a space's tenant requires the deployer to be a member of that
+space**, so somebody lent edit access to your agent cannot point it at your
+team's key and deploy it. Variables are expanded before the check, so a
+reference cannot be smuggled in through one.
+
+### Conversation review
+
+Conversations stay private to the person chatting — the agent's owner cannot
+read them. An agent can opt in to review:
+
+```json
+"conversationReview": { "enabled": true, "notice": "The support team may read this conversation to improve the agent." }
+```
+
+Then the people who maintain the agent (`EDIT` on it) may read its
+conversations, and **only read** them. The opt-in is per version: a version
+that did not opt in grants nothing, whatever later versions say. Every chat
+window — the Manager and the Chat UI — shows the notice before the first
+message (without a custom `notice`, a default sentence), from
+`GET /agents/{agentId}/profile`, which anybody who may chat with the agent can
+read.
+
+`GET /agents/{agentId}/usage` (`VIEW` on the agent) answers how many
+conversations an agent has had, how many are active and how many distinct
+people started them — without reading any of them.
+
+### Runtime settings
+
+`default-space` and `legacy-visibility` can be changed without a restart by an
+administrator, in the Manager's **Workspaces** page or with
+`GET` / `PUT /workspaces/settings`. Every setting reports where its value comes
+from:
+
+- **`PINNED`** — the property is set in the configuration, and the API refuses
+  to change it. Unset the property to hand it over to runtime control.
+- **`STORED`** — changed at runtime; kept in the database.
+- **`DEFAULT`** — neither.
+
+Changes reach every node within seconds.
 
 ### Resources with no descriptor at all
 

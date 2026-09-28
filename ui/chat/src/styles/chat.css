@@ -157,6 +157,18 @@ a:hover { opacity: 0.85; }
 
 /* ─── Messages area ───────────────────────────── */
 
+/* Said before the first message: the agent's maintainers may read this
+   conversation. Quiet, not alarming — it is information, not a warning. */
+.chat-review-notice {
+  padding: 8px 20px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--chat-text-muted, inherit);
+  background: var(--chat-surface);
+  border-bottom: 1px solid var(--chat-border);
+  flex-shrink: 0;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

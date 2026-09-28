@@ -2,6 +2,32 @@
 
 ## Current Status (v6.4.0, plus the post-6.3.0 EDDI alignment in #197-#203)
 
+### Workspaces sharing UX (2026-09-28, branch `feat/workspaces-sharing-ux`)
+
+What the Manager gained on top of the backend's workspace features — see
+`docs/workspaces.md` for the model:
+
+- **Space switcher** (`components/workspaces/space-switcher.tsx`) now also filters by
+  ownership (Everything / Mine / Shared with me) and shows where new items are
+  created. It renders whenever workspaces are enabled, even with one space — "Shared
+  with me" is still a choice. The chosen space is sent as `X-EDDI-Space` on every
+  POST by `ApiClient` (`setCreateSpace`, synced from `useSpaces`).
+- **Share dialog** previews every change with `dryRun=true` and holds a change that
+  reaches beyond the resource for confirmation (`share-preview`); names people from
+  the user directory with autocomplete (`share-subject-input.tsx`); flags grants that
+  reach nobody; offers `internal` visibility, moving into a team, and a copyable chat
+  link for agents. Ownership transfer sends the principal (`bob`), never `user:bob`.
+- **Notifications** (`notification-bell.tsx`, top bar): shares with you and access
+  requests, with one-click Grant. **Request access** (`request-access-panel.tsx`)
+  replaces the error on agent / workflow / resource detail pages for a 403.
+- **Workspaces page** (`/manage/workspaces`): runtime settings for admins, and each
+  space's own secrets and variables.
+- **Conversation review**: an agent-detail section to opt a version in, and a notice
+  (`components/chat/review-notice.tsx`) above the chat. The Chat UI shows the same
+  notice from `/agents/{id}/profile`.
+- **Operator**: activation sets the operator agent to `internal` visibility, so every
+  signed-in user can open the drawer.
+
 ### How a linked account is actually consumed (traced end to end, after getting it wrong once)
 
 Where a `PER_USER` connection resolves — and where it refuses — is not obvious from

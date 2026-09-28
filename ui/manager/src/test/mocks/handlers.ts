@@ -718,6 +718,9 @@ export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
+/** Where an E2E spec plants the signed-in user's notifications. */
+export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
+
 function readSeed<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -732,6 +735,66 @@ function readSeed<T>(key: string): T | null {
 
 function readWorkspaceSeed() {
   return readSeed<typeof WORKSPACES_DISABLED>(WORKSPACE_SEED_KEY);
+}
+
+/** The shape `SpaceTenants.tenantFor` produces; the hash is fixed here. */
+function tenantOf(request: Request): string {
+  const space = new URL(request.url).searchParams.get("space") ?? "";
+  return space.startsWith("team:") ? "t.engineering.1a2b3c4d" : "u.alice.5e6f7a8b";
+}
+
+function workspaceSettings(defaultSpace: string | null, legacyVisibility: string | null) {
+  return {
+    enforcing: readWorkspaceSeed()?.enabled === true,
+    groupsClaim: "groups",
+    defaultSpace: {
+      value: defaultSpace,
+      source: defaultSpace ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.default-space",
+    },
+    legacyVisibility: {
+      value: legacyVisibility ?? "shared",
+      source: legacyVisibility ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.legacy-visibility",
+    },
+    updatedAt: null,
+    updatedBy: null,
+    warnings: [],
+  };
+}
+
+const SPACE_STORE_KEY = "eddi-e2e-space-resources";
+
+function readSpaceStore(request: Request, kind: "secrets" | "variables"): unknown[] {
+  const all = readSeed<Record<string, Record<string, unknown>>>(SPACE_STORE_KEY) ?? {};
+  return Object.values(all[`${tenantOf(request)}/${kind}`] ?? {});
+}
+
+function writeSpaceStore(request: Request, kind: "secrets" | "variables", key: string, value: unknown | null) {
+  try {
+    const all = readSeed<Record<string, Record<string, unknown>>>(SPACE_STORE_KEY) ?? {};
+    const bucket = { ...(all[`${tenantOf(request)}/${kind}`] ?? {}) };
+    if (value === null) delete bucket[key];
+    else bucket[key] = value;
+    all[`${tenantOf(request)}/${kind}`] = bucket;
+    localStorage.setItem(SPACE_STORE_KEY, JSON.stringify(all));
+  } catch {
+    // No localStorage (the node tier): nothing to remember.
+  }
+}
+
+type SeededNotification = { id: string; readAt?: string | null } & Record<string, unknown>;
+
+function readNotificationSeed(): SeededNotification[] {
+  return readSeed<SeededNotification[]>(NOTIFICATION_SEED_KEY) ?? [];
+}
+
+function writeNotificationSeed(value: SeededNotification[]) {
+  try {
+    localStorage.setItem(NOTIFICATION_SEED_KEY, JSON.stringify(value));
+  } catch {
+    // No localStorage (the node tier): nothing to remember.
+  }
 }
 
 function readShareSeed(id: string) {
@@ -807,6 +870,101 @@ export const handlers = [
   http.put("*/descriptorstore/descriptors/:id/shares/visibility", ({ params }) =>
     HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
   ),
+  http.put("*/descriptorstore/descriptors/:id/shares/space", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  // The real endpoint answers the same for an id that matches nothing, so
+  // this one does too.
+  http.post("*/descriptorstore/descriptors/:id/shares/requests", () => HttpResponse.json({ outcome: "SENT" })),
+
+  // Notifications. Empty unless a spec seeds some; marking read is remembered
+  // for the page's lifetime so the badge behaves.
+  http.get("*/workspaces/notifications/count", () =>
+    HttpResponse.json({ unread: readNotificationSeed().filter((n) => !n.readAt).length })
+  ),
+  http.get("*/workspaces/notifications", () => HttpResponse.json(readNotificationSeed())),
+  http.post("*/workspaces/notifications/read", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[] };
+    const all = readNotificationSeed();
+    const now = new Date().toISOString();
+    let marked = 0;
+    const next = all.map((n) => {
+      if (n.readAt || (body.ids && !body.ids.includes(n.id))) return n;
+      marked += 1;
+      return { ...n, readAt: now };
+    });
+    writeNotificationSeed(next);
+    return HttpResponse.json({ marked });
+  }),
+
+  // The user directory behind the share box's suggestions.
+  http.get("*/workspaces/directory", ({ request }) => {
+    const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
+    const people = [
+      { subject: "user:bob", kind: "user", label: "Bob Builder", detail: "bob@example.com" },
+      { subject: "user:carol", kind: "user", label: "Carol Test", detail: "carol@example.com" },
+      { subject: "team:engineering", kind: "team", label: "engineering", detail: null },
+    ];
+    return HttpResponse.json(q ? people.filter((p) => `${p.label} ${p.detail ?? ""}`.toLowerCase().includes(q)) : people);
+  }),
+
+  // Runtime workspace settings (administrators).
+  http.get("*/workspaces/settings", () => HttpResponse.json(workspaceSettings(null, null))),
+  http.put("*/workspaces/settings", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      defaultSpace?: string | null;
+      legacyVisibility?: string | null;
+    };
+    return HttpResponse.json(workspaceSettings(body.defaultSpace ?? null, body.legacyVisibility ?? null));
+  }),
+
+  // A space's own secrets and variables.
+  http.get("*/spacestore/tenant", ({ request }) =>
+    HttpResponse.json({ space: new URL(request.url).searchParams.get("space") ?? "", tenant: tenantOf(request) })
+  ),
+  // Stored per tenant for the page's lifetime, so a saved entry shows up in
+  // the list the page re-reads. Values are never returned, as on the server.
+  http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
+  http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { description?: string };
+    const key = String(params.key);
+    const secret = {
+      keyName: key,
+      reference: `\${vault:${tenantOf(request)}/${key}}`,
+      description: body.description ?? null,
+      allowedAgents: ["*"],
+      createdAt: new Date().toISOString(),
+    };
+    writeSpaceStore(request, "secrets", key, secret);
+    return HttpResponse.json(secret);
+  }),
+  http.delete("*/spacestore/secrets/:key", ({ params, request }) => {
+    writeSpaceStore(request, "secrets", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.get("*/spacestore/variables", ({ request }) => HttpResponse.json(readSpaceStore(request, "variables"))),
+  http.put("*/spacestore/variables/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { value?: string; description?: string };
+    const key = String(params.key);
+    const variable = {
+      key,
+      value: body.value ?? "",
+      description: body.description ?? null,
+      reference: `\${vars:${tenantOf(request)}/${key}}`,
+    };
+    writeSpaceStore(request, "variables", key, variable);
+    return HttpResponse.json(variable);
+  }),
+  http.delete("*/spacestore/variables/:key", ({ params, request }) => {
+    writeSpaceStore(request, "variables", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // What a chat window shows about an agent, and how much it is used.
+  http.get("*/agents/:agentId/profile", ({ params }) =>
+    HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
+  ),
+  http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
 
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
@@ -955,9 +1113,22 @@ export const handlers = [
     // space switcher pass its own E2E test while doing nothing — which is
     // exactly the bug this feature already shipped once.
     const space = url.searchParams.get("space") ?? "";
-    const scoped = space
+    const inSpace = space
       ? matched.filter((a) => "spaceId" in a && a.spaceId === space)
       : matched;
+
+    // `?ownership=` narrows the same way: "mine" is what the caller owns,
+    // "shared" what somebody else owns. Only while enforced — the backend
+    // ignores it otherwise, since everyone sees everything.
+    const ownership = url.searchParams.get("ownership") ?? "";
+    const seed = readWorkspaceSeed() as { enabled?: boolean; principal?: string } | null;
+    const me = seed?.enabled ? seed.principal : undefined;
+    const scoped =
+      me && ownership === "mine"
+        ? inSpace.filter((a) => "ownerId" in a && a.ownerId === me)
+        : me && ownership === "shared"
+          ? inSpace.filter((a) => "ownerId" in a && !!a.ownerId && a.ownerId !== me)
+          : inSpace;
 
     // `callerLevel` is stamped by the server ONLY while enforcement is on —
     // ResourceAccessGuard omits it otherwise, and NON_NULL keeps it off the

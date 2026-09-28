@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
+import type { Ownership } from "@/lib/api/agents";
 import {
   getWorkspaceInfo,
   principalOf,
@@ -16,6 +18,9 @@ import {
  * ordinary UI choice look like account state.
  */
 const STORAGE_KEY = "eddi.workspace.space";
+
+/** Where the Mine / Shared-with-me choice is remembered — same reasoning as the space. */
+const OWNERSHIP_KEY = "eddi.workspace.ownership";
 
 /** The sentinel for "everything I can reach", which is also the default. */
 export const ALL_SPACES = "";
@@ -103,6 +108,45 @@ const spaceStore = {
   },
 };
 
+/**
+ * The ownership filter, shared the same way the space is — the switcher and the
+ * listing are in different trees.
+ */
+let sessionOwnership: Ownership = "";
+
+function readOwnership(): Ownership {
+  try {
+    const stored = localStorage.getItem(OWNERSHIP_KEY);
+    return stored === "mine" || stored === "shared" ? stored : "";
+  } catch {
+    return sessionOwnership;
+  }
+}
+
+const ownershipStore = {
+  listeners: new Set<() => void>(),
+  subscribe(listener: () => void) {
+    ownershipStore.listeners.add(listener);
+    return () => {
+      ownershipStore.listeners.delete(listener);
+    };
+  },
+  getSnapshot(): Ownership {
+    return readOwnership();
+  },
+  set(ownership: Ownership) {
+    if (readOwnership() === ownership) return;
+    sessionOwnership = ownership;
+    try {
+      if (ownership) localStorage.setItem(OWNERSHIP_KEY, ownership);
+      else localStorage.removeItem(OWNERSHIP_KEY);
+    } catch {
+      // `sessionOwnership` holds it for this session.
+    }
+    ownershipStore.listeners.forEach((listener) => listener());
+  },
+};
+
 export interface UseSpacesResult {
   /**
    * Whether the backend enforces workspaces at all.
@@ -127,12 +171,22 @@ export interface UseSpacesResult {
   /** The active space's descriptor, or null when showing everything. */
   active: SpaceInfo | null;
   /**
-   * Whether a switcher is worth showing at all. One space means the control
-   * would only ever offer the view the user already has.
+   * Whether a switcher is worth showing at all — whenever workspaces are
+   * enforced. With one space it still offers "Mine" and "Shared with me", which
+   * is the question a user with no team asks most.
    */
   hasChoice: boolean;
   /** True until the first answer arrives, so callers can avoid a flash. */
   isLoading: boolean;
+  /** Mine / Shared with me / everything — a narrowing, like the space. */
+  ownership: Ownership;
+  setOwnership: (ownership: Ownership) => void;
+  /**
+   * The space something created now lands in: the selected space when one is
+   * selected, else the server's default (null). The same thing a file browser
+   * does — you create in the folder you are looking at.
+   */
+  createSpace: SpaceInfo | null;
 }
 
 /**
@@ -201,6 +255,9 @@ export function useSpaces(): UseSpacesResult {
 
   const setActiveSpace = useCallback((spaceId: string) => spaceStore.set(spaceId), []);
 
+  const storedOwnership = useSyncExternalStore(ownershipStore.subscribe, ownershipStore.getSnapshot);
+  const setOwnership = useCallback((ownership: Ownership) => ownershipStore.set(ownership), []);
+
   const active = useMemo(
     () => spaces.find((s) => s.id === activeSpace) ?? null,
     [spaces, activeSpace]
@@ -218,6 +275,15 @@ export function useSpaces(): UseSpacesResult {
   // switcher, leaving an invisible filter with no control to clear it.
   const narrowingApplies = data ? data.enabled : status === "pending";
 
+  // Create where the user is looking — but only in a space the server has just
+  // confirmed they are in. A remembered space they have since left would make
+  // every POST a 403, so anything short of a confirmed, enforced, reachable
+  // space clears the header rather than sending a guess.
+  const createSpace = data?.enabled && active ? active : null;
+  useEffect(() => {
+    api.setCreateSpace(createSpace?.id ?? null);
+  }, [createSpace]);
+
   return {
     enabled: info.enabled,
     principal: principalOf(info),
@@ -226,7 +292,10 @@ export function useSpaces(): UseSpacesResult {
     activeSpace: narrowingApplies ? activeSpace : ALL_SPACES,
     setActiveSpace,
     active,
-    hasChoice: info.enabled && spaces.length > 1,
+    hasChoice: info.enabled,
     isLoading,
+    ownership: narrowingApplies ? storedOwnership : "",
+    setOwnership,
+    createSpace,
   };
 }

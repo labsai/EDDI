@@ -2,7 +2,19 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Globe, Loader2, Lock, Trash2, Users, UserPlus } from "lucide-react";
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  Copy,
+  FolderInput,
+  Globe,
+  Loader2,
+  Lock,
+  Trash2,
+  Users,
+  UserPlus,
+} from "lucide-react";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,19 +25,32 @@ import {
   ACCESS_LEVELS,
   getShareInfo,
   levelIncludes,
+  moveToSpace,
   revokeShare,
   setResourceVisibility,
   shareResource,
   transferOwnership,
   type AccessLevel,
+  type ResourceGrant,
   type ResourceVisibility,
+  type ShareOptions,
   type ShareResult,
 } from "@/lib/api/sharing";
 import { describeSpace, isUserSubject, parseSubjectInput } from "@/lib/spaces";
 import { useHasRole } from "@/hooks/use-auth";
+import { useSpaces } from "@/hooks/use-spaces";
+import { ShareSubjectInput } from "@/components/workspaces/share-subject-input";
 
 /** Which mutation produced a {@link ShareResult}, so the summary can name it. */
-type ShareAction = "share" | "revoke" | "visibility" | "transfer";
+type ShareAction = "share" | "revoke" | "visibility" | "transfer" | "move";
+
+/** A change that was previewed and is waiting for the user to confirm it. */
+interface PendingChange {
+  action: ShareAction;
+  preview: ShareResult;
+  apply: () => Promise<ShareResult>;
+  successMessage: string;
+}
 
 interface ShareDialogProps {
   open: boolean;
@@ -34,35 +59,38 @@ interface ShareDialogProps {
   resourceId: string;
   /** Shown in the title so the user knows what they are about to share. */
   resourceName?: string;
+  /**
+   * The chat address to offer for copying, for an agent. Absent for resources
+   * nobody chats with.
+   */
+  chatLink?: string;
 }
 
 /**
  * Share one resource with people and teams.
  *
- * <h3>The consequence line is the point</h3> Sharing an agent cascades through
- * the workflows, rule sets, LLM configs and output sets it references — it has
- * to, or the recipient gets a name pointing at documents they cannot open. That
- * is invisible in the request and surprising in the result, so every outcome
- * here says how many resources it actually touched and names what it declined
- * to touch. "Shared" and "shared, except three things that belong to a
- * colleague" are different facts and the user needs both.
+ * <h3>The consequence is shown before, not only after</h3> Sharing an agent
+ * cascades through the workflows, rule sets, LLM configs and output sets it
+ * references — and sharing a group reaches every agent in it. That is invisible
+ * in the request, so any change that would touch more than the resource itself,
+ * or leave something out, is previewed first: the dialog lists what it will
+ * change and what it will skip, and waits for a confirmation.
  */
-export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDialogProps) {
+export function ShareDialog({ open, onClose, resourceId, resourceName, chatLink }: ShareDialogProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { spaces } = useSpaces();
 
   const [subjectInput, setSubjectInput] = useState("");
   const [level, setLevel] = useState<AccessLevel>("USE");
   const [busy, setBusy] = useState(false);
   /**
-   * The subject an ownership transfer has been confirmed for, or null.
-   *
-   * A subject rather than a boolean because it has to be *bound* to what the
-   * warning named: with a flag, arming the confirmation for "bob" and then
-   * retyping "carol" handed carol ownership under a warning displayed for bob.
+   * The subject an OWN grant has been confirmed for, or null — bound to what the
+   * warning named, so retyping the name withdraws the confirmation.
    */
   const [confirmedSubject, setConfirmedSubject] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<{ result: ShareResult; action: ShareAction } | null>(null);
+  const [pending, setPending] = useState<PendingChange | null>(null);
 
   const {
     data: info,
@@ -84,29 +112,65 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
     async (result: ShareResult, action: ShareAction) => {
       setLastResult({ result, action });
       await refetch();
-      // Owner and visibility ride on the descriptor, so anything showing a badge
-      // for this resource is now stale. `agentKeys.all` prefix-matches both
-      // descriptor listings; the detail query is rooted at "agent" (singular)
-      // and is NOT covered by it — invalidating only the plural key was a no-op
-      // for the page a user lands on straight after sharing.
+      // Owner, visibility and space ride on the descriptor, so every listing and
+      // detail view showing this resource is now stale.
       await queryClient.invalidateQueries({ queryKey: agentKeys.all });
       await queryClient.invalidateQueries({ queryKey: agentKeys.detail(resourceId) });
       await queryClient.invalidateQueries({ queryKey: agentKeys.descriptor(resourceId) });
-      // The workflow and extension listings too, now that this dialog is
-      // reachable from them. Sharing is by descriptor id and works on any
-      // resource, so invalidating only the agent keys left the ownership badge
-      // and `callerLevel` on those pages showing the state from before the
-      // share — the same staleness the agent detail key was added to fix.
       await queryClient.invalidateQueries({ queryKey: ["workflows"] });
       await queryClient.invalidateQueries({ queryKey: ["resources"] });
     },
     [refetch, queryClient, resourceId]
   );
 
+  /**
+   * Previews a change and applies it straight away when it touches only this
+   * resource; otherwise holds it for confirmation.
+   */
+  const previewThenApply = useCallback(
+    async (action: ShareAction, run: (options: ShareOptions) => Promise<ShareResult>, successMessage: string) => {
+      setBusy(true);
+      try {
+        const preview = await run({ dryRun: true });
+        const wide = (preview.updated?.length ?? 0) > 1 || (preview.skipped?.length ?? 0) > 0;
+        if (wide) {
+          setPending({ action, preview, apply: () => run({}), successMessage });
+          return false;
+        }
+        const result = await run({});
+        await afterChange(result, action);
+        toast.success(successMessage);
+        return true;
+      } catch (e) {
+        toast.error(getErrorMessage(e));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [afterChange]
+  );
+
+  const confirmPending = useCallback(async () => {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      const result = await pending.apply();
+      await afterChange(result, pending.action);
+      toast.success(pending.successMessage);
+      if (pending.action === "share") {
+        setSubjectInput("");
+        setConfirmedSubject(null);
+      }
+      setPending(null);
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [pending, afterChange]);
+
   const handleShare = useCallback(async () => {
-    // Validation first. Arming the confirmation before this showed a destructive
-    // "Confirm transfer" button warning about handing ownership to nobody, for
-    // an empty or malformed subject.
     const parsed = parseSubjectInput(subjectInput);
     if ("error" in parsed) {
       toast.error(
@@ -116,32 +180,26 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
       );
       return;
     }
-
     // Handing someone OWN lets them delete the resource and re-share it to
-    // anyone, and there is no "undo" that does not depend on them cooperating.
-    // Every other level is reversible by the owner alone, so this is the one
-    // that gets a second look — and the confirmation is bound to the subject it
-    // was shown for, so retyping the name withdraws it.
+    // anyone, so it gets a second look — bound to the subject it was shown for.
     if (level === "OWN" && confirmedSubject !== parsed.subject) {
       setConfirmedSubject(parsed.subject);
       return;
     }
-    setBusy(true);
-    try {
-      const result = await shareResource(resourceId, parsed.subject, level);
-      await afterChange(result, "share");
+    const applied = await previewThenApply(
+      "share",
+      (options) => shareResource(resourceId, parsed.subject, level, options),
+      t("workspaces.share.shared", "Shared")
+    );
+    if (applied) {
       setSubjectInput("");
       setConfirmedSubject(null);
-      toast.success(t("workspaces.share.shared", "Shared"));
-    } catch (e) {
-      toast.error(getErrorMessage(e));
-    } finally {
-      setBusy(false);
     }
-  }, [subjectInput, level, confirmedSubject, resourceId, afterChange, t]);
+  }, [subjectInput, level, confirmedSubject, resourceId, previewThenApply, t]);
 
   const handleRevoke = useCallback(
     async (subject: string) => {
+      // Removing access only ever narrows, so it is applied without a preview.
       setBusy(true);
       try {
         const result = await revokeShare(resourceId, subject);
@@ -157,19 +215,23 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
   );
 
   const handleVisibility = useCallback(
-    async (visibility: ResourceVisibility) => {
-      setBusy(true);
-      try {
-        const result = await setResourceVisibility(resourceId, visibility);
-        await afterChange(result, "visibility");
-        toast.success(t("workspaces.share.visibilityUpdated", "Visibility updated"));
-      } catch (e) {
-        toast.error(getErrorMessage(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [resourceId, afterChange, t]
+    (visibility: ResourceVisibility) =>
+      previewThenApply(
+        "visibility",
+        (options) => setResourceVisibility(resourceId, visibility, options),
+        t("workspaces.share.visibilityUpdated", "Visibility updated")
+      ),
+    [resourceId, previewThenApply, t]
+  );
+
+  const handleMove = useCallback(
+    (spaceId: string) =>
+      previewThenApply(
+        "move",
+        (options) => moveToSpace(resourceId, spaceId, options),
+        t("workspaces.move.done", "Moved")
+      ),
+    [resourceId, previewThenApply, t]
   );
 
   const title = resourceName
@@ -177,6 +239,10 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
     : t("workspaces.share.title", "Share");
 
   const grants = useMemo(() => info?.grants ?? [], [info]);
+  const teamSpaces = useMemo(
+    () => spaces.filter((space) => space.kind === "team" && space.id !== info?.spaceId),
+    [spaces, info?.spaceId]
+  );
 
   /** Whether the button is currently asking rather than acting. */
   const awaitingOwnerConfirmation = level === "OWN" && confirmedSubject !== null;
@@ -197,14 +263,23 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
           </p>
         )}
 
-        {/* `info` deliberately does not render alongside an error. TanStack keeps
-            the last good data through a failed refetch, so rendering both showed
-            a live-looking grant list and working buttons underneath the message
-            saying the request had failed — reachable whenever a revoke or a
-            visibility change strips the caller's own access mid-session. */}
+        {/* `info` deliberately does not render alongside an error: TanStack keeps
+            the last good data through a failed refetch, and live-looking controls
+            under an error message invite clicks that will fail. */}
         {info && !error && (
           <div className="space-y-5">
-            <OwnerLine ownerId={info.ownerId ?? null} spaceId={info.spaceId ?? null} />
+            <OwnerLine owner={info.ownerLabel ?? info.ownerId ?? null} spaceId={info.spaceId ?? null} />
+
+            {chatLink && <CopyChatLink link={chatLink} />}
+
+            {pending && (
+              <PendingPreview
+                pending={pending}
+                busy={busy}
+                onConfirm={() => void confirmPending()}
+                onCancel={() => setPending(null)}
+              />
+            )}
 
             {!isOwner && (
               <p className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
@@ -218,39 +293,41 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
             {isAdmin && (
               <TransferOwnership
                 resourceId={resourceId}
-                currentOwner={info.ownerId ?? null}
+                currentOwner={info.ownerLabel ?? info.ownerId ?? null}
                 busy={busy}
                 onBusy={setBusy}
                 onTransferred={afterChange}
               />
             )}
 
-            {isOwner && (
+            {isOwner && !pending && (
               <>
-                <VisibilityChooser current={info.visibility} busy={busy} onChange={handleVisibility} />
+                <VisibilityChooser current={info.visibility} busy={busy} onChange={(v) => void handleVisibility(v)} />
+
+                {teamSpaces.length > 0 && (
+                  <MoveToTeam teams={teamSpaces} busy={busy} onMove={(spaceId) => void handleMove(spaceId)} />
+                )}
 
                 <section className="space-y-2">
-                  <h3 className="text-sm font-medium">
-                    {t("workspaces.share.peopleAndTeams", "People and teams")}
-                  </h3>
+                  <h3 className="text-sm font-medium">{t("workspaces.share.peopleAndTeams", "People and teams")}</h3>
 
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    <Input
+                    <ShareSubjectInput
                       value={subjectInput}
-                      onChange={(e) => {
-                        setSubjectInput(e.target.value);
+                      disabled={busy}
+                      onChange={(value) => {
+                        setSubjectInput(value);
                         setConfirmedSubject(null);
                       }}
-                      placeholder={t("workspaces.share.subjectPlaceholder", "name@example.com or team:engineering")}
-                      aria-label={t("workspaces.share.subjectLabel", "Person or team")}
-                      data-testid="share-subject-input"
-                      onKeyDown={(e) => {
-                        if (e.key !== "Enter" || busy) return;
-                        e.preventDefault();
-                        // Enter arms an ownership transfer but never completes
-                        // one: two quick presses would otherwise sail straight
-                        // through the confirmation the second press is meant to
-                        // read. Confirming takes a deliberate click.
+                      onPick={(match) => {
+                        setSubjectInput(match.subject);
+                        setConfirmedSubject(null);
+                      }}
+                      onSubmit={() => {
+                        if (busy) return;
+                        // Enter arms an ownership transfer but never completes one:
+                        // two quick presses would otherwise sail through the
+                        // confirmation the second press is meant to read.
                         if (level === "OWN" && confirmedSubject) return;
                         void handleShare();
                       }}
@@ -263,7 +340,7 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
                       }}
                       aria-label={t("workspaces.share.levelLabel", "Access level")}
                       data-testid="share-level-select"
-                      className="h-9 rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="h-10 rounded-lg border border-border bg-background px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {ACCESS_LEVELS.map((l) => (
                         <option key={l} value={l}>
@@ -302,34 +379,7 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
                   ) : (
                     <ul className="divide-y divide-border rounded-md border border-border">
                       {grants.map((grant) => (
-                        <li key={grant.subject} className="flex items-center gap-3 px-3 py-2">
-                          {isUserSubject(grant.subject) ? (
-                            <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                          ) : (
-                            <Users className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                          )}
-                          {/* The person/team distinction was icon-only, and the icon
-                              is aria-hidden — so a screen reader heard two identical
-                              rows. */}
-                          <span className="sr-only">
-                            {isUserSubject(grant.subject)
-                              ? t("workspaces.share.subjectIsPerson", "Person")
-                              : t("workspaces.share.subjectIsTeam", "Team")}
-                          </span>
-                          <span className="flex-1 truncate text-sm">{describeSpace(grant.subject)}</span>
-                          <Badge variant="secondary">{levelLabel(t, grant.level)}</Badge>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => void handleRevoke(grant.subject)}
-                            aria-label={t("workspaces.share.revokeFor", "Stop sharing with {{subject}}", {
-                              subject: describeSpace(grant.subject) ?? grant.subject,
-                            })}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          </Button>
-                        </li>
+                        <GrantRow key={grant.subject} grant={grant} busy={busy} onRevoke={() => void handleRevoke(grant.subject)} />
                       ))}
                     </ul>
                   )}
@@ -345,22 +395,179 @@ export function ShareDialog({ open, onClose, resourceId, resourceName }: ShareDi
   );
 }
 
+function GrantRow({ grant, busy, onRevoke }: { grant: ResourceGrant; busy: boolean; onRevoke: () => void }) {
+  const { t } = useTranslation();
+  const isPerson = grant.kind ? grant.kind === "user" : isUserSubject(grant.subject);
+  const name = grant.label || describeSpace(grant.subject) || grant.subject;
+  const unknown = grant.known === false;
+  return (
+    <li className="flex items-center gap-3 px-3 py-2" data-testid={`share-grant-${grant.subject}`}>
+      {isPerson ? (
+        <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      ) : (
+        <Users className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+      {/* The person/team distinction is icon-only and the icon is aria-hidden,
+          so a screen reader needs it said. */}
+      <span className="sr-only">
+        {isPerson ? t("workspaces.share.subjectIsPerson", "Person") : t("workspaces.share.subjectIsTeam", "Team")}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm">{name}</span>
+        {grant.detail && <span className="truncate text-xs text-muted-foreground">{grant.detail}</span>}
+        {unknown && (
+          <span className="flex items-center gap-1 text-xs text-warning" data-testid="share-grant-unknown">
+            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+            {t("workspaces.share.unknownGrant", "No one who signs in matches this — it reaches nobody. Remove it and share again.")}
+          </span>
+        )}
+      </span>
+      <Badge variant="secondary">{levelLabel(t, grant.level)}</Badge>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        onClick={onRevoke}
+        aria-label={t("workspaces.share.revokeFor", "Stop sharing with {{subject}}", { subject: name })}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </li>
+  );
+}
+
 /**
- * Reassign a resource's owner. Administrators only.
- *
- * Not the same operation as granting someone `OWN`, which is what the section
- * above does, and the difference is exactly why this exists:
- *
- * - Granting OWN *adds* a second owner, and requires being the owner yourself.
- * - Transferring *replaces* the owner, and is `@RolesAllowed("eddi-admin")`.
- *
- * So when a resource's owner leaves the organisation, nobody who remains can
- * grant themselves access through the section above — there is no owner left to
- * do it. EDDI documents that as the case this endpoint is for. The Manager
- * implemented the call and never gave anyone a way to reach it.
- *
- * Confirmed before it fires, for the reason the OWN grant is: it changes who
- * controls the resource, and it is not the admin's own to undo afterwards.
+ * The preview of a change that reaches beyond this resource, waiting for a yes.
+ */
+function PendingPreview({
+  pending,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  pending: PendingChange;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const updated = pending.preview.updated ?? [];
+  const skipped = pending.preview.skipped ?? [];
+  return (
+    <section className="space-y-3 rounded-md border border-primary/30 bg-primary/5 p-3" data-testid="share-preview" role="alert">
+      <p className="text-sm font-medium">
+        {t("workspaces.preview.title", "This change reaches {{count}} resource", { count: updated.length })}
+      </p>
+      <ul className="list-inside list-disc text-xs text-muted-foreground">
+        {updated.slice(0, MAX_LISTED).map((target) => (
+          <li key={target.id} className="truncate">
+            {target.name ?? target.id}
+          </li>
+        ))}
+        {updated.length > MAX_LISTED && (
+          <li className="list-none italic">
+            {t("workspaces.share.andMore", "and {{count}} more", { count: updated.length - MAX_LISTED })}
+          </li>
+        )}
+      </ul>
+      {skipped.length > 0 && (
+        <p className="text-xs text-warning">
+          {t("workspaces.share.cascadeSkipped", "{{count}} resource left unchanged — you do not own it", {
+            count: skipped.length,
+          })}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <Button size="sm" onClick={onConfirm} disabled={busy} data-testid="share-preview-confirm">
+          <Check className="h-4 w-4" aria-hidden="true" />
+          {t("workspaces.preview.confirm", "Apply to all of them")}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel} disabled={busy} data-testid="share-preview-cancel">
+          {t("common.cancel", "Cancel")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** File the resource under one of the caller's teams. */
+function MoveToTeam({
+  teams,
+  busy,
+  onMove,
+}: {
+  teams: { id: string; label: string }[];
+  busy: boolean;
+  onMove: (spaceId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [target, setTarget] = useState(teams[0]?.id ?? "");
+  return (
+    <section className="space-y-2" data-testid="move-to-team">
+      <h3 className="text-sm font-medium">{t("workspaces.move.title", "Move to a team")}</h3>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          aria-label={t("workspaces.move.team", "Team")}
+          className="h-10 flex-1 rounded-lg border border-border bg-background px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="move-team-select"
+        >
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.label}
+            </option>
+          ))}
+        </select>
+        <Button variant="outline" onClick={() => onMove(target)} disabled={busy || !target} data-testid="move-submit">
+          <FolderInput className="h-4 w-4" aria-hidden="true" />
+          {t("workspaces.move.action", "Move")}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t(
+          "workspaces.move.hint",
+          "Everyone in the team can then find and edit it. You stay the owner — only you can delete it or share it further."
+        )}
+      </p>
+    </section>
+  );
+}
+
+/** A copyable address for chatting with an agent — what "share it with a colleague" usually means. */
+function CopyChatLink({ link }: { link: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error(t("workspaces.share.copyFailed", "Could not copy — select the address and copy it yourself."));
+    }
+  };
+  return (
+    <section className="space-y-1" data-testid="share-chat-link">
+      <h3 className="text-sm font-medium">{t("workspaces.share.chatLink", "Chat link")}</h3>
+      <div className="flex gap-2">
+        <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label={t("workspaces.share.chatLink", "Chat link")} />
+        <Button variant="outline" onClick={() => void copy()} data-testid="share-chat-link-copy">
+          {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+          {copied ? t("workspaces.share.copied", "Copied") : t("workspaces.share.copy", "Copy")}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("workspaces.share.chatLinkHint", "Works for anyone the agent is shared with at “Can chat” or above.")}
+      </p>
+    </section>
+  );
+}
+
+/**
+ * Reassign a resource's owner. Administrators only — for a resource whose owner
+ * has left, which nobody who remains could otherwise recover. Confirmed before it
+ * fires, bound to the subject it was shown for.
  */
 function TransferOwnership({
   resourceId,
@@ -386,23 +593,18 @@ function TransferOwnership({
   const handleTransfer = useCallback(async () => {
     const result = parseSubjectInput(input);
     if ("error" in result) {
-      toast.error(
-        t("workspaces.transfer.subjectRequired", "Enter the person to make owner."),
-      );
+      toast.error(t("workspaces.transfer.subjectRequired", "Enter the person to make owner."));
       return;
     }
-    // Bound to the subject it was shown for, so retyping the name withdraws it
-    // — the same rule the OWN grant follows, and for the same reason.
     if (confirmed !== result.subject) {
       setConfirmed(result.subject);
       return;
     }
     onBusy(true);
     try {
-      // `spaceId` is left to the server: it derives the new owner's personal
-      // space, and a client guessing at the encoding is the failure mode
-      // `GET /workspaces` exists to remove.
-      const transferred = await transferOwnership(resourceId, result.subject);
+      // The server resolves a name or verified email to the account, and derives
+      // the new owner's personal space itself.
+      const transferred = await transferOwnership(resourceId, input.trim().replace(/^user:/, ""));
       await onTransferred(transferred, "transfer");
       setInput("");
       setConfirmed(null);
@@ -416,13 +618,11 @@ function TransferOwnership({
 
   return (
     <section className="space-y-2 rounded-md border border-warning/30 bg-warning/5 p-3" data-testid="transfer-ownership">
-      <h3 className="text-sm font-medium">
-        {t("workspaces.transfer.title", "Transfer ownership")}
-      </h3>
+      <h3 className="text-sm font-medium">{t("workspaces.transfer.title", "Transfer ownership")}</h3>
       <p className="text-xs text-muted-foreground">
         {t(
           "workspaces.transfer.hint",
-          "Administrators only. Use this when the current owner has left and nobody else can grant access.",
+          "Administrators only. Use this when the current owner has left and nobody else can grant access."
         )}
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -452,8 +652,7 @@ function TransferOwnership({
         <p className="text-xs text-destructive" role="alert" data-testid="transfer-warning">
           {t("workspaces.transfer.warning", {
             owner: currentOwner ?? t("workspaces.share.unowned", "No recorded owner"),
-            defaultValue:
-              "This replaces the current owner ({{owner}}). They lose control of this resource.",
+            defaultValue: "This replaces the current owner ({{owner}}). They lose control of this resource.",
           })}
         </p>
       )}
@@ -461,14 +660,12 @@ function TransferOwnership({
   );
 }
 
-function OwnerLine({ ownerId, spaceId }: { ownerId: string | null; spaceId: string | null }) {
+function OwnerLine({ owner, spaceId }: { owner: string | null; spaceId: string | null }) {
   const { t } = useTranslation();
   const space = describeSpace(spaceId);
   return (
     <p className="text-sm text-muted-foreground" data-testid="share-owner-line">
-      {ownerId
-        ? t("workspaces.share.ownedBy", "Owned by {{owner}}", { owner: ownerId })
-        : t("workspaces.share.unowned", "No recorded owner")}
+      {owner ? t("workspaces.share.ownedBy", "Owned by {{owner}}", { owner }) : t("workspaces.share.unowned", "No recorded owner")}
       {space ? ` · ${t("workspaces.share.inSpace", "in {{space}}", { space })}` : ""}
     </p>
   );
@@ -498,17 +695,29 @@ function VisibilityChooser({
       hint: t("workspaces.visibility.spaceHint", "Everyone in this resource's workspace."),
     },
     {
+      value: "internal",
+      icon: Building2,
+      label: t("workspaces.visibility.internal", "Everyone signed in"),
+      hint: t(
+        "workspaces.visibility.internalHint",
+        "Anyone who signs in can chat with it. Its configuration stays private. Not reachable anonymously."
+      ),
+    },
+    {
       value: "published",
       icon: Globe,
       label: t("workspaces.visibility.published", "Published"),
-      hint: t("workspaces.visibility.publishedHint", "Everyone with access to this deployment."),
+      hint: t(
+        "workspaces.visibility.publishedHint",
+        "Everyone with access to this deployment can read it — anonymous chat visitors included."
+      ),
     },
   ];
 
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-medium">{t("workspaces.share.visibility", "Visibility")}</h3>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2">
         {options.map((opt) => {
           const Icon = opt.icon;
           const selected = current === opt.value;
@@ -540,12 +749,8 @@ function VisibilityChooser({
 }
 
 /**
- * What the last change actually did.
- *
- * Sharing an agent reaches the whole config graph beneath it, which the user
- * never asked for explicitly — so say so. And when something was left alone
- * because it belongs to somebody else, name it: silence there reads as success
- * and leaves a recipient with a half-shared agent nobody knows is half-shared.
+ * What the last change actually did — and, when something was left alone
+ * because it belongs to somebody else, what.
  */
 function CascadeSummary({ result, action }: { result: ShareResult; action: ShareAction }) {
   const { t } = useTranslation();
@@ -556,15 +761,14 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
     <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3" data-testid="share-cascade-summary">
       <p className="text-sm">
         {/* Which verb matters: "Applied to 3 resources" after a revoke reads as
-            though access had been granted, and after a transfer it says nothing
-            about who now owns them. */}
+            though access had been granted. */}
         {action === "revoke"
           ? t("workspaces.share.cascadeRevoked", "Removed from {{count}} resource", { count: updated.length })
           : action === "transfer"
-            ? t("workspaces.transfer.cascade", "Owner changed on {{count}} resource", {
-                count: updated.length,
-              })
-            : t("workspaces.share.cascadeApplied", "Applied to {{count}} resource", { count: updated.length })}
+            ? t("workspaces.transfer.cascade", "Owner changed on {{count}} resource", { count: updated.length })
+            : action === "move"
+              ? t("workspaces.move.cascade", "Moved {{count}} resource", { count: updated.length })
+              : t("workspaces.share.cascadeApplied", "Applied to {{count}} resource", { count: updated.length })}
       </p>
       {skipped.length > 0 && (
         <div className="space-y-1">
@@ -579,14 +783,9 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
                 {target.name ?? target.id}
               </li>
             ))}
-            {/* A list of five under a count of twelve reads as the whole list.
-                Silent truncation is the one thing this summary exists not to
-                do. */}
             {skipped.length > MAX_LISTED && (
               <li className="list-none italic">
-                {t("workspaces.share.andMore", "and {{count}} more", {
-                  count: skipped.length - MAX_LISTED,
-                })}
+                {t("workspaces.share.andMore", "and {{count}} more", { count: skipped.length - MAX_LISTED })}
               </li>
             )}
           </ul>
@@ -597,20 +796,8 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
 }
 
 /**
- * The level as a human reads it.
- *
- * Falls through to the raw value rather than returning nothing. `level` is
- * typed, but it arrives over the wire — a backend that grows a fifth level
- * would otherwise render an empty badge next to somebody's name, which reads as
- * "no access" rather than as "a level this UI does not know yet".
- */
-/**
- * The message for a failed read of the sharing state.
- *
- * A 403 here is not a fault, it is the USE/VIEW split doing its job: someone
- * shared an agent so you could *talk to* it, which deliberately does not let
- * you read how it was built. The server's own wording is about access levels
- * and reads as an error; this says what actually happened.
+ * The message for a failed read of the sharing state. A 403 is the USE/VIEW
+ * split doing its job, so it is explained rather than reported as a fault.
  */
 function friendlyError(t: (k: string, d: string) => string, error: unknown): string {
   if (error instanceof ApiClientError && error.status === 403) {
@@ -622,9 +809,13 @@ function friendlyError(t: (k: string, d: string) => string, error: unknown): str
   return getErrorMessage(error);
 }
 
-/** How many skipped resources to name before summarising the rest. */
+/** How many resources to name before summarising the rest. */
 const MAX_LISTED = 5;
 
+/**
+ * The level as a human reads it. Falls through to the raw value for a level
+ * this UI does not know yet, rather than rendering an empty badge.
+ */
 function levelLabel(t: (k: string, d: string) => string, level: AccessLevel): string {
   switch (level) {
     case "USE":

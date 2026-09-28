@@ -33,6 +33,11 @@ export interface ChatState {
   undoAvailable: boolean;
   redoAvailable: boolean;
   agentName: string | null;
+  /**
+   * Shown before the first message when the agent's maintainers may read this
+   * conversation. Null when they may not.
+   */
+  reviewNotice: string | null;
   config: ChatConfig;
   /** Set when the backend requests a specific input field (e.g. password). */
   activeInputField: InputField | null;
@@ -85,6 +90,7 @@ export const initialState: ChatState = {
   undoAvailable: false,
   redoAvailable: false,
   agentName: null,
+  reviewNotice: null,
   config: defaultConfig,
   activeInputField: null,
   isSecretMode: false,
@@ -110,6 +116,7 @@ export type ChatAction =
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
   | { type: "SET_AGENT_NAME"; name: string | null }
+  | { type: "SET_REVIEW_NOTICE"; notice: string | null }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
   | { type: "SET_INPUT_FIELD"; field: InputField }
@@ -290,6 +297,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_AGENT_NAME":
       return { ...state, agentName: action.name };
+
+    case "SET_REVIEW_NOTICE":
+      return { ...state, reviewNotice: action.notice };
 
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };

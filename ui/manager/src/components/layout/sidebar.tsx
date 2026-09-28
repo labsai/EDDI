@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Boxes,
+  Building2,
   HelpCircle,
   Check,
   RotateCcw,
@@ -91,6 +92,7 @@ const navSections = [
   {
     labelKey: "nav.sectionAdmin",
     items: [
+      { path: "/manage/workspaces", icon: Building2, labelKey: "nav.workspaces", fallback: "Workspaces" },
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
       // Shown to everybody, like the nine other admin-only entries around it.
       // `navSections` is a static const and nothing here is role-gated, so

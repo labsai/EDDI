@@ -109,6 +109,17 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+## Secrets that belong to a space
+
+With [workspaces](workspaces.md) enforced, writing to the vault stays with
+`eddi-admin` — but every personal and team space also has a tenant of its own,
+which the space's members manage without an administrator
+(`/spacestore/secrets?space=…`, or the Manager's **Workspaces** page). An agent
+references such a secret explicitly, as `${vault:<tenant>/<key>}`, with the
+tenant id every response names. Deploying an agent that references a space's
+tenant requires the deployer to be a member of that space; the grant check below
+applies on top. See [Secrets and variables that belong to a space](workspaces.md#secrets-and-variables-that-belong-to-a-space).
+
 ## Agent Grants (`allowedAgents`)
 
 Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is checked **when an agent is deployed**, not when a secret is resolved. What a violation costs is set by [the enforcement mode](#modes) — blocked, logged, or not checked at all.

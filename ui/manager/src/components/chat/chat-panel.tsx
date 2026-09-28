@@ -1,3 +1,4 @@
+import { ReviewNotice } from "@/components/chat/review-notice";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -503,6 +504,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             )}
           </button>
         )}
+
+        {/* Said before the first message: the agent's maintainers may read
+            this conversation, when its deployed version opted in. */}
+        <ReviewNotice agentId={selectedAgentId} environment={chatEnvironment} />
 
         {/* Messages — the FAB must be a SIBLING of the scroller, anchored to
             this wrapper: absolutely positioned inside an overflow container it

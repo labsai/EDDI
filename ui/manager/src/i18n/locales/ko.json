@@ -75,7 +75,8 @@
     "workforce": "워크포스",
     "monitoring": "대화 모니터링",
     "analytics": "분석",
-    "connections": "연결"
+    "connections": "연결",
+    "workspaces": "작업 공간"
   },
   "theme": {
     "light": "라이트",
@@ -444,7 +445,18 @@
     "toolPauseReasonPlaceholder": "예: {toolNames} 에 승인이 필요합니다",
     "toolPendingMessage": "일시 정지 중 최종 사용자 메시지 ({toolNames} 허용됨)",
     "toolPendingMessagePlaceholder": "예: {toolNames} 승인을 위해 사람을 기다리는 중…",
-    "toolInGroupTurns": "그룹 턴 내부에서는 멤버의 게이트된 도구 호출이 자동으로 거부됩니다(REJECT)."
+    "toolInGroupTurns": "그룹 턴 내부에서는 멤버의 게이트된 도구 호출이 자동으로 거부됩니다(REJECT).",
+    "review": {
+      "title": "사용 현황 및 대화 검토",
+      "total": "대화",
+      "active": "현재 활성",
+      "users": "사용자",
+      "description": "대화는 대화한 본인만 볼 수 있습니다. 이 옵션을 켜면 이 에이전트를 편집할 수 있는 모든 사람이 대화를 읽을 수 있습니다 — 사람들이 무엇을 묻는지 파악하고 개선하기 위해서입니다. 채팅은 입력하기 전에 사용자에게 이를 알립니다.",
+      "enable": "이 에이전트의 관리자가 대화를 읽을 수 있도록 허용",
+      "notice": "채팅이 사용자에게 알리는 내용 (비워 두면 기본 문구 사용)",
+      "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
+      "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
+    }
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -747,7 +759,8 @@
     "errorConversationEnded": "이 대화는 종료되었습니다.",
     "errorAgentNotReady": "이 에이전트는 선택한 환경에 아직 배포되지 않았습니다.",
     "errorAgentMismatch": "이 대화는 에이전트의 다른 버전에 속해 있습니다.",
-    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요."
+    "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+    "reviewNoticeLabel": "대화 검토"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -4868,7 +4881,9 @@
       "published": "게시됨",
       "shared": "공유됨",
       "sharedTitle": "{{owner}} 소유 · {{space}} 내",
-      "ownedBy": "{{owner}} 소유"
+      "ownedBy": "{{owner}} 소유",
+      "internal": "로그인한 모든 사용자",
+      "sharedBy": "{{owner}}님이 공유함"
     },
     "level": {
       "use": "대화 가능",
@@ -4886,7 +4901,9 @@
       "space": "작업 공간",
       "spaceHint": "이 리소스의 작업 공간에 속한 모든 사람.",
       "published": "게시됨",
-      "publishedHint": "이 배포에 접근할 수 있는 모든 사람."
+      "publishedHint": "이 배포에 접근할 수 있는 모든 사람이 읽을 수 있습니다 — 익명 채팅 방문자도 포함됩니다.",
+      "internal": "로그인한 모든 사용자",
+      "internalHint": "로그인한 사람은 누구나 채팅할 수 있습니다. 구성은 비공개로 유지됩니다. 익명으로는 접근할 수 없습니다."
     },
     "share": {
       "title": "공유",
@@ -4894,7 +4911,7 @@
       "visibility": "공개 범위",
       "peopleAndTeams": "사용자 및 팀",
       "subjectLabel": "사용자 또는 팀",
-      "subjectPlaceholder": "name@example.com 또는 team:engineering",
+      "subjectPlaceholder": "이름, 이메일 또는 팀",
       "levelLabel": "접근 수준",
       "add": "공유",
       "shared": "공유했습니다",
@@ -4920,7 +4937,13 @@
       "cascadeRevoked_other": "{{count}}개 리소스에서 제거됨",
       "andMore_other": "외 {{count}}개",
       "cascadeRevoked_one": "{{count}}개 리소스에서 제거됨",
-      "andMore_one": "외 {{count}}개"
+      "andMore_one": "외 {{count}}개",
+      "unknownGrant": "로그인하는 사용자 중 일치하는 사람이 없어 아무에게도 전달되지 않습니다. 삭제하고 다시 공유하세요.",
+      "copyFailed": "복사할 수 없습니다 — 주소를 선택해 직접 복사하세요.",
+      "chatLink": "채팅 링크",
+      "copied": "복사됨",
+      "copy": "복사",
+      "chatLinkHint": "에이전트가 “대화 가능” 이상으로 공유된 모든 사람이 사용할 수 있습니다."
     },
     "emptySpace": "이 작업 공간에 에이전트가 없습니다",
     "emptySpaceDescription": "다른 작업 공간에 볼 수 있는 에이전트가 있을 수 있습니다.",
@@ -4938,12 +4961,106 @@
       "warning": "현재 소유자({{owner}})를 대체하며, 해당 사용자는 이 리소스에 대한 제어권을 잃습니다.",
       "cascade_other": "리소스 {{count}}개의 소유자를 변경했습니다",
       "cascade_one": "리소스 {{count}}개의 소유자를 변경했습니다"
-    }
+    },
+    "notifications": {
+      "granted": "{{name}}에게 접근 권한을 부여했습니다",
+      "labelUnread_one": "알림 — 읽지 않음 {{count}}개",
+      "labelUnread_other": "알림 — 읽지 않음 {{count}}개",
+      "label": "알림",
+      "markAll": "모두 읽음으로 표시",
+      "empty": "새 항목이 없습니다. 나와의 공유와 접근 요청이 여기에 표시됩니다.",
+      "unnamed": "이름 없는 리소스",
+      "requested": "{{who}}님이 {{what}}에 대한 “{{level}}” 접근을 요청했습니다",
+      "shared": "{{who}}님이 {{what}}을(를) 공유했습니다 — {{level}}",
+      "grant": "부여",
+      "openChat": "채팅 열기",
+      "open": "열기",
+      "dismiss": "닫기"
+    },
+    "request": {
+      "alreadyHas": "이미 해당 접근 권한이 있습니다 — 페이지를 새로 고치세요.",
+      "chatOnlyTitle": "이 에이전트와 채팅할 수 있습니다",
+      "title": "이 항목에 대한 접근 권한이 없습니다",
+      "chatOnly": "채팅용으로 공유되었으므로 구성은 비공개로 유지됩니다.",
+      "subtitle": "비공개이거나 다른 사람과만 공유되었을 수 있습니다. 접근을 요청할 수 있습니다.",
+      "sent": "요청을 보냈습니다. 항목이 존재하고 소유자가 있으면 소유자의 알림에 표시됩니다 — 권한이 부여되면 나에게도 표시됩니다.",
+      "messagePlaceholder": "왜 필요한가요? (선택 사항)",
+      "message": "소유자에게 보낼 메시지",
+      "action": "접근 요청"
+    },
+    "move": {
+      "done": "이동했습니다",
+      "title": "팀으로 이동",
+      "team": "팀",
+      "action": "이동",
+      "hint": "이제 팀의 모든 사람이 찾고 편집할 수 있습니다. 소유자는 그대로 나입니다 — 삭제하거나 추가로 공유할 수 있는 사람은 나뿐입니다.",
+      "cascade_one": "리소스 {{count}}개를 이동했습니다",
+      "cascade_other": "리소스 {{count}}개를 이동했습니다"
+    },
+    "preview": {
+      "title_one": "이 변경은 리소스 {{count}}개에 적용됩니다",
+      "title_other": "이 변경은 리소스 {{count}}개에 적용됩니다",
+      "confirm": "모두에 적용"
+    },
+    "ownership": {
+      "mine": "내 항목",
+      "shared": "나와 공유됨",
+      "any": "볼 수 있는 모든 항목",
+      "label": "표시"
+    },
+    "create": {
+      "default": "기본 작업 공간",
+      "hint": "새 항목은 {{space}}에 생성됩니다."
+    },
+    "emptyShared": "아직 나와 공유된 항목이 없습니다",
+    "emptySharedDescription": "동료가 나 또는 내 팀과 에이전트를 공유하면 여기에 표시되며, 알림에도 표시됩니다.",
+    "showEverything": "볼 수 있는 모든 항목 표시"
   },
   "connectionRef": {
     "wrapped": "연결은 스킴을 포함한 전체 헤더 값을 제공합니다. ${connection:name}만 단독으로 쓰고 “Bearer ”는 연결의 헤더 값에 넣으세요.",
     "headerMismatch": "이 연결은 자격 증명을 “{{expected}}”로 보내므로 헤더 이름도 그래야 합니다. 그렇지 않으면 설정에는 한 이름이, 요청에는 다른 이름이 실립니다.",
     "refusedInRequest": "${connection:…}은 경로, 쿼리 매개변수, 본문에서는 거부됩니다. URL의 자격 증명은 모든 프록시 로그에 남고 본문의 것은 읽히지 않습니다. 대신 헤더에서 연결을 참조하세요.",
     "refusedInModel": "언어 모델, 임베딩, 벡터 저장소는 ${connection:…}을 받지 않습니다. 연결은 전체 헤더로 확인되지만 이들은 순수 자격 증명이 필요합니다. 여기서는 ${vault:…}을 사용하세요."
+  },
+  "workspacesPage": {
+    "title": "작업 공간",
+    "subtitle": "내 작업 공간, 그곳에 보관된 시크릿과 변수, 새 작업의 공유 방식.",
+    "notEnforced": "이 배포에서는 작업 공간이 적용되지 않아 모든 사람이 모든 것을 볼 수 있습니다. 운영자가 eddi.workspaces.enabled=true로 활성화합니다.",
+    "yourSpaces": "내 작업 공간",
+    "yourSpacesHint": "각 작업 공간에는 고유한 시크릿과 변수가 있습니다. 구성원만 이를 보거나 변경할 수 있으며, 이를 사용하는 에이전트도 구성원만 배포할 수 있습니다.",
+    "referenceCopied": "참조를 복사했습니다",
+    "copyReference": "에이전트에서 사용할 참조 복사",
+    "secretStored": "시크릿을 저장했습니다",
+    "secrets": "시크릿",
+    "noSecrets": "이 작업 공간에는 아직 시크릿이 없습니다",
+    "deleteNamed": "{{name}} 삭제",
+    "secretName": "이름 (예: openai-key)",
+    "secretValue": "값 — 암호화되어 저장되며 다시 표시되지 않습니다",
+    "add": "추가",
+    "deleteSecretTitle": "이 시크릿을 삭제하시겠습니까?",
+    "deleteSecretDescription": "이를 사용하는 에이전트는 다시 저장될 때까지 작동하지 않습니다. 이 작업은 되돌릴 수 없습니다.",
+    "variableStored": "변수를 저장했습니다",
+    "variables": "변수",
+    "noVariables": "이 작업 공간에는 아직 변수가 없습니다",
+    "variableName": "이름 (예: model)",
+    "variableValue": "값",
+    "pinned": "{{property}}에 의해 고정됨",
+    "stored": "여기서 설정됨",
+    "default": "기본값",
+    "settings": "설정",
+    "settingsHint": "즉시 적용되며, 5초 이내에 모든 레플리카에 반영됩니다. 작업 공간 적용 여부와 팀 정보를 담은 토큰 클레임은 시작 시 설정이며 참고용으로만 표시됩니다.",
+    "enforcing": "적용됨",
+    "enforcedYes": "예",
+    "enforcedNo": "아니요",
+    "groupsClaim": "팀 정보를 가져오는 토큰 클레임",
+    "defaultSpace": "새 작업의 기본 위치",
+    "defaultSpacePlaceholder": "비워 두면 각자의 작업 공간 — 또는 팀 이름",
+    "defaultSpaceHelp": "팀 이름을 지정하면 배포가 팀 중심이 됩니다. 비공개로 설정하지 않는 한 동료들이 서로의 작업을 볼 수 있습니다. 사용자가 선택한 작업 공간이 항상 우선합니다.",
+    "legacy": "소유권이 기록되기 전에 생성된 리소스",
+    "legacyShared": "모두에게 표시 — 업그레이드 후에도 사라지는 것은 없습니다",
+    "legacyAdminOnly": "관리자에게만 표시 — 소유자가 지정된 후",
+    "lastChanged": "마지막 변경: {{who}}",
+    "neverChanged": "아직 여기서 변경되지 않음",
+    "saved": "설정을 저장했습니다"
   }
 }
