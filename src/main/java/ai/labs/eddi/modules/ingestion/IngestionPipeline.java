@@ -297,7 +297,8 @@ public class IngestionPipeline {
         if (!sourceRun.coveredWholeSource()) {
             collector.tombstoningSkipped = true;
             LOGGER.infof("Not reconciling deletions for source '%s': the run stopped at %s rather than covering "
-                    + "the source", LogSanitizer.sanitize(source.getName()), sourceRun.summary().stopReason());
+                    + "the source", LogSanitizer.sanitize(source.getName()),
+                    sourceRun.summary().discoveryIncomplete() ? "incomplete sitemap discovery" : sourceRun.summary().stopReason());
             return 0;
         }
         List<DocumentState> gone = stateStore.bumpAndFindMissing(

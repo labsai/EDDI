@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -73,6 +74,7 @@ class SitemapParsingTest {
 
             assertEquals(List.of(BASE + "/a", BASE + "/b"), sitemap.pageUrls());
             assertTrue(sitemap.childSitemaps().isEmpty());
+            assertTrue(sitemap.complete());
         }
 
         @Test
@@ -157,7 +159,9 @@ class SitemapParsingTest {
             for (int i = 0; i < locs.length; i++) {
                 locs[i] = BASE + "/p" + i;
             }
-            assertEquals(5_000, parse(urlset(locs)).pageUrls().size());
+            Sitemap sitemap = parse(urlset(locs));
+            assertEquals(5_000, sitemap.pageUrls().size());
+            assertFalse(sitemap.complete(), "a sitemap cut at the cap may list pages that were never read");
         }
 
         @Test
@@ -236,6 +240,7 @@ class SitemapParsingTest {
             Sitemap sitemap = WebCrawler.parseSitemap(body, null, BASE + "/sitemap.xml.gz");
 
             assertEquals(List.of(BASE + "/first"), sitemap.pageUrls());
+            assertFalse(sitemap.complete(), "what lay past the decompression cap was never read");
         }
     }
 

@@ -945,6 +945,35 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a sitemap that could not be read means the source was not covered")
+        void unreadableSitemapIsNotCoverage() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .status(SITE + "/sitemap.xml", 503)
+                    .page(SITE + "/", "<html><body>x</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertEquals(StopReason.COMPLETED, summary.stopReason());
+            assertFalse(summary.coveredWholeSource(), "an outage says nothing about which pages the sitemap lists");
+        }
+
+        @Test
+        @DisplayName("a site with no sitemap — the fallback answers 404 — is still covered")
+        void noSitemapIsStillCoverage() {
+            // The guard against the opposite mistake: were a missing sitemap read as
+            // incomplete discovery, deletions would stop for every site without one.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow:")
+                    .page(SITE + "/", "<html><body>x</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertTrue(site.wasRequested(SITE + "/sitemap.xml"));
+            assertTrue(summary.coveredWholeSource());
+        }
+
+        @Test
         @DisplayName("an index of indexes cannot read more than the sitemap budget")
         void sitemapIndexBudget() {
             // Each index lists two more: unbounded, the requests made before the first
@@ -965,10 +994,13 @@ class WebCrawlerTest {
                 level = next;
             }
 
-            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
 
             long sitemapRequests = site.requestedUrls().stream().filter(url -> url.endsWith(".xml")).count();
             assertEquals(20, sitemapRequests, "capped at MAX_SITEMAPS");
+            // The sitemaps left unread may list pages the crawl never queued. Reported as
+            // covered, deletion reconciliation would remove exactly those.
+            assertFalse(summary.coveredWholeSource(), "a crawl that left sitemaps unread has not covered the source");
         }
 
         @Test

@@ -420,6 +420,9 @@ public class WebCrawler {
             sitemapsRead++;
             String sitemapUrl = sitemapQueue.poll();
             Sitemap sitemap = fetchSitemap(sitemapUrl, request, counters);
+            if (!sitemap.complete()) {
+                counters.discoveryIncomplete = true;
+            }
             String indexHost = CrawlUrls.host(sitemapUrl).orElse(null);
             for (String child : sitemap.childSitemaps()) {
                 // The protocol's own rule: an index lists sitemaps on its own host.
@@ -435,6 +438,7 @@ public class WebCrawler {
             }
             for (String url : sitemap.pageUrls()) {
                 if (pagesFromSitemaps >= MAX_SITEMAP_URLS) {
+                    counters.discoveryIncomplete = true;
                     break;
                 }
                 String canonical = CrawlUrls.canonicalize(url);
@@ -446,6 +450,13 @@ public class WebCrawler {
                     pagesFromSitemaps++;
                 }
             }
+        }
+        // Sitemaps left unread — the budget, a limit or a cancellation stopped the
+        // loop — list pages the crawl never learned of. Without saying so, a crawl
+        // that then finished its queue reported the source covered, and deletion
+        // reconciliation removed pages that only the unread sitemaps listed.
+        if (!sitemapQueue.isEmpty()) {
+            counters.discoveryIncomplete = true;
         }
     }
 
@@ -595,8 +606,21 @@ public class WebCrawler {
     /**
      * What one sitemap lists: pages, or — for a sitemap index — further sitemaps.
      */
-    record Sitemap(List<String> pageUrls, List<String> childSitemaps) {
-        static final Sitemap EMPTY = new Sitemap(List.of(), List.of());
+    /**
+     * @param complete
+     *            false when this sitemap may list more than was read — it was cut
+     *            at a cap, or could not be read for a reason that says nothing
+     *            about what it lists. A crawl that relied on it has not seen the
+     *            whole source.
+     */
+    record Sitemap(List<String> pageUrls, List<String> childSitemaps, boolean complete) {
+        /** No sitemap there — a definite answer, as a 404 is. */
+        static final Sitemap EMPTY = new Sitemap(List.of(), List.of(), true);
+        /**
+         * A sitemap that could not be read: an outage, a refusal, a body that would not
+         * parse.
+         */
+        static final Sitemap UNREAD = new Sitemap(List.of(), List.of(), false);
     }
 
     private Sitemap fetchSitemap(String sitemapUrl, CrawlRequest request, Counters counters) {
@@ -605,17 +629,22 @@ public class WebCrawler {
             FetchedPage page = fetcher.fetch(new FetchCommand(sitemapUrl, request.politeness().userAgent(),
                     request.limits().requestTimeout(), null, null, MAX_METADATA_BYTES));
             counters.bytesDownloaded += page.body() == null ? 0 : page.body().length;
-            if (!page.isOk() || page.body() == null || page.body().length == 0) {
+            if (!page.isOk()) {
+                // A 404 or 410 answers that there is no such sitemap; an outage, a rate
+                // limit or a refusal answers nothing about what it lists.
+                return saysNothingAboutContent(page.statusCode()) ? Sitemap.UNREAD : Sitemap.EMPTY;
+            }
+            if (page.body() == null || page.body().length == 0) {
                 return Sitemap.EMPTY;
             }
             return parseSitemap(page.body(), page.declaredCharset(), sitemapUrl);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return Sitemap.EMPTY;
+            return Sitemap.UNREAD;
         } catch (IOException | RuntimeException e) {
             LOGGER.debugf("Could not read sitemap %s: %s",
                     LogSanitizer.sanitize(sitemapUrl), LogSanitizer.sanitize(describe(e)));
-            return Sitemap.EMPTY;
+            return Sitemap.UNREAD;
         }
     }
 
@@ -639,9 +668,13 @@ public class WebCrawler {
      * {@code <sm:urlset>} reads like {@code <urlset>}.
      */
     static Sitemap parseSitemap(byte[] body, String declaredCharset, String sitemapUrl) throws IOException {
-        byte[] bytes = isGzip(body) ? gunzip(body) : body;
+        boolean gzipped = isGzip(body);
+        byte[] bytes = gzipped ? gunzip(body) : body;
+        // Reaching a cap means the sitemap may list more than was read.
+        boolean decompressionCapped = gzipped && bytes.length >= MAX_DECOMPRESSED_SITEMAP_BYTES;
         if (!looksLikeXml(bytes)) {
-            return new Sitemap(textSitemapUrls(bytes, bytes == body ? declaredCharset : null), List.of());
+            List<String> lines = textSitemapUrls(bytes, bytes == body ? declaredCharset : null);
+            return new Sitemap(lines, List.of(), !decompressionCapped && lines.size() < MAX_SITEMAP_URLS);
         }
         // A charset from the HTTP header describes the compressed bytes, not what is
         // inside them; the XML declaration is authoritative for those.
@@ -664,7 +697,8 @@ public class WebCrawler {
             default -> collectText(xml, "loc", "url", found);
         }
         List<String> urls = List.copyOf(found);
-        return "sitemapindex".equals(root) ? new Sitemap(List.of(), urls) : new Sitemap(urls, List.of());
+        boolean complete = !decompressionCapped && urls.size() < MAX_SITEMAP_URLS;
+        return "sitemapindex".equals(root) ? new Sitemap(List.of(), urls, complete) : new Sitemap(urls, List.of(), complete);
     }
 
     private static void collectText(Document xml, String element, String parent, Set<String> into) {
@@ -830,6 +864,10 @@ public class WebCrawler {
      *            caller needs this before concluding that an unseen document has
      *            been deleted: a crawl that hit its page limit saw an arbitrary
      *            subset.
+     * @param discoveryIncomplete
+     *            a sitemap was cut at a cap or could not be read, so pages it lists
+     *            may never have been queued — the same reason as a limit not to
+     *            read absence as deletion
      */
     public record CrawlSummary(
             int pagesFetched,
@@ -840,7 +878,17 @@ public class WebCrawler {
             int fetchAttempts,
             long bytesDownloaded,
             Duration duration,
-            StopReason stopReason) {
+            StopReason stopReason,
+            boolean discoveryIncomplete) {
+
+        /**
+         * A summary whose discovery was complete — every source that has no sitemaps.
+         */
+        public CrawlSummary(int pagesFetched, int pagesUnchanged, int pagesSkipped, int errors, int unreachableErrors,
+                int fetchAttempts, long bytesDownloaded, Duration duration, StopReason stopReason) {
+            this(pagesFetched, pagesUnchanged, pagesSkipped, errors, unreachableErrors, fetchAttempts, bytesDownloaded,
+                    duration, stopReason, false);
+        }
 
         /**
          * Whether the crawl covered its whole scope, so absence means deletion.
@@ -857,7 +905,7 @@ public class WebCrawler {
         public boolean coveredWholeSource() {
             boolean nothingReached = pagesFetched + pagesUnchanged == 0
                     && (errors == 0 || unreachableErrors == errors);
-            return stopReason == StopReason.COMPLETED && !nothingReached;
+            return stopReason == StopReason.COMPLETED && !nothingReached && !discoveryIncomplete;
         }
     }
 
@@ -869,11 +917,16 @@ public class WebCrawler {
         private int unreachable;
         private int fetchAttempts;
         private long bytesDownloaded;
+        /**
+         * A sitemap was cut short or left unread, so the queue was never the whole
+         * source.
+         */
+        private boolean discoveryIncomplete;
 
         CrawlSummary summarize(Instant start, StopReason stopReason) {
             return new CrawlSummary(pagesFetched, unchanged, skipped, errors, unreachable, fetchAttempts,
                     bytesDownloaded,
-                    Duration.between(start, Instant.now()), stopReason);
+                    Duration.between(start, Instant.now()), stopReason, discoveryIncomplete);
         }
     }
 }

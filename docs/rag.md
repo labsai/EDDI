@@ -416,6 +416,11 @@ Bounds: 20 sitemaps per run, indexes and their children included; 5,000 page URL
 1 MB per sitemap as fetched and 16 MB once decompressed, so a small gzip body cannot inflate without
 limit. `maxPages` still decides how many pages are ingested.
 
+A run that hit one of these bounds — or found a sitemap it could not read (a 5xx, 429, 401 or 403,
+a transport error, a body that would not parse) — **concludes nothing about deletions**, like a run
+that stopped at a limit: the unread part may list pages the crawl never queued. A sitemap answering
+404 is not such a case; that is a definite "no sitemap here".
+
 **When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
 it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
 or reached nothing at all concludes nothing. "Reached nothing" is deliberate: an unreachable seed, a

@@ -221,3 +221,15 @@ the first two fail with the reap removed).
   `RuntimeException` — left both versions retrievable behind a bare `failed:` status. It is still
   reported as failed (a retry removes every version but its own), with a `warning` saying the new
   version is stored alongside the old. `replace_whoseCleanupFails_failsAndSaysBothVersionsMayRemain`.
+
+### Fourth review round: incomplete sitemap discovery no longer counts as coverage
+
+A crawl whose sitemap discovery was cut short — the 20-sitemap budget with sitemaps still queued,
+the 5,000-URL cap, a sitemap cut at the per-sitemap or decompression cap, or a sitemap that could
+not be read for a reason that says nothing about its content — still ended `COMPLETED`, so
+`coveredWholeSource()` held and deletion reconciliation could remove pages only the unread
+sitemaps listed (CodeRabbit). It predates this PR for the robots.txt caps; index traversal made it
+easier to reach. `CrawlSummary` gains `discoveryIncomplete`, which `coveredWholeSource()` now
+honours; a sitemap answering 404 stays a definite answer, so sites without one keep reconciling.
+Tests: `unreadableSitemapIsNotCoverage`, `sitemapIndexBudget` (both fail with the flag ignored),
+`noSitemapIsStillCoverage`, and the parser's cap cases.
