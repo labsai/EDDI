@@ -809,43 +809,43 @@ describe("ChatWidget — resume after approval", () => {
   }, 15000);
 });
 
-describe("ChatWidget — model cascade", () => {
-  /**
-   * Backend whose stream emits the given frames and then stays open, so the
-   * transient indicator state is still on screen when we assert.
-   */
-  function mockOpenStream(frames: string[]) {
-    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
-      const href = String(url);
-      if (href.includes("/start")) {
-        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
-      }
-      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
-      if (href.includes("/stream")) {
-        return new Response(
-          new ReadableStream({
-            start(c) {
-              const enc = new TextEncoder();
-              for (const f of frames) c.enqueue(enc.encode(f));
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "text/event-stream" } },
-        );
-      }
+/**
+ * Backend whose stream emits the given frames and then stays open, so the
+ * transient indicator state is still on screen when we assert.
+ */
+function mockOpenStream(frames: string[]) {
+  globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+    const href = String(url);
+    if (href.includes("/start")) {
+      return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+    }
+    if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+    if (href.includes("/stream")) {
       return new Response(
-        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
-        { status: 200 },
+        new ReadableStream({
+          start(c) {
+            const enc = new TextEncoder();
+            for (const f of frames) c.enqueue(enc.encode(f));
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    }) as typeof fetch;
-  }
+    }
+    return new Response(
+      JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+}
 
-  async function send(text = "hello") {
-    renderWidget();
-    const input = await screen.findByTestId("chat-input");
-    fireEvent.change(input, { target: { value: text } });
-    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
-  }
+async function sendOnOpenStream(text = "hello") {
+  renderWidget();
+  const input = await screen.findByTestId("chat-input");
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+}
 
+describe("ChatWidget — model cascade", () => {
   it("says the agent is thinking harder once the cascade escalates", async () => {
     // A buffered cascade emits its whole answer as a single token, so the wait
     // after an escalation is completely silent — without this the user watches
@@ -853,7 +853,7 @@ describe("ChatWidget — model cascade", () => {
     mockOpenStream([
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"low_confidence"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     expect(await screen.findByTestId("escalating-indicator")).toBeInTheDocument();
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
@@ -864,7 +864,7 @@ describe("ChatWidget — model cascade", () => {
       'event: cascade_escalation\ndata: {"toStep":1}\n\n',
       "event: token\ndata: Here is the answer\n\n",
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByText("Here is the answer");
     expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
@@ -880,7 +880,7 @@ describe("ChatWidget — model cascade", () => {
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"confidence":0.61,' +
         '"threshold":0.7,"reason":"low_confidence","durationMs":812}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByTestId("escalating-indicator");
     expect(document.body.textContent).not.toMatch(
@@ -898,7 +898,7 @@ describe("ChatWidget — model cascade", () => {
       "event: token\ndata: partial answer\n\n",
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"timeout"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByTestId("escalating-indicator");
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
@@ -915,11 +915,104 @@ describe("ChatWidget — model cascade", () => {
       "event: token\ndata: Partial answer\n\n",
       'event: cascade_step_start\ndata: {"stepIndex":1,"modelName":"gpt-4o"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByText("Partial answer");
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
     expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatWidget — live tool calls", () => {
+  it("says which tool the agent is using", async () => {
+    // Without handling, the event was dropped and a slow tool looked like the
+    // agent thinking for no reason.
+    mockOpenStream([
+      'event: task_start\ndata: {"taskId":"ai.labs.llm","taskType":"llm","index":0}\n\n',
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Using calculator…");
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+  });
+
+  it("follows the newest tool when the agent calls several", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"websearch"}\n\n',
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
+    );
+    expect(document.body.textContent).not.toMatch(/websearch/);
+  });
+
+  it("clears the tool status as soon as text resumes", async () => {
+    // No event says a tool finished — resumed output is the only signal.
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      "event: token\ndata: The answer is 4\n\n",
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByText("The answer is 4");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Using calculator/);
+  });
+
+  it("clears the tool status when the turn completes", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: done\ndata: {"conversationState":"READY","conversationOutputs":[{"output":["4"]}]}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByText("4");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+  });
+
+  it("names a tool called after text has already streamed", async () => {
+    // A model may write a sentence and THEN call a tool. The silence while it
+    // runs is the wait worth explaining, so the event is not token-gated the
+    // way task_start is.
+    mockOpenStream([
+      "event: token\ndata: Let me check that.\n\n",
+      'event: tool_call\ndata: {"tool":"weather"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using weather…");
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+    expect(screen.getByText("Let me check that.")).toBeInTheDocument();
+  });
+
+  it("ignores a malformed payload rather than rendering a broken name", async () => {
+    mockOpenStream([
+      'event: task_start\ndata: {"taskId":"ai.labs.llm","taskType":"llm","index":0}\n\n',
+      "event: tool_call\ndata: not json\n\n",
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByTestId("thinking-indicator");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Using /);
+  });
+
+  it("gives way to the escalation hint when the cascade escalates", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"low_confidence"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("escalating-indicator")).toBeInTheDocument();
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
   });
 });
 

@@ -265,6 +265,58 @@ describe("cascade escalation", () => {
   });
 });
 
+/* ─── Live tool call ─────────────────────────── */
+
+describe("active tool", () => {
+  it("SET_ACTIVE_TOOL sets and clears the name", () => {
+    const on = chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: "calculator" });
+    expect(on.activeTool).toBe("calculator");
+
+    expect(chatReducer(on, { type: "SET_ACTIVE_TOOL", tool: null }).activeTool).toBeNull();
+  });
+
+  it("SET_ACTIVE_TOOL returns the SAME state object when unchanged", () => {
+    // Cleared on every token — must not re-render the store per token.
+    expect(chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: null })).toBe(
+      initialState,
+    );
+  });
+
+  it("FINISH_STREAMING clears it — no tool is running once the turn is over", () => {
+    const state: ChatState = {
+      ...initialState,
+      activeTool: "calculator",
+      isProcessing: true,
+      messages: [makeMsg({ isStreaming: true })],
+    };
+
+    expect(chatReducer(state, { type: "FINISH_STREAMING" }).activeTool).toBeNull();
+  });
+
+  it("CLEAR_MESSAGES clears it, so a new conversation never inherits it", () => {
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    expect(chatReducer(state, { type: "CLEAR_MESSAGES" }).activeTool).toBeNull();
+  });
+
+  it("an escalation drops the tool the abandoned model was running", () => {
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    const next = chatReducer(state, { type: "SET_ESCALATING", value: true });
+
+    expect(next.isEscalating).toBe(true);
+    expect(next.activeTool).toBeNull();
+  });
+
+  it("lowering escalation leaves a running tool alone", () => {
+    // SET_ESCALATING false is dispatched on every token; it must neither wipe
+    // the tool nor allocate a new state when nothing changed.
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    expect(chatReducer(state, { type: "SET_ESCALATING", value: false })).toBe(state);
+  });
+});
+
 describe("CLEAR_MESSAGES resets the turn flags", () => {
   it("clears isProcessing — a cleared conversation is not mid-turn", () => {
     // This was only ever lowered as a side effect of the abandoned stream's

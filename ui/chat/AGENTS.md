@@ -44,7 +44,7 @@ src/
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
-│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade)
+│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade), Using {tool}
 │   └── ScrollToBottom.tsx  # Floating scroll button
 ├── hooks/
 │   ├── useTheme.ts         # Dark/light/system theme with localStorage
@@ -63,9 +63,15 @@ src/
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Eight SSE events**: `task_start`, `task_complete`, `task_failed`, `token`,
-  `cascade_step_start`, `cascade_escalation`, `done`, `error`. There is **no
-  `thinking` event** — the backend never emits one.
+- **Nine SSE events**: `task_start`, `task_complete`, `task_failed`, `token`,
+  `tool_call`, `cascade_step_start`, `cascade_escalation`, `done`, `error`.
+  There is **no `thinking` event** — the backend never emits one.
+- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
+  the name only; arguments reach the client later, redacted, in
+  `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
+  widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
+  an escalation, or the end of the turn clears it. It is not token-gated — a
+  model can write a sentence and then call a tool.
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read

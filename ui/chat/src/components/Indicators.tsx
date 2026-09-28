@@ -1,6 +1,7 @@
 /* ──────────────────────────────────────────────
    TypingIndicator — Bouncing dots (agent is typing)
-   ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up
+   ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up,
+                       `tool` while a tool call is running
    ────────────────────────────────────────────── */
 
 /** Three bouncing dots shown while the agent is composing a response. */
@@ -35,14 +36,27 @@ export function TypingIndicator() {
  * of it is the end user's business. "Harder" is avoided too — it implies the
  * first attempt was half-hearted — as is ⚡, which reads as *fast* when the
  * whole point of this state is that the answer is taking longer.
+ *
+ * `tool` names the tool the agent is running right now ("Using calculator…",
+ * the Manager's wording). It takes precedence over `escalating`: a tool called
+ * after an escalation is the stronger model at work, and the reducer drops the
+ * tool when an escalation follows it. The name is shown as sent — it is the
+ * identifier the agent designer gave the tool, not operator detail.
  */
-export function ThinkingIndicator({ escalating = false }: { escalating?: boolean }) {
+export function ThinkingIndicator({
+  escalating = false,
+  tool = null,
+}: {
+  escalating?: boolean;
+  tool?: string | null;
+}) {
+  const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
   return (
     <div
       className="indicator"
       role="status"
       aria-live="polite"
-      data-testid={escalating ? "escalating-indicator" : "thinking-indicator"}
+      data-testid={`${mode}-indicator`}
     >
       <div className="indicator__avatar" aria-hidden="true">
         E
@@ -50,9 +64,15 @@ export function ThinkingIndicator({ escalating = false }: { escalating?: boolean
       <div className="indicator__bubble">
         <div className="indicator__thinking">
           <span className="indicator__brain" aria-hidden="true">
-            🧠
+            {mode === "tool" ? "🔧" : "🧠"}
           </span>
-          <span>{escalating ? "Taking a closer look…" : "Thinking…"}</span>
+          <span>
+            {mode === "tool"
+              ? `Using ${tool}…`
+              : mode === "escalating"
+                ? "Taking a closer look…"
+                : "Thinking…"}
+          </span>
         </div>
       </div>
     </div>

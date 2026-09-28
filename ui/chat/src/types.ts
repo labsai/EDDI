@@ -60,7 +60,7 @@ export type ConversationState =
 
 /**
  * SSE event types emitted by POST /agents/{conversationId}/stream.
- * Mirrors RestAgentEngineStreaming — all eight.
+ * Mirrors RestAgentEngineStreaming — all nine.
  *
  * Note: there is no "thinking" event. The UI previously declared one and the
  * backend never emitted it, so the thinking indicator was only ever cleared by
@@ -72,6 +72,7 @@ export type SSEEventType =
   | "task_start"
   | "task_complete"
   | "task_failed"
+  | "tool_call"
   | "cascade_step_start"
   | "cascade_escalation"
   | "done"
