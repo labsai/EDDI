@@ -128,3 +128,15 @@ removed), `LifecycleManagerErrorClassificationTest` (`describeFailure`),
 paths over HTTP), Manager
 `conversations.test.ts`, `use-chat-sse-handling.test.tsx`, `use-chat.test.tsx` (all three
 chat cases fail with the notice removed).
+
+### Integration tests over real HTTP, and ITs next to a local MongoDB
+
+- `RagIngestionIT` — upload, list and **delete** a file through the full JAX-RS filter chain
+  (the layer the 400 lived in, which every unit test skipped), `replace` validation, and
+  `sitemapUrls` persisted and refused at a private address. `TaskFailureReportIT` — an agent
+  whose LLM points at a closed local port: both the plain and the streaming path must carry
+  `taskErrors`. Reverting either fix fails them (`deleteFile`; both failure-report tests).
+- `IntegrationTestProfile` follows `-Dquarkus.mongodb.devservices.port`. With a locally
+  installed MongoDB on 27017, DevServices could not bind and every `@QuarkusTest` IT failed
+  at startup; `-Dquarkus.mongodb.devservices.port=27018` now moves both DevServices and the
+  profile's connection string, rather than pointing the tests at the real local database.
