@@ -173,3 +173,19 @@ Tests: `RagSourceIngestionServiceTest.AbandonedRuns` (history shows it failed, n
 a live run untouched, the threshold follows the budget, a failing reap does not break the read —
 the first two fail with the reap removed).
 
+### Review fixes, and two CodeQL alerts
+
+- **Concurrent replacements of one document could delete each other** (CodeRabbit). Each stores,
+  then removes every other ingestion's chunks under the name; interleaved, both deletions take the
+  other's new chunks and the document is left with none. Store-and-delete is now serialized per
+  (knowledge base, document name) with a weak-valued lock map — per instance, stated in the
+  Javadoc. `concurrentReplacementsOfOneNameLeaveOneVersion` forces the interleaving and ends with
+  zero chunks without the lock.
+- **Manager: the streaming back-fill overwrote the failure notice** when an `ERROR` turn also
+  carried text (CodeRabbit). The notice is now appended after it; tested, and the test fails with
+  the old order.
+- **`EmbeddingStoreFactory`** — the Chroma builder logged `baseUrl`, tenant, database and
+  collection unsanitized (`java/log-injection`); `sanitizeCollection` stripped trailing
+  underscores with `_+$`, quadratic on a long run of them (`java/polynomial-redos`). Both
+  pre-existing on `main`; now `sanitize(...)` and a linear scan. The new timing test fails against
+  the regex.

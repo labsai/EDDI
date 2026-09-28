@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,6 +66,22 @@ class EmbeddingStoreFactoryExtendedTest {
         void trailingUnderscores() {
             String result = EmbeddingStoreFactory.sanitizeCollection("test!");
             assertFalse(result.endsWith("_"), "Should not end with underscore, got: " + result);
+        }
+
+        @Test
+        @DisplayName("a name of nothing but special characters strips to the bare prefix, as the regex did")
+        void allSpecialCharacters() {
+            assertEquals("eddi_kb", EmbeddingStoreFactory.sanitizeCollection("!!!"));
+            assertEquals("eddi_kb_a_b", EmbeddingStoreFactory.sanitizeCollection("a-b--"));
+        }
+
+        @Test
+        @DisplayName("a long run of underscores is linear, not quadratic")
+        void longUnderscoreRun() {
+            // "_+$" retried at every underscore: 200k of them took minutes.
+            String name = "_".repeat(200_000) + "x" + "_".repeat(200_000);
+            String result = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> EmbeddingStoreFactory.sanitizeCollection(name));
+            assertTrue(result.endsWith("x"));
         }
 
         @Test

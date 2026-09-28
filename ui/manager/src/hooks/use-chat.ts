@@ -727,16 +727,6 @@ function handleSSEEvent(
           if (snapshot.conversationState === "AWAITING_HUMAN") {
             store.getState().setPaused(true, null);
           }
-          const failure = describeTurnFailure(
-            snapshot.conversationOutputs?.[snapshot.conversationOutputs.length - 1],
-            snapshot.conversationState,
-            turnFailedFallback(t),
-          );
-          if (failure) {
-            // Into the (usually empty) streaming bubble rather than beside it, so a
-            // failed turn does not leave a blank bubble above its explanation.
-            store.getState().appendToLastAgentMessage(`⚠️ ${failure}`);
-          }
           if (snapshot.conversationOutputs?.length) {
             const lastOutput = snapshot.conversationOutputs[
               snapshot.conversationOutputs.length - 1
@@ -771,6 +761,21 @@ function handleSSEEvent(
                 });
               }
             }
+          }
+          // After the back-fill above, not before it: an ERROR turn can carry text as
+          // well as taskErrors, and the back-fill replaces the bubble with the
+          // snapshot's text — which would take a notice appended first with it.
+          const failure = describeTurnFailure(
+            snapshot.conversationOutputs?.[snapshot.conversationOutputs.length - 1],
+            snapshot.conversationState,
+            turnFailedFallback(t),
+          );
+          if (failure) {
+            // Into the (usually empty) streaming bubble rather than beside it, so a
+            // failed turn does not leave a blank bubble above its explanation.
+            const messages = store.getState().messages;
+            const current = messages[messages.length - 1]?.content ?? "";
+            store.getState().appendToLastAgentMessage(`${current.trim() ? "\n\n" : ""}⚠️ ${failure}`);
           }
         } catch {
           // Ignore parse errors — done event data may be empty

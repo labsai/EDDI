@@ -27,6 +27,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Async document ingestion into knowledge base vector stores. Uses virtual
@@ -50,6 +51,20 @@ public class RagIngestionService {
      * Bounded status tracking with 1-hour expiry to prevent memory leaks.
      */
     private final Cache<String, String> ingestionStatus = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
+
+    /**
+     * One lock per document being replaced, so two replacements of one name cannot
+     * delete each other. Each stores its chunks and then removes every other
+     * ingestion's under that name — run concurrently, both can store before either
+     * deletes, each deletion then matches the other's new chunks, and the document
+     * is left with none. Weak values: an entry lives only while a replacement holds
+     * or waits for its lock. Per instance: replacements of one name arriving at two
+     * instances at once are not serialized.
+     */
+    private final Cache<ReplaceKey, ReentrantLock> replaceLocks = Caffeine.newBuilder().weakValues().build();
+
+    private record ReplaceKey(String kbId, String documentName) {
+    }
 
     /** Caveats on completed ingestions, kept exactly as long as their status. */
     private final Cache<String, String> ingestionWarnings = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
@@ -130,23 +145,15 @@ public class RagIngestionService {
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();
 
-            ingestor.ingest(document);
-
-            // 4. Replace: remove what the document had before, AFTER the new version is
-            // stored — a failure above leaves the previous version retrievable rather
-            // than leaving the document with no vectors at all. Chunks written before
-            // chunks were tagged with an ingestion id carry no such key, and
-            // isNotEqualTo matches them too, so they are superseded as well.
-            if (replace) {
-                try {
-                    store.removeAll(metadataKey(METADATA_SOURCE).isEqualTo(documentName)
-                            .and(metadataKey(METADATA_KB_ID).isEqualTo(kbId))
-                            .and(metadataKey(METADATA_INGESTION_ID).isNotEqualTo(ingestionId)));
-                } catch (UnsupportedOperationException e) {
-                    String warning = "The new version is stored, but this knowledge base's vector store cannot delete by metadata, "
-                            + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
-                    ingestionWarnings.put(ingestionId, warning);
-                    LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
+            ReentrantLock replaceLock = replace ? replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock()) : null;
+            if (replaceLock != null) {
+                replaceLock.lock();
+            }
+            try {
+                storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, replace);
+            } finally {
+                if (replaceLock != null) {
+                    replaceLock.unlock();
                 }
             }
 
@@ -156,6 +163,29 @@ public class RagIngestionService {
         } catch (Exception e) {
             ingestionStatus.put(ingestionId, "failed: " + e.getMessage());
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
+        }
+    }
+
+    private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String kbId,
+                                 String documentName, String ingestionId, boolean replace) {
+        ingestor.ingest(document);
+
+        // 4. Replace: remove what the document had before, AFTER the new version is
+        // stored — a failure above leaves the previous version retrievable rather
+        // than leaving the document with no vectors at all. Chunks written before
+        // chunks were tagged with an ingestion id carry no such key, and
+        // isNotEqualTo matches them too, so they are superseded as well.
+        if (replace) {
+            try {
+                store.removeAll(metadataKey(METADATA_SOURCE).isEqualTo(documentName)
+                        .and(metadataKey(METADATA_KB_ID).isEqualTo(kbId))
+                        .and(metadataKey(METADATA_INGESTION_ID).isNotEqualTo(ingestionId)));
+            } catch (UnsupportedOperationException e) {
+                String warning = "The new version is stored, but this knowledge base's vector store cannot delete by metadata, "
+                        + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
+                ingestionWarnings.put(ingestionId, warning);
+                LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
+            }
         }
     }
 

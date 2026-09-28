@@ -62,7 +62,6 @@ public class EmbeddingStoreFactory {
 
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
-    private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
     /** Ceiling on cached embedding stores across every knowledge base. */
     static final int MAX_STORES = 50;
@@ -376,8 +375,8 @@ public class EmbeddingStoreFactory {
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
-                collectionName, version.toString());
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", sanitize(baseUrl),
+                sanitize(tenantName), sanitize(databaseName), sanitize(collectionName), version.toString());
 
         return ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)
@@ -446,7 +445,15 @@ public class EmbeddingStoreFactory {
     }
 
     static String sanitizeCollection(String kbId) {
-        return TRAILING_UNDERSCORES.matcher("eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_")).replaceAll("");
+        String name = "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
+        // A scan from the end, not the "_+$" regex it replaces: an unanchored-start
+        // "_+$" retries at every underscore, quadratic on a name that is a long run of
+        // them (CodeQL java/polynomial-redos), and the name is operator input.
+        int end = name.length();
+        while (end > 0 && name.charAt(end - 1) == '_') {
+            end--;
+        }
+        return name.substring(0, end);
     }
 
     /**

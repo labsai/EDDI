@@ -22,6 +22,8 @@ import org.mockito.Mock;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import dev.langchain4j.data.embedding.Embedding;
 import org.mockito.ArgumentCaptor;
@@ -184,6 +186,39 @@ class RagIngestionServiceTest {
 
         verify(embeddingStore, never()).removeAll(any(Filter.class));
         assertNull(service.getWarning(id));
+    }
+
+    /**
+     * Two replacements of one name each store, then delete every other ingestion's
+     * chunks under it. Interleaved — both store before either deletes — each
+     * deletion takes the other's new chunks and the document is left with none. The
+     * store below holds the first write until a second one arrives (or a second
+     * passes), forcing exactly that interleaving when nothing serializes the two.
+     */
+    @Test
+    void concurrentReplacementsOfOneNameLeaveOneVersion() throws Exception {
+        var bothWriting = new CountDownLatch(2);
+        var store = new InMemoryEmbeddingStore<TextSegment>() {
+            @Override
+            public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
+                bothWriting.countDown();
+                try {
+                    bothWriting.await(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                super.addAll(ids, embeddings, embedded);
+            }
+        };
+        wireRealStore(store);
+
+        String first = service.ingest("test-kb", "Refunds within 30 days.", "policy.txt", createConfig(), true);
+        String second = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
+        awaitCompleted(first);
+        awaitCompleted(second);
+
+        List<String> stored = storedTexts(store);
+        assertEquals(1, stored.size(), "exactly one version must survive two concurrent replacements: " + stored);
     }
 
     private void wireRealStore(EmbeddingStore<TextSegment> store) {

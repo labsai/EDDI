@@ -213,6 +213,29 @@ describe("use-chat handleSSEEvent — a failed turn says so", () => {
     expect(useChatStore.getState().isProcessing).toBe(false);
   });
 
+  it("keeps the reason when the ERROR turn also carries text the snapshot back-fills", async () => {
+    // The back-fill replaces the bubble with the snapshot's text; a notice appended
+    // before it went with it.
+    h.frames = [
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "ERROR",
+          conversationOutputs: [
+            {
+              output: [{ type: "text", text: "Partial answer." }],
+              taskErrors: [{ type: "errorDigest", text: "Task 'eddi://ai.labs.httpcalls' failed: 503" }],
+            },
+          ],
+        }),
+      },
+    ];
+
+    const agentMessage = await send();
+
+    expect(agentMessage?.content).toBe("Partial answer.\n\n⚠️ Task 'eddi://ai.labs.httpcalls' failed: 503");
+  });
+
   it("falls back to a generic notice when the ERROR turn carries no reason", async () => {
     h.frames = [{ type: "done", data: JSON.stringify({ conversationState: "ERROR", conversationOutputs: [{}] }) }];
 
