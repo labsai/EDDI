@@ -2068,6 +2068,8 @@
       "includeSubdomains": "包含子域名",
       "excludePatterns": "排除模式",
       "excludePatternsHint": "针对 URL 路径的通配符，以逗号分隔 — * 限于一个路径段，** 可跨段",
+      "sitemapUrls": "站点地图",
+      "sitemapUrlsHint": "用于发现页面的站点地图 URL，以逗号分隔。仅当 robots.txt 未列出时需要；会跟踪站点地图索引",
       "saveFirst": "请先保存知识库，然后才能运行、预览此源或查看其历史记录。",
       "run": "立即运行",
       "runFailed": "无法启动运行。可能已有一次运行正在进行。",

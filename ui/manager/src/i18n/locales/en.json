@@ -2148,6 +2148,8 @@
       "includeSubdomains": "Include subdomains",
       "excludePatterns": "Exclude patterns",
       "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
       "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
       "run": "Run now",
       "runFailed": "Could not start the run. A run may already be in flight.",

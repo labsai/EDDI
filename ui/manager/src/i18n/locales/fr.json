@@ -2090,6 +2090,8 @@
       "includeSubdomains": "Inclure les sous-domaines",
       "excludePatterns": "Motifs d'exclusion",
       "excludePatternsHint": "Globs appliqués au chemin de l'URL, séparés par des virgules — * reste dans un segment, ** les traverse",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps pour découvrir les pages, séparées par des virgules. Utile seulement si robots.txt ne les liste pas ; les index de sitemaps sont suivis",
       "saveFirst": "Enregistrez la base de connaissances pour exécuter cette source, la prévisualiser ou voir son historique.",
       "run": "Exécuter",
       "runFailed": "Impossible de démarrer l'exécution. Une exécution est peut-être déjà en cours.",

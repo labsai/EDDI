@@ -355,6 +355,7 @@ The cron is read in **UTC**, which is written onto the schedule rather than left
 | `maxDepth` | `3` | How many links from the seed |
 | `maxPages` | `200` | Pages ingested per run |
 | `excludePatterns` | empty | Globs matched against the path |
+| `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
 | `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
@@ -384,6 +385,36 @@ costs one 304.
 
 `robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
 `respectRobots` off only for a site you own.
+
+#### Sitemaps
+
+A sitemap lists a site's pages, so a crawl finds pages nothing links to and does not depend on link
+structure. Before the first page is fetched, a run reads — in this order, each at most once:
+
+1. the sitemaps in `web.sitemapUrls`, for a site that publishes one without listing it in robots.txt
+   (and for a crawl with `respectRobots` off, which reads no robots.txt at all);
+2. every `Sitemap:` line in robots.txt — a relative one is resolved against robots.txt;
+3. only when neither gave anything, the conventional `/sitemap.xml`, at the cost of one 404 where
+   there is none.
+
+Every form the [sitemap protocol](https://www.sitemaps.org/protocol.html) allows is read:
+
+| Form | What is taken |
+| --- | --- |
+| `<urlset>` | each `url/loc`. The `loc` of the image, video and news extensions sits under its own element and is **not** a page; `xhtml:link` hreflang alternates are not followed either — the scope decides which languages are crawled |
+| `<sitemapindex>` | each `sitemap/loc`, read as a further sitemap — indexes of indexes included |
+| RSS 2.0 / Atom | each `item/link`, or each `entry/link` whose `rel` is absent or `alternate` |
+| Plain text | one URL per line |
+| gzip | any of the above compressed (`.xml.gz`), recognised by its content rather than its name or Content-Type |
+
+Namespace prefixes (`<sm:urlset>`), entities, CDATA, surrounding whitespace, a byte-order mark and
+UTF-16 are all handled; only absolute `http(s)` URLs are taken. What a sitemap lists is held to the
+same scope as a linked page — `pathPrefix`, `sameSiteOnly` and `excludePatterns` all apply — because a
+sitemap is written by the site, not by the operator.
+
+Bounds: 20 sitemaps per run, indexes and their children included; 5,000 page URLs across all of them;
+1 MB per sitemap as fetched and 16 MB once decompressed, so a small gzip body cannot inflate without
+limit. `maxPages` still decides how many pages are ingested.
 
 **When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
 it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
@@ -763,7 +794,7 @@ parameter rather than ignoring it.
 
 ## Future Enhancements
 
-- More ingestion source types — sitemaps, email, Google Drive, OneDrive
+- More ingestion source types — email, Google Drive, OneDrive (sitemap discovery already ships with web sources — see [Sitemaps](#sitemaps))
 - OCR for scanned PDFs and images
 - Advanced retrieval: re-ranking, hybrid search, metadata filtering
 - ONNX in-process embeddings (air-gapped / edge deployments)

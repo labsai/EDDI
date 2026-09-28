@@ -489,6 +489,23 @@ function SourceCard({
             </Field>
           )}
 
+          {!isUpload && (
+            <Field
+              label={t("ragEditor.sources.sitemapUrls", "Sitemaps")}
+              hint={t(
+                "ragEditor.sources.sitemapUrlsHint",
+                "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
+              )}
+            >
+              <PatternListInput
+                patterns={source.web?.sitemapUrls ?? []}
+                onCommit={(urls) => onChangeWeb({ sitemapUrls: urls })}
+                disabled={readOnly}
+                testId={`${testId}-sitemap-urls`}
+              />
+            </Field>
+          )}
+
           {isUpload && (
             <IngestionFilesPanel
               kbId={kbId}

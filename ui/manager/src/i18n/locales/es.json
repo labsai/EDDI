@@ -2090,6 +2090,8 @@
       "includeSubdomains": "Incluir subdominios",
       "excludePatterns": "Patrones de exclusión",
       "excludePatternsHint": "Globs sobre la ruta de la URL, separados por comas — * permanece en un segmento, ** los cruza",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps para descubrir páginas, separadas por comas. Solo si robots.txt no las incluye; se siguen los índices de sitemaps",
       "saveFirst": "Guarde la base de conocimiento para ejecutar esta fuente, previsualizarla o ver su historial.",
       "run": "Ejecutar ahora",
       "runFailed": "No se pudo iniciar la ejecución. Puede que ya haya una en curso.",

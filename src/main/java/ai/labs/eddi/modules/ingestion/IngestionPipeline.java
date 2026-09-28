@@ -666,7 +666,7 @@ public class IngestionPipeline {
                 web.getUserAgent(),
                 web.isRespectRobots());
 
-        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness);
+        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness, web.getSitemapUrls());
     }
 
     private static String describe(Throwable t) {

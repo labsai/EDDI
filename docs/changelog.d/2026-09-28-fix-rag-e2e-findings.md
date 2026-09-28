@@ -56,3 +56,35 @@ Files: `RagIngestionService`, `IRestRagIngestion`, `RestRagIngestion`,
 [`docs/rag.md`](../rag.md#document-ingestion). Tests: `RagIngestionServiceTest` (replace,
 no replace, pre-change chunks, unsupported store — the first three fail with the removal
 disabled), `RestRagIngestionTest`.
+
+### Web sources read every sitemap form, including the index most large sites publish
+
+The crawler already seeded from sitemaps listed in robots.txt, but it read every `<loc>` as a
+page. A **sitemap index** lists further sitemaps, so their URLs were queued as pages, the fetcher
+refused the XML, and sitemap discovery found nothing — on docs.labs.ai itself, whose
+`sitemap.xml` is an index over `sitemap-pages.xml` (81 pages). An image or video sitemap would
+equally have queued every image as a page.
+
+- **Every protocol form** — `urlset` (only `url/loc`; the image, video and news extensions'
+  own `loc`s and `xhtml:link` hreflang alternates are not pages), `sitemapindex` (followed,
+  indexes of indexes included), RSS 2.0 and Atom feeds, plain-text sitemaps, and any of
+  them gzip-compressed — recognised by content, not by name or Content-Type. Namespace
+  prefixes, entities, CDATA, BOMs and UTF-16 are handled; only absolute `http(s)` URLs count.
+- **Where sitemaps come from** — new `web.sitemapUrls` (at most 20, each validated like
+  `startUrl`: http(s), not a private literal address) for a site that publishes one without
+  listing it, or a crawl with `respectRobots` off; then robots.txt, where a relative
+  `Sitemap:` line is now resolved instead of silently failing; and, only when neither gave
+  anything, the conventional `/sitemap.xml`.
+- **Bounds** — 20 sitemaps per run including every index child, 5,000 page URLs across all
+  of them, 16 MB decompressed per sitemap (a gzip bomb stops at the cap, keeping the URLs
+  before it). Sitemap pages are held to the crawl's scope like linked ones.
+- **Manager** — a "Sitemaps" field on website sources, in all 11 locales.
+
+Files: `WebCrawler` (`parseSitemap`, sitemap queue), `CrawlRequest` (`sitemapUrls`; the
+4-argument constructor stays), `IngestionSource.WebSource`, `IngestionPipeline`,
+`ui/manager` ingestion-sources panel and API type, [`docs/rag.md`](../rag.md#sitemaps).
+Tests: `SitemapParsingTest` (20 — every form, encoding, gzip bound), `WebCrawlerTest`
+(index following, configured sitemap without robots, dedupe, index budget, relative robots
+line, `/sitemap.xml` fallback and its absence when a sitemap is named, gzip end to end,
+scope), `IngestionSourceSitemapValidationTest`. Mutation-checked: without the index
+distinction or the gzip branch, six of them fail.

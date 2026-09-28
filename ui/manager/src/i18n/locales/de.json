@@ -2068,6 +2068,8 @@
       "includeSubdomains": "Subdomains einbeziehen",
       "excludePatterns": "Ausschlussmuster",
       "excludePatternsHint": "Globs für den URL-Pfad, kommagetrennt — * bleibt in einem Segment, ** überschreitet sie",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap-URLs zur Seitenermittlung, kommagetrennt. Nur nötig, wenn robots.txt sie nicht aufführt; Sitemap-Indizes werden verfolgt",
       "saveFirst": "Speichern Sie die Wissensdatenbank, um diese Quelle auszuführen, zu testen oder ihren Verlauf zu sehen.",
       "run": "Jetzt ausführen",
       "runFailed": "Ausführung konnte nicht gestartet werden. Möglicherweise läuft bereits eine.",
