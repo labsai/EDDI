@@ -16,7 +16,7 @@ import {
   useGroupConversation,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
-import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
@@ -129,11 +129,30 @@ export function GroupDetailPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
-  // To update after a save: call
-  // setSearchParams(p => { p.set("version", String(newVersion)); return p }, { replace: true })
   const version = useMemo(
     () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
     [searchParams],
+  );
+  /**
+   * Move the page onto the version a config save created.
+   *
+   * Every save makes a new version. Staying on the old one — as this page did —
+   * refetched the pre-save document (the edit appeared to revert), and the next
+   * save or delete 409'd; "Delete group + members" got as far as soft-deleting
+   * every member agent before the group delete failed.
+   */
+  const setVersion = useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("version", String(next));
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
   );
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -245,6 +264,13 @@ export function GroupDetailPage() {
    * could never accept a file again, with no error to explain it.
    */
   const userClearedRef = useRef(false);
+  // It is a choice about ONE group. The page stays mounted when the route moves
+  // to another group, and a "New Discussion" pressed on the last one used to
+  // leave the next group's newest discussion unselected on arrival.
+  // Declared before the auto-select effect so it runs first on a group switch.
+  useEffect(() => {
+    userClearedRef.current = false;
+  }, [groupId]);
 
   // Auto-select the first conversation on load — but never override the
   // conversation the stream is driving (its settle effect handles selection),
@@ -344,7 +370,11 @@ export function GroupDetailPage() {
   useEffect(() => {
     const verdict = pendingDecisionRef.current;
     if (!verdict) return;
-    if (streamState.hitlResume) {
+    // A rejection never produces `hitl_resume`: the backend ends the run on the
+    // spot and reports it with `group_complete` carrying state REJECTED. Waiting
+    // for the ack alone meant a rejection was never confirmed at all, and the
+    // pending decision lingered into whatever the page did next.
+    if (streamState.hitlResume || (verdict === "REJECTED" && streamState.state === "REJECTED")) {
       toast.success(
         verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"),
       );
@@ -470,11 +500,21 @@ export function GroupDetailPage() {
     // it shows the full pause metadata (pausedAt, timeout policy/countdown,
     // per-task awaiting list, or — for a human turn — the rendered prompt) and
     // the lifecycle actions that state offers.
-    if (STREAM_SETTLED_STATES.includes(streamState.state) && streamState.conversationId) {
+    //
+    // A connection that dropped without a terminal event is handed over the
+    // same way: the discussion may still be running, and the persisted
+    // conversation polls while it is, whereas the stream is frozen for good.
+    if (
+      (STREAM_SETTLED_STATES.includes(streamState.state) || streamState.interrupted) &&
+      streamState.conversationId
+    ) {
       userClearedRef.current = false; // the stream owns the selection now
       setSelectedConvId(streamState.conversationId);
+      if (streamState.interrupted && groupId) {
+        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+      }
     }
-  }, [streamState.state, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
+  }, [streamState.state, streamState.interrupted, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -565,11 +605,18 @@ export function GroupDetailPage() {
   // conversation, whose detail may not be cached yet. Keep showing the live
   // streamState (banner from hitlPause) instead of a loading skeleton until the
   // persisted conversation has loaded — avoids a flash at the decision moment.
+  //
+  // The same holds after a dropped connection: the page hands over to the
+  // stored conversation at once, but that copy can be behind what the stream
+  // already showed. Until it has caught up (it polls while the run goes on),
+  // keep the live rows rather than let them vanish — the rule the Workforce
+  // board applies too.
   const showStreamFallback =
     !isStreamActive &&
-    convLoading &&
     streamState.state !== "CREATED" &&
-    selectedConvId === streamState.conversationId;
+    selectedConvId === streamState.conversationId &&
+    (convLoading ||
+      (streamState.interrupted && !persistedHasCaughtUp(selectedConversation, streamState)));
 
   const conversationCount = conversations?.length ?? 0;
 
@@ -969,7 +1016,14 @@ export function GroupDetailPage() {
                 <PanelRightClose className="h-3.5 w-3.5" />
               </button>
             </div>
-            <GroupConfigPanel key={groupId} config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
+            <GroupConfigPanel
+              key={groupId}
+              config={safeConfig}
+              groupId={groupId}
+              groupVersion={version}
+              onVersionChange={setVersion}
+              className="flex-1 min-h-0"
+            />
           </div>
         )}
       </div>
@@ -988,6 +1042,7 @@ export function GroupDetailPage() {
             config={safeConfig}
             groupId={groupId}
             groupVersion={version}
+            onVersionChange={setVersion}
           />
         </div>
       </AccessibleDialog>

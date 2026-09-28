@@ -28,7 +28,11 @@ interface DiscussionOverviewProps {
    * re-create the three-renderer drift this dashboard exists to avoid.
    */
   extras?: ReactNode;
-  /** The outcome band's content — the decision card and synthesised answer. */
+  /**
+   * The outcome band's content — the decision card. Every caller builds it from
+   * the stored or streamed decision, which is the NEWEST round's, so it is shown
+   * only while the newest round is selected (see the `outcome` band below).
+   */
   outcome?: ReactNode;
   /**
    * Invoked when the reader picks a phase, to show them its actual turns.
@@ -79,6 +83,7 @@ export function DiscussionOverview({
   }
 
   const anonymous = rosterIsAnonymous(digest.style);
+  const roundOutcome = digest.selectedRound === digest.roundCount ? outcome : null;
 
   const band = (name: OverviewBand): ReactNode => {
     switch (name) {
@@ -88,9 +93,15 @@ export function DiscussionOverview({
         // ROUND_TABLE and PEER_REVIEW runs) otherwise showed no conclusion at
         // all in Overview — the one thing the reader came for was reachable
         // only by switching back.
-        return outcome || digest.synthesizedAnswer ? (
+        //
+        // The caller's `outcome` is the NEWEST round's decision (the stored
+        // `decision` field, which a continuation replaces), so an earlier round
+        // must not show it: it put round 3's verdict beside round 1's synthesis.
+        // A historical round keeps its own synthesis, which the digest already
+        // reads from that round's turns.
+        return roundOutcome || digest.synthesizedAnswer ? (
           <div key="outcome" className="space-y-3">
-            {outcome}
+            {roundOutcome}
             {digest.synthesizedAnswer && <SynthesisCard answer={digest.synthesizedAnswer} />}
           </div>
         ) : null;

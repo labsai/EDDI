@@ -152,19 +152,21 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 ### RestAgentManagement Gate
 
-`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):
 
 ```java
 if (checkForUserAuthentication &&
-        !production.equals(userConversation.getEnvironment()) &&
+        !production.equals(environment) &&
         identity.isAnonymous()) {
     throw new UnauthorizedException();
 }
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`test`) must be authenticated; `production` conversations are exempt from this particular gate (the legacy `unrestricted`/`restricted` names are read as `production`)
 - Requests to `/production/` environments always pass regardless of auth status
+
+**The check runs before any side effect.** The managed `GET` and `POST /agents/managed/{intent}/{userId}` create the user's conversation when none exists and replace it when it has ended. The environment checked is the one the request acts on: a live conversation's stored environment, or — for a conversation about to be created or to replace an ended one — the environment of the trigger deployment it will be started with, which is picked *before* the check and then used for the start. So a `401` from these endpoints means nothing was created, deleted or replaced. The `POST` hands the `UnauthorizedException` to the JAX-RS exception mappers, so it answers `401` like the `GET` does (it used to answer an opaque `500`).
 
 ### Local Development Keycloak
 
