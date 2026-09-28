@@ -18,11 +18,17 @@ import java.util.List;
  * <p>
  * {@code groupId} arrives as a <b>context</b> value —
  * {@code MemberTurnExecutor} and {@code GroupLifecycleOps} both inject it that
- * way, and nothing writes it as a conversation <em>property</em>. It is read
- * from the current step first, then from any earlier step, since a resumed turn
- * re-enters without the original context map. The property read is kept as a
- * last resort so a config that genuinely does set a {@code groupId} property
- * still works.
+ * way. It is read from the current step first, then from any earlier step,
+ * since a resumed turn re-enters without the original context map.
+ * <p>
+ * The context value is the only source. A {@code groupId} conversation
+ * <em>property</em> used to be honoured as a last resort, but properties are
+ * not a trusted channel — a client can set them per turn through
+ * {@code properties} context expressions, and property setters can capture user
+ * input into them — so the fallback let a conversation claim membership of any
+ * group and reach its shared memories. Group membership is a runtime fact the
+ * group orchestrator asserts, and {@code ClientContextGuard} keeps clients from
+ * asserting it through the context key instead.
  */
 public final class ConversationGroups {
 
@@ -53,10 +59,6 @@ public final class ConversationGroups {
             }
         }
 
-        var props = memory.getConversationProperties();
-        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
-            return List.of(p.getValueString());
-        }
         return List.of();
     }
 

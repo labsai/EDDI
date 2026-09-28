@@ -85,6 +85,10 @@ observed there, and carries a regression test.
   resolver moved from the LLM module to `ConversationGroups` so both write paths share it); a
   `group` property in a conversation that belongs to no group is stored as `self`, the only scope
   that keeps it reachable without widening it.
+  The group comes from the `groupId` context value only — the shared resolver carries main's
+  removal of the `groupId` *property* fallback (clients and property setters can set a property,
+  so it let a conversation claim any group), which now covers this persistence path and the
+  undo/redo sync as well as the memory tool.
   [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
   [`ConversationGroups.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationGroups.java),
   [`UserMemoryEntry.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java)

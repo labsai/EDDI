@@ -94,6 +94,44 @@ their own entry, not searched for elsewhere.
 **message the user typed** (see [Secrets Vault → Secret Input](secrets-vault.md#secret-input-agent-conversations)),
 `secret` hides a **context value your application sends**.
 
+### Reserved Context Keys
+
+A few context keys are set by EDDI itself when it drives a conversation on its own
+behalf, and the engine trusts them to decide what a turn may do:
+
+| Key | Set by | What the engine uses it for |
+|---|---|---|
+| `groupId` | Group conversations | Which group's `group`-visible [user memories](user-memory.md#group-memory) the conversation sees and writes |
+| `groupConversationId` | Group conversations | Which live discussion the member's group tools act on |
+| `groupDepth` | Group conversations | Nesting depth of the discussion |
+| `groupTranscript` | Group conversations | The discussion transcript shown to a member |
+| `dynamicAgentConfig` | Group conversations | The group's [dynamic-agent policy](group-conversations.md) for the turn |
+| `dynamicCreatedAgentIds` | Group conversations | The agents the discussion has created (and may tear down) |
+| `delegationDepth` | `converse_with_agent` | How many delegation hops led to this conversation |
+
+A client cannot set them. EDDI drops these keys from the context of every externally
+supplied request — `POST /agents/{agentId}/start`, `POST /agents/{conversationId}`
+(plain and streaming), managed conversations, and a trigger's initial context — before
+the conversation sees it. The request still succeeds; only the reserved entries are
+removed, so `{context.groupId}` in a template renders empty for a client-started turn.
+Group members, delegated sub-agent conversations and schedules still receive the values
+EDDI sets. Matching is exact and case-sensitive: `screenGroupId` or `GroupId` are
+ordinary keys.
+
+Once a conversation has been governed by a group's `dynamicAgentConfig`, later turns in
+it keep that policy even when they carry no group context — for example a turn the
+conversation's owner sends into a member conversation directly.
+
+A deployment whose every caller is trusted can let clients set specific reserved keys
+again — EDDI logs a warning at startup when it does:
+
+```properties
+eddi.conversation.client-context.permitted-reserved-keys=groupId
+```
+
+Only the keys in the table can be listed; anything else is ignored. The default permits
+none.
+
 ### How Context is Used
 
 Once passed to EDDI, context can be:

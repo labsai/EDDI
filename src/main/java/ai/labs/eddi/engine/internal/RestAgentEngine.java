@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -89,6 +90,14 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** Mirrors QuotaExceededExceptionMapper; jakarta.ws.rs has no 429 constant. */
     private static final int TOO_MANY_REQUESTS = 429;
 
+    /**
+     * Removes the engine-reserved keys from client-supplied context. Field-injected
+     * with the strict default so directly constructed unit tests keep it non-null
+     * (CDI overwrites it with the configured bean in production).
+     */
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
     @Inject
     public RestAgentEngine(IConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -124,7 +133,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // no interactive caller and must not be gated on one.
             resourceAccessGuard.requireAgentUseAccess(agentId);
             String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
-            var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
+            var result = conversationService.startConversation(environment, agentId, resolvedUserId, clientContextGuard.strip(context));
             return Response.created(result.conversationUri()).build();
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());
@@ -216,7 +225,8 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(inputData.getInput(), "inputData.input");
         validateConversationOwnership(conversationId);
 
-        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, response);
+        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
+                response);
     }
 
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
