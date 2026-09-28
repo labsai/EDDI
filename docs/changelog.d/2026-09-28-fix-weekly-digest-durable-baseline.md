@@ -50,7 +50,9 @@ All in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-notify.yml
   reverted if the post fails. A failed push therefore sends nothing, a failed
   post is retried by the next run, and a stuck push can never re-post the
   digest every 15 minutes. An unreadable marker file stops all digests with an
-  error, rather than reading as "never sent".
+  error, rather than reading as "never sent". Without `SLACK_WEBHOOK_URL`
+  nothing is planned or claimed, so the digests stay due and go out once the
+  secret is set, instead of being recorded as sent.
 - **Only fresh values become history.** The Docker Hub and GitHub stats steps
   report `ok=false` when they carry a value forward, and `Persist` then leaves
   the day's row to a later run. The GitHub stats step gets the same
@@ -67,9 +69,9 @@ only from fresh, numeric metrics; until a run writes it, the digests wait for a
 later run instead of going out early.
 
 Verified locally: actionlint/shellcheck clean apart from the pre-existing
-SC2129 style notes; the plan step under 10 fake clocks and histories (normal,
+SC2129 style notes; the plan step under 11 fake clocks and histories (normal,
 already sent, not yet due, dropped Monday, today's row missing, zero row, no
-activity, forced, empty history, corrupt markers); both Slack payloads parsed
+activity, forced, empty history, corrupt markers, no webhook); both Slack payloads parsed
 as JSON; persist and claim end-to-end against a bare copy of the branch
 (append, same-day no-op, not fresh, unreachable remote).
 

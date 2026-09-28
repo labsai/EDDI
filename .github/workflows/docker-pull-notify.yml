@@ -545,8 +545,18 @@ jobs:
         if: steps.history.outputs.ready == 'true'
         env:
           FORCE: ${{ github.event.inputs.force_digest == 'true' }}
+          SLACK_CONFIGURED: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         run: |
           set -uo pipefail
+          # Without a webhook nothing can be delivered, so plan nothing: a
+          # claimed-but-unpostable digest would either be recorded as sent and
+          # never arrive, or be claimed and released on every run. Left
+          # unplanned, both digests stay due and go out once the secret is set.
+          if [ "$SLACK_CONFIGURED" != "true" ]; then
+            echo "::warning::SLACK_WEBHOOK_URL is not configured — no digest planned"
+            exit 0
+          fi
+
           CSV=hist/data/metrics.csv
           MARKERS=hist/data/digests.json
           DUE_HOUR=7
@@ -737,8 +747,10 @@ jobs:
         run: |
           set -uo pipefail
           if [ -z "$SLACK_WEBHOOK" ]; then
-            echo "No SLACK_WEBHOOK_URL configured, skipping"
-            exit 0
+            # Unreachable while "Plan digests" gates on the secret; failing
+            # keeps it safe anyway, since the release step then un-records it.
+            echo "::error::No SLACK_WEBHOOK_URL configured"
+            exit 1
           fi
 
           view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=", ${VIEW_DELTA}"
@@ -792,8 +804,10 @@ jobs:
         run: |
           set -uo pipefail
           if [ -z "$SLACK_WEBHOOK" ]; then
-            echo "No SLACK_WEBHOOK_URL configured, skipping"
-            exit 0
+            # Unreachable while "Plan digests" gates on the secret; failing
+            # keeps it safe anyway, since the release step then un-records it.
+            echo "::error::No SLACK_WEBHOOK_URL configured"
+            exit 1
           fi
 
           view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=" (${VIEW_DELTA})"
