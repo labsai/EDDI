@@ -610,7 +610,7 @@ class GroupConversationServiceConcurrencyTest {
 
     @SuppressWarnings("unchecked")
     private Map<String, DiscussionControlToken> controlTokens() throws Exception {
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         return (Map<String, DiscussionControlToken>) field.get(service);
     }

@@ -459,8 +459,9 @@ public class McpGroupTools {
     @Tool(description = "Start a group discussion asynchronously and return immediately "
             + "with the conversation ID and IN_PROGRESS state. Use this instead of "
             + "discuss_with_group for TASK_FORCE or other long-running discussions. "
-            + "Poll with read_group_conversation to check progress and get results "
-            + "when state changes to COMPLETED or FAILED.")
+            + "Poll with read_group_conversation to check progress. It has ended once the state is "
+            + "COMPLETED, FAILED, REJECTED (a human declined it) or CANCELLED, and is waiting on a "
+            + "person while AWAITING_APPROVAL or AWAITING_HUMAN_INPUT.")
     public String start_group_discussion(
                                          @ToolArg(description = "Group configuration ID (from create_group or list_groups)") String groupId,
                                          @ToolArg(description = "The question or topic for the group to discuss") String question,
