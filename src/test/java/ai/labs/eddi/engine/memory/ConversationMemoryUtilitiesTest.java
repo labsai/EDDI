@@ -292,6 +292,40 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("an old secret turn's parser results are cleared on read, even when they hold the secret tokenized")
+        void oldStoredSecretTurnParserResultsAreClearedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            var snapshot = oldShapeSecretTurn(new Context(Context.ContextType.string, "true"));
+            // The parser split the secret: no stored value carries it whole, so no needle
+            // matches.
+            var run = snapshot.getConversationSteps().get(1).getWorkflows().getFirst();
+            run.getLifecycleTasks().add(new ResultSnapshot("expressions:matches", List.of("unknown(tok-aaaa)", "unknown(bbbb-1111)"), null,
+                    new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("intents", List.of("tok-aaaa", "bbbb-1111"), null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("properties:extracted", List.of(Map.of("name", "bbbb-1111")), null, new Date(), null,
+                    true));
+            var secretOutput = snapshot.getConversationOutputs().get(1);
+            secretOutput.put("expressions", "unknown(tok-aaaa),unknown(bbbb-1111)");
+            secretOutput.put("intents", List.of("tok-aaaa", "bbbb-1111"));
+
+            for (boolean detailed : List.of(false, true)) {
+                for (boolean currentOnly : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, currentOnly);
+                    String json = mapper.writeValueAsString(simple.getConversationOutputs())
+                            + mapper.writeValueAsString(simple.getConversationSteps());
+                    String where = "detailed=" + detailed + " currentOnly=" + currentOnly + ": ";
+                    assertFalse(json.contains("tok-aaaa"), where + json);
+                    assertFalse(json.contains("bbbb-1111"), where + json);
+                    var output = simple.getConversationOutputs().getLast();
+                    assertFalse(output.containsKey("expressions"), where + output);
+                    assertFalse(output.containsKey("intents"), where + output);
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals(List.of("tok-aaaa", "bbbb-1111"), secretOutput.get("intents"));
+        }
+
+        @Test
         @DisplayName("returnDetailed=false keeps the display input, which masks a secret turn")
         void nonDetailedKeepsDisplayInput() {
             // Conversation writes the placeholder under "input" for a secretInput turn

@@ -38,6 +38,8 @@ public class ConversationMemoryUtilities {
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_CONVERSATION_PROPERTIES = "conversationProperties";
     private static final String KEY_PROPERTIES = "properties";
+    /** The parser's conversation-output entry for the matched expressions. */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
 
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         var snapshot = getMemorySnapshot(conversationMemory);
@@ -391,7 +393,13 @@ public class ConversationMemoryUtilities {
      */
     private static ConversationOutput maskSecretTurnOutput(ConversationOutput conversationOutput, List<String> needles) {
         var masked = new ConversationOutput();
-        conversationOutput.forEach((key, value) -> masked.put(key, maskedSecretTurnOutputValue(key, value, needles)));
+        conversationOutput.forEach((key, value) -> {
+            // The parser's expressions and intents are dropped, as Conversation does at
+            // turn end: they can hold the secret tokenized, which no needle matches.
+            if (!KEY_EXPRESSIONS_OUTPUT.equals(key) && !INTENTS.key().equals(key)) {
+                masked.put(key, maskedSecretTurnOutputValue(key, value, needles));
+            }
+        });
         return masked;
     }
 
@@ -412,9 +420,14 @@ public class ConversationMemoryUtilities {
         if (EXPRESSIONS_PARSED.key().equals(key)) {
             return value == null ? null : "";
         }
+        // Cleared wholesale, as Conversation does at turn end: the parser may have
+        // tokenized the secret, so no stored value need contain it whole.
+        if (EXPRESSIONS_MATCHES.key().equals(key) || INTENTS.key().equals(key) || PROPERTIES_EXTRACTED.key().equals(key)) {
+            return value == null ? null : List.of();
+        }
         // Property mirrors stay as they are, like the conversation properties they
-        // copy; properties:extracted is the parser's reading of the input, not one.
-        if (key.startsWith(KEY_PROPERTIES + ":") && !PROPERTIES_EXTRACTED.key().equals(key)) {
+        // copy.
+        if (key.startsWith(KEY_PROPERTIES + ":")) {
             return value;
         }
         return scrubbedSecretTurnValue(value, needles);
