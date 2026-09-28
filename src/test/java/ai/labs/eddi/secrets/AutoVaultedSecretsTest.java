@@ -108,9 +108,37 @@ class AutoVaultedSecretsTest {
         String typedIn = new SecretReference("default", AutoVaultedSecrets.newSlotName(AGENT, "user-1", "other")).toReferenceString();
         properties.put("other", new Property("other", typedIn, Scope.conversation));
 
-        assertEquals(1, secrets.deleteForConversation(properties, "user-1"));
+        assertEquals(1, secrets.deleteForConversation(properties.values(), "user-1"));
         verify(provider).delete(SecretReference.parse(own));
         verify(provider, never()).delete(SecretReference.parse(typedIn));
+    }
+
+    @Test
+    @DisplayName("deleteForConversation deletes a slot once, however many versions reference it")
+    void deleteForConversationDeduplicates() throws Exception {
+        String own = new SecretReference("default", AutoVaultedSecrets.newSlotName(AGENT, "user-1", "apiKey")).toReferenceString();
+
+        assertEquals(1, secrets.deleteForConversation(List.of(autoVaulted(own), autoVaulted(own)), "user-1"));
+        verify(provider, times(1)).delete(SecretReference.parse(own));
+    }
+
+    @Test
+    @DisplayName("deleteForConversation surfaces a vault failure instead of swallowing it — the caller keeps the references")
+    void deleteForConversationPropagatesFailure() throws Exception {
+        String own = new SecretReference("default", AutoVaultedSecrets.newSlotName(AGENT, "user-1", "apiKey")).toReferenceString();
+        doThrow(new ISecretProvider.SecretProviderException("vault down")).when(provider).delete(any());
+
+        assertThrows(ISecretProvider.SecretProviderException.class,
+                () -> secrets.deleteForConversation(List.of(autoVaulted(own)), "user-1"));
+    }
+
+    @Test
+    @DisplayName("the slot shape is reserved: only names newSlotName produces are")
+    void reservedNames() {
+        assertTrue(AutoVaultedSecrets.isReservedName(AutoVaultedSecrets.newSlotName(AGENT, "user-1", "apiKey")));
+        assertFalse(AutoVaultedSecrets.isReservedName(AGENT + ".apiKey"));
+        assertFalse(AutoVaultedSecrets.isReservedName("openai-key"));
+        assertFalse(AutoVaultedSecrets.isReservedName(null));
     }
 
     @Test

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -649,5 +650,20 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(e.getMessage().contains("OpenAPI"), e.getMessage());
             verifyNoInteractions(secretProvider);
         }
+    }
+
+    /**
+     * GDPR erasure deletes a user's auto-vaulted slots by name, so setup must not
+     * create — or hand out — a key in that reserved shape.
+     */
+    @Test
+    @DisplayName("a vaultKeyName in the reserved auto-vault shape is rejected")
+    void reservedVaultKeyNameIsRejected() throws Exception {
+        String reserved = AutoVaultedSecrets.newSlotName("agent", "user-1", "apiKey");
+
+        var e = assertThrows(Exception.class, () -> vaultApiKey("sk-live-value", reserved));
+
+        assertTrue(e.getMessage().contains("reserved"), e.getMessage());
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
     }
 }

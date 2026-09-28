@@ -726,17 +726,7 @@ public class Conversation implements IConversation {
         String agentId = conversationMemory.getAgentId();
         String conversationId = conversationMemory.getConversationId();
 
-        // Determine the agent's configured default visibility (from UserMemoryConfig).
-        // Falls back to global if no config (matches legacy unscoped behavior).
         AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
-        Visibility configDefault = Visibility.global;
-        if (config != null) {
-            try {
-                configDefault = Visibility.valueOf(config.getDefaultVisibility());
-            } catch (IllegalArgumentException e) {
-                configDefault = Visibility.global;
-            }
-        }
 
         // Writes owed by an earlier turn that never reached this method. They are
         // indistinguishable from "unchanged" by value, so they are driven by the
@@ -760,14 +750,10 @@ public class Conversation implements IConversation {
                     continue;
                 }
                 // Apply visibility at persistence boundary only
-                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                if (vis == Visibility.group && groupIds.isEmpty()) {
-                    // Outside a group conversation a group entry would match no reader
-                    // at all. self is the only scope that keeps it reachable without
-                    // widening it.
+                Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
+                if (vis == Visibility.self && property.getVisibility() == Visibility.group) {
                     LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
                             + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
-                    vis = Visibility.self;
                 }
                 UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);

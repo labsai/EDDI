@@ -260,6 +260,34 @@ public class ConversationMemory implements IConversationMemory {
      * as {@link Property} objects ({@code null} = absent). Empty when the step
      * recorded none.
      */
+    /**
+     * Every property value this conversation can still bring back: the current
+     * ones, plus both sides of every recorded change in the step history and the
+     * redo cache — undo and redo restore those. Whatever such a value points to (an
+     * auto-vaulted slot) belongs to the conversation until it is deleted.
+     */
+    public static List<Property> everyPropertyVersion(IConversationMemory memory) {
+        List<Property> versions = new ArrayList<>(memory.getConversationProperties().values());
+        List<IConversationStep> steps = new ArrayList<>();
+        var all = memory.getAllSteps();
+        for (int i = 0; all != null && i < all.size(); i++) {
+            steps.add(all.get(i));
+        }
+        if (memory.getRedoCache() != null) {
+            steps.addAll(memory.getRedoCache());
+        }
+        for (IConversationStep step : steps) {
+            propertyChanges(step).values().forEach(beforeAfter -> {
+                for (Property property : beforeAfter) {
+                    if (property != null) {
+                        versions.add(property);
+                    }
+                }
+            });
+        }
+        return versions;
+    }
+
     public static Map<String, Property[]> propertyChanges(IConversationStep step) {
         Map<String, Property[]> changes = new LinkedHashMap<>();
         if (step == null) {

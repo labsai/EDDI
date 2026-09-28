@@ -36,10 +36,15 @@ observed there, and carries a regression test.
   Bob's (reproduced live: both references identical, the vault checksum switched to Bob's value).
   Every auto-vaulted write now gets its own slot, `<agentId>.u<sha256(userId)[:16]>.<nonce>.<name>`
   — nothing can collide, and the user id itself never enters the vault. Since slots are no longer
-  overwritten they are deleted explicitly: on overwrite of the property, on permanent conversation
-  deletion (single and retention sweep), and on GDPR erasure, which sweeps the default tenant plus
-  every tenant the user's conversations point into and reports `autoVaultedSecretsDeleted`. Legacy
-  shared slots are never deleted by this — they may still back other users' conversations.
+  overwritten they are deleted explicitly: on permanent conversation deletion (single and retention
+  sweep) — every slot the conversation's undo history and redo cache still reference, since undo
+  restores an overwritten secret's previous reference — and on GDPR erasure, which sweeps the
+  default tenant plus every tenant any of those versions point into and reports
+  `autoVaultedSecretsDeleted`. A vault failure never discards the references: the conversation is
+  kept (deletion fails, the sweep retries), and GDPR erasure keeps the snapshots and reports the
+  step failed. The slot shape is reserved — the secrets REST API and setup's `vaultKeyName` reject
+  it — because the GDPR sweep matches slots by name. Legacy shared slots are never deleted by this —
+  they may still back other users' conversations.
   `ConfigReferenceGuard` accepts the new slot only when it is exactly this conversation's agent,
   user (hash) and property under its tenant; the legacy `<agentId>.<name>` form stays accepted for
   conversations vaulted before the change.
@@ -136,8 +141,13 @@ observed there, and carries a regression test.
   undo, both a conversation-scoped and a `longTerm` property still held the undone value). Each
   completed turn now records its property changes on its step (`properties:changes`, uncommitted
   and non-public), which undo reverts and redo re-applies; `ConversationService` carries the
-  `longTerm` part into the user-memory store, but only where the store still holds exactly the value
-  this turn wrote — a change made since by another conversation or agent is left alone. A new turn
+  `longTerm` part into the user-memory store, but only into the entry this turn wrote: same value,
+  last written by this conversation, at the identity the turn persisted it under (the shared
+  `global` row and the agent's own row can hold the same key, even the same value). A change made
+  since by another conversation or agent is left alone, and so is anything ambiguous. The restored
+  entry is persisted the way a turn persists it (`ConversationGroups.persistedVisibility`, with the
+  deployed agent's `userMemoryConfig`), so undoing a visibility change undoes it in the store and a
+  redone `group` property comes back as `group`. A new turn
   now also clears the redo stack: redo after *undo → new message* used to graft a step from the
   abandoned timeline. Turns completed through a HITL resume record no changes (undo leaves their
   properties as before).
@@ -160,7 +170,9 @@ observed there, and carries a regression test.
   (reproduced on Claude), and a model asked for "turn 3" got something other than what the user
   meant. Turn N is now step N: the opening step is turn 0, the user's first message turn 1; ranges
   are inclusive, reversed ranges are normalised, and the opening step no longer renders an empty
-  user line.
+  user line. A turn number beyond `int` means the last summarized turn instead of throwing
+  `NumberFormatException` out of the tool, and a range ending at `Integer.MAX_VALUE` no longer
+  overflows into an empty result.
   [`ConversationRecallTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ConversationRecallTool.java),
   [`ConversationSummarizer.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationSummarizer.java)
 

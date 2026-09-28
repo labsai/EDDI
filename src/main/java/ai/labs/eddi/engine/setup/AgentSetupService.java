@@ -44,6 +44,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
@@ -1297,6 +1298,11 @@ public class AgentSetupService {
         if (key != null && isVaultReference(key) && !SecretReference.parse(key).equals(ref)) {
             throw new AgentSetupException("apiKey references vault key '" + SecretReference.parse(key).keyName()
                     + "' but vaultKeyName says '" + ref.keyName() + "'. Pass one or the other.");
+        }
+
+        if (AutoVaultedSecrets.isReservedName(ref.keyName())) {
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' has the reserved shape of an auto-vaulted conversation "
+                    + "secret, which belongs to one user's conversation. Choose another name.");
         }
 
         if (!secretProvider.isAvailable()) {

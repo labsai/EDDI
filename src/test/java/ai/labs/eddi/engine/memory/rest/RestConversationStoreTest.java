@@ -4,6 +4,13 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import java.util.Collection;
+import org.mockito.ArgumentCaptor;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -186,6 +193,29 @@ class RestConversationStoreTest {
         }
     }
 
+    private static final String OLD_SECRET = "${vault:agent.u0123456789abcdef.0123456789ab.apiKey}";
+    private static final String NEW_SECRET = "${vault:agent.u0123456789abcdef.ba9876543210.apiKey}";
+
+    /**
+     * A conversation whose secret was overwritten once, so undo can restore the old
+     * slot.
+     */
+    private static ConversationMemorySnapshot snapshotWithSecretHistory() {
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent", 1, "user-1");
+        memory.getConversationProperties().put("apiKey", vaultedProperty(OLD_SECRET));
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put("apiKey", vaultedProperty(NEW_SECRET));
+        memory.recordPropertyChanges(baseline);
+        return ConversationMemoryUtilities.convertConversationMemory(memory);
+    }
+
+    private static Property vaultedProperty(String reference) {
+        var property = new Property("apiKey", reference, Property.Scope.conversation);
+        property.setAutoVaulted(Boolean.TRUE);
+        return property;
+    }
+
     @Nested
     @DisplayName("deleteConversationLog")
     class DeleteConversationLog {
@@ -287,6 +317,45 @@ class RestConversationStoreTest {
         void throwsForNull() {
             assertThrows(IllegalArgumentException.class,
                     () -> restConversationStore.deleteConversationLog(null, true));
+        }
+
+        @Test
+        @DisplayName("a vault failure keeps the conversation: its snapshot is the only record of the secret slots")
+        @SuppressWarnings("unchecked")
+        void vaultFailureKeepsTheConversation() throws Exception {
+            var cleaner = mock(AutoVaultedSecrets.class);
+            Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+            when(cleanerInstance.isResolvable()).thenReturn(true);
+            when(cleanerInstance.get()).thenReturn(cleaner);
+            restConversationStore.autoVaultedSecretsInstance = cleanerInstance;
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithSecretHistory());
+            when(cleaner.deleteForConversation(any(), any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
+
+            assertThrows(ResourceStoreException.class, () -> restConversationStore.deleteConversationLog("conv-1", true));
+
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor("conv-1");
+        }
+
+        @Test
+        @DisplayName("every secret version is swept, including the one only the undo history still references")
+        @SuppressWarnings("unchecked")
+        void sweepsEverySecretVersion() throws Exception {
+            var cleaner = mock(AutoVaultedSecrets.class);
+            Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+            when(cleanerInstance.isResolvable()).thenReturn(true);
+            when(cleanerInstance.get()).thenReturn(cleaner);
+            restConversationStore.autoVaultedSecretsInstance = cleanerInstance;
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithSecretHistory());
+
+            restConversationStore.deleteConversationLog("conv-1", true);
+
+            var versions = ArgumentCaptor.forClass(Collection.class);
+            verify(cleaner).deleteForConversation(versions.capture(), eq("user-1"));
+            var references = ((Collection<Property>) versions.getValue()).stream().map(Property::getValueString).toList();
+            assertTrue(references.contains(OLD_SECRET), references.toString());
+            assertTrue(references.contains(NEW_SECRET), references.toString());
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
         }
 
         @Test

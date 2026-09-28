@@ -6,7 +6,6 @@ package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.secrets.model.SecretReference;
-import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,7 +17,6 @@ import java.security.SecureRandom;
 import java.util.Collection;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -44,11 +42,18 @@ import java.util.regex.Pattern;
  * rule, so the slots remain manageable through the secrets REST API.
  * <p>
  * Because a write no longer overwrites a shared slot, slots must be deleted
- * explicitly: when the property is overwritten, when its conversation is
- * deleted, and on GDPR erasure. Every delete here only ever touches slots in
- * the current format that belong to the given user — a legacy shared
- * {@code <agentId>.<name>} slot may still be referenced by other users'
- * conversations and is left alone.
+ * explicitly: when their conversation is deleted, and on GDPR erasure. Not when
+ * the property is overwritten — undo restores the previous reference, so the
+ * previous slot stays reachable through the step history, and conversation
+ * deletion sweeps every version that history holds
+ * ({@code ConversationMemory.everyPropertyVersion}). Every delete here only
+ * ever touches slots in the current format that belong to the given user — a
+ * legacy shared {@code <agentId>.<name>} slot may still be referenced by other
+ * users' conversations and is left alone.
+ * <p>
+ * <b>The name format is reserved.</b> The GDPR sweep recognises a user's slots
+ * by name alone, so no other writer may create a key in that shape: the secrets
+ * REST API and agent setup reject one ({@link #isReservedName}).
  */
 @ApplicationScoped
 public class AutoVaultedSecrets {
@@ -100,6 +105,16 @@ public class AutoVaultedSecrets {
     }
 
     /**
+     * Whether a key name falls in the namespace auto-vaulted slots are created in.
+     * Only {@code PropertySetterTask} may write such a key: GDPR erasure deletes a
+     * user's slots by name, so a manually created key in this shape would be
+     * deleted along with them.
+     */
+    public static boolean isReservedName(String keyName) {
+        return isCurrentFormat(keyName);
+    }
+
+    /**
      * Whether {@code keyName} is exactly a slot {@link #newSlotName} could have
      * produced for this agent, user and property — whatever its nonce. The
      * credential-reference guard uses it to accept a conversation's own
@@ -125,13 +140,15 @@ public class AutoVaultedSecrets {
 
     /**
      * Deletes the slot an auto-vaulted property value points to, when it is a
-     * current-format slot owned by {@code userId}. Best effort: a failure is
-     * logged, never thrown — the caller is always in the middle of something more
-     * important (a turn, a deletion).
+     * current-format slot owned by {@code userId}. A slot that is already gone is
+     * not an error.
      *
      * @return {@code true} when a slot was deleted
+     * @throws ISecretProvider.SecretProviderException
+     *             when the vault could not delete it — the caller must not discard
+     *             the reference, or the credential is orphaned
      */
-    public boolean deleteReferencedSlot(String referenceValue, String userId) {
+    boolean deleteReferencedSlot(String referenceValue, String userId) throws ISecretProvider.SecretProviderException {
         if (referenceValue == null || !SecretReference.isVaultReference(referenceValue)) {
             return false;
         }
@@ -149,25 +166,39 @@ public class AutoVaultedSecrets {
             return true;
         } catch (ISecretProvider.SecretNotFoundException e) {
             return false;
-        } catch (Exception e) {
-            LOGGER.warnf("[VAULT] Could not delete auto-vaulted slot '%s': %s", LogSanitizer.sanitize(reference.keyName()), e.getMessage());
-            return false;
         }
     }
 
     /**
-     * Deletes every auto-vaulted slot referenced by a conversation's properties.
+     * Deletes every auto-vaulted slot the given property values point to — pass
+     * {@code ConversationMemory.everyPropertyVersion}, not just the current
+     * properties, or the slots undo could restore are orphaned. Stops at the first
+     * vault failure so the caller can keep the conversation (and with it the
+     * references) for a retry.
      *
      * @return the number of slots deleted
+     * @throws ISecretProvider.SecretProviderException
+     *             when a slot could not be deleted
      */
-    public int deleteForConversation(Map<String, Property> conversationProperties, String userId) {
-        if (conversationProperties == null || conversationProperties.isEmpty()) {
+    public int deleteForConversation(Collection<Property> propertyVersions, String userId) throws ISecretProvider.SecretProviderException {
+        if (propertyVersions == null || propertyVersions.isEmpty() || !secretProvider.isAvailable()) {
             return 0;
         }
+        Set<String> references = new LinkedHashSet<>();
+        for (Property property : propertyVersions) {
+            if (property != null && Boolean.TRUE.equals(property.getAutoVaulted()) && property.getValueString() != null) {
+                references.add(property.getValueString());
+            }
+        }
         int deleted = 0;
-        for (Property property : conversationProperties.values()) {
-            if (property != null && Boolean.TRUE.equals(property.getAutoVaulted()) && deleteReferencedSlot(property.getValueString(), userId)) {
-                deleted++;
+        for (String reference : references) {
+            try {
+                if (deleteReferencedSlot(reference, userId)) {
+                    deleted++;
+                }
+            } catch (ISecretProvider.SecretProviderException e) {
+                LOGGER.warnf("[VAULT] Could not delete an auto-vaulted slot: %s", e.getMessage());
+                throw e;
             }
         }
         return deleted;

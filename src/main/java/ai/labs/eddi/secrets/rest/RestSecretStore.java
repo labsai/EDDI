@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
@@ -99,6 +100,14 @@ public class RestSecretStore implements IRestSecretStore {
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
+        if (AutoVaultedSecrets.isReservedName(keyName)) {
+            // GDPR erasure deletes a user's auto-vaulted slots by name, so a manual key
+            // in that shape would be erased with them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "keyName '" + keyName + "' has the reserved shape of an auto-vaulted conversation secret "
+                            + "(<agentId>.u<16 hex>.<12 hex>.<name>). Choose another name."))
+                    .build();
         }
         if (body == null || body.value() == null || body.value().isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Secret value must not be empty")).build();

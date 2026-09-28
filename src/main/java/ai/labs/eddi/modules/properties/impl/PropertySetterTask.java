@@ -108,7 +108,6 @@ public class PropertySetterTask implements ILifecycleTask {
     private final IResourceClientLibrary resourceClientLibrary;
     private final ObjectMapper objectMapper;
     private final ISecretProvider secretProvider;
-    private final AutoVaultedSecrets autoVaultedSecrets;
 
     @Inject
     public PropertySetterTask(IExpressionProvider expressionProvider, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
@@ -120,7 +119,6 @@ public class PropertySetterTask implements ILifecycleTask {
         this.resourceClientLibrary = resourceClientLibrary;
         this.objectMapper = objectMapper;
         this.secretProvider = secretProvider;
-        this.autoVaultedSecrets = new AutoVaultedSecrets(secretProvider);
     }
 
     /**
@@ -468,8 +466,9 @@ public class PropertySetterTask implements ILifecycleTask {
      * Every write goes to its own slot,
      * {@code <agentId>.u<userHash>.<nonce>.<keyName>} (see
      * {@link AutoVaultedSecrets}), so no other user or conversation can resolve it;
-     * the slot the property pointed to before is deleted. Since the tenant is
-     * typically "default", the short-form syntax is used.
+     * the slot the property pointed to before is kept for undo and deleted with the
+     * conversation. Since the tenant is typically "default", the short-form syntax
+     * is used.
      *
      * @param memory
      *            the conversation memory (used for agentId and input scrubbing)
@@ -505,7 +504,6 @@ public class PropertySetterTask implements ILifecycleTask {
         // conversation's reference resolved to.
         String qualifiedKeyName = AutoVaultedSecrets.newSlotName(agentId, memory.getUserId(), keyName);
         var ref = new SecretReference(tenantId, qualifiedKeyName);
-        Property previous = conversationProperties.get(keyName);
 
         // Store the plaintext in the vault (encrypted at rest)
         try {
@@ -525,12 +523,9 @@ public class PropertySetterTask implements ILifecycleTask {
 
         scrubSecretInput(memory, keyName, plaintext);
 
-        // The property is about to point at the new slot; the one it pointed at before
-        // is unreachable from now on. Only a current-format slot of this user is ever
-        // deleted — a legacy shared slot may still back other conversations.
-        if (previous != null && Boolean.TRUE.equals(previous.getAutoVaulted())) {
-            autoVaultedSecrets.deleteReferencedSlot(previous.getValueString(), memory.getUserId());
-        }
+        // The slot the property pointed at before is NOT deleted: this turn's property
+        // delta records it, and undo restores that reference. It is deleted with the
+        // conversation, which sweeps every version in the step history and redo cache.
 
         // Return the vault reference to be stored in properties instead of plaintext
         return ref.toReferenceString();

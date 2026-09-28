@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.engine.model.Context;
 
 import java.util.List;
@@ -56,6 +58,31 @@ public final class ConversationGroups {
             return List.of(p.getValueString());
         }
         return List.of();
+    }
+
+    /**
+     * The visibility a {@code longTerm} property is persisted with: its own, else
+     * the agent's {@code userMemoryConfig.defaultVisibility}, else {@code global}
+     * (the legacy unscoped behaviour). A {@code group} property outside any group
+     * is stored as {@code self} — a group entry with no group matches no reader,
+     * and {@code self} is the only scope that keeps it reachable without widening
+     * it. The turn boundary and undo/redo both persist through this, so an undone
+     * or redone property lands exactly where the turn put it.
+     */
+    public static Visibility persistedVisibility(Property property, AgentConfiguration.UserMemoryConfig config, List<String> groupIds) {
+        Visibility vis = property.getVisibility() != null ? property.getVisibility() : configuredDefault(config);
+        return vis == Visibility.group && (groupIds == null || groupIds.isEmpty()) ? Visibility.self : vis;
+    }
+
+    private static Visibility configuredDefault(AgentConfiguration.UserMemoryConfig config) {
+        if (config == null || config.getDefaultVisibility() == null) {
+            return Visibility.global;
+        }
+        try {
+            return Visibility.valueOf(config.getDefaultVisibility());
+        } catch (IllegalArgumentException e) {
+            return Visibility.global;
+        }
     }
 
     /** Unwraps a {@code context:*} data entry, which holds a {@link Context}. */

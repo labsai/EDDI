@@ -133,6 +133,29 @@ class ConversationRecallToolTest {
     }
 
     @Test
+    void recallConversationDetail_turnBeyondInt_isTheLastSummarizedTurn() {
+        // Integer.parseInt threw NumberFormatException out of the tool for this
+        var tool = new ConversationRecallTool(createOutputs(10), 5, 20);
+
+        String result = tool.recallConversationDetail("turn 99999999999");
+
+        assertTrue(result.contains("Turn 4"));
+        assertFalse(result.contains("Turn 5"));
+    }
+
+    @Test
+    void recallConversationDetail_rangeEndingAtIntMax_doesNotOverflow() {
+        // last + 1 overflowed to a negative bound and recalled nothing
+        var tool = new ConversationRecallTool(createOutputs(10), 5, 20);
+
+        String result = tool.recallConversationDetail("turns 3-2147483647");
+
+        assertTrue(result.contains("Turn 3"));
+        assertTrue(result.contains("Turn 4"));
+        assertFalse(result.contains("Turn 5"));
+    }
+
+    @Test
     void recallConversationDetail_enforcesMaxRecallLimit() {
         // maxRecallTurns=5, summaryThroughStep=25
         var tool = new ConversationRecallTool(createOutputs(30), 25, 5);

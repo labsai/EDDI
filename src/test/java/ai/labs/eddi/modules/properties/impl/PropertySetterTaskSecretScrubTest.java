@@ -45,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -327,8 +328,8 @@ class PropertySetterTaskSecretScrubTest {
     }
 
     @Test
-    @DisplayName("overwriting a secret property deletes the slot it pointed to before")
-    void overwriteDeletesThePreviousSlot() throws Exception {
+    @DisplayName("overwriting a secret property keeps the slot it pointed to before — undo restores that reference")
+    void overwriteKeepsThePreviousSlot() throws Exception {
         stepWithParsedInput();
         task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
         String first = memory.getConversationProperties().get("apiKey").getValueString();
@@ -338,6 +339,8 @@ class PropertySetterTaskSecretScrubTest {
         String second = memory.getConversationProperties().get("apiKey").getValueString();
 
         assertNotEquals(first, second);
-        verify(secretProvider).delete(SecretReference.parse(first));
+        // Deleting it here left undo restoring a reference to a slot that no longer
+        // existed; it is deleted with the conversation instead.
+        verify(secretProvider, never()).delete(any());
     }
 }

@@ -86,10 +86,19 @@ Every auto-vaulted write gets **its own slot**, `<agentId>.u<userHash>.<nonce>.<
 user hash is a truncated SHA-256 of the user id (the id itself never enters the vault), the nonce
 makes each write unique. The slot used to be `<agentId>.<property>`, one per agent, so every user and
 conversation of the agent shared it and the last writer's secret was what everyone's reference
-resolved to. Because slots are no longer overwritten they are deleted explicitly: when the property
-is overwritten, when its conversation is permanently deleted, and on GDPR erasure (which reports
-`autoVaultedSecretsDeleted`). A legacy `<agentId>.<property>` reference in an older conversation is
+resolved to. Because slots are no longer overwritten they are deleted explicitly: when their
+conversation is permanently deleted, and on GDPR erasure (which reports `autoVaultedSecretsDeleted`).
+Overwriting the property keeps the previous slot, because undo restores the previous reference;
+conversation deletion sweeps every slot the conversation's undo history and redo cache still point
+to. If the vault cannot delete them, the conversation is **not** deleted (the request fails, the
+retention sweep retries on its next run), and a GDPR erasure keeps the user's conversations and
+reports both steps failed — the snapshots are the only record of a custom tenant the slots live
+in, so a retry needs them. A legacy `<agentId>.<property>` reference in an older conversation is
 still accepted, and never deleted by this cleanup — it may back other users' conversations.
+
+The slot shape is **reserved**: the GDPR sweep recognises a user's slots by name, so
+`PUT /secretstore/secrets/{tenant}/{key}` and agent setup's `vaultKeyName` reject a key name in the
+form `<agentId>.u<16 hex>.<12 hex>.<name>` with `400`.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing

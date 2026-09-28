@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -1050,9 +1051,97 @@ class ConversationServiceTest {
         return memory;
     }
 
+    private static final String CONVERSATION = "aabbccddeeff112233445566";
+
+    /** An entry last written by this conversation. */
     private static UserMemoryEntry storedEntry(String key, Object value, String owner) {
-        return new UserMemoryEntry("id-" + key, "user-1", key, value, "fact", Property.Visibility.global, owner, List.of(), "c", false, 0,
-                Instant.now(), Instant.now());
+        return storedEntry("id-" + key, key, value, Property.Visibility.global, owner, CONVERSATION);
+    }
+
+    private static UserMemoryEntry storedEntry(String id, String key, Object value, Property.Visibility visibility, String owner,
+                                               String conversationId) {
+        return new UserMemoryEntry(id, "user-1", key, value, "fact", visibility, owner, List.of(), conversationId, false, 0, Instant.now(),
+                Instant.now());
+    }
+
+    private ConversationMemory memoryWithChange(Property before, Property after) {
+        var memory = new ConversationMemory(CONVERSATION, "agent-1", 1, "user-1");
+        if (before != null) {
+            memory.getConversationProperties().put(before.getName(), before);
+        }
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put(after.getName(), after);
+        memory.recordPropertyChanges(baseline);
+        return memory;
+    }
+
+    private static Property longTerm(String key, String value, Property.Visibility visibility) {
+        var property = new Property(key, value, Property.Scope.longTerm);
+        property.setVisibility(visibility);
+        return property;
+    }
+
+    @Test
+    void undo_withAGlobalAndAnAgentRowOfEqualValue_rewritesOnlyTheRowTheTurnWrote() throws Exception {
+        var memory = memoryWithChange(longTerm("color", "teal", Property.Visibility.self), longTerm("color", "red", Property.Visibility.self));
+        var global = storedEntry("id-global", "color", "red", Property.Visibility.global, "agent-2", CONVERSATION);
+        var own = storedEntry("id-own", "color", "red", Property.Visibility.self, "agent-1", CONVERSATION);
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(global, own));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals("id-own", written.getValue().id(), "the self row the turn wrote, not the shared global one");
+        assertEquals("teal", written.getValue().value());
+    }
+
+    @Test
+    void undo_leavesAnEqualValueAnotherConversationWroteAlone() throws Exception {
+        var memory = memoryWithLongTermChange("color", "teal", "red");
+        when(userMemoryStore.getAllEntries("user-1"))
+                .thenReturn(List.of(storedEntry("id-color", "color", "red", Property.Visibility.global, "agent-1", "another-conversation")));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        verify(userMemoryStore, never()).upsert(any());
+        verify(userMemoryStore, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void undo_revertsAVisibilityChange_inTheStoreToo() throws Exception {
+        // the turn widened self -> group; undo must narrow the stored entry again
+        var memory = memoryWithChange(longTerm("diet", "vegan", Property.Visibility.self), longTerm("diet", "vegan", Property.Visibility.group));
+        memory.getCurrentStep().storeData(new Data<>("context:groupId", new Context(Context.ContextType.string, "team-1")));
+        var stored = new UserMemoryEntry("id-diet", "user-1", "diet", "vegan", "fact", Property.Visibility.group, "agent-1", List.of("team-1"),
+                CONVERSATION, false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(stored));
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), true);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals(Property.Visibility.self, written.getValue().visibility());
+        assertEquals(List.of(), written.getValue().groupIds());
+    }
+
+    @Test
+    void redo_recreatesAGroupPropertyAsGroup_whenTheConversationIsInAGroup() throws Exception {
+        var memory = new ConversationMemory(CONVERSATION, "agent-1", 1, "user-1");
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>("context:groupId", new Context(Context.ContextType.string, "team-1")));
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put("diet", longTerm("diet", "vegan", Property.Visibility.group));
+        memory.recordPropertyChanges(baseline);
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of());
+
+        conversationService.syncLongTermChanges(memory, memory.getCurrentStep(), false);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals(Property.Visibility.group, written.getValue().visibility());
+        assertEquals(List.of("team-1"), written.getValue().groupIds());
     }
 
     @Test

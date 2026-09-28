@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -424,19 +426,23 @@ public class GdprComplianceService {
         // the user (AutoVaultedSecrets), so the default tenant is swept for them —
         // together with any other tenant the user's conversations point into, which
         // is why this runs BEFORE the snapshots that name those tenants are gone.
+        // Every property version counts — the undo history can point into a tenant
+        // the current properties no longer name.
         long autoVaultedSecretsDeleted = 0;
+        boolean vaultCleanupIncomplete = false;
         if (autoVaultedSecretsInstance != null && autoVaultedSecretsInstance.isResolvable()) {
             Set<String> tenants = new LinkedHashSet<>();
             for (String convId : conversationIds) {
                 try {
                     var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(convId);
-                    if (snapshot != null && snapshot.getConversationProperties() != null) {
-                        snapshot.getConversationProperties().values().stream()
+                    if (snapshot != null) {
+                        ConversationMemory.everyPropertyVersion(ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot)).stream()
                                 .map(AutoVaultedSecrets::tenantOf)
                                 .filter(Objects::nonNull)
                                 .forEach(tenants::add);
                     }
                 } catch (Exception e) {
+                    vaultCleanupIncomplete = true;
                     recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
                 }
             }
@@ -446,19 +452,29 @@ public class GdprComplianceService {
                     LOGGER.infof("[GDPR] Deleted %d auto-vaulted secrets [%s]", autoVaultedSecretsDeleted, pseudonym);
                 }
             } catch (Exception e) {
+                vaultCleanupIncomplete = true;
                 recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
             }
         }
 
-        // 4c. Delete conversation memory snapshots
+        // 4c. Delete conversation memory snapshots — unless the vault step above is
+        // incomplete. A snapshot is the only record of a custom tenant its secrets
+        // live in; deleting it now would leave a retry of this erasure unable to
+        // find them, while keeping it lets the retry finish the job. The result
+        // reports the step as failed either way.
         long conversationsDeleted = 0;
-        try {
-            conversationsDeleted = conversationMemoryStore
-                    .deleteConversationsByUserId(userId);
-            LOGGER.infof("[GDPR] Deleted %d conversations [%s]",
-                    conversationsDeleted, pseudonym);
-        } catch (Exception e) {
-            recordFailure(failedSteps, "conversations", e, pseudonym);
+        if (vaultCleanupIncomplete) {
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until their vault secrets are erased — retry the erasure"), pseudonym);
+        } else {
+            try {
+                conversationsDeleted = conversationMemoryStore
+                        .deleteConversationsByUserId(userId);
+                LOGGER.infof("[GDPR] Deleted %d conversations [%s]",
+                        conversationsDeleted, pseudonym);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "conversations", e, pseudonym);
+            }
         }
 
         // 5. Delete managed conversation mappings.

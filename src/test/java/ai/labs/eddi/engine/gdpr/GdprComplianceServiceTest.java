@@ -27,6 +27,8 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -184,6 +186,47 @@ class GdprComplianceServiceTest {
 
         assertTrue(result.failedSteps().contains("autoVaultedSecrets"), result.failedSteps().toString());
         assertFalse(result.complete());
+        // The snapshots are the only record of a custom tenant the secrets live in —
+        // deleting them now would leave a retry nothing to find.
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId("user-1");
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+    }
+
+    /**
+     * A tenant named only in the undo history — the current property has since
+     * moved to another one — must still be swept.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_sweepsATenantOnlyTheUndoHistoryNames() throws Exception {
+        var cleaner = mock(AutoVaultedSecrets.class);
+        Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+        when(cleanerInstance.isResolvable()).thenReturn(true);
+        when(cleanerInstance.get()).thenReturn(cleaner);
+        var withVault = new GdprComplianceService(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cleanerInstance, cacheFactory, 30L);
+
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent", 1, "user-1");
+        memory.getConversationProperties().put("apiKey", vaulted("${vault:acme/agent.u0123456789abcdef.0123456789ab.apiKey}"));
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put("apiKey", vaulted("${vault:agent.u0123456789abcdef.ba9876543210.apiKey}"));
+        memory.recordPropertyChanges(baseline);
+        when(conversationMemoryStore.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("c1")).thenReturn(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        withVault.deleteUserData("user-1");
+
+        var tenants = ArgumentCaptor.forClass(Collection.class);
+        verify(cleaner).deleteForUser(eq("user-1"), tenants.capture());
+        assertTrue(tenants.getValue().contains("acme"), "the tenant the undo history names must be swept: " + tenants.getValue());
+    }
+
+    private static Property vaulted(String reference) {
+        var property = new Property("apiKey", reference, Property.Scope.conversation);
+        property.setAutoVaulted(Boolean.TRUE);
+        return property;
     }
 
     @Test
