@@ -87,6 +87,10 @@ fixes all of that; [`docs/workspaces.md`](../workspaces.md) describes the result
   "Starting conversation…" behind a 401.
 - The share preview rendered unnamed workflows and configs as empty bullets:
   the server sends `""`, and `name ?? id` only falls back on null.
+- A default team applied to everyone, so someone outside it had new work
+  filed where that team could read and edit it; with the setting now
+  changeable at runtime, turning it on for one team moved everybody's new
+  work there. It now applies to the team's members only.
 - `requestAccess` answered 202, and `ApiClient` discards the body of a 202, so
   "you already have access" showed as "sent". It now answers 200 with the
   outcome.

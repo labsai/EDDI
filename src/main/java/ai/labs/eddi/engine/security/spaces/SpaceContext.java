@@ -93,7 +93,13 @@ public class SpaceContext {
     /**
      * The space a resource this caller creates is filed under, in order: the space
      * the request names in {@link #SPACE_HEADER}, when the caller belongs to it;
-     * the deployment's default team, when one is set; the caller's personal space.
+     * the deployment's default team, when one is set <em>and the caller is a member
+     * of it</em>; the caller's personal space.
+     * <p>
+     * The default team used to apply to everyone. Someone outside it then had their
+     * work filed where a team they do not belong to could read and edit it — and,
+     * since the setting became changeable at runtime, an administrator turning it
+     * on for one team silently moved everybody else's new work there.
      *
      * @return the space id, or {@code null} when there is no authenticated caller —
      *         in which case nothing should be stamped at all
@@ -103,15 +109,17 @@ public class SpaceContext {
         if (principal == null) {
             return null;
         }
+        CallerSpaces caller = current();
         String requested = requestedSpace();
-        if (requested != null && current().spaces().contains(requested)) {
+        if (requested != null && caller.spaces().contains(requested)) {
             return requested;
         }
         // A space the caller is not in is refused before anything is created — see
         // SpaceHeaderFilter — so reaching here with one means a path the filter does
         // not cover. Falling back is the safe answer: the resource lands where it
         // would have without the header, never in a space the caller cannot see.
-        return settings.getDefaultSpaceTeam().map(Subjects::teamSpace).orElseGet(() -> Subjects.personalSpace(principal));
+        return settings.getDefaultSpaceTeam().map(Subjects::teamSpace).filter(caller.spaces()::contains)
+                .orElseGet(() -> Subjects.personalSpace(principal));
     }
 
     /**

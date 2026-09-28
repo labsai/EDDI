@@ -25,7 +25,7 @@ Two switches, and they mean different things.
 | `eddi.workspaces.enabled` | `false` | Whether ownership is **enforced** — listings filtered, reads and writes checked. |
 | `eddi.workspaces.groups-claim` | `groups` | JWT claim carrying Keycloak group membership, which becomes team spaces. |
 | `eddi.workspaces.legacy-visibility` | `shared` | What happens to resources created before ownership was recorded: `shared` or `admin-only`. **Changeable at runtime** — see [Runtime settings](#runtime-settings). |
-| `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment. **Changeable at runtime.** |
+| `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment: that team's members create there by default, everyone else keeps their personal space. **Changeable at runtime.** |
 | `eddi.workspaces.directory.enabled` | `true` | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
 
@@ -179,8 +179,13 @@ A new resource is filed in the first of:
 1. the space named by the request's `X-EDDI-Space` header — the Manager sends
    the workspace currently in view, and says so in the workspace switcher
    ("New items are created in …");
-2. the deployment's default space ([runtime setting](#runtime-settings));
+2. the deployment's default team ([runtime setting](#runtime-settings)) — for
+   members of that team only;
 3. the creator's personal space.
+
+A default team never files somebody's work in a team they are not in: their
+work would otherwise be readable and editable by people they never chose to
+share it with.
 
 A header naming a space the caller is not a member of is refused with 403
 before anything is created.
