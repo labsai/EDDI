@@ -490,6 +490,8 @@
       ],
       "webOrigins": [
         "+",
+        "http://localhost:${EDDI_PORT:7070}",
+        "https://localhost:${EDDI_HTTPS_PORT:7443}",
         "http://localhost:7070",
         "https://localhost:7070",
         "http://localhost:7071",
