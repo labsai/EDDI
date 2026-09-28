@@ -60,8 +60,11 @@ All in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-notify.yml
   analytics delta and the milestone marker; the `week_*`/`day_*` fields and
   the zero-baseline heuristics are gone.
 
-After merge, the first run past 07:00 UTC finds no markers and sends today's
-daily and the 2026-09-21 → 2026-09-28 weekly with the real numbers.
+After merge there are no markers yet, so both digests are due at once: the first
+run past 07:00 UTC that finds that day's history row sends the daily and the
+weekly for 2026-09-21 → 2026-09-28 with the real numbers. The row is written
+only from fresh, numeric metrics; until a run writes it, the digests wait for a
+later run instead of going out early.
 
 Verified locally: actionlint/shellcheck clean apart from the pre-existing
 SC2129 style notes; the plan step under 10 fake clocks and histories (normal,
