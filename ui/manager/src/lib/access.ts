@@ -1,4 +1,5 @@
 import { levelIncludes, type AccessLevel } from "@/lib/api/sharing";
+import { parseResourceUri } from "@/lib/api/agents";
 
 /**
  * What the signed-in user may do with one listed resource.
@@ -63,3 +64,36 @@ export function accessFor(callerLevel?: string | null): ResourceAccess {
     known: true,
   };
 }
+
+/**
+ * The access a detail page may offer, read from the version descriptors it
+ * already loads.
+ *
+ * <h3>Only this resource's descriptors count</h3> The descriptor `filter=` is a
+ * text match, so a different resource whose id merely contains this one comes
+ * back too — and its `callerLevel` says nothing about this one. Only a
+ * descriptor whose resource URI resolves to `id` is consulted.
+ *
+ * <h3>Nothing is offered before the answer is in</h3> While the descriptors are
+ * still loading (`undefined`), every capability is false rather than
+ * unrestricted: otherwise an `EDIT` grantee sees Delete flash up and vanish, and
+ * can click it in between. Once loaded, the ordinary `accessFor` rules apply —
+ * including "absent means unrestricted" for backends without workspaces.
+ */
+export function accessForDetail(
+  descriptors: readonly { resource: string; callerLevel?: string | null }[] | undefined,
+  id: string | undefined,
+): ResourceAccess {
+  if (!descriptors) return PENDING;
+  const own = descriptors.find((d) => d.resource && parseResourceUri(d.resource).id === id);
+  return accessFor(own?.callerLevel);
+}
+
+/** Nothing offered yet — the shape while a detail page's descriptors load. */
+const PENDING: ResourceAccess = {
+  canUse: false,
+  canView: false,
+  canEdit: false,
+  canOwn: false,
+  known: false,
+};

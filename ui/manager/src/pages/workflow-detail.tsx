@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { accessForDetail } from "@/lib/access";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -77,6 +78,8 @@ export function WorkflowDetailPage() {
   const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
 
   const { data: versionDescriptors } = useWorkflowVersions(id!);
+  // Deleting a workflow needs OWN; an EDIT grantee may still change it.
+  const access = accessForDetail(versionDescriptors, id);
 
   // Version picker data
   const versions = useMemo(() => {
@@ -458,14 +461,16 @@ export function WorkflowDetailPage() {
             </button>
           )}
 
-          {/* Delete */}
-          <button
-            onClick={() => setShowDeleteDialog(true)}
-            className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-            data-testid="delete-wf-btn"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {/* Delete — OWN only, as on the workflows list */}
+          {access.canOwn && (
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+              data-testid="delete-wf-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
