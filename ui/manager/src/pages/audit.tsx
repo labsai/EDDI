@@ -1,4 +1,5 @@
 import { formatUsd } from "@/lib/utils";
+import { displayUserInput } from "@/lib/api/conversations";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
@@ -328,7 +329,7 @@ function StepGroup({
           {/* Show user input if available */}
           {stepEntries[0]?.input?.["input:initial"] != null && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
-              &ldquo;{String(stepEntries[0].input["input:initial"] as string)}&rdquo;
+              &ldquo;{displayUserInput(String(stepEntries[0].input["input:initial"] as string))}&rdquo;
             </p>
           )}
         </div>
