@@ -1,6 +1,7 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import { agentKeys } from "@/lib/query-keys";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 import {
   getAgentDescriptors,
   getAgentDescriptorsWithVersions,
@@ -118,7 +119,14 @@ export function useUpdateAgent() {
       version: number;
       agent: Agent;
     }) => updateAgent(id, version, agent),
-    onSuccess: () => {
+    onSuccess: (result, { id, agent }) => {
+      // Seed the version the save created with the document just written, so
+      // a page that moves onto it renders the edit at once rather than the
+      // previous version's placeholder.
+      const newVersion = parseVersionFromLocation(result?.location);
+      if (newVersion !== null) {
+        queryClient.setQueryData([...agentKeys.all, id, newVersion], agent);
+      }
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
