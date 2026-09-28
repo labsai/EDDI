@@ -676,7 +676,13 @@ public class AgentConfiguration {
          * LLM instructions for memory consolidation. Customizable by the agent
          * designer. Entries are appended as JSON after this prompt.
          */
-        private String summarizationPrompt = "You are a memory consolidation assistant. Given a list of remembered facts "
+        private String summarizationPrompt = DEFAULT_SUMMARIZATION_PROMPT;
+
+        /**
+         * The built-in consolidation prompt — the field's default, and what Dream uses
+         * when a stored config sets {@code summarizationPrompt} to null or blank.
+         */
+        public static final String DEFAULT_SUMMARIZATION_PROMPT = "You are a memory consolidation assistant. Given a list of remembered facts "
                 + "about a user, distill them into fewer, non-redundant entries. Preserve all "
                 + "important details. Remove duplicates and merge related facts. Each entry "
                 + "should be a single, clear statement.\n\n"

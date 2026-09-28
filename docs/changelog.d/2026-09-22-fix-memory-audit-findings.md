@@ -32,6 +32,10 @@ observed there, and carries a regression test.
   qwen2.5:3b, which returned three of four coffee preferences unchanged and lost "no sugar".
   An upsert that returns no id is treated as a failed write — the group rolls back, restoring any
   original with that key — instead of being counted as a created entry.
+  No consolidated value is cut any more: a value over the length limit, whether the model wrote
+  it or it came from joining two same-key values, keeps the group's originals instead. And a
+  config whose `summarizationPrompt` is null or blank uses the built-in prompt, where it used to
+  send the model the literal text "null".
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
 - **`scope: "secret"` values of different users shared one vault slot.** The slot was
   `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to

@@ -942,7 +942,7 @@ public class DreamService {
                     .filter(m -> m.get("value") != null && !m.get("value").isBlank())
                     .map(m -> new ConsolidatedEntry(
                             truncate(m.get("key").strip(), MAX_KEY_LENGTH),
-                            truncate(m.get("value").strip(), MAX_VALUE_LENGTH)))
+                            m.get("value").strip()))
                     .toList();
         } catch (Exception e) {
             LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response: %s",
@@ -960,7 +960,11 @@ public class DreamService {
      */
     static String consolidationInstructions(AgentConfiguration.DreamConfig config, int originalCount) {
         int target = Math.max(1, config.getSummarizeTargetEntries());
-        return config.getSummarizationPrompt() + "\n\nYou are given " + originalCount + " entries. Consolidate them into at most "
+        String prompt = config.getSummarizationPrompt();
+        if (prompt == null || prompt.isBlank()) {
+            prompt = AgentConfiguration.DreamConfig.DEFAULT_SUMMARIZATION_PROMPT;
+        }
+        return prompt + "\n\nYou are given " + originalCount + " entries. Consolidate them into at most "
                 + target + " entr" + (target == 1 ? "y" : "ies")
                 + ", and in any case fewer than " + originalCount + ". Every important detail must survive in some entry.";
     }
@@ -988,15 +992,23 @@ public class DreamService {
      * Collapses consolidated entries that share a key into one, joining their
      * values. They would otherwise upsert onto the same document, the later one
      * silently overwriting the earlier.
+     * <p>
+     * Nothing is truncated. A value over {@link #MAX_VALUE_LENGTH} — from the
+     * model, or from joining two values — returns an empty list, which the caller
+     * treats as "keep the originals": cutting it would lose the tail's facts while
+     * the originals are deleted anyway.
      */
     static List<ConsolidatedEntry> mergeDuplicateKeys(List<ConsolidatedEntry> entries) {
         Map<String, String> byKey = new LinkedHashMap<>();
         for (ConsolidatedEntry entry : entries) {
             byKey.merge(entry.key(), entry.value(), (a, b) -> a.equals(b) ? a : a + "; " + b);
         }
-        return byKey.entrySet().stream()
-                .map(e -> new ConsolidatedEntry(e.getKey(), truncate(e.getValue(), MAX_VALUE_LENGTH)))
-                .toList();
+        if (byKey.values().stream().anyMatch(value -> value.length() > MAX_VALUE_LENGTH)) {
+            LOGGER.warnf("[DREAM] A consolidated value exceeds %d characters; keeping the originals rather than cutting it.",
+                    MAX_VALUE_LENGTH);
+            return List.of();
+        }
+        return byKey.entrySet().stream().map(e -> new ConsolidatedEntry(e.getKey(), e.getValue())).toList();
     }
 
     /**

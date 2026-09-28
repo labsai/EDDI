@@ -233,15 +233,45 @@ class DreamServiceExtendedTest {
         }
 
         @Test
-        @DisplayName("truncation applies to long keys and values")
-        void truncation() {
+        @DisplayName("a long key is truncated, a long value is kept whole for mergeDuplicateKeys to refuse")
+        void longKeyTruncatedLongValueKept() {
             String longKey = "k".repeat(200);
             String longVal = "v".repeat(2000);
             var result = dreamService.parseConsolidatedEntries(
                     "[{\"key\": \"" + longKey + "\", \"value\": \"" + longVal + "\"}]");
             assertEquals(1, result.size());
             assertTrue(result.getFirst().key().length() <= DreamService.MAX_KEY_LENGTH);
-            assertTrue(result.getFirst().value().length() <= DreamService.MAX_VALUE_LENGTH);
+            assertEquals(2000, result.getFirst().value().length(), "cutting the value would lose facts once the originals go");
+        }
+
+        @Test
+        @DisplayName("a value over the limit — from the model or from a merge — keeps the originals instead of being cut")
+        void overLongValueKeepsTheOriginals() {
+            String half = "x".repeat(DreamService.MAX_VALUE_LENGTH - 10);
+            var merged = DreamService.mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", half),
+                    new DreamService.ConsolidatedEntry("k", half + "y")));
+            assertTrue(merged.isEmpty(), "two values that fit alone must not be joined and cut");
+
+            var single = DreamService
+                    .mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", "v".repeat(DreamService.MAX_VALUE_LENGTH + 1))));
+            assertTrue(single.isEmpty());
+
+            var fits = DreamService
+                    .mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", "a"), new DreamService.ConsolidatedEntry("k", "b")));
+            assertEquals(List.of(new DreamService.ConsolidatedEntry("k", "a; b")), fits);
+        }
+
+        @Test
+        @DisplayName("a null or blank summarizationPrompt falls back to the built-in prompt, never the text 'null'")
+        void nullPromptUsesTheDefault() {
+            var config = new AgentConfiguration.DreamConfig();
+            config.setSummarizationPrompt(null);
+            String instructions = DreamService.consolidationInstructions(config, 4);
+            assertTrue(instructions.startsWith(AgentConfiguration.DreamConfig.DEFAULT_SUMMARIZATION_PROMPT), instructions);
+            assertFalse(instructions.startsWith("null"));
+
+            config.setSummarizationPrompt("  ");
+            assertTrue(DreamService.consolidationInstructions(config, 4).startsWith(AgentConfiguration.DreamConfig.DEFAULT_SUMMARIZATION_PROMPT));
         }
     }
 
