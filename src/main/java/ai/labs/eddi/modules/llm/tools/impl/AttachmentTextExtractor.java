@@ -7,11 +7,14 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.IOUtils;
+import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 import java.util.Locale;
@@ -45,13 +48,37 @@ public class AttachmentTextExtractor {
 
     private static final String TRUNCATION_SUFFIX_FMT = "\n\n[Content truncated - showing first %d characters]";
 
+    /** Fallback page cap when configuration yields a non-positive value. */
+    public static final int DEFAULT_MAX_PAGES = 500;
+
     private final int defaultMaxChars;
+    private final int maxPages;
 
     @Inject
     public AttachmentTextExtractor(
             @ConfigProperty(name = "eddi.attachments.extraction.max-chars",
-                            defaultValue = "50000") int defaultMaxChars) {
+                            defaultValue = "50000") int defaultMaxChars,
+            @ConfigProperty(name = "eddi.attachments.extraction.max-pages",
+                            defaultValue = "500") int maxPages) {
         this.defaultMaxChars = defaultMaxChars > 0 ? defaultMaxChars : DEFAULT_MAX_CHARS;
+        this.maxPages = maxPages > 0 ? maxPages : DEFAULT_MAX_PAGES;
+    }
+
+    /**
+     * Convenience constructor for tests and callers with no configured page cap.
+     */
+    public AttachmentTextExtractor(int defaultMaxChars) {
+        this(defaultMaxChars, DEFAULT_MAX_PAGES);
+    }
+
+    /**
+     * Loads a PDF from bytes with a temp-file scratch cache rather than PDFBox's
+     * default unlimited in-memory buffering, so a small but highly-compressed ("PDF
+     * bomb") document cannot inflate the heap during parsing.
+     */
+    private static PDDocument loadPdf(byte[] pdfBytes) throws IOException {
+        StreamCacheCreateFunction tempFileCache = IOUtils.createTempFileOnlyStreamCache();
+        return Loader.loadPDF(pdfBytes, "", null, null, tempFileCache);
     }
 
     /**
@@ -123,11 +150,18 @@ public class AttachmentTextExtractor {
      */
     public String extractPdfText(byte[] pdfBytes, int maxChars) throws AttachmentExtractionException {
         int cap = maxChars > 0 ? maxChars : defaultMaxChars;
-        try (PDDocument document = Loader.loadPDF(pdfBytes)) {
+        try (PDDocument document = loadPdf(pdfBytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
+            // Stop at the page cap: a document with tens of thousands of pages would
+            // otherwise have every page extracted into memory before the character
+            // cap trims the result. Extracting only up to the cap bounds both.
+            int totalPages = document.getNumberOfPages();
+            int lastPage = Math.min(totalPages, maxPages);
+            stripper.setStartPage(1);
+            stripper.setEndPage(lastPage);
             String text = stripper.getText(document);
-            LOGGER.debugf("Extracted %d characters from PDF with %d pages",
-                    text.length(), document.getNumberOfPages());
+            LOGGER.debugf("Extracted %d characters from PDF (%d of %d pages)",
+                    text.length(), lastPage, totalPages);
             return cap(text, cap);
         } catch (Exception e) {
             throw new AttachmentExtractionException("Failed to extract text from PDF: " + e.getMessage(), e);
@@ -142,7 +176,7 @@ public class AttachmentTextExtractor {
     public String extractPdfText(byte[] pdfBytes, int startPage, int endPage, int maxChars)
             throws AttachmentExtractionException {
         int cap = maxChars > 0 ? maxChars : defaultMaxChars;
-        try (PDDocument document = Loader.loadPDF(pdfBytes)) {
+        try (PDDocument document = loadPdf(pdfBytes)) {
             int totalPages = document.getNumberOfPages();
             if (startPage < 1 || startPage > totalPages) {
                 throw new AttachmentExtractionException(
@@ -168,7 +202,7 @@ public class AttachmentTextExtractor {
      * Extract structural metadata from a PDF (page count + document information).
      */
     public PdfInfo extractPdfInfo(byte[] pdfBytes) throws AttachmentExtractionException {
-        try (PDDocument document = Loader.loadPDF(pdfBytes)) {
+        try (PDDocument document = loadPdf(pdfBytes)) {
             var info = document.getDocumentInformation();
             String title = info != null ? info.getTitle() : null;
             String author = info != null ? info.getAuthor() : null;

@@ -236,6 +236,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.budget.enforce-by-default` | `false` | Enforce per-conversation tool cost ceilings without a per-task `enforceBudget` flag. See [langchain.md](langchain.md) |
 | `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
+| `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
+| `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
@@ -260,6 +262,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
+| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document |
 
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without

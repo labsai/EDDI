@@ -23,6 +23,35 @@ import java.util.zip.ZipOutputStream;
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
 
+    /**
+     * Decompression-bomb ceilings for {@link #unzip}. An agent-config ZIP is a
+     * modest set of JSON documents, so these are generous headroom rather than
+     * expected sizes; a well under 25 MB upload that inflates past them is a bomb,
+     * not a backup. Counted as bytes are actually read, never trusting
+     * {@link ZipEntry#getSize()} (which the archive author controls and can lie
+     * about or leave as -1).
+     */
+    static final int MAX_ENTRIES = 10_000;
+    static final long MAX_ENTRY_INFLATED_BYTES = 100L * 1024 * 1024;
+    static final long MAX_TOTAL_INFLATED_BYTES = 500L * 1024 * 1024;
+
+    private final int maxEntries;
+    private final long maxEntryInflatedBytes;
+    private final long maxTotalInflatedBytes;
+
+    public ZipArchive() {
+        this(MAX_ENTRIES, MAX_ENTRY_INFLATED_BYTES, MAX_TOTAL_INFLATED_BYTES);
+    }
+
+    /**
+     * Test seam: lets a test drive the bomb ceilings without inflating gigabytes.
+     */
+    ZipArchive(int maxEntries, long maxEntryInflatedBytes, long maxTotalInflatedBytes) {
+        this.maxEntries = maxEntries;
+        this.maxEntryInflatedBytes = maxEntryInflatedBytes;
+        this.maxTotalInflatedBytes = maxTotalInflatedBytes;
+    }
+
     @Override
     public void createZip(String sourceDirPath, String targetZipPath, Path allowedBaseDir) throws IOException {
         File directoryToZip = new File(sourceDirPath);
@@ -104,7 +133,14 @@ public class ZipArchive implements IZipArchive {
         String targetDirPath = targetDir.getCanonicalPath();
         try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
             ZipEntry entry;
+            int entryCount = 0;
+            // A running total across all entries, so many small entries cannot add up
+            // to a bomb any more than one huge entry can.
+            long[] totalInflated = {0L};
             while ((entry = zipIn.getNextEntry()) != null) {
+                if (++entryCount > maxEntries) {
+                    throw new IOException("Zip archive has too many entries (limit " + maxEntries + ")");
+                }
                 File destFile = new File(targetDir, entry.getName());
                 String destFilePath = destFile.getCanonicalPath();
 
@@ -122,18 +158,31 @@ public class ZipArchive implements IZipArchive {
                     if (!parentDir.mkdirs() && !parentDir.isDirectory()) {
                         throw new IOException("Could not create parent directories for: " + destFilePath);
                     }
-                    extractFile(zipIn, destFile);
+                    extractFile(zipIn, destFile, entry.getName(), totalInflated);
                 }
                 zipIn.closeEntry();
             }
         }
     }
 
-    private void extractFile(ZipInputStream zipIn, File destFile) throws IOException {
+    private void extractFile(ZipInputStream zipIn, File destFile, String entryName, long[] totalInflated) throws IOException {
         try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(destFile))) {
             byte[] bytesIn = new byte[BUFFER_SIZE];
+            long entryInflated = 0;
             int read;
             while ((read = zipIn.read(bytesIn)) != -1) {
+                entryInflated += read;
+                totalInflated[0] += read;
+                // Measured as it inflates, so a highly-compressed entry is aborted
+                // mid-stream rather than after 25 GB has hit the disk.
+                if (entryInflated > maxEntryInflatedBytes) {
+                    throw new IOException("Zip entry '" + entryName + "' exceeds the maximum inflated size of "
+                            + maxEntryInflatedBytes + " bytes");
+                }
+                if (totalInflated[0] > maxTotalInflatedBytes) {
+                    throw new IOException("Zip archive exceeds the maximum total inflated size of "
+                            + maxTotalInflatedBytes + " bytes");
+                }
                 bos.write(bytesIn, 0, read);
             }
         }

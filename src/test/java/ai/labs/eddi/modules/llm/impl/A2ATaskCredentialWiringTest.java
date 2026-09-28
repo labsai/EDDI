@@ -16,12 +16,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -100,10 +103,14 @@ class A2ATaskCredentialWiringTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static HttpResponse<String> response(String body) {
-        HttpResponse<String> response = mock(HttpResponse.class);
+    private static HttpResponse<InputStream> response(String body) {
+        // The manager now reads the body via BodyHandlers.ofInputStream() and a
+        // bounded stream read, so the mocked response must expose an InputStream body
+        // (a String body would ClassCastException inside the bounded read and the
+        // card would silently fail to parse).
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
         when(response.statusCode()).thenReturn(200);
-        when(response.body()).thenReturn(body);
+        when(response.body()).thenReturn(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
         return response;
     }
 
