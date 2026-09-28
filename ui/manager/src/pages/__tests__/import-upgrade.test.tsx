@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 
 function renderDialog() {
@@ -101,5 +103,46 @@ describe("ImportAgentDialog — Upgrade Strategy", () => {
       <ImportAgentDialog open={false} onClose={() => {}} onSuccess={() => {}} />
     );
     expect(screen.queryByTestId("import-agent-dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("ImportAgentDialog — changes made on this instance", () => {
+  it("leaves a CONFLICT unticked, and says why", async () => {
+    // A conflict is a resource changed here since the last sync. Ticking every
+    // row by default made "Upgrade Now" overwrite that change without the
+    // operator ever choosing to.
+    server.use(
+      http.post("*/backup/import/preview", () =>
+        HttpResponse.json({
+          sourceAgentId: "agent1",
+          sourceAgentName: "Support Agent",
+          targetAgentId: "agent1",
+          targetAgentName: "Support Agent",
+          resources: [
+            { sourceId: "out1", resourceType: "output", name: "Outputs", action: "UPDATE", targetId: "o",
+              targetVersion: 1, matchStrategy: "type", sourceContent: "{}", targetContent: "{}", workflowIndex: -1 },
+            { sourceId: "llm1", resourceType: "langchain", name: "Hotfixed LLM", action: "CONFLICT", targetId: "l",
+              targetVersion: 4, matchStrategy: "type", sourceContent: "{}", targetContent: "{}", workflowIndex: -1 },
+          ],
+        })
+      )
+    );
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.upload(screen.getByTestId("import-file-input"),
+      new File(["fake-zip"], "agent.zip", { type: "application/zip" }));
+    await user.click(screen.getByTestId("strategy-upgrade"));
+    await user.click(screen.getByTestId("import-confirm-strategy"));
+    const select = await screen.findByTestId("upgrade-target-select");
+    const firstAgent = [...(select as HTMLSelectElement).options].find((o) => o.value)!;
+    await user.selectOptions(select, firstAgent.value);
+    await user.click(screen.getByTestId("import-target-next"));
+
+    const conflictRow = (await screen.findByText("Hotfixed LLM")).closest("tr")!;
+    const updateRow = screen.getByText("Outputs").closest("tr")!;
+    expect(conflictRow.querySelector("input[type=checkbox]")).not.toBeChecked();
+    expect(updateRow.querySelector("input[type=checkbox]")).toBeChecked();
+    expect(screen.getByTestId("preview-notices")).toHaveTextContent(/changed on this instance/);
   });
 });

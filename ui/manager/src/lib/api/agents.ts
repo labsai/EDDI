@@ -35,6 +35,12 @@ export interface AgentDescriptor {
    * `accessFor()` in `@/lib/access`, which treats absence as unrestricted.
    */
   callerLevel?: string;
+  /**
+   * The agent's id on the instance it was imported or synced from. It is what
+   * recognises the local copy of a remote agent — a name can be changed on
+   * either side, or shared by two agents.
+   */
+  originId?: string;
 }
 
 export interface Agent {

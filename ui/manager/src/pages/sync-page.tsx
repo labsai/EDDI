@@ -15,6 +15,7 @@ import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
+import { PreviewNotices } from "@/components/agents/import-steps/preview-step";
 import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
@@ -35,8 +36,16 @@ interface AgentMapping {
   remoteVersion: number | null;
   localTargetId: string | null; // null = create new
   autoMatched: boolean;
+  /**
+   * The operator picked "Create new" themselves. Only then is a copy forced:
+   * otherwise a mapping with no target lets the backend find the agent an
+   * earlier sync promoted from this source, instead of creating another one.
+   */
+  createNew: boolean;
   checked: boolean;
   preview: ImportPreview | null;
+  /** CONFLICT rows the operator chose to overwrite; every other one is left alone. */
+  overwrite: string[];
 }
 
 
@@ -61,20 +70,24 @@ export function SyncPage() {
   const executeBatchMutation = useExecuteSyncBatch();
 
   function handleConnected(agents: DocumentDescriptor[]) {
-    // Auto-match by name
+    // Auto-match: the local agent promoted from this remote one first — its
+    // originId is the remote id, and it survives a rename on either side — and
+    // only then by name.
     const newMappings: AgentMapping[] = agents.map((remote) => {
       const { id, version } = parseResourceUri(remote.resource);
-      const localMatch = localAgents.find(
-        (la) => la.name?.toLowerCase() === remote.name?.toLowerCase()
-      );
+      const localMatch =
+        localAgents.find((la) => la.originId === id) ??
+        localAgents.find((la) => la.name?.toLowerCase() === remote.name?.toLowerCase());
       return {
         remoteAgent: remote,
         remoteId: id,
         remoteVersion: version,
         localTargetId: localMatch?.id || null,
         autoMatched: !!localMatch,
+        createNew: false,
         checked: true,
         preview: null,
+        overwrite: [],
       };
     });
     setMappings(newMappings);
@@ -95,6 +108,7 @@ export function SyncPage() {
       sourceAgentId: m.remoteId,
       sourceAgentVersion: m.remoteVersion,
       targetAgentId: m.localTargetId,
+      createNew: m.createNew,
     }));
 
     // The previous run's outcome describes resources this preview is about to
@@ -112,7 +126,13 @@ export function SyncPage() {
               const p = previews.find(
                 (pr) => pr.sourceAgentId === m.remoteId
               );
-              return p ? { ...m, preview: p } : m;
+              if (!p) return m;
+              // With no target named, the backend previews onto the agent an earlier
+              // sync promoted from this source. Adopt it, so the row shows which agent
+              // will be written and the sync names the same one.
+              const localTargetId =
+                m.localTargetId ?? (m.createNew ? null : p.targetAgentId ?? null);
+              return { ...m, preview: p, localTargetId, overwrite: [] };
             })
           );
         },
@@ -128,8 +148,16 @@ export function SyncPage() {
       sourceAgentId: m.remoteId,
       sourceAgentVersion: m.remoteVersion,
       targetAgentId: m.localTargetId,
-      selectedResources: null, // sync all
+      // Everything (null) unless a conflict is to be overwritten: a CONFLICT row is
+      // written only when named, so naming it means naming the rest as well.
+      selectedResources:
+        m.overwrite.length > 0 && m.preview
+          ? m.preview.resources
+              .filter((r) => r.action !== "CONFLICT" || m.overwrite.includes(r.sourceId))
+              .map((r) => r.sourceId)
+          : null,
       workflowOrder: null,
+      createNew: m.createNew,
     }));
 
     executeBatchMutation.mutate(
@@ -147,11 +175,16 @@ export function SyncPage() {
             }
           }
           setMappings((prev) =>
-            prev.map((m) => ({
-              ...m,
-              localTargetId: m.localTargetId ?? createdBySource.get(m.remoteId) ?? null,
-              preview: null,
-            }))
+            prev.map((m) => {
+              const created = createdBySource.get(m.remoteId);
+              return {
+                ...m,
+                localTargetId: m.localTargetId ?? created ?? null,
+                createNew: created ? false : m.createNew,
+                preview: null,
+                overwrite: [],
+              };
+            })
           );
         },
       }
@@ -266,7 +299,9 @@ export function SyncPage() {
                       onChange={(e) =>
                         updateMapping(idx, {
                           localTargetId: e.target.value || null,
+                          createNew: !e.target.value,
                           preview: null,
+                          overwrite: [],
                         })
                       }
                       className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -317,7 +352,17 @@ export function SyncPage() {
 
                 {/* Expanded detail */}
                 {expandedAgent === m.remoteId && m.preview && (
-                  <AgentSyncDetail preview={m.preview} />
+                  <AgentSyncDetail
+                    preview={m.preview}
+                    overwrite={m.overwrite}
+                    onToggleOverwrite={(sourceId) =>
+                      updateMapping(idx, {
+                        overwrite: m.overwrite.includes(sourceId)
+                          ? m.overwrite.filter((id) => id !== sourceId)
+                          : [...m.overwrite, sourceId],
+                      })
+                    }
+                  />
                 )}
               </div>
             ))}
@@ -343,7 +388,10 @@ export function SyncPage() {
 
           {/* What the sync actually did — never inferred from "the request resolved" */}
           {executeBatchMutation.data && (
-            <SyncOutcome execution={executeBatchMutation.data} />
+            <SyncOutcome
+              execution={executeBatchMutation.data}
+              names={new Map(mappings.map((m) => [m.remoteId, m.remoteAgent.name || m.remoteId]))}
+            />
           )}
         </section>
       )}
@@ -370,7 +418,13 @@ export function SyncPage() {
  * which are worth showing — so a sync that wrote nothing at all reported
  * success. The outcome is read from the results themselves.
  */
-function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
+function SyncOutcome({
+  execution,
+  names,
+}: {
+  execution: BatchSyncExecution;
+  names: Map<string, string>;
+}) {
   const { t } = useTranslation();
   const { partial, results } = execution;
 
@@ -410,11 +464,39 @@ function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
         )}
       </div>
 
+      {/* What each agent got — a single "Sync complete" said nothing about it. */}
+      <ul className="space-y-0.5 text-xs text-muted-foreground" data-testid="sync-outcome-counts">
+        {results
+          .filter((r) => r.result)
+          .map((r) => (
+            <li key={r.sourceAgentId}>
+              <span className="font-medium text-foreground">
+                {names.get(r.sourceAgentId) ?? r.sourceAgentId}
+              </span>
+              {": "}
+              {t("syncPage.outcomeCounts", "{{updated}} updated · {{created}} created · {{skipped}} unchanged", {
+                updated: r.result?.updated ?? 0,
+                created: r.result?.created ?? 0,
+                skipped: r.result?.skipped ?? 0,
+              })}
+            </li>
+          ))}
+      </ul>
+
+      {wrote > 0 && (
+        <p className="text-xs text-muted-foreground" data-testid="sync-redeploy-hint">
+          {t(
+            "syncPage.redeployHint",
+            "Synced changes are saved as new versions. What is running keeps running — deploy the new version to make it live."
+          )}
+        </p>
+      )}
+
       {failedAgents.length > 0 && (
         <ul className="space-y-1 text-xs text-muted-foreground">
           {failedAgents.map((r) => (
             <li key={r.sourceAgentId} data-testid={`sync-failure-${r.sourceAgentId}`}>
-              <span className="font-medium text-foreground">{r.sourceAgentId}</span>
+              <span className="font-medium text-foreground">{names.get(r.sourceAgentId) ?? r.sourceAgentId}</span>
               {": "}
               {r.error ||
                 r.result?.failures
@@ -429,12 +511,21 @@ function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
 }
 
 /* ─── Per-agent resource diff table ─── */
-function AgentSyncDetail({ preview }: { preview: ImportPreview }) {
+function AgentSyncDetail({
+  preview,
+  overwrite,
+  onToggleOverwrite,
+}: {
+  preview: ImportPreview;
+  overwrite: string[];
+  onToggleOverwrite: (sourceId: string) => void;
+}) {
   const { t } = useTranslation();
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   return (
-    <div className="bg-secondary/20 px-5 pb-4">
+    <div className="space-y-2 bg-secondary/20 px-5 pb-4">
+      <PreviewNotices preview={preview} />
       <div className="overflow-auto rounded-lg border max-h-64">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm">
@@ -454,7 +545,7 @@ function AgentSyncDetail({ preview }: { preview: ImportPreview }) {
           <tbody className="divide-y divide-border">
             {preview.resources.map((r) => {
               const hasDiff =
-                r.action === "UPDATE" &&
+                (r.action === "UPDATE" || r.action === "CONFLICT" || r.action === "REMOVE") &&
                 (r.sourceContent || r.targetContent);
               const isExpanded = expandedRow === r.sourceId;
 
@@ -470,7 +561,21 @@ function AgentSyncDetail({ preview }: { preview: ImportPreview }) {
                       <ResourceTypeBadge type={r.resourceType} />
                     </td>
                     <td className="px-3 py-1.5">
-                      <ActionBadge action={r.action} />
+                      <div className="flex items-center gap-2">
+                        <ActionBadge action={r.action} />
+                        {r.action === "CONFLICT" && (
+                          <label className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={overwrite.includes(r.sourceId)}
+                              onChange={() => onToggleOverwrite(r.sourceId)}
+                              className="accent-primary"
+                              data-testid={`sync-overwrite-${r.sourceId}`}
+                            />
+                            {t("syncPage.overwrite", "Overwrite local change")}
+                          </label>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-1.5">
                       {hasDiff && (

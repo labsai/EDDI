@@ -34,6 +34,15 @@ interface ImportAgentDialogProps {
 type Step = "upload" | "strategy" | "target" | "preview" | "importing" | "outcome";
 type Strategy = "create" | "merge" | "upgrade" | "sync";
 
+/**
+ * Every row starts ticked except a CONFLICT: that one was changed on this
+ * instance since the last sync, and overwriting it has to be a choice the
+ * operator makes, never the default.
+ */
+function defaultSelection(preview: ImportPreview): Set<string> {
+  return new Set(preview.resources.filter((r) => r.action !== "CONFLICT").map((r) => r.sourceId));
+}
+
 export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialogProps) {
   const { t } = useTranslation();
 
@@ -133,8 +142,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
         {
           onSuccess: (data) => {
             setPreview(data);
-            const allIds = new Set(data.resources.map((r) => r.sourceId));
-            setSelected(allIds);
+            setSelected(defaultSelection(data));
             // Initialize workflow order from CREATE workflow resources
             const wfIds = data.resources
               .filter((r) => r.resourceType === "workflow" && r.action === "CREATE")
@@ -158,8 +166,11 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
         {
           onSuccess: (data) => {
             setPreview(data);
-            const allIds = new Set(data.resources.map((r) => r.sourceId));
-            setSelected(allIds);
+            setSelected(defaultSelection(data));
+            // With no target chosen, the backend syncs onto the agent an earlier
+            // sync promoted from this source, when there is one. Adopting it here
+            // makes the picker say so, and the execute names the same agent.
+            if (!syncTargetId && data.targetAgentId) setSyncTargetId(data.targetAgentId);
             setStep("preview");
           },
           onError: (err) => setError(err.message),
