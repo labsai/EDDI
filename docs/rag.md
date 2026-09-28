@@ -223,7 +223,7 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Also accepts `kbId` — **see the warning below before using it** |
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). Also accepts `kbId` — **see the warning below before using it** |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
 > **Leave `kbId` unset.** It overrides the key the documents are stored under, and it defaults to the knowledge base's `name`, which is the key **retrieval always uses** — `RagContextProvider` keys the store on `ragConfig.getName()` and has no way to be pointed anywhere else. So passing a `kbId` that is anything other than the KB's exact `name` ingests into a store nothing reads: the call returns `202`, the status goes to `completed`, the documents are really embedded and really stored, and retrieval finds nothing, permanently. Ingestion *sources* are not affected — `IngestionPipeline` keys on the name and cannot diverge.
@@ -259,6 +259,27 @@ Response:
 ```
 
 Status values: `pending` → `processing` → `completed` | `failed: <error message>`
+
+**Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
+twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
+`replace=true` to supersede instead:
+
+```bash
+curl -X POST "http://localhost:7070/ragstore/rags/abc123/ingest?version=1&documentName=pricing.md&replace=true" \
+  -H "Content-Type: text/plain" --data-binary @pricing.md
+```
+
+The new chunks are stored first and the previous ones removed afterwards, so a failure part-way
+leaves the old version retrievable rather than leaving the document with no vectors. Chunks from
+before this option existed are superseded too. `replace=true` needs an explicit `documentName` and
+is refused with a `400` without one: every document ingested without a name shares `unnamed`, and
+replacing that would delete all of them. On a vector store that cannot delete by metadata, the
+ingestion still completes and the status response carries a `warning` saying the previous version is
+still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
+better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
+the originals again.
 
 ## Ingestion Sources
 

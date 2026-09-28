@@ -2036,6 +2036,7 @@
     "ingestion": "문서 수집",
     "dropFiles": "여기에 문서를 드래그 앤 드롭하세요",
     "dropHint": "텍스트, 마크다운 또는 기타 텍스트 기반 파일",
+    "replaceSameName": "같은 파일 이름으로 이전에 수집한 문서 교체",
     "browse": "찾아보기",
     "pasteText": "또는 텍스트 콘텐츠 붙여넣기",
     "pastePlaceholder": "여기에 문서 텍스트를 붙여넣으세요...",

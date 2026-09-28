@@ -2058,6 +2058,7 @@
     "ingestion": "Ingesta de documentos",
     "dropFiles": "Arrastre documentos aquí para ingerir",
     "dropHint": "Texto, Markdown o cualquier archivo de texto",
+    "replaceSameName": "Reemplazar un documento ingerido previamente con el mismo nombre de archivo",
     "browse": "Buscar",
     "pasteText": "O pegue el contenido del texto",
     "pastePlaceholder": "Pegue el texto del documento aquí...",

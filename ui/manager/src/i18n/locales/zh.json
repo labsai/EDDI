@@ -2036,6 +2036,7 @@
     "ingestion": "文档摄入",
     "dropFiles": "将文档拖放到此处进行摄入",
     "dropHint": "文本，Markdown或任何基于文本的文件",
+    "replaceSameName": "替换之前导入的同名文档",
     "browse": "浏览",
     "pasteText": "或粘贴文本内容",
     "pastePlaceholder": "在此粘贴文档文本...",

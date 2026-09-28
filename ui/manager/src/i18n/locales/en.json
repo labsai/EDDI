@@ -2116,6 +2116,7 @@
     "ingestion": "Document Ingestion",
     "dropFiles": "Drop documents here to ingest",
     "dropHint": "Text, Markdown, or any text-based file",
+    "replaceSameName": "Replace a previously ingested document with the same file name",
     "browse": "Browse",
     "pasteText": "Or paste text content",
     "pastePlaceholder": "Paste document text here...",

@@ -2036,6 +2036,7 @@
     "ingestion": "Dokumenten-Aufnahme",
     "dropFiles": "Dokumente hierhin ziehen zum Aufnehmen",
     "dropHint": "Text, Markdown oder beliebige Textdateien",
+    "replaceSameName": "Zuvor aufgenommenes Dokument mit gleichem Dateinamen ersetzen",
     "browse": "Durchsuchen",
     "pasteText": "Oder Textinhalt einfügen",
     "pastePlaceholder": "Dokumententext hier einfügen...",
