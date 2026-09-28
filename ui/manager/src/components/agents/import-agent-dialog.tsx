@@ -68,6 +68,12 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   const [sourceAgent, setSourceAgent] = useState<string | null>(null);
   const [sourceVersion, setSourceVersion] = useState<number | null>(null);
   const [syncTargetId, setSyncTargetId] = useState<string | null>(null);
+  /**
+   * The operator picked "Create new agent" themselves. Only then is a copy
+   * forced; otherwise the backend syncs onto the agent promoted from this source
+   * earlier, and the picker pre-selects it so that is visible before the preview.
+   */
+  const [syncCreateNew, setSyncCreateNew] = useState(false);
 
   const importMutation = useImportAgent();
   const previewMutation = usePreviewImport();
@@ -96,6 +102,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     setSourceAgent(null);
     setSourceVersion(null);
     setSyncTargetId(null);
+    setSyncCreateNew(false);
   }, []);
 
   function handleClose() {
@@ -162,6 +169,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           sourceVersion,
           targetAgentId: syncTargetId,
           sourceAuth: syncAuth,
+          createNew: syncCreateNew,
         },
         {
           onSuccess: (data) => {
@@ -170,7 +178,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
             // With no target chosen, the backend syncs onto the agent an earlier
             // sync promoted from this source, when there is one. Adopting it here
             // makes the picker say so, and the execute names the same agent.
-            if (!syncTargetId && data.targetAgentId) setSyncTargetId(data.targetAgentId);
+            if (!syncTargetId && !syncCreateNew && data.targetAgentId) setSyncTargetId(data.targetAgentId);
             setStep("preview");
           },
           onError: (err) => setError(err.message),
@@ -238,6 +246,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           selectedResources: selectedIds,
           workflowOrder: workflowOrder.length > 0 ? workflowOrder : null,
           sourceAuth: syncAuth,
+          createNew: syncCreateNew,
         },
         {
           onSuccess: settle,
@@ -356,7 +365,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               onSyncAuthChange={setSyncAuth}
               onRemoteAgents={setRemoteAgents}
               onSourceAgent={(id, version) => { setSourceAgent(id); setSourceVersion(version); }}
-              onSyncTarget={setSyncTargetId}
+              onSyncTarget={(id, createNew) => { setSyncTargetId(id); setSyncCreateNew(createNew); }}
               error={error}
               isLoading={isLoading}
               isPreviewing={previewUpgradeMutation.isPending || previewSyncMutation.isPending}
@@ -508,7 +517,7 @@ function TargetStep({
   onSyncAuthChange: (auth: string) => void;
   onRemoteAgents: (agents: DocumentDescriptor[]) => void;
   onSourceAgent: (id: string, version: number | null) => void;
-  onSyncTarget: (id: string | null) => void;
+  onSyncTarget: (id: string | null, createNew: boolean) => void;
   error: string | null;
   isLoading: boolean;
   isPreviewing: boolean;
@@ -623,7 +632,7 @@ function SyncTargetPicker({
   onAuthChange: (auth: string) => void;
   onRemoteAgents: (agents: DocumentDescriptor[]) => void;
   onSourceAgent: (id: string, version: number | null) => void;
-  onSyncTarget: (id: string | null) => void;
+  onSyncTarget: (id: string | null, createNew: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { data } = useInfiniteAgentDescriptors();
@@ -655,6 +664,10 @@ function SyncTargetPicker({
                 if (remote) {
                   const { id, version } = parseResourceUri(remote.resource);
                   onSourceAgent(id, version);
+                  // The local copy an earlier sync promoted from this agent, if
+                  // any: syncing onto it is what the operator almost always means.
+                  const promoted = localAgents.find((a) => a.originId === id);
+                  onSyncTarget(promoted?.id ?? null, false);
                 }
               }}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -678,7 +691,7 @@ function SyncTargetPicker({
             </label>
             <select
               value={syncTargetId || ""}
-              onChange={(e) => onSyncTarget(e.target.value || null)}
+              onChange={(e) => onSyncTarget(e.target.value || null, !e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               data-testid="sync-target-select"
             >

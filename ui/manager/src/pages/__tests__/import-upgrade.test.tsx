@@ -146,3 +146,62 @@ describe("ImportAgentDialog — changes made on this instance", () => {
     expect(screen.getByTestId("preview-notices")).toHaveTextContent(/changed on this instance/);
   });
 });
+
+describe("ImportAgentDialog — syncing onto an earlier promotion", () => {
+  async function toSyncTarget() {
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/prod-copy?version=4",
+            name: "Support Agent (prod)",
+            description: "",
+            createdOn: 1,
+            lastModifiedOn: 1,
+            originId: "remote-agent1",
+          },
+        ])
+      )
+    );
+    renderDialog();
+    const user = userEvent.setup();
+    await user.upload(screen.getByTestId("import-file-input"),
+      new File(["fake-zip"], "agent.zip", { type: "application/zip" }));
+    await user.click(screen.getByTestId("strategy-sync"));
+    await user.click(screen.getByTestId("import-confirm-strategy"));
+    await user.type(await screen.findByTestId("sync-url-input"), "https://staging.eddi.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+    await user.selectOptions(await screen.findByTestId("sync-source-select"), "remote-agent1");
+    return user;
+  }
+
+  it("pre-selects the local copy promoted from the chosen agent", async () => {
+    // What a sync with no target does anyway — shown before the preview, not after.
+    await toSyncTarget();
+
+    await waitFor(() =>
+      expect((screen.getByTestId("sync-target-select") as HTMLSelectElement).value).toBe("prod-copy")
+    );
+  });
+
+  it("creates a new agent only when the operator picks Create new", async () => {
+    const previews: URLSearchParams[] = [];
+    server.use(
+      http.post("*/backup/import/sync/preview", ({ request }) => {
+        previews.push(new URL(request.url).searchParams);
+        return HttpResponse.json({
+          sourceAgentId: "remote-agent1", sourceAgentName: "Support Agent",
+          targetAgentId: null, targetAgentName: null, resources: [],
+        });
+      })
+    );
+    const user = await toSyncTarget();
+
+    await user.selectOptions(screen.getByTestId("sync-target-select"), "");
+    await user.click(screen.getByTestId("import-target-next"));
+
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(previews[0]!.get("createNew")).toBe("true");
+    expect(previews[0]!.get("targetAgentId")).toBeNull();
+  });
+});

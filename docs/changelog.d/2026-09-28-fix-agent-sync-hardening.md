@@ -73,7 +73,10 @@ copy only when the operator picks *Create new*, adopts the target a preview
 resolved, shows `REMOVE`/`CONFLICT` rows with their diffs and the preview's
 warnings, lets a conflict be overwritten per row, and says per agent what was
 written and that it is not live until deployed. The import dialog leaves `CONFLICT`
-rows unticked. i18n in all 11 locales.
+rows unticked, pre-selects the local copy promoted from the chosen agent as soon as
+it is picked, and creates a new agent only when *Create new agent* is chosen
+explicitly — so leaving the default never duplicates and choosing a copy is always
+honoured. i18n in all 11 locales.
 
 Three commits that followed the merge of #829 on `fix/agent-sync-promotion` —
 parser documents travelling with the agent — were never pushed; they are the base
