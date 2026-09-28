@@ -5,7 +5,9 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.exception.SneakyThrow;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -24,7 +26,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.lang.reflect.Field;
 import java.net.URI;
@@ -67,9 +72,13 @@ class RestAgentManagementExtendedTest {
     }
 
     private AgentTriggerConfiguration triggerWithDeployment(String agentId) {
+        return triggerWithDeployment(agentId, Deployment.Environment.production);
+    }
+
+    private AgentTriggerConfiguration triggerWithDeployment(String agentId, Deployment.Environment environment) {
         var deployment = new AgentDeployment();
         deployment.setAgentId(agentId);
-        deployment.setEnvironment(Deployment.Environment.production);
+        deployment.setEnvironment(environment);
         deployment.setInitialContext(new HashMap<>());
 
         var trigger = new AgentTriggerConfiguration();
@@ -256,6 +265,444 @@ class RestAgentManagementExtendedTest {
 
             Response response = mgmt.endCurrentConversation("intent-1", "user-1");
             assertEquals(200, response.getStatus());
+        }
+    }
+
+    // ─── Authorization precedes every side effect ───────────────
+
+    /**
+     * An anonymous caller that the gate rejects must not have created, deleted or
+     * replaced anything: a 401 from the managed endpoints means nothing happened.
+     * Before the fix the conversation was created (or the ended one deleted and
+     * replaced) first and the caller was checked afterwards, so a rejected request
+     * still left a new engine conversation and a stored UserConversation behind.
+     */
+    @Nested
+    @DisplayName("Authorization before side effects")
+    class AuthorizationBeforeSideEffects {
+
+        private static final String ENDED_CONV_ID = "112233445566778899aabbcc";
+        private static final String NEW_CONV_ID = "aabbccddee112233aabbccdd";
+
+        private AgentTriggerConfiguration trigger;
+
+        /** No stored UserConversation for (intent-1, user-1). */
+        private void givenNoExistingConversation() throws Exception {
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+        }
+
+        /** A stored UserConversation whose engine conversation has ended. */
+        private void givenEndedConversation(Deployment.Environment storedEnvironment) throws Exception {
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(new UserConversation("intent-1", "user-1", storedEnvironment, "agent-1", ENDED_CONV_ID));
+            when(restAgentEngine.getConversationState(ENDED_CONV_ID)).thenReturn(ConversationState.ENDED);
+        }
+
+        private void givenTrigger(Deployment.Environment environment) {
+            trigger = triggerWithDeployment("agent-1", environment);
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(trigger);
+        }
+
+        /** The engine accepts the start; the new conversation is live. */
+        private SimpleConversationMemorySnapshot givenEngineCreatesConversation() {
+            var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + NEW_CONV_ID + "?version=1");
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenReturn(Response.status(201).header("location", location.toString()).build());
+            when(restAgentEngine.getConversationState(NEW_CONV_ID)).thenReturn(ConversationState.READY);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            when(restAgentEngine.readConversation(eq(NEW_CONV_ID), any(), any(), any())).thenReturn(snapshot);
+            return snapshot;
+        }
+
+        private void assertNothingCreatedOrReplaced() throws Exception {
+            verify(userConversationStore, never()).createUserConversation(any());
+            verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(restAgentEngine, never()).startConversationWithContext(any(), any(), any(), any());
+            verify(restAgentEngine, never()).startConversation(any(), any(), any());
+            verify(restAgentEngine, never()).readConversation(any(), any(), any(), any());
+            verify(restAgentEngine, never()).sayWithinContext(any(), any(), any(), any(), any(), any());
+            // createNewConversation writes the language into the trigger's (cached)
+            // deployment context — a rejected caller must not reach that either.
+            if (trigger != null) {
+                assertFalse(trigger.getAgentDeployments().getFirst().getInitialContext().containsKey(RestAgentManagement.KEY_LANG),
+                        "a rejected request reached createNewConversation");
+            }
+        }
+
+        private void callLoad(RestAgentManagement mgmt) {
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+        }
+
+        private void callSay(RestAgentManagement mgmt) {
+            mgmt.sayWithinContext("intent-1", "user-1", false, false, List.of(), new InputData("Hello", Map.of()), asyncResponse);
+        }
+
+        /**
+         * sayWithinContext hands the UnauthorizedException to the JAX-RS exception
+         * mappers via resume(Throwable) — Quarkus maps it to 401 exactly as the throw
+         * from loadConversationMemory — and never resumes with a built (500) Response.
+         */
+        private void assertSayAnswered401() {
+            verify(asyncResponse).resume(isA(UnauthorizedException.class));
+            verify(asyncResponse, never()).resume(any(Response.class));
+        }
+
+        // --- rejected: nothing happens ---
+
+        @Test
+        @DisplayName("load, no existing conversation: 401 and no conversation is created")
+        void loadRejectedBeforeCreate() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            givenNoExistingConversation();
+            givenTrigger(Deployment.Environment.test);
+            givenEngineCreatesConversation();
+
+            assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
+
+            assertNothingCreatedOrReplaced();
+            verify(asyncResponse, never()).resume(any());
+        }
+
+        @Test
+        @DisplayName("say, no existing conversation: 401 and no conversation is created")
+        void sayRejectedBeforeCreate() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            givenNoExistingConversation();
+            givenTrigger(Deployment.Environment.test);
+            givenEngineCreatesConversation();
+
+            callSay(mgmt);
+
+            assertSayAnswered401();
+            assertNothingCreatedOrReplaced();
+        }
+
+        @Test
+        @DisplayName("load, ended conversation: 401 and the ended one is neither deleted nor replaced")
+        void loadRejectedBeforeReplace() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            // The ended conversation was production; the replacement would be test.
+            // The request acts on the replacement, so its environment decides.
+            givenEndedConversation(Deployment.Environment.production);
+            givenTrigger(Deployment.Environment.test);
+            givenEngineCreatesConversation();
+
+            assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
+
+            assertNothingCreatedOrReplaced();
+            verify(asyncResponse, never()).resume(any());
+        }
+
+        @Test
+        @DisplayName("say, ended conversation: 401 and the ended one is neither deleted nor replaced")
+        void sayRejectedBeforeReplace() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            givenEndedConversation(Deployment.Environment.test);
+            givenTrigger(Deployment.Environment.test);
+            givenEngineCreatesConversation();
+
+            callSay(mgmt);
+
+            assertSayAnswered401();
+            assertNothingCreatedOrReplaced();
+        }
+
+        @Test
+        @DisplayName("load and say, live non-production conversation: 401 without touching it")
+        void liveConversationRejected() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(new UserConversation("intent-1", "user-1", Deployment.Environment.test, "agent-1", "conv-1"));
+            when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+
+            assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
+            callSay(mgmt);
+
+            assertSayAnswered401();
+            assertNothingCreatedOrReplaced();
+            verify(agentTriggerStore, never()).readAgentTrigger(anyString());
+        }
+
+        // --- missing trigger: the existing error, not a 401 ---
+
+        private void givenMissingTrigger() {
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenAnswer(inv -> {
+                throw SneakyThrow.sneakyThrow(new IResourceStore.ResourceNotFoundException("no trigger"));
+            });
+        }
+
+        /**
+         * The trigger is read to decide the environment before the caller is checked,
+         * exactly as it was read (inside creation) before the check it used to follow.
+         * So a missing trigger still surfaces as the store's not-found exception —
+         * mapped by JAX-RS for load, the opaque 500 for say — for anonymous callers
+         * too.
+         */
+        @Test
+        @DisplayName("missing trigger, anonymous caller: the same not-found error as before, nothing created")
+        void missingTriggerKeepsItsError() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            givenNoExistingConversation();
+            givenMissingTrigger();
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> callLoad(mgmt));
+
+            callSay(mgmt);
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            assertEquals(500, captor.getValue().getStatus());
+            verify(asyncResponse, never()).resume(any(Throwable.class));
+            assertNothingCreatedOrReplaced();
+        }
+
+        /**
+         * One deliberate difference for this error path: the trigger is now read before
+         * the ended conversation is deleted, so a missing trigger leaves the ended
+         * UserConversation in place instead of deleting it and then failing. Each later
+         * request fails the same way either way.
+         */
+        @Test
+        @DisplayName("missing trigger, ended conversation: fails without deleting the ended one")
+        void missingTriggerDoesNotDeleteEnded() throws Exception {
+            var mgmt = create(false);
+            givenEndedConversation(Deployment.Environment.production);
+            givenMissingTrigger();
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> callLoad(mgmt));
+
+            assertNothingCreatedOrReplaced();
+        }
+
+        // --- authorized: unchanged ---
+
+        /**
+         * The three ways past the gate — an authenticated caller, a production
+         * deployment, and OIDC off — each create the conversation exactly as before:
+         * trigger read, engine start, then the stored UserConversation, and the request
+         * proceeds on the new conversation.
+         */
+        @ParameterizedTest(name = "checkAuth={0}, anonymous={1}, env={2}, say={3}")
+        @CsvSource({"true, false, test, false", "true, false, test, true", "true, true, production, false", "true, true, production, true",
+                "false, true, test, false", "false, true, test, true"})
+        @DisplayName("authorized caller, no existing conversation: created and served as before")
+        void authorizedCreate(boolean checkAuth, boolean anonymous, Deployment.Environment environment, boolean say) throws Exception {
+            var mgmt = create(checkAuth);
+            when(identity.isAnonymous()).thenReturn(anonymous);
+            givenNoExistingConversation();
+            givenTrigger(environment);
+            var snapshot = givenEngineCreatesConversation();
+
+            if (say) {
+                callSay(mgmt);
+            } else {
+                callLoad(mgmt);
+            }
+
+            InOrder order = inOrder(userConversationStore, agentTriggerStore, restAgentEngine);
+            order.verify(userConversationStore).readUserConversation("intent-1", "user-1");
+            order.verify(agentTriggerStore).readAgentTrigger("intent-1");
+            order.verify(restAgentEngine).startConversationWithContext(eq("agent-1"), eq(environment), eq("user-1"), anyMap());
+            var stored = ArgumentCaptor.forClass(UserConversation.class);
+            order.verify(userConversationStore).createUserConversation(stored.capture());
+            assertEquals(environment, stored.getValue().getEnvironment());
+            assertEquals(NEW_CONV_ID, stored.getValue().getConversationId());
+            verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            assertProceededOnNewConversation(say, snapshot);
+        }
+
+        @ParameterizedTest(name = "checkAuth={0}, anonymous={1}, env={2}, say={3}")
+        @CsvSource({"true, false, test, false", "true, false, test, true", "true, true, production, false", "true, true, production, true",
+                "false, true, test, false", "false, true, test, true"})
+        @DisplayName("authorized caller, ended conversation: deleted, then replaced, as before")
+        void authorizedReplace(boolean checkAuth, boolean anonymous, Deployment.Environment environment, boolean say) throws Exception {
+            var mgmt = create(checkAuth);
+            when(identity.isAnonymous()).thenReturn(anonymous);
+            givenEndedConversation(Deployment.Environment.test);
+            givenTrigger(environment);
+            var snapshot = givenEngineCreatesConversation();
+
+            if (say) {
+                callSay(mgmt);
+            } else {
+                callLoad(mgmt);
+            }
+
+            InOrder order = inOrder(userConversationStore, restAgentEngine);
+            order.verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            order.verify(restAgentEngine).startConversationWithContext(eq("agent-1"), eq(environment), eq("user-1"), anyMap());
+            order.verify(userConversationStore).createUserConversation(any());
+            assertProceededOnNewConversation(say, snapshot);
+        }
+
+        @Test
+        @DisplayName("anonymous, ended test conversation replaced by a production one: allowed (the replacement decides)")
+        void endedNonProductionReplacedByProduction() throws Exception {
+            var mgmt = create(true);
+            when(identity.isAnonymous()).thenReturn(true);
+            givenEndedConversation(Deployment.Environment.test);
+            givenTrigger(Deployment.Environment.production);
+            var snapshot = givenEngineCreatesConversation();
+
+            callLoad(mgmt);
+
+            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(userConversationStore).createUserConversation(any());
+            verify(asyncResponse).resume(snapshot);
+        }
+
+        private void assertProceededOnNewConversation(boolean say, SimpleConversationMemorySnapshot snapshot) {
+            if (say) {
+                verify(restAgentEngine).sayWithinContext(eq(NEW_CONV_ID), any(), any(), any(), any(), eq(asyncResponse));
+                verify(asyncResponse, never()).resume(any(Response.class));
+                verify(asyncResponse, never()).resume(any(Throwable.class));
+            } else {
+                verify(asyncResponse).resume(snapshot);
+            }
+        }
+    }
+
+    // ─── The cached trigger's context is never written to ───────
+
+    /**
+     * The deployment a new conversation is started with belongs to the
+     * {@link AgentTriggerConfiguration} held in the shared {@code agentTriggers}
+     * cache. Writing the caller's language into its {@code initialContext} leaked
+     * that language to concurrent callers and wrote a plain HashMap from several
+     * threads; each request now starts the conversation with its own copy.
+     */
+    @Nested
+    @DisplayName("Trigger context is copied per request")
+    class TriggerContextCopy {
+
+        private static final String ENDED_CONV_ID = "112233445566778899aabbcc";
+        private static final String NEW_CONV_ID = "aabbccddee112233aabbccdd";
+
+        private AgentTriggerConfiguration trigger;
+        private Map<String, Context> triggerContextBefore;
+
+        /** A trigger whose deployment carries one designer-set context entry. */
+        private void givenTriggerWithContext() {
+            trigger = triggerWithDeployment("agent-1");
+            trigger.getAgentDeployments().getFirst().getInitialContext().put("channel", new Context(Context.ContextType.string, "web"));
+            triggerContextBefore = new HashMap<>(trigger.getAgentDeployments().getFirst().getInitialContext());
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(trigger);
+        }
+
+        private void givenEngineCreatesConversation() {
+            var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + NEW_CONV_ID + "?version=1");
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenReturn(Response.status(201).header("location", location.toString()).build());
+            when(restAgentEngine.getConversationState(NEW_CONV_ID)).thenReturn(ConversationState.READY);
+            when(restAgentEngine.readConversation(eq(NEW_CONV_ID), any(), any(), any())).thenReturn(new SimpleConversationMemorySnapshot());
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Context> contextSentToEngine() {
+            ArgumentCaptor<Map<String, Context>> captor = ArgumentCaptor.forClass(Map.class);
+            verify(restAgentEngine).startConversationWithContext(eq("agent-1"), any(), eq("user-1"), captor.capture());
+            return captor.getValue();
+        }
+
+        private void assertTriggerContextUnchanged() {
+            var triggerContext = trigger.getAgentDeployments().getFirst().getInitialContext();
+            assertEquals(triggerContextBefore, triggerContext, "the cached trigger's context was modified");
+            assertFalse(triggerContext.containsKey(RestAgentManagement.KEY_LANG), "the caller's language was written into the cached trigger");
+        }
+
+        private void assertEngineGot(Map<String, Context> sent, String expectedLanguage) {
+            assertNotSame(trigger.getAgentDeployments().getFirst().getInitialContext(), sent, "the engine was handed the cached map itself");
+            assertEquals("web", sent.get("channel").getValue(), "the designer-set context must still reach the engine");
+            assertTrue(sent.containsKey(RestAgentManagement.KEY_LANG));
+            assertEquals(Context.ContextType.string, sent.get(RestAgentManagement.KEY_LANG).getType());
+            assertEquals(expectedLanguage, sent.get(RestAgentManagement.KEY_LANG).getValue());
+        }
+
+        @Test
+        @DisplayName("load, new conversation: engine gets lang, cached trigger context unchanged")
+        void loadCreate() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "en");
+        }
+
+        @Test
+        @DisplayName("say, new conversation: engine gets lang from the input context, cached trigger context unchanged")
+        void sayCreate() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.sayWithinContext("intent-1", "user-1", false, false, List.of(),
+                    new InputData("Bonjour", Map.of("lang", new Context(Context.ContextType.string, "fr"))), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "fr");
+        }
+
+        @Test
+        @DisplayName("load, ended conversation replaced: engine gets lang, cached trigger context unchanged")
+        void loadReplaceEnded() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(new UserConversation("intent-1", "user-1", Deployment.Environment.production, "agent-1", ENDED_CONV_ID));
+            when(restAgentEngine.getConversationState(ENDED_CONV_ID)).thenReturn(ConversationState.ENDED);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "de", false, false, List.of(), asyncResponse);
+
+            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), "de");
+        }
+
+        /**
+         * Unchanged engine-facing behaviour: with no language the engine still receives
+         * a {@code lang} entry whose value is null, as it did before the copy.
+         */
+        @Test
+        @DisplayName("no language: engine still gets a null-valued lang entry, cached trigger context unchanged")
+        void nullLanguage() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenTriggerWithContext();
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", null, false, false, List.of(), asyncResponse);
+
+            assertTriggerContextUnchanged();
+            assertEngineGot(contextSentToEngine(), null);
+        }
+
+        @Test
+        @DisplayName("deployment without an initial context: engine gets a map holding only lang")
+        void nullInitialContext() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            trigger = triggerWithDeployment("agent-1");
+            trigger.getAgentDeployments().getFirst().setInitialContext(null);
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(trigger);
+            givenEngineCreatesConversation();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            var sent = contextSentToEngine();
+            assertEquals(Set.of(RestAgentManagement.KEY_LANG), sent.keySet());
+            assertEquals("en", sent.get(RestAgentManagement.KEY_LANG).getValue());
+            assertNull(trigger.getAgentDeployments().getFirst().getInitialContext());
         }
     }
 
