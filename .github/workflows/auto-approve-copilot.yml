@@ -232,7 +232,12 @@ jobs:
                 const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
                   owner, repo, pull_number: number, per_page: 100,
                 });
-                if (changedFiles.some(f => f.filename.startsWith('.github/'))) {
+                // previous_filename too: a rename reports only its DESTINATION in
+                // `filename`, so moving a workflow out of .github/ (which disables it)
+                // would otherwise read as a change outside CI config entirely.
+                const touchesGithub = f => [f.filename, f.previous_filename]
+                  .some(p => typeof p === 'string' && p.startsWith('.github/'));
+                if (changedFiles.some(touchesGithub)) {
                   core.info(`PR #${number}: modifies .github/** (CI/workflow config); leaving to a human reviewer.`);
                   continue;
                 }

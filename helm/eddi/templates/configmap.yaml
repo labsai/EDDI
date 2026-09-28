@@ -217,6 +217,21 @@ data:
   {{- if and .Values.ingress.enabled $oidcOff (not $allowAllSet) }}
   {{- fail "ingress.enabled=true with eddi.oidc.enabled=false would publish EDDI to the network with no authentication on any endpoint. Enable OIDC (eddi.oidc.enabled=true, the supported production posture), or — to expose it unauthenticated on purpose (air-gapped/demo) — acknowledge it explicitly by setting eddi.security.allowUnauthenticated=true (and, for the MCP server and the secrets vault, allowUnauthenticatedMcp / allowUnauthenticatedSecretStore). This gate does not fire without an Ingress, so the local quickstart is unaffected." }}
   {{- end }}
+  {{- /*
+    The same decision HighValueSurfaceGuard enforces at boot, taken at render
+    time instead. With OIDC off, authorization.enabled is false (it tracks
+    quarkus.oidc.tenant-enabled), and a production-mode EDDI refuses to start
+    unless BOTH /mcp and /secretstore are explicitly opted in. Rendering that
+    anyway gave `helm install` a success message and a pod in CrashLoopBackOff —
+    for the chart's own no-flag default. Refuse it here, naming the same values
+    the boot failure would. Nothing is opened by default: the operator still has
+    to choose, or turn OIDC on.
+  */}}
+  {{- $mcpOpen := eq (lower (toString (default "" $allowMcp))) "true" }}
+  {{- $secretStoreOpen := eq (lower (toString (default "" $allowSecretStore))) "true" }}
+  {{- if and $oidcOff (not (and $mcpOpen $secretStoreOpen)) }}
+  {{- fail (printf "eddi.oidc.enabled=false, and without OIDC EDDI refuses to boot (HighValueSurfaceGuard) unless the MCP server and the secrets vault are each opted in to unauthenticated access — so this release would install and then crash-loop. Currently allowUnauthenticatedMcp=%q, allowUnauthenticatedSecretStore=%q. Either enable OIDC (eddi.oidc.enabled=true with keycloak.enabled=true or eddi.oidc.authServerUrl — the supported production posture), or, for a local/port-forward install you alone can reach, acknowledge both explicitly: --set eddi.security.allowUnauthenticatedMcp=true --set eddi.security.allowUnauthenticatedSecretStore=true." (toString (default "" $allowMcp)) (toString (default "" $allowSecretStore))) }}
+  {{- end }}
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: {{ if $allowAllSet }}{{ $allowAll | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
   {{- /*
     The MCP server (agent CRUD, conversations, memories, audit trails) and the

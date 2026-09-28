@@ -532,11 +532,23 @@ jobs:
           # a placeholder wherever MongoDB stays enabled, exactly as the vault key and
           # the postgres password are supplied.
           mongopw=ci-placeholder-mongo
+          # Without OIDC the chart refuses to render unless /mcp and /secretstore
+          # are both opted in (the boot-time HighValueSurfaceGuard condition, moved
+          # to render time), so every OIDC-off render below carries both.
+          optin=(--set eddi.security.allowUnauthenticatedMcp=true --set eddi.security.allowUnauthenticatedSecretStore=true)
 
-          helm lint helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw
+          helm lint helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw "${optin[@]}"
 
           echo "--- default: MongoDB, with auth"
-          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw > /dev/null
+          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw "${optin[@]}" > /dev/null
+
+          # The password sits in URI userinfo, and the recommended base64 generator
+          # emits / and +. Rendered raw, such a password broke the connection string.
+          echo "--- MongoDB credentials are percent-encoded in the connection string"
+          helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
+            --set 'mongodb.rootPassword=a/b+c@d' "${optin[@]}" \
+            | grep -q 'mongodb://eddi:a%2Fb%2Bc%40d@' \
+            || { echo "::error::mongodb.rootPassword is not URL-encoded in mongodb.connectionString"; exit 1; }
 
           echo "--- PostgreSQL + in-chart Keycloak"
           helm template eddi helm/eddi \
@@ -573,7 +585,7 @@ jobs:
             --set eddi.datastoreType=postgres \
             --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi \
             --set eddi.datastore.externalJdbcUsername=eddi \
-            --set eddi.datastore.externalJdbcPassword=ci-placeholder-pg > /dev/null
+            --set eddi.datastore.externalJdbcPassword=ci-placeholder-pg "${optin[@]}" > /dev/null
 
           # Null-valued renders. A values file with a bare `externalJdbcUrl:` —
           # what an operator gets by copying values.yaml and clearing the
@@ -589,7 +601,7 @@ jobs:
             --set mongodb.rootPassword=$mongopw \
             --set eddi.datastore.externalJdbcUrl=null \
             --set eddi.datastore.externalConnectionString=null \
-            --set eddi.messagingType=null > /dev/null
+            --set eddi.messagingType=null "${optin[@]}" > /dev/null
 
       - name: The chart's guards still fire
         # Every one of these used to render happily and hand the operator a
@@ -601,14 +613,32 @@ jobs:
           # Supplied wherever MongoDB stays enabled, so each case fails on the guard
           # it is testing rather than on the now-required mongodb.rootPassword.
           mongopw=ci-placeholder-mongo
+          # Every case below gets the OIDC-off opt-ins, so each one is refused by
+          # the guard it names and not by the high-value-surface guard (which is
+          # asserted on its own, without them, right after).
+          optin=(--set eddi.security.allowUnauthenticatedMcp=true --set eddi.security.allowUnauthenticatedSecretStore=true)
           expect_failure() {
             local what="$1"; shift
-            if helm template eddi helm/eddi "$@" > /dev/null 2>&1; then
+            if helm template eddi helm/eddi "${optin[@]}" "$@" > /dev/null 2>&1; then
               echo "::error::'$what' rendered successfully — its guard no longer fires"
               exit 1
             fi
             echo "ok: '$what' is refused"
           }
+          # No OIDC and no opt-ins: this rendered, installed, and crash-looped on
+          # HighValueSurfaceGuard. Asserted on the message, not just the exit code,
+          # so a different failure cannot stand in for it.
+          for partial in "" "--set eddi.security.allowUnauthenticatedMcp=true"; do
+            # shellcheck disable=SC2086
+            if out=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
+                --set mongodb.rootPassword=$mongopw $partial 2>&1 >/dev/null); then
+              echo "::error::OIDC off without both high-value opt-ins ('$partial') rendered"
+              exit 1
+            fi
+            grep -q 'HighValueSurfaceGuard' <<<"$out" \
+              || { echo "::error::refused, but not by the high-value-surface guard: $out"; exit 1; }
+            echo "ok: OIDC off with opt-ins '${partial:-none}' is refused"
+          done
           expect_failure "no datastore configured at all" \
             --set eddi.vaultMasterKey=$key --set mongodb.enabled=false --set postgres.enabled=false
           expect_failure "messagingType=nats on a stock image" \

@@ -1283,9 +1283,7 @@ repair_running_keycloak() {
   fi
 
   local admin_token clients_json client_uuid
-  admin_token=$(curl -sf -X POST \
-    -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
-    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null \
+  admin_token=$(kc_admin_token_request "$kc_base" 2>/dev/null \
     | kc_json "$json_tool" token) || admin_token=""
   if [[ -z "$admin_token" ]]; then
     rm -f "$realm_defs"
@@ -1304,6 +1302,22 @@ repair_running_keycloak() {
 
   repair_keycloak_identity_scopes "$kc_base" "$realm_defs" "$json_tool" "$admin_token" "$client_uuid"
   rm -f "$realm_defs"
+}
+
+# POSTs the master-realm password grant for admin-cli and prints the response.
+# The credentials are the ones Keycloak was bootstrapped with: docker-compose.auth.yml
+# reads KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD from this same
+# environment (defaulting to admin/admin), so a caller that exported a generated
+# password — gcp/provision-vm.sh --with-auth does — must be logged in with it,
+# not with a literal admin/admin that Keycloak never created. --data-urlencode,
+# because a password is free to contain & = + and %.
+kc_admin_token_request() {
+  curl -sf -X POST \
+    --data-urlencode "client_id=admin-cli" \
+    --data-urlencode "grant_type=password" \
+    --data-urlencode "username=${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+    --data-urlencode "password=${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}" \
+    "${1}/realms/master/protocol/openid-connect/token"
 }
 
 configure_keycloak_client() {
@@ -1336,9 +1350,7 @@ configure_keycloak_client() {
 
   # Get admin token
   local admin_token_json admin_token=""
-  admin_token_json=$(curl -sf -X POST \
-    -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
-    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null) || true
+  admin_token_json=$(kc_admin_token_request "$kc_base" 2>/dev/null) || true
 
   if [[ "$json_tool" == "jq" ]]; then
     admin_token=$(echo "$admin_token_json" | jq -r '.access_token // empty' 2>/dev/null) || admin_token=""
@@ -1767,6 +1779,14 @@ case "${1:-help}" in
     done
 
     if [[ -n "$NEW_VERSION" ]]; then
+      # Validate BEFORE touching .env or .eddi-config: a rejected value must leave
+      # the installation exactly as it was, not pinned to an image tag this very
+      # check refuses. Docker's tag grammar, which also keeps the value inert
+      # inside the sed replacements below.
+      if [[ ! "$NEW_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+        echo "Invalid --eddi-version: $NEW_VERSION (expected an image tag such as 6.4.0 or latest)" >&2
+        exit 1
+      fi
       echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
       if grep -q '^EDDI_VERSION=' "$ENV_FILE" 2>/dev/null; then
         sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=${NEW_VERSION}|" "$ENV_FILE"

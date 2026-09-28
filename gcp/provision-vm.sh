@@ -57,7 +57,6 @@ DEFAULT_EDDI_VERSION="latest"
 NETWORK_TAG="eddi-server"
 FIREWALL_RULE_HTTP="allow-eddi-http"
 FIREWALL_RULE_HTTPS="allow-eddi-https"
-FIREWALL_RULE_KC="allow-eddi-keycloak"
 FIREWALL_RULE_GRAFANA="allow-eddi-grafana"
 FIREWALL_RULE_NGINX_HTTP="allow-eddi-nginx-http"
 FIREWALL_RULE_NGINX_HTTPS="allow-eddi-nginx-https"
@@ -112,8 +111,8 @@ ${BOLD}Create options:${RESET}
   --source-ranges=CIDR[,..] Restrict the firewall to these ranges
                             [default: the IP running this script, /32]
   --i-understand-public     Open the firewall to 0.0.0.0/0 AND allow an
-                            open-access (no-auth) VM. Exposes EDDI (and, with
-                            --with-auth, the Keycloak login) to the whole internet.
+                            open-access (no-auth) VM. Exposes EDDI to the whole
+                            internet.
   --vault-key=KEY           Set EDDI vault master key (min 16 chars)
   --https                   Set up nginx + Let's Encrypt HTTPS (implies --with-auth)
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
@@ -245,34 +244,55 @@ require_auth_or_public_ack() {
   fi
 }
 
-# One random master-realm superuser password per create, printed once by
-# print_success. Alphanumeric so it survives the compose/env plumbing unquoted.
-generate_kc_admin_password() {
-  [[ "$WITH_AUTH" != "true" ]] && return 0
-  if command -v openssl &>/dev/null; then
-    KC_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-24)"
-  else
-    KC_ADMIN_PASSWORD="$(head -c 32 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-24)"
-  fi
-  if [[ ${#KC_ADMIN_PASSWORD} -lt 16 ]]; then
-    fail "Could not generate a Keycloak admin password (openssl/urandom unavailable)."
-  fi
-}
-
 # ── Firewall rules ────────────────────────────────────────────────────────────
 
+# Sorted, comma-joined form of a source-range list, so "a,b" and "b,a" compare
+# equal. gcloud prints sourceRanges with ';' under value(...list()) on some
+# versions and ',' on others; both are normalised.
+normalize_ranges() {
+  printf '%s' "$1" | tr ';, ' '\n\n\n' | grep -v '^$' | sort -u | paste -s -d , -
+}
+
+# $4 (optional) overrides SOURCE_RANGES for this one rule — used only for the
+# ACME port-80 rule, which Let's Encrypt must reach from its own servers.
 ensure_firewall_rule() {
   local rule_name="$1"
   local ports="$2"
   local description="$3"
+  local ranges="${4:-$SOURCE_RANGES}"
 
-  if gcloud compute firewall-rules describe "$rule_name" \
-      --project="$GCP_PROJECT" &>/dev/null 2>&1; then
-    dim "Firewall rule '${rule_name}' already exists — skipping."
-    return 0
+  # An existing rule is reused only if it already has the ranges this run
+  # resolved. Rules are global to the project and a previous run (or an older
+  # version of this script, which omitted --source-ranges) may have left one open
+  # to 0.0.0.0/0 — skipping it would tag a new VM into a world-open rule while
+  # the summary claims the firewall is scoped. Reconcile instead.
+  local existing
+  if existing=$(gcloud compute firewall-rules describe "$rule_name" \
+      --project="$GCP_PROJECT" --format='value(sourceRanges.list())' 2>/dev/null); then
+    if [[ "$(normalize_ranges "$existing")" == "$(normalize_ranges "$ranges")" ]]; then
+      dim "Firewall rule '${rule_name}' already exists with source ${ranges} — reusing."
+      return 0
+    fi
+    warn "Firewall rule '${rule_name}' exists with source '${existing:-<none>}'; setting it to '${ranges}'. It applies to every VM tagged '${NETWORK_TAG}' in this project."
+    echo -ne "  Updating firewall rule '${rule_name}' (source: ${ranges})... "
+    local upd_err
+    upd_err=$(mktemp /tmp/eddi-fw-err-XXXXXX)
+    if gcloud compute firewall-rules update "$rule_name" \
+      --project="$GCP_PROJECT" \
+      --source-ranges="$ranges" \
+      --quiet >/dev/null 2>"$upd_err"; then
+      echo -e "${GREEN}✅${RESET}"
+      rm -f "$upd_err"
+      return 0
+    fi
+    echo ""
+    echo -e "  ${RED}❌  Failed to update firewall rule '${rule_name}':${RESET}"
+    sed 's/^/    /' "$upd_err" >&2
+    rm -f "$upd_err"
+    exit 1
   fi
 
-  echo -ne "  Creating firewall rule '${rule_name}' (source: ${SOURCE_RANGES})... "
+  echo -ne "  Creating firewall rule '${rule_name}' (source: ${ranges})... "
   local fw_err
   fw_err=$(mktemp /tmp/eddi-fw-err-XXXXXX)
   # --source-ranges is REQUIRED here: gcloud defaults an omitted value to
@@ -286,7 +306,7 @@ ensure_firewall_rule() {
     --network=default \
     --action=ALLOW \
     --rules="tcp:${ports}" \
-    --source-ranges="$SOURCE_RANGES" \
+    --source-ranges="$ranges" \
     --target-tags="$NETWORK_TAG" \
     --description="$description" \
     --quiet >/dev/null 2>"$fw_err"; then
@@ -310,20 +330,29 @@ setup_firewall_rules() {
   ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
     "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
 
-  if [[ "$WITH_AUTH" == "true" ]]; then
-    ensure_firewall_rule "$FIREWALL_RULE_KC" \
-      "8180" "EDDI Keycloak authentication portal (direct)"
-  fi
+  # No rule for Keycloak's :8180. docker-compose.auth.yml publishes it on the
+  # VM's loopback only (KEYCLOAK_BIND defaults to 127.0.0.1): on the HTTPS path
+  # nginx proxies https://auth.<ip>.sslip.io to it, and without HTTPS a browser
+  # login only works through an SSH tunnel anyway (see print_success). A firewall
+  # hole would lead nowhere.
 
   # Grafana (3000) and Prometheus (9090) are deliberately NOT opened: the
   # monitoring compose publishes them on the VM's loopback only (neither has auth
   # worth exposing — Grafana ships admin/admin), so they are reached over an SSH
   # tunnel, not a firewall hole. See the SSH-tunnel note in print_success.
 
-  # nginx ports — needed for Let's Encrypt HTTP-01 challenge and HTTPS traffic
+  # nginx ports — needed for Let's Encrypt HTTP-01 challenge and HTTPS traffic.
+  #
+  # Port 80 is the ONE rule that is not caller-scoped: Let's Encrypt validates
+  # HTTP-01 by fetching /.well-known/acme-challenge/ from its own (unpublished,
+  # changing) addresses, so a /32 rule would make issuance fail on every scoped
+  # create. Nothing on :80 can be abused — during issuance nginx serves only the
+  # ACME webroot and a static "being configured" text, and afterwards only a 301
+  # to https — while 443, which carries EDDI and Keycloak, stays scoped.
   if [[ "$SETUP_HTTPS" == "true" ]]; then
     ensure_firewall_rule "$FIREWALL_RULE_NGINX_HTTP" \
-      "80" "nginx HTTP (Let's Encrypt ACME challenge + HTTP→HTTPS redirect)"
+      "80" "nginx HTTP (Let's Encrypt ACME challenge + HTTP→HTTPS redirect only)" \
+      "0.0.0.0/0"
     ensure_firewall_rule "$FIREWALL_RULE_NGINX_HTTPS" \
       "443" "nginx HTTPS reverse proxy (EDDI + Keycloak)"
   fi
@@ -386,14 +415,8 @@ build_startup_script() {
   local p_flags="${install_flags}"
   local p_setup_https="${SETUP_HTTPS}"
   local p_le_email="${LETSENCRYPT_EMAIL:-admin@example.com}"
-  # Emitted only with --with-auth. Exported before install.sh runs docker compose,
-  # so docker-compose.auth.yml's ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin} picks up the
-  # random password instead of the admin/admin default. Single-quoted; the value
-  # is alphanumeric (generate_kc_admin_password), so it cannot break the quoting.
-  local p_kc_admin_export=""
-  if [[ "$WITH_AUTH" == "true" ]]; then
-    p_kc_admin_export="export KC_BOOTSTRAP_ADMIN_USERNAME='${KC_ADMIN_USERNAME}'; export KC_BOOTSTRAP_ADMIN_PASSWORD='${KC_ADMIN_PASSWORD}'"
-  fi
+  local p_with_auth="${WITH_AUTH}"
+  local p_kc_admin_file="${KC_ADMIN_FILE}"
 
   cat <<STARTUP_SCRIPT
 #!/usr/bin/env bash
@@ -518,9 +541,32 @@ export EDDI_HTTPS_PORT="${p_https_port}"
 # 0.0.0.0. Off-box exposure is controlled by the now IP-scoped firewall and the
 # require_auth_or_public_ack gate, not by the bind address, so this is safe here.
 export EDDI_BIND="0.0.0.0"
-# Random Keycloak master-realm admin password (empty/unset without --with-auth),
-# consumed by docker-compose.auth.yml via install.sh's docker compose invocation.
-${p_kc_admin_export}
+# Keycloak master-realm admin password (--with-auth only). Generated HERE, on the
+# VM, and kept in a root-only file — never on the provisioning machine and never
+# in this script: the startup script is instance metadata, which every process
+# on the VM (containers included) can read from the metadata server. Created
+# once; later boots re-read the same file, so it keeps matching the admin
+# Keycloak bootstrapped into its volume on first start. Exported so
+# docker-compose.auth.yml's \${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin} and
+# install.sh's admin-API calls use it instead of admin/admin.
+if [[ "${p_with_auth}" == "true" ]]; then
+  if [[ ! -s "${p_kc_admin_file}" ]]; then
+    KC_PW=\$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-24)
+    if [[ \${#KC_PW} -lt 16 ]]; then
+      echo "ERROR: could not generate a Keycloak admin password." >&2
+      exit 1
+    fi
+    ( umask 077
+      printf 'KC_BOOTSTRAP_ADMIN_USERNAME=%s\nKC_BOOTSTRAP_ADMIN_PASSWORD=%s\n' \\
+        "${KC_ADMIN_USERNAME}" "\${KC_PW}" > "${p_kc_admin_file}" )
+    unset KC_PW
+  fi
+  chmod 600 "${p_kc_admin_file}"
+  set -a
+  # shellcheck disable=SC1090
+  . "${p_kc_admin_file}"
+  set +a
+fi
 
 curl -fsSL "https://raw.githubusercontent.com/labsai/EDDI/\${EDDI_BRANCH}/install.sh" \\
   | bash -s -- ${p_flags}
@@ -583,7 +629,7 @@ server {
     # The realm's OIDC endpoints (/realms/eddi/...) must be public so the Manager
     # SPA can log users in, but the master-realm admin console must NOT be: it is
     # the superuser surface for the whole identity provider. Block it here; reach
-    # it over an SSH tunnel or the (firewall-scoped) direct :8180. 404, not 403,
+    # it over an SSH tunnel to the VM's loopback-bound :8180. 404, not 403,
     # so the console's existence is not even confirmed to a scanner.
     location /admin/ {
         return 404;
@@ -737,7 +783,10 @@ create_vm() {
   local startup_script_file
   startup_script_file=$(mktemp /tmp/eddi-startup-XXXXXX)
   build_startup_script > "$startup_script_file"
-  chmod 644 "$startup_script_file"
+  # Owner-only: gcloud reads it as this user, nobody else needs to. It carries no
+  # Keycloak credential any more (that is generated on the VM), but it does carry
+  # the install flags.
+  chmod 600 "$startup_script_file"
 
   local create_args=(
     compute instances create "$VM_NAME"
@@ -868,17 +917,30 @@ print_success() {
     echo -e "  ${BOLD}MCP${RESET}          ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/mcp${RESET}"
   fi
 
+  local ssh_cmd="gcloud compute ssh ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT}"
+
   if [[ "$WITH_AUTH" == "true" && "$SETUP_HTTPS" != "true" ]]; then
+    # Without HTTPS a browser at another machine cannot log in over the VM's IP,
+    # and no hostname override changes that: the realm is sslRequired=external,
+    # so Keycloak refuses a plain-http login from a public address, and the
+    # Manager's PKCE S256 needs crypto.subtle, which browsers only expose in a
+    # secure context (https, or localhost). An SSH tunnel is exactly localhost on
+    # both ends, which is what docker-compose.auth.yml's URLs already say.
     echo ""
-    echo -e "  ${BOLD}Keycloak${RESET}     ${CYAN}http://${EXTERNAL_IP}:8180${RESET}"
+    echo -e "  ${YELLOW}Browser login needs HTTPS or an SSH tunnel.${RESET} Without --https the"
+    echo -e "  ${DIM}Keycloak login is only reachable as localhost. Tunnel both ports, then open${RESET}"
+    echo -e "  ${DIM}http://localhost:${EDDI_PORT}/manage on your machine:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd} -- -L ${EDDI_PORT}:localhost:${EDDI_PORT} -L 8180:localhost:8180${RESET}"
+    echo -e "  ${DIM}Or re-create with --https for public sslip.io URLs.${RESET}"
   fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Keycloak admin console${RESET}  ${KC_ADMIN_USERNAME} / ${YELLOW}${KC_ADMIN_PASSWORD}${RESET}"
-    echo -e "  ${DIM}↑ generated for this VM, shown ONCE — store it now. The console is not${RESET}"
-    echo -e "  ${DIM}  exposed on the public HTTPS host; reach it over the direct :8180 port${RESET}"
-    echo -e "  ${DIM}  (firewall-scoped to ${SOURCE_RANGES}) or an SSH tunnel.${RESET}"
+    echo -e "  ${BOLD}Keycloak admin console${RESET}  user ${KC_ADMIN_USERNAME}; the password is generated ON the VM"
+    echo -e "  ${DIM}(never in instance metadata) once the install runs. Read it with:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd} --command='sudo cat ${KC_ADMIN_FILE}'${RESET}"
+    echo -e "  ${DIM}The console is not exposed on the public HTTPS host and Keycloak's port is${RESET}"
+    echo -e "  ${DIM}bound to the VM's loopback; reach it over an SSH tunnel (-L 8180:localhost:8180).${RESET}"
     echo ""
     echo -e "  ${DIM}The 'eddi' EDDI admin account ships WITHOUT a password — set one:${RESET}"
     echo -e "  ${DIM}  Keycloak console → Users → eddi → Credentials → Set password${RESET}"
@@ -890,7 +952,7 @@ print_success() {
     echo -e "  ${BOLD}Monitoring${RESET} (Grafana 3000 / Prometheus 9090) is published on the VM's"
     echo -e "  ${DIM}loopback only — neither has authentication worth exposing (Grafana ships${RESET}"
     echo -e "  ${DIM}admin/admin). Reach them over an SSH tunnel:${RESET}"
-    echo -e "    ${CYAN}$(basename "$0") ssh ${VM_NAME} -- -L 3000:localhost:3000 -L 9090:localhost:9090${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd} -- -L 3000:localhost:3000 -L 9090:localhost:9090${RESET}"
     echo -e "  ${DIM}then open http://localhost:3000 (Grafana) and http://localhost:9090.${RESET}"
   fi
 
@@ -952,7 +1014,6 @@ cmd_create() {
   check_prerequisites
   resolve_project
   resolve_source_ranges
-  generate_kc_admin_password
   print_config_summary
   maybe_reserve_static_ip
   setup_firewall_rules
@@ -1265,10 +1326,11 @@ RESERVED_IP=""
 SOURCE_RANGES=""
 SOURCE_RANGES_EXPLICIT=""
 I_UNDERSTAND_PUBLIC="false"
-# Random master-realm superuser password for Keycloak, generated per create when
-# --with-auth is set (was the hardcoded admin/admin from docker-compose.auth.yml).
+# Keycloak master-realm superuser, --with-auth only (was the hardcoded
+# admin/admin from docker-compose.auth.yml). The password is generated on the VM
+# by the startup script into this root-only file — see build_startup_script.
 KC_ADMIN_USERNAME="admin"
-KC_ADMIN_PASSWORD=""
+KC_ADMIN_FILE="/root/.eddi-keycloak-admin"
 
 COMMAND="${1:-help}"
 shift || true

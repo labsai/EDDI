@@ -69,7 +69,8 @@ services:
     command: start-dev --import-realm
     environment:
       # admin/admin is the DEV default for the local docker-compose quick start,
-      # where Keycloak is only reachable on 127.0.0.1. Any deployment that exposes
+      # where Keycloak is only reachable on 127.0.0.1 (see `ports:` below — the
+      # bind is loopback unless KEYCLOAK_BIND says otherwise). Any deployment that exposes
       # Keycloak off-box must override these — the GCP provisioner
       # (gcp/provision-vm.sh) generates a random KC_BOOTSTRAP_ADMIN_PASSWORD per VM
       # and exports it before `docker compose up`, so this default is never what a
@@ -84,8 +85,14 @@ services:
       # causing iss-mismatch failures when the browser validates them.
       KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    # Loopback by default, like EDDI itself (EDDI_BIND in docker-compose.yml):
+    # the admin/admin default above must never be reachable off-host by accident.
+    # Nothing off-box needs this port — EDDI reaches Keycloak over the compose
+    # network (keycloak:8080), KC_HOSTNAME above is a localhost URL, and the GCP
+    # VM's HTTPS path proxies https://auth.<ip>.sslip.io to localhost:8180 via
+    # nginx. Set KEYCLOAK_BIND=0.0.0.0 only after changing the admin password.
     ports:
-      - "${KEYCLOAK_PORT:-8180}:8080"
+      - "${KEYCLOAK_BIND:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro

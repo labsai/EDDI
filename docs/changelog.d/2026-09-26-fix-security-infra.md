@@ -120,3 +120,40 @@ Follow-ups from adversarial review of the change above:
   leaves MongoDB enabled (the default renders and the guard-failure cases alike, so
   each guard case still fails on the guard it tests, not on the missing password),
   mirroring how it already supplies the vault key and the PostgreSQL password.
+
+## 🔒 fix(infra): CodeRabbit review findings on PR 865 (2026-09-28)
+
+**Repo:** EDDI (`fix/security-infra`)
+
+### What changed and why
+
+- **GCP: the Keycloak admin password no longer travels in instance metadata.**
+  It was generated on the operator's machine and embedded in the startup script,
+  which GCE serves to every process on the VM (containers included) from the
+  metadata server, and the temp copy was mode 644. The startup script now
+  generates it **on the VM** into root-only `/root/.eddi-keycloak-admin` (once;
+  later boots reuse it) and the banner prints the `gcloud compute ssh …
+  --command='sudo cat …'` to read it. This also retires the `/dev/urandom`
+  fallback that filtered raw bytes and usually came up short of 16 characters.
+- **GCP: existing firewall rules are reconciled, not skipped.** A rule left
+  world-open by an earlier run was reused as-is while the summary claimed a
+  scoped firewall; `ensure_firewall_rule` now compares source ranges and updates
+  the rule. The port-80 rule alone is `0.0.0.0/0`, because Let's Encrypt's HTTP-01
+  validation comes from its own servers — it serves only the ACME webroot and a
+  301; 443 stays scoped. The now-pointless `:8180` rule is no longer created.
+- **Keycloak is published on loopback** (`KEYCLOAK_BIND`, default `127.0.0.1`) in
+  [`docker-compose.auth.yml`](../../docker-compose.auth.yml), so its `admin/admin`
+  dev default is never reachable off-host by accident.
+- **`install.sh` logs in to Keycloak with the bootstrap credentials** it was
+  started with (`KC_BOOTSTRAP_ADMIN_*`, default admin/admin) instead of a literal
+  admin/admin, so a provisioned VM's CORS/redirect setup no longer silently
+  fails; `eddi update --eddi-version=` validates the tag before writing `.env`.
+- **Helm refuses an OIDC-off render without both high-value opt-ins** — the
+  default install otherwise rendered and then crash-looped on
+  `HighValueSurfaceGuard`. Docs' `helm install` lines now carry the required
+  values. A live `helm upgrade` of a release whose MongoDB predates
+  authentication refuses to render until the user is created
+  (`mongodb.authMigrated`, procedure in [`docs/kubernetes.md`](../../docs/kubernetes.md)).
+  MongoDB credentials are URL-encoded in the connection string.
+- `auto-approve-copilot.yml` also treats a rename **out of** `.github/` as a CI
+  change (`previous_filename`).

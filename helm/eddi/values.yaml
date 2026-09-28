@@ -2,8 +2,14 @@
 # EDDI Helm Chart — Default Values
 # ─────────────────────────────────────────────────────────────
 # Override any value with --set or a custom values.yaml file:
-#   helm install eddi ./helm/eddi --set eddi.vaultMasterKey="$(openssl rand -base64 24)"
 #   helm install eddi ./helm/eddi -f my-values.yaml
+#
+# Minimal local (port-forward, no OIDC) install — every value below is required:
+#   helm install eddi ./helm/eddi \
+#     --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+#     --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+#     --set eddi.security.allowUnauthenticatedMcp=true \
+#     --set eddi.security.allowUnauthenticatedSecretStore=true
 #
 # ⚠️  The chart intentionally has NO default credentials. eddi.vaultMasterKey is
 # mandatory, and postgres.password / keycloak.adminPassword are mandatory when
@@ -92,9 +98,10 @@ eddi:
   # derived from oidc.enabled. The MCP server exposes agent CRUD, conversations,
   # memories and audit trails; /secretstore writes the vault — turning OIDC off
   # must not silently open them. Left empty they render "false", so a deployment
-  # running without OIDC must opt each one in EXPLICITLY (set it to true here) or
-  # HighValueSurfaceGuard refuses to boot and names exactly what to set. Enable
-  # OIDC instead wherever you can.
+  # running without OIDC must opt each one in EXPLICITLY (set it to true here).
+  # The chart refuses to RENDER an OIDC-off release until both are true — the
+  # same condition under which HighValueSurfaceGuard would refuse to boot, caught
+  # before the pod crash-loops. Enable OIDC instead wherever you can.
   #
   # Also note: with ingress.enabled=true and oidc.enabled=false the chart refuses
   # to render unless allowUnauthenticated is set explicitly — publishing an
@@ -192,6 +199,13 @@ mongodb:
   # the database first (db.changeUserPassword in the admin db), then upgrade.
   rootUsername: eddi
   rootPassword: ""
+  # UPGRADING a release from before MongoDB authentication: its data volume is
+  # already initialised, so the image will NOT create rootUsername, yet it does
+  # turn --auth on. Create the user in the still-unauthenticated database first
+  # (kubectl exec … mongosh admin — the exact command is in the render error and
+  # in docs/kubernetes.md), then set this to true for that upgrade. A live
+  # `helm upgrade` that detects such a release refuses to render until you do.
+  authMigrated: false
   storage:
     size: 10Gi
     # storageClassName: standard

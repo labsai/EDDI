@@ -106,8 +106,43 @@ PowerShell) only when you mean to rotate.
 ```bash
 helm install eddi ./helm/eddi \
   --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
 ```
+
+This is the local, port-forward-only shape: no OIDC, so the chart refuses to
+render until the MCP server and the secrets vault are opted in to
+unauthenticated access explicitly — without both, EDDI's
+`HighValueSurfaceGuard` would refuse to boot. For anything others can reach,
+enable OIDC instead (`eddi.oidc.enabled=true` with `keycloak.enabled=true` or
+`eddi.oidc.authServerUrl`) and drop the two opt-ins. Keep the generated
+`mongodb.rootPassword`: MongoDB only reads it when its volume is first
+initialised.
+
+#### Upgrading to an authenticated MongoDB
+
+Releases from before MongoDB authentication have a data volume that was
+initialised without a user. The mongo image creates `mongodb.rootUsername` only
+on an **empty** volume, but turns `--auth` on regardless — so a plain upgrade
+leaves MongoDB demanding a user that does not exist, and EDDI loses its
+database. A live `helm upgrade` detects this and refuses to render. Create the
+user first, in the still-unauthenticated database, entering the password you
+will pass as `mongodb.rootPassword` at the prompt:
+
+```bash
+kubectl exec -it -n eddi eddi-mongodb-0 -- mongosh admin --quiet \
+  --eval 'db.createUser({user: "eddi", pwd: passwordPrompt(), roles: ["root"]})'
+
+helm upgrade eddi ./helm/eddi --namespace eddi --reuse-values \
+  --set mongodb.rootPassword='<the same password>' \
+  --set mongodb.authMigrated=true
+```
+
+(`eddi-mongodb-0` and `user: "eddi"` assume release `eddi` and the default
+`mongodb.rootUsername`; the render error prints the exact names for yours.)
+Existing data is untouched.
 
 ## Deployment Options
 

@@ -1,4 +1,27 @@
 {{- if .Values.mongodb.enabled }}
+{{- /*
+  Upgrade guard for installs that predate MongoDB authentication. The mongo
+  image creates MONGO_INITDB_ROOT_USERNAME only when /data/db is EMPTY, yet it
+  turns --auth on whenever those variables are set. Upgrading a release whose
+  volume was initialised unauthenticated therefore enforces auth for a user that
+  was never created, and EDDI loses its database on the spot. Such a release is
+  recognisable on a live `helm upgrade`: its MongoDB StatefulSet exists but the
+  <release>-mongodb Secret (introduced together with authentication) does not.
+  `lookup` is empty under `helm template` and client-side dry runs, so this never
+  fires there — it is a best-effort brake on the one path that loses data.
+*/}}
+{{- if and .Release.IsUpgrade (not .Values.mongodb.authMigrated) }}
+{{- $mongoName := printf "%s-mongodb" (include "eddi.fullname" .) }}
+{{- $existingSts := lookup "apps/v1" "StatefulSet" .Release.Namespace $mongoName }}
+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $mongoName }}
+{{- if and $existingSts (not $existingSecret) }}
+{{- fail (printf `This upgrade turns on MongoDB authentication for an existing in-chart MongoDB (%[1]s) whose data was initialised WITHOUT it. The mongo image creates the root user only on an empty volume, so after this upgrade MongoDB would require a user that does not exist and EDDI would lose database access. Create the user first, in the still-unauthenticated database (the password prompt keeps it out of shell history):
+
+  kubectl exec -it -n %[2]s %[1]s-0 -- mongosh admin --quiet --eval 'db.createUser({user: "%[3]s", pwd: passwordPrompt(), roles: ["root"]})'
+
+enter the SAME value you pass as mongodb.rootPassword, then re-run the upgrade with --set mongodb.authMigrated=true. Existing data is untouched. See docs/kubernetes.md, "Upgrading to an authenticated MongoDB".` $mongoName .Release.Namespace .Values.mongodb.rootUsername) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
