@@ -49,6 +49,8 @@ public class UserMemoryTool {
     private static final String ON_CAP_EVICT_OLDEST = "evict_oldest";
     /** GDPR bookkeeping keys are never evicted (mirrors the retention sweep). */
     private static final String GDPR_KEY_PREFIX = IUserMemoryStore.RESERVED_KEY_PREFIX;
+    /** Marker for a global memory whose entry records no owning agent. */
+    private static final String UNKNOWN_GLOBAL_OWNER = "(unknown)";
     private static final String TURN_DISCARDED_REFUSAL = "⚠️ This turn has been cancelled; nothing was stored or changed.";
     private static final String RESERVED_KEY_REFUSAL = "⚠️ Keys starting with '%s' are reserved for GDPR bookkeeping and cannot be "
             + "written or forgotten by an agent.";
@@ -159,8 +161,9 @@ public class UserMemoryTool {
             if (vis == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite()) {
                 String otherOwner = globalKeyOwnedByAnotherAgent(key.trim());
                 if (otherOwner != null) {
-                    return ("⚠️ A global memory with key '%s' is owned by another agent and cannot be overwritten. "
-                            + "Use a different key, or store it with 'self' visibility.").formatted(key.trim());
+                    return ("⚠️ A global memory with key '%s' is owned by another agent (or its owner is unknown) "
+                            + "and cannot be overwritten. Use a different key, or store it with 'self' visibility.")
+                            .formatted(key.trim());
                 }
             }
 
@@ -314,15 +317,24 @@ public class UserMemoryTool {
     }
 
     /**
-     * If a {@code global} memory with this key already exists and is owned by an
-     * agent other than this one, returns that owning agent's id; otherwise
-     * {@code null}. Used to refuse a cross-agent global value overwrite.
+     * If a {@code global} memory with this key already exists and is not provably
+     * owned by this agent, returns a non-null marker (the owning agent's id, or
+     * {@link #UNKNOWN_GLOBAL_OWNER} when the entry records no owner — legacy or
+     * migrated data); otherwise {@code null}. Used to refuse a cross-agent global
+     * value overwrite. An entry of unknown ownership fails closed: the guard cannot
+     * show this agent owns it, so only {@code allowGlobalKeyOverwrite} permits the
+     * write.
      */
     private String globalKeyOwnedByAnotherAgent(String key) throws IResourceStore.ResourceStoreException {
         for (UserMemoryEntry entry : store.getAllEntries(userId)) {
-            if (entry != null && entry.visibility() == Visibility.global && key.equals(entry.key())
-                    && entry.sourceAgentId() != null && !entry.sourceAgentId().equals(agentId)) {
-                return entry.sourceAgentId();
+            if (entry != null && entry.visibility() == Visibility.global && key.equals(entry.key())) {
+                String owner = entry.sourceAgentId();
+                if (owner == null || owner.isBlank()) {
+                    return UNKNOWN_GLOBAL_OWNER;
+                }
+                if (!owner.equals(agentId)) {
+                    return owner;
+                }
             }
         }
         return null;

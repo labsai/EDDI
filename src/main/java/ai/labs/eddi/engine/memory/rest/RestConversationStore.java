@@ -409,7 +409,13 @@ public class RestConversationStore implements IRestConversationStore {
         // the soft-delete path included, which still removes the conversation from
         // every listing. Strict variant: a legacy conversation with no recorded
         // owner is refused to a non-admin here, rather than deletable by any token.
-        conversationAccessGuard.requireConversationOwnerStrict(conversationId);
+        // A pre-v5.1.6 descriptor without a userId resolves its owner from the
+        // snapshot (the same fallback populateDataToDescriptor uses for listings), so
+        // the recorded owner can still delete their own legacy conversation.
+        conversationAccessGuard.requireConversationOwnerStrict(conversationId, id -> {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
+            return snapshot != null ? snapshot.getUserId() : null;
+        });
 
         if (deletePermanently) {
             // If the conversation is a live pending approval, resolve the HITL state

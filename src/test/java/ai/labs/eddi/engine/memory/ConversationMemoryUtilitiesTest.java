@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -236,6 +237,48 @@ class ConversationMemoryUtilitiesTest {
             String stepStr = String.valueOf(stepData.getValue());
             assertFalse(stepStr.contains(secret), "the raw secret must not survive in a structured step value");
             assertTrue(stepStr.contains("<REDACTED>"), "the nested secret must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must redact secrets in map KEYS and in Object[] elements")
+        void detailedRedactsMapKeysAndArrays() {
+            // A credential can sit in a map key (a token-keyed lookup) or in a String[]
+            // — neither may pass through the detailed projection raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of(secret, "value", "list", new String[]{secret});
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("httpCall:array", new Object[]{secret, List.of(secret)});
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            var map = (Map<?, ?>) out.get("httpCall:myApi");
+            assertFalse(map.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) map.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) out.get("httpCall:array")).contains(secret),
+                    "a secret inside an Object[] output value must be redacted");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            var stepMap = (Map<?, ?>) stepData.getValue();
+            assertFalse(stepMap.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted in step data");
+            assertFalse(Arrays.deepToString((Object[]) stepMap.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted in step data");
         }
 
         @Test

@@ -28,6 +28,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -376,6 +377,10 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
             scheduleStore.deleteSchedule(scheduleId);
             return Response.noContent().build();
+        } catch (ForbiddenException | WebApplicationException e) {
+            // Keep a downstream 403/404 (or any other mapped status) as-is instead of
+            // flattening it into a 500 — the same rethrow the other mutation paths do.
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to delete schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to delete schedule");

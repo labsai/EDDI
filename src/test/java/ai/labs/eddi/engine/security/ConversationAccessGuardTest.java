@@ -270,6 +270,46 @@ class ConversationAccessGuardTest {
     }
 
     @Nested
+    @DisplayName("requireConversationOwnerStrict with a legacy owner lookup")
+    class RequireConversationOwnerStrictLegacy {
+
+        @Test
+        @DisplayName("an unowned descriptor takes its owner from the lookup: owner passes, others are refused")
+        void lookupOwnerIsChecked() throws Exception {
+            descriptorOwnedBy(null);
+
+            assertEquals(OWNER, guardFor(identityOf(OWNER, "eddi-viewer"), true)
+                    .requireConversationOwnerStrict(CONVERSATION_ID, id -> OWNER));
+            assertThrows(ForbiddenException.class, () -> guardFor(identityOf(OTHER, "eddi-viewer"), true)
+                    .requireConversationOwnerStrict(CONVERSATION_ID, id -> OWNER));
+        }
+
+        @Test
+        @DisplayName("a failing lookup fails closed: unowned, so admin-only")
+        void failingLookupFailsClosed() throws Exception {
+            descriptorOwnedBy(null);
+
+            assertThrows(ForbiddenException.class, () -> guardFor(identityOf(OWNER, "eddi-viewer"), true)
+                    .requireConversationOwnerStrict(CONVERSATION_ID, id -> {
+                        throw new IllegalStateException("store down");
+                    }));
+            assertNull(guardFor(identityOf(OTHER, "eddi-admin"), true)
+                    .requireConversationOwnerStrict(CONVERSATION_ID, id -> {
+                        throw new IllegalStateException("store down");
+                    }));
+        }
+
+        @Test
+        @DisplayName("a descriptor that records an owner never consults the lookup")
+        void recordedOwnerWins() throws Exception {
+            descriptorOwnedBy(OWNER);
+
+            assertThrows(ForbiddenException.class, () -> guardFor(identityOf(OTHER, "eddi-viewer"), true)
+                    .requireConversationOwnerStrict(CONVERSATION_ID, id -> OTHER));
+        }
+    }
+
+    @Nested
     @DisplayName("canAccessConversation — must admit exactly what requireConversationOwner admits")
     class CanAccessConversation {
 

@@ -20,6 +20,8 @@ keep working, while the missing owner/role/redaction checks are added.
   `conversationId` to belong to the same user the tool is bound to, so the LLM can no
   longer continue another user's conversation by supplying its id. New conversations
   (started as the bound user) and internal group-orchestrator callers are unaffected.
+  A conversation that records no owner is refused too (fail closed): its ownership
+  cannot be established, and the model supplied the id.
 - **Schedule `persistentConversationId`.** Create now nulls a caller-supplied
   `persistentConversationId` (mirroring import); the fire path additionally refuses to
   reuse a persistent conversation owned by a different user than the schedule.
@@ -33,17 +35,20 @@ keep working, while the missing owner/role/redaction checks are added.
 - **`UserMemoryTool` visibility guardrail.** The tool now applies the configured
   `defaultVisibility`, restricts writable visibilities to a configurable allow-set
   (default `self`), and refuses overwriting a `global` key owned by another agent unless
-  configured. Two new `guardrails` fields: `allowedVisibilities`, `allowGlobalKeyOverwrite`.
+  configured — including a global key whose entry records no owning agent (legacy or
+  migrated data), since the guard cannot show it is this agent's. Two new `guardrails`
+  fields, documented in `docs/user-memory.md`: `allowedVisibilities`, `allowGlobalKeyOverwrite`.
 - **`returnDetailed` step-data exposure.** The detailed conversion now drops sensitive
   internal keys (`audit:*`, `*:trace:*`, `*Error`) and runs values through
   `SecretRedactionFilter`, matching the SSE path; full-fidelity debugging remains on the
-  owner/admin-gated raw endpoint. Redaction recurses into `Map` values and `List`
-  elements, so a secret embedded in a structured value (e.g. a deserialized httpCall
-  response body under an agent-chosen key) is masked too, not just top-level strings.
+  owner/admin-gated raw endpoint. Redaction recurses into `Map` keys and values,
+  collection elements and `Object[]` elements, so a secret embedded in a structured value
+  (e.g. a deserialized httpCall response body under an agent-chosen key, or a
+  token-keyed map) is masked too, not just top-level strings.
 - **Semantic parser endpoint.** `POST /parser/{parserId}` was role-less; it now requires
   `eddi-admin`/`eddi-editor` and a `VIEW` check on the specific parser configuration.
 - **Postgres health readiness.** The anonymous readiness payload no longer returns the
-  JDBC URL or raw exception text — status only.
+  JDBC URL or raw exception text — status only; the failure is logged server-side.
 - **A2A `tasks/send`.** The JSON-RPC endpoint now requires a real role (`eddi-user` and
   up) rather than mere authentication, and the reply returns only the text output instead
   of the serialized `ConversationOutput` map.
@@ -52,6 +57,11 @@ keep working, while the missing owner/role/redaction checks are added.
   check resolves the owner the same way as the soft-delete fix on `main` (live
   descriptor, else the archived one; no descriptor at all is a 404 unless admin), so a
   soft-deleted conversation can only be permanently deleted by its owner or an admin.
+  A pre-v5.1.6 descriptor that records no owner (live or archived) takes its owner from
+  the memory snapshot — the same fallback the listing uses — so the recorded owner can
+  still delete their own legacy conversation; with no owner anywhere it stays admin-only.
+- **Schedule delete status codes.** `DELETE /schedulestore/schedules/{id}` rethrows a
+  downstream 403/404 instead of flattening it into a 500, like the other mutation paths.
 
 ### Tests
 

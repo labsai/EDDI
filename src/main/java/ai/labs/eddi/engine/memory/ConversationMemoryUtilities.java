@@ -235,13 +235,16 @@ public class ConversationMemoryUtilities {
 
     /**
      * Runs a step/output value through {@link SecretRedactionFilter}, recursing
-     * into {@link Map} values and {@link List}/array elements so a secret embedded
-     * in a <em>structured</em> value is masked too — e.g. a deserialized httpCall
-     * response body stored as a Map/List under the agent-chosen
-     * {@code responseObjectName}, which is not a denylisted key and would otherwise
-     * reach the caller-controlled {@code returnDetailed} view unredacted. Every
-     * String leaf is redacted; other scalar shapes are returned unchanged. The
-     * sensitive internal keys are already dropped by
+     * into {@link Map} keys and values, {@link Collection} elements and
+     * {@code Object[]} elements so a secret embedded in a <em>structured</em> value
+     * is masked too — e.g. a deserialized httpCall response body stored as a
+     * Map/List under the agent-chosen {@code responseObjectName}, which is not a
+     * denylisted key and would otherwise reach the caller-controlled
+     * {@code returnDetailed} view unredacted. A credential can sit in a map
+     * <em>key</em> as easily as in a value (a token-keyed lookup table), so String
+     * keys are redacted as well. Every String leaf is redacted; other scalar shapes
+     * (including primitive arrays, which cannot hold a String) are returned
+     * unchanged. The sensitive internal keys are already dropped by
      * {@link #isSensitiveDetailedKey} before this is reached.
      */
     private static Object redactDetailedValue(Object value) {
@@ -251,14 +254,22 @@ public class ConversationMemoryUtilities {
         if (value instanceof Map<?, ?> map) {
             var redacted = new LinkedHashMap<Object, Object>();
             for (var entry : map.entrySet()) {
-                redacted.put(entry.getKey(), redactDetailedValue(entry.getValue()));
+                var key = entry.getKey() instanceof String k ? SecretRedactionFilter.redact(k) : entry.getKey();
+                redacted.put(key, redactDetailedValue(entry.getValue()));
             }
             return redacted;
         }
-        if (value instanceof List<?> list) {
-            var redacted = new ArrayList<Object>(list.size());
-            for (var element : list) {
+        if (value instanceof Collection<?> collection) {
+            var redacted = new ArrayList<Object>(collection.size());
+            for (var element : collection) {
                 redacted.add(redactDetailedValue(element));
+            }
+            return redacted;
+        }
+        if (value instanceof Object[] array) {
+            var redacted = new Object[array.length];
+            for (int i = 0; i < array.length; i++) {
+                redacted[i] = redactDetailedValue(array[i]);
             }
             return redacted;
         }

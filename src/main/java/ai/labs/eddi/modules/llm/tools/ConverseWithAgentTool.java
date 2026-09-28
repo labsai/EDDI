@@ -345,8 +345,9 @@ public class ConverseWithAgentTool {
      * <p>
      * Decidable only when the tool is bound to a real user (authorization enabled).
      * A conversation that cannot be found is left to the downstream
-     * {@code say(...)} call to surface; any other verification failure fails closed
-     * — the conversation is not driven unless ownership could be confirmed.
+     * {@code say(...)} call to surface; any other verification failure — including
+     * a conversation that records no owner — fails closed: the conversation is not
+     * driven unless ownership could be confirmed.
      *
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
@@ -359,7 +360,16 @@ public class ConverseWithAgentTool {
         try {
             var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
             String owner = snapshot != null ? snapshot.getUserId() : null;
-            if (owner != null && !owner.isBlank() && !owner.equals(userId)) {
+            if (owner == null || owner.isBlank()) {
+                // Fail closed: the conversation id is model-supplied, and the agent-id
+                // say(...) overload checks only the agent match — so an ownerless
+                // (legacy) conversation would otherwise be drivable by any bound user.
+                LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': ownership could not be established",
+                        conversationId);
+                return "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified."
+                        .formatted(conversationId);
+            }
+            if (!owner.equals(userId)) {
                 LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s' owned by another user", conversationId);
                 return "⚠️ Conversation '%s' does not belong to you and cannot be continued.".formatted(conversationId);
             }

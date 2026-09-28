@@ -291,4 +291,35 @@ class UserMemoryToolTest {
         verify(store).upsert(captor.capture());
         assertEquals(Visibility.group, captor.getValue().visibility());
     }
+
+    @Test
+    void rememberFact_globalAllowed_butExistingKeyHasUnknownOwner_refused() throws Exception {
+        // A legacy/migrated global entry with no sourceAgentId cannot be shown to be
+        // this agent's, so the overwrite fails closed.
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        var ownerlessGlobal = new UserMemoryEntry("id-x", "user-1", "shared_key", "old", "fact",
+                Visibility.global, null, List.of(), "conv-x", false, 0, Instant.now(), Instant.now());
+        when(store.getAllEntries("user-1")).thenReturn(List.of(ownerlessGlobal));
+
+        String result = tool.rememberFact("shared_key", "new value", "fact", "global");
+
+        assertTrue(result.contains("owner is unknown"), "expected an unknown-owner refusal, got: " + result);
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    void rememberFact_unknownOwner_allowedWhenOverwriteEnabled() throws Exception {
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        config.getGuardrails().setAllowGlobalKeyOverwrite(true);
+        var ownerlessGlobal = new UserMemoryEntry("id-x", "user-1", "shared_key", "old", "fact",
+                Visibility.global, null, List.of(), "conv-x", false, 0, Instant.now(), Instant.now());
+        lenient().when(store.getAllEntries("user-1")).thenReturn(List.of(ownerlessGlobal));
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        String result = tool.rememberFact("shared_key", "new value", "fact", "global");
+
+        assertTrue(result.contains("✅ Remembered"), "expected success, got: " + result);
+        verify(store).upsert(any());
+    }
 }

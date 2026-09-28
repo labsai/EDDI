@@ -1575,6 +1575,17 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void deleteSchedule_downstreamStatusIsPreserved_notFlattenedTo500() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s2");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s2")).thenReturn(stored);
+        doThrow(new NotFoundException("gone")).when(scheduleStore).deleteSchedule("s2");
+
+        assertThrows(NotFoundException.class, () -> rest.deleteSchedule("s2"));
+    }
+
+    @Test
     void disableSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
         asEditor("editor-1");
         var stored = makeCronSchedule("s3");

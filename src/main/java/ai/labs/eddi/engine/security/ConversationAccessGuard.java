@@ -191,6 +191,36 @@ public class ConversationAccessGuard {
      *             if no descriptor exists at all and the caller is not an admin
      */
     public String requireConversationOwnerStrict(String conversationId) {
+        return requireConversationOwnerStrict(conversationId, null);
+    }
+
+    /**
+     * Where the owner of a pre-v5.1.6 conversation is recorded when its descriptor
+     * has none: the memory snapshot's {@code userId}. The listing path
+     * ({@code RestConversationStore.populateDataToDescriptor}) already falls back
+     * to it, so the strict check must as well — otherwise the recorded owner of a
+     * legacy conversation could see it listed but never delete it.
+     */
+    @FunctionalInterface
+    public interface LegacyOwnerLookup {
+        /** The owner recorded outside the descriptor, or null when there is none. */
+        String ownerOf(String conversationId) throws Exception;
+    }
+
+    /**
+     * As {@link #requireConversationOwnerStrict(String)}, but when the resolved
+     * descriptor (live or archived) records no owner, the owner is looked up
+     * through {@code legacyOwnerLookup} before the strict decision. The looked-up
+     * owner is then checked exactly like a descriptor owner — the owner or an admin
+     * passes, anyone else is refused. When the lookup establishes no owner either
+     * (none recorded, or the lookup failed), the conversation stays unowned and
+     * only an admin may act on it: a lookup failure never widens access.
+     *
+     * @param legacyOwnerLookup
+     *            fallback owner source for a descriptor without a userId; may be
+     *            null (no fallback)
+     */
+    public String requireConversationOwnerStrict(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {
         var descriptor = resolveDescriptor(conversationId);
         if (descriptor == null) {
             if (ownershipValidator.isAdmin(identity)) {
@@ -200,8 +230,24 @@ public class ConversationAccessGuard {
             LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
             throw new NotFoundException("Conversation not found");
         }
-        ownershipValidator.requireOwnerOrAdminStrict(identity, descriptor.getUserId(), RESOURCE_TYPE);
-        return descriptor.getUserId();
+        String owner = descriptor.getUserId();
+        if ((owner == null || owner.isBlank()) && legacyOwnerLookup != null) {
+            owner = lookUpLegacyOwner(conversationId, legacyOwnerLookup);
+        }
+        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
+        return owner;
+    }
+
+    private static String lookUpLegacyOwner(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {
+        try {
+            return legacyOwnerLookup.ownerOf(conversationId);
+        } catch (Exception e) {
+            // Fail closed: an owner we could not read is treated as no owner, which the
+            // strict check admits to an admin only.
+            LOGGER.warnf("Could not resolve the legacy owner of conversation %s: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     /**

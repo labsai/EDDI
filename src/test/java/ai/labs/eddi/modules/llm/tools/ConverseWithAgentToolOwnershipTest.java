@@ -68,6 +68,18 @@ class ConverseWithAgentToolOwnershipTest {
     }
 
     @Test
+    @DisplayName("refuses to continue a conversation that records no owner, without driving it")
+    void suppliedConversationId_ownerless_refused() throws Exception {
+        when(conversationService.getConversationMemorySnapshot("conv-legacy")).thenReturn(snapshotOwnedBy(null));
+        var tool = new ConverseWithAgentTool(conversationService, "user-A");
+
+        String result = tool.converseWithAgent("agent-2", "hello", "conv-legacy");
+
+        assertTrue(result.contains("ownership could not be verified"), "expected a fail-closed refusal, got: " + result);
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
     @DisplayName("continues a conversation the bound user owns")
     void suppliedConversationId_ownedBySameUser_allowed() throws Exception {
         when(conversationService.getConversationMemorySnapshot("conv-own")).thenReturn(snapshotOwnedBy("user-A"));
