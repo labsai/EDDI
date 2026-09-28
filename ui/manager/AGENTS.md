@@ -95,8 +95,8 @@ npm run test         # Vitest (CI adds --coverage)
 Playwright suite against the mock backend.
 
 > ⚠️ **`npx tsc --noEmit` checks nothing in this repo.** `tsconfig.json` is a
-> solution file — `"files": []` plus references to `tsconfig.app.json` and
-> `tsconfig.node.json` — so `--noEmit` resolves zero input files and exits 0.
+> solution file — `"files": []` plus project references (`tsconfig.app.json`,
+> `tsconfig.node.json`, `tsconfig.e2e.json`, `tsconfig.design-sync.json`) — so `--noEmit` resolves zero input files and exits 0.
 > Always use `npm run typecheck` (what CI runs). The old pre-commit hook ran the
 > no-op form until it let a syntax error through to CI.
 

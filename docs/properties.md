@@ -151,7 +151,7 @@ See [Persistent User Memory](user-memory.md) for full details on the LLM memory 
 
 Properties are available in **all** templates via the `properties` namespace.
 
-> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. AGENTS.md §5.1 is the authoritative reference for the template data model.
+> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. [Agent Config Authoring](agent-config-authoring.md#template-syntax) is the authoritative reference for the template data model.
 
 ### In Output Templates
 

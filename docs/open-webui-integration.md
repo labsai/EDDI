@@ -620,7 +620,7 @@ Assembled from the standard shapes — see [`langchain.md`](langchain.md) for th
 }
 ```
 
-> A single unconditional `inputmatcher` deliberately departs from the guidance in [`AGENTS.md` §5.3](../AGENTS.md) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
+> A single unconditional `inputmatcher` deliberately departs from the guidance in [Agent Config Authoring](agent-config-authoring.md#behavior-rule-safety-rules) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
 
 **2. `…0003.langchain.json`** — the model:
 

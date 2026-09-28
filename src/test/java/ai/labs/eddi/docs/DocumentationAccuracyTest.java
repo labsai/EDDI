@@ -244,9 +244,12 @@ class DocumentationAccuracyTest {
     void everyBackupExtensionIsDocumented() {
         // The ZIP block only: the URI table right after it names some of the same
         // types, and would otherwise satisfy this check for an extension the ZIP
-        // block no longer lists.
-        String agents = section(read("docs/agent-config-authoring.md"), "## ZIP Structure for Agent Import",
-                "### URI format");
+        // block no longer lists. section() falls back to the rest of the page when
+        // the end heading is missing, which would quietly re-admit that table.
+        String page = read("docs/agent-config-authoring.md");
+        assertTrue(page.contains("### URI format"),
+                "agent-config-authoring.md no longer has a '### URI format' heading to end the ZIP block at");
+        String agents = section(page, "## ZIP Structure for Agent Import", "### URI format");
         String backup = read("src/main/java/ai/labs/eddi/backup/impl/AbstractBackupService.java");
         Matcher m = Pattern.compile("String\\s+\\w+_EXT\\s*=\\s*\"([^\"]+)\"").matcher(backup);
         Set<String> missing = new TreeSet<>();

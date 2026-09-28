@@ -2,7 +2,7 @@
 
 This page collects the rules that are easy to get wrong when writing agent JSON by hand — behavior rules, property setters, output sets, HTTP calls, workflows and import ZIPs. Each one has caused a real defect: a config that saved and deployed cleanly and then misbehaved at runtime. The per-extension pages ([Behavior Rules](behavior-rules.md), [Properties](properties.md), [HTTP Calls](httpcalls.md), [Output Configuration](output-configuration.md)) are the full references; this page is the checklist to read before writing one.
 
-It is also the reference the repository's `AGENTS.md` (§5) sends AI coding assistants to, so keep it exact: a wrong sentence here is repeated in every config an assistant writes.
+> **Contributors:** the repository's `AGENTS.md` (§5) sends AI coding assistants here before they write a config, so keep this page exact — a wrong sentence is repeated in every config an assistant writes.
 
 ## Template Syntax
 
@@ -226,7 +226,7 @@ Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI recei
 
 ## ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which rejects anything shorter than 18 characters or containing a character other than `0-9a-fA-F` and `-`. Semantic names like `my-agent-wf1` will be rejected.
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID for anything shorter than 18 characters or containing a character other than `0-9a-fA-F` and `-` — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
 
 The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
@@ -311,4 +311,4 @@ Always use v6 canonical URIs in new configs:
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
 
-Two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".
+**For contributors:** two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".

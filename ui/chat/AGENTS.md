@@ -69,10 +69,11 @@ src/
   `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
   `done`, `error`. There is **no `thinking` event** — the backend never emits one.
   `tool_call` (`{"tool":"<name>"}`, sent as the LLM invokes a tool) is **not handled
-  by this widget yet** — `sse-events.ts` ignores it.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string — and for the
-  known client conditions (the ones the non-streaming endpoint answers with
-  409/410/404/429/403/503) it also carries a `"code"`. Branch on `code`, show `message`.
+  by this widget yet** — `SSEEventType` in `types.ts` omits it and the event `switch` in
+  `ChatWidget.tsx` has no case for it.
+- **`error` payload is JSON** `{"message":"…"}`, not a bare string — and for every
+  known client condition (each one the non-streaming endpoint answers with a typed
+  status — 409, 410, 404, 413, 429, 403, 503) it also carries a `"code"`. Branch on `code`, show `message`.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
   the snapshot to refresh them.
@@ -145,7 +146,7 @@ CI's `UI Chat` job runs `npm ci`, `npm run typecheck` and `npm test` on every PR
 ## 5. Mandatory Workflow
 
 1. **Before work**: `git status`, read this file + the top of the root `docs/changelog.md` and anything pending in the root `docs/changelog.d/`
-2. **During work**: Commit with `feat(chat):` / `fix(chat):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates below.
+2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates below.
 3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT

@@ -33,7 +33,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine. When designing a new feature, always ask: "should this be configurable by the agent designer?" If yes, expose it as a config field with sensible defaults — don't hardcode behavior or pick a single "best" approach.
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output. The rules that keep it sound are §4.1.
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in the database or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. `ci.yml` also runs Gitleaks, Trivy, ZAP and a CycloneDX SBOM; CodeQL (`codeql.yml`), fuzzing (`clusterfuzzlite.yml`) and Scorecard have workflows of their own.
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. `ci.yml` also runs CodeQL (Java and UI), Gitleaks (`Secret Scanning`), Trivy (`Trivy Filesystem Scan`) and a CycloneDX SBOM; there is deliberately no DAST job. `codeql.yml` is only a weekly rescan; fuzzing (`clusterfuzzlite.yml`) and Scorecard (`scorecard.yml`) are separate workflows.
 
 ### Build & Test Commands
 
@@ -171,7 +171,7 @@ Tests: about 18,000 unit and integration test methods, with >90% instruction / >
 | — | Session Forking | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7) |
 | — | Conversation Chaining | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3) |
 | 9 | DAG Pipeline | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped |
-| — | HITL — remaining | Manager approvals UI (`ui/manager`) and the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
+| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
 | — | Guardrails | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`) |
 | 11b | Multi-Channel | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`) |
 | 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
@@ -283,7 +283,8 @@ LLM tools (annotated with `@Tool` from langchain4j) always execute **inside a co
 LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
-          (builtin, http, mcp, a2a, dynamic, memory, recall — the context carries the memory)
+          (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
+           contextual, artifact, attachment, group-task; the context carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -343,7 +344,7 @@ A new `ILifecycleTask` requires ALL of:
 
 - [ ] Configuration class (`*Configuration.java`) — the existing ones are POJOs with getters (only `LlmConfiguration` is a record); follow the neighbouring style
 - [ ] Store interface (`I*Store extends IResourceStore<T>`)
-- [ ] Store implementation extending `AbstractResourceStore<T>` (`@ApplicationScoped`). It runs on MongoDB **and** PostgreSQL through `IResourceStorageFactory` — the `configs/<area>/mongo/` package names are historical. It inherits `@ConfigurationUpdate` on update/delete
+- [ ] Store implementation extending `AbstractResourceStore<T>` (`@ApplicationScoped`). It runs on MongoDB **and** PostgreSQL through `IResourceStorageFactory`, so for these stores the `configs/<area>/mongo/` package name is historical (stores that inject `MongoDatabase` directly have a separate `Postgres*` twin). It inherits `@ConfigurationUpdate` on update/delete
 - [ ] REST interface (JAX-RS, extends `IRestVersionInfo`)
 - [ ] REST implementation (`@ApplicationScoped`)
 - [ ] Bootstrap module (`@Startup`, `modules/<area>/bootstrap/*Module`) registering the task in the `@LifecycleExtensions` map
@@ -357,6 +358,8 @@ Every task implements `getId()` (returns `TaskId`), `getType()` and `execute()`.
 ### 4.4 Code Patterns
 
 #### Action Matching
+
+Schematic — `ApiCallsTask.collectMatchingApiCalls` is the real version (§4.5).
 
 ```java
 IData<List<String>> latestData = currentStep.getLatestData(MemoryKeys.ACTIONS);

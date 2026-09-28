@@ -48,14 +48,19 @@ compile or does not work, stale counts and paths, and a context cost (84 KB for 
   a published page (added to `SUMMARY.md`) that is useful to human config authors too. §5 keeps
   a trigger ("writing agent JSON? read this first") and the five mistakes the page exists to
   prevent. Section numbers §1–§6 are unchanged because Java comments and tests cite them;
-  the citations of §5.3 and §5.5 (`ReservedActionLint`, four tests) now name the new page, and
+  every citation of the old §5.x subsections — in `ReservedActionLint`,
+  `WorkspaceAccessIndexMigration`, three tests and four published pages (`conversation-memory`,
+  `properties`, `httpcalls`, `open-webui-integration`) — now names the new page, and
   `DocumentationAccuracyTest` / `DocumentedRestPathsTest` grade the page instead of `AGENTS.md`.
+- `docs/langchain.md` taught the same nonexistent `buildToolList` diagram and now matches §4.2.
 - **§3's "Completed" table** (phase history) became a table of what already exists, each row
   pointing at its doc — the part an assistant actually needs before building something parallel.
 - Generic advice models already follow (null checks, log levels) collapsed to the EDDI-specific
   rules; the Docker section condensed; table padding removed; `architecture.md` (50 KB) is now
   "read the section for your area", not required reading in full.
-- Also: stale test count (14,000 → ~18,000), the security-scan workflow list, the docs host
+- Also: stale test count (14,000 → ~18,000), the security-scan list (ZAP was removed from CI,
+  and push/PR CodeQL runs in `ci.yml`, not `codeql.yml`), a roadmap row still listing the
+  Manager approvals UI as to-do (it ships at `/manage/approvals`), the docs host
   (docs.labs.ai, not eddi.labs.ai), a branch-naming rule (rename a tool-generated `claude/*`
   branch before the first commit), a note that `-Dtest` runs skip the repo-wide guards, and
   the no-attribution rule extended to PR comments and review replies.
@@ -90,4 +95,5 @@ compile or does not work, stale counts and paths, and a context cost (84 KB for 
 
 ### Follow-ups
 
-- Handle the `tool_call` SSE event in `ui/chat` (`src/api/sse-events.ts`).
+- Handle the `tool_call` SSE event in `ui/chat` (`SSEEventType` in `src/types.ts` and the event
+  `switch` in `src/components/ChatWidget.tsx`).
