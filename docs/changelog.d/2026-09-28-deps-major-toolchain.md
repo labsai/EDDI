@@ -69,6 +69,20 @@ impossible content type in that match fails the test.
 | 2026-09-28 | Manager RAG upload tests failed under Node 24 | undici 7 brand-checks File/Blob; jsdom's global File loses its bytes in FormData and breaks request.formData() | Assert on the multipart part's name and content type, parsed from the raw body | d09d1b120a |
 ```
 
+### Existing checkouts: a Node install per version
+
+The first integration run of all the dependency branches together failed in `npm ci` with
+`Class extends value undefined is not a constructor or null`. It only fails on a checkout that
+already had a `ui/node` from Node 22, which is every developer's; fresh clones and CI are fine.
+frontend-maven-plugin replaces the node binary over an existing install but unpacks the new npm on
+top of the old one without clearing it, and the mixed npm tree crashes on start. `ui/node` is
+gitignored, so `./mvnw clean` does not remove it either.
+
+`installDirectory` in [`pom.xml`](../../pom.xml) is now `ui/node/${node.version}`: every Node
+version gets its own directory, so a bump can never mix installs, and the old one is simply never
+used again. Verified by `./mvnw package` on the checkout that had failed: it installed v24.21.0 into
+`ui/node/v24.21.0/node`, left the old files alone, and built both UIs.
+
 ### Next
 
 The UI toolchain and runtime majors (including `@types/node` 24) stay on their own branch.

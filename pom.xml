@@ -985,8 +985,15 @@
                 <configuration>
                     <skip>${skipUi}</skip>
                     <nodeVersion>${node.version}</nodeVersion>
-                    <!-- Node lands in ui/node (gitignored), shared by both UIs. -->
-                    <installDirectory>${project.basedir}/ui</installDirectory>
+                    <!-- Node lands in ui/node/<node.version>/node (all of ui/node is gitignored),
+                         shared by both UIs. One directory PER VERSION: the plugin swaps in a new
+                         node binary over an existing install but unpacks the new npm over the old
+                         one without clearing it, and the mixed npm tree crashes ("Class extends
+                         value undefined"). A fixed ui/node therefore broke `package` on every
+                         existing checkout at the Node 22 -> 24 bump, while fresh clones and CI
+                         were fine. A new version now gets a new directory; an old one is simply
+                         never used again. -->
+                    <installDirectory>${project.basedir}/ui/node/${node.version}</installDirectory>
                 </configuration>
                 <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
                      `quarkus:dev` never need the UI, and binding it earlier made every one of
