@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -79,7 +80,10 @@ export function WorkflowDetailPage() {
 
   const { data: versionDescriptors } = useWorkflowVersions(id!);
   // Deleting a workflow needs OWN; an EDIT grantee may still change it.
-  const access = accessForDetail(versionDescriptors, id);
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  const spaces = useSpaces();
+  const workspacesEnforced = spaces.isLoading ? undefined : spaces.enabled;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Version picker data
   const versions = useMemo(() => {

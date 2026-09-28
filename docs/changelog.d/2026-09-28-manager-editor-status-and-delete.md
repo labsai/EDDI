@@ -36,10 +36,17 @@ matching **detail** pages (`/manage/agentview/:id`, `/manage/workflowview/:id`,
 only an EDIT grant saw an enabled Delete button, and clicking it returned a 403.
 None of the three pages has a Share entry point.
 
-- New `accessForDetail(descriptors, id)` in `lib/access.ts` reads the level
+- New `accessForDetail(descriptors, id, workspacesEnforced)` in `lib/access.ts` reads the level
   from the version descriptors each page already loads. It only uses the
   descriptor whose URI resolves to this `id`, because `filter=` is a text match
   and can also return a resource whose id merely contains this one.
+- **A missing descriptor is not a missing level.** If no descriptor for this
+  `id` comes back, the lookup is empty or partial. That counts as unrestricted
+  only when `/workspaces` reports enforcement off, because unmigrated data there
+  can legitimately return no descriptors and owners must keep Delete. With
+  enforcement on, or before `/workspaces` has answered, nothing is offered.
+  (Raised by CodeRabbit on PR #879: the first version read "no match" as
+  unrestricted.)
 - **Nothing is offered while the descriptors load.** Treating "not loaded yet"
   as unrestricted would show Delete briefly to an EDIT grantee, long enough to
   click it. Once the descriptors arrive the normal rule applies: a missing
@@ -52,16 +59,20 @@ None of the three pages has a Share entry point.
 - `use-platform-status.test.tsx`: a 401 or 403 reads online with a null
   instance ID. A network error reads offline.
 - `access.test.ts`: `accessForDetail` offers nothing while loading, ignores a
-  descriptor for a lookalike id, and treats a missing level as unrestricted.
+  descriptor for a lookalike id, and treats a missing level as unrestricted. A
+  missing descriptor offers nothing under enforcement or before `/workspaces`
+  answers, and stays unrestricted with workspaces off.
 - New `detail-page-owner-actions.test.tsx`: all three detail pages hide Delete
   for EDIT and show it for OWN. The agent page also shows it when the backend
-  sends no level. Each test waits for content that renders at both levels
+  sends no level. With an empty descriptor lookup, it hides Delete under
+  enforcement and shows it with workspaces off. Each test waits for content that renders at both levels
   before checking that Delete is absent.
 - `config-editor.test.tsx` and `resources.test.tsx` had checked for Delete
   synchronously on the first render. They now wait for it, since it appears
   once the level is known.
 - Mutation-checked: with the gates and the 401/403 branch removed, all five new
-  behavioural tests fail.
+  behavioural tests fail. With the empty-lookup case reading as unrestricted
+  again, the three tests covering it fail.
 
 **Files:** [`use-platform-status.ts`](../../ui/manager/src/hooks/use-platform-status.ts),
 [`access.ts`](../../ui/manager/src/lib/access.ts),

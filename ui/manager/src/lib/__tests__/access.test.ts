@@ -90,7 +90,7 @@ describe("accessForDetail", () => {
   it("offers nothing while the descriptors are still loading", () => {
     // Unrestricted here would flash Delete at an EDIT grantee until the level
     // arrived — long enough to click it.
-    expect(accessForDetail(undefined, "a1")).toMatchObject({
+    expect(accessForDetail(undefined, "a1", false)).toMatchObject({
       canUse: false,
       canView: false,
       canEdit: false,
@@ -100,12 +100,27 @@ describe("accessForDetail", () => {
 
   it("reads the level of this resource, not of one whose id contains it", () => {
     // `filter=` is a text match: `a1` also returns `a1b2`, which the caller may own.
-    const access = accessForDetail([uri("a1b2", "OWN"), uri("a1", "EDIT")], "a1");
+    const access = accessForDetail([uri("a1b2", "OWN"), uri("a1", "EDIT")], "a1", true);
     expect(access.canEdit).toBe(true);
     expect(access.canOwn).toBe(false);
   });
 
-  it("treats a loaded descriptor without a level as unrestricted", () => {
-    expect(accessForDetail([uri("a1")], "a1").canOwn).toBe(true);
+  it("treats this resource's descriptor without a level as unrestricted", () => {
+    expect(accessForDetail([uri("a1")], "a1", undefined).canOwn).toBe(true);
+  });
+
+  it("offers nothing when no descriptor matches and workspaces are enforced", () => {
+    // An empty or partial lookup is not the backend saying "unrestricted".
+    expect(accessForDetail([], "a1", true).canOwn).toBe(false);
+    expect(accessForDetail([uri("a1b2", "OWN")], "a1", true).canOwn).toBe(false);
+  });
+
+  it("offers nothing when no descriptor matches before /workspaces has answered", () => {
+    expect(accessForDetail([], "a1", undefined).canOwn).toBe(false);
+  });
+
+  it("keeps Delete when no descriptor matches on a deployment without workspaces", () => {
+    // Unmigrated data can return no descriptors; owners there had Delete before.
+    expect(accessForDetail([], "a1", false).canOwn).toBe(true);
   });
 });

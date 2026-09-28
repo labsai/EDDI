@@ -65,6 +65,15 @@ export function accessFor(callerLevel?: string | null): ResourceAccess {
   };
 }
 
+/** Nothing offered — the shape while the answer is not in yet, or cannot be. */
+const PENDING: ResourceAccess = {
+  canUse: false,
+  canView: false,
+  canEdit: false,
+  canOwn: false,
+  known: false,
+};
+
 /**
  * The access a detail page may offer, read from the version descriptors it
  * already loads.
@@ -77,23 +86,24 @@ export function accessFor(callerLevel?: string | null): ResourceAccess {
  * <h3>Nothing is offered before the answer is in</h3> While the descriptors are
  * still loading (`undefined`), every capability is false rather than
  * unrestricted: otherwise an `EDIT` grantee sees Delete flash up and vanish, and
- * can click it in between. Once loaded, the ordinary `accessFor` rules apply —
- * including "absent means unrestricted" for backends without workspaces.
+ * can click it in between. Once a matching descriptor is in, the ordinary
+ * `accessFor` rules apply to its level.
+ *
+ * <h3>No matching descriptor is not "no level"</h3> An absent `callerLevel` on
+ * this resource's own descriptor is the backend saying nothing is enforced. An
+ * absent *descriptor* says nothing at all — an empty or partial lookup — so it
+ * only reads as unrestricted when the deployment is known not to enforce
+ * workspaces (unmigrated data there can legitimately return no descriptors, and
+ * owners must keep Delete). Under enforcement, or before `/workspaces` has
+ * answered (`workspacesEnforced` undefined), it offers nothing.
  */
 export function accessForDetail(
   descriptors: readonly { resource: string; callerLevel?: string | null }[] | undefined,
   id: string | undefined,
+  workspacesEnforced: boolean | undefined,
 ): ResourceAccess {
   if (!descriptors) return PENDING;
   const own = descriptors.find((d) => d.resource && parseResourceUri(d.resource).id === id);
-  return accessFor(own?.callerLevel);
+  if (own) return accessFor(own.callerLevel);
+  return workspacesEnforced === false ? accessFor(undefined) : PENDING;
 }
-
-/** Nothing offered yet — the shape while a detail page's descriptors load. */
-const PENDING: ResourceAccess = {
-  canUse: false,
-  canView: false,
-  canEdit: false,
-  canOwn: false,
-  known: false,
-};

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -104,7 +105,10 @@ export function AgentDetailPage() {
   const { data: versions } = useAgentVersions(id!);
   // Delete (and sharing) need OWN. An EDIT grantee was offered Delete here and
   // met a 403 — the agents list already hid it for them via the same level.
-  const access = accessForDetail(versions, id);
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  const spaces = useSpaces();
+  const workspacesEnforced = spaces.isLoading ? undefined : spaces.enabled;
+  const access = accessForDetail(versions, id, workspacesEnforced);
 
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;

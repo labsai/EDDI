@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import {
   FileCode,
   GitBranch,
@@ -120,7 +121,10 @@ export function ResourceDetailPage() {
     isError: isVersionsError,
   } = useResourceVersions(type ?? "", id ?? "");
   // Deleting a resource needs OWN; an EDIT grantee may still change it.
-  const access = accessForDetail(versionDescriptors, id);
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  const spaces = useSpaces();
+  const workspacesEnforced = spaces.isLoading ? undefined : spaces.enabled;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Resolve latest version from descriptors
   useEffect(() => {

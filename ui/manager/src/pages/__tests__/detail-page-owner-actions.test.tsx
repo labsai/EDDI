@@ -62,6 +62,35 @@ describe("Agent detail — owner-only actions", () => {
     withLevel(undefined);
     expect(await screen.findByTestId("delete-agent-btn")).toBeInTheDocument();
   });
+
+  it("hides Delete when enforcement is on and no descriptor for this agent came back", async () => {
+    // An empty lookup is not "no level". Reading it as unrestricted showed a
+    // non-owner Delete whenever the descriptor query came back short.
+    server.use(
+      http.get("*/workspaces", () =>
+        HttpResponse.json({ enabled: true, principal: "editor", spaces: [], seesEverything: false }),
+      ),
+      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
+    );
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+    await screen.findByTestId("export-agent-btn");
+    // Let both /workspaces and the descriptors settle before asserting absence.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByTestId("delete-agent-btn")).not.toBeInTheDocument();
+  });
+
+  it("keeps Delete when workspaces are off and no descriptor came back", async () => {
+    server.use(
+      http.get("*/workspaces", () =>
+        HttpResponse.json({ enabled: false, spaces: [], seesEverything: true }),
+      ),
+      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
+    );
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+    expect(await screen.findByTestId("delete-agent-btn")).toBeInTheDocument();
+  });
 });
 
 describe("Workflow detail — owner-only actions", () => {
