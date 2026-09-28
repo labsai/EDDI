@@ -86,7 +86,7 @@ cosign verify \
   labsai/eddi:6.4.0
 ```
 
-Replace `6.0.0` with any tag you want to verify (`latest`, `6.0.0-RC2`, `6.0.0-b42`, etc.).
+Replace the tag with any tag you want to verify (`latest`, a release candidate such as `6.0.0-RC2`, a build such as `6.0.0-b42`, etc.).
 
 **Successful output** will show the verified certificate chain and Rekor log entry:
 

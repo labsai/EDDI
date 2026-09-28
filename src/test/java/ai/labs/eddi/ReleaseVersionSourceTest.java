@@ -327,7 +327,13 @@ class ReleaseVersionSourceTest {
     private static int[] semver(String version) {
         Matcher m = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)").matcher(version);
         assertTrue(m.find(), "'" + version + "' does not start with MAJOR.MINOR.PATCH");
-        return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+        try {
+            return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+        } catch (NumberFormatException e) {
+            // \d+ admits a component too large for an int; report it as the
+            // bad version it is rather than as an unexplained exception.
+            throw new AssertionError("'" + version + "' has a version component too large to compare", e);
+        }
     }
 
     /**

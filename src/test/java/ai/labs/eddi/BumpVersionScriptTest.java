@@ -278,6 +278,23 @@ class BumpVersionScriptTest {
         assertTrue(read("helm/eddi/Chart.yaml").contains("appVersion: \"6.4.0\""), "a refused release must change nothing");
     }
 
+    /**
+     * post-release writes the pom before the pointers, so anything that would make
+     * the pointer step refuse has to be caught before that first write — otherwise
+     * a manual run exits with pom.xml moved and the chart not.
+     */
+    @Test
+    @DisplayName("post-release refuses before its first write, leaving no half-applied bump")
+    void postReleaseValidatesBeforeWriting() throws Exception {
+        write("helm/eddi/Chart.yaml", read("helm/eddi/Chart.yaml").replace("version: 2.2.0", "version: 2.2"));
+
+        Run run = run("post-release", "6.5.0");
+
+        assertEquals(2, run.exit, run.output);
+        assertTrue(read("pom.xml").contains("<version>6.4.0</version>"),
+                "a refused post-release must not have moved pom.xml:\n" + run.output);
+    }
+
     @Test
     @DisplayName("next refuses to move the build version backwards")
     void nextRefusesToGoBackwards() throws Exception {

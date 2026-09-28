@@ -160,6 +160,17 @@ class Repo:
             raise BumpError(f"no top-level version: line in {CHART}")
         return m.group(1)
 
+    def validate(self) -> None:
+        """Everything a release or post-release will parse or rewrite, checked
+        BEFORE the first write, so a refusal never leaves a half-applied bump
+        (pom.xml moved, the chart not) in a manual checkout."""
+        core(self.pom_version(), "pom.xml's version")
+        core(self.app_version(), "appVersion")
+        parse(self.chart_version())
+        test = self.root / CHART_TEST
+        if test.is_file() and not EXPECTED_CHART_CONSTANT.search(read(test)):
+            raise BumpError(f"{CHART_TEST} no longer declares EXPECTED_CHART_VERSION = \"...\"")
+
     # ── edits ────────────────────────────────────────────────────────────────
     def _rewrite(self, path: Path, text: str) -> None:
         if text != read(path):
@@ -254,6 +265,7 @@ def do_next(repo: Repo, version: str, force: bool) -> None:
 def do_release(repo: Repo, version: str, chart_bump: str | None, force: bool) -> None:
     """Point every release pointer at `version`."""
     parse(version)
+    repo.validate()
     current = repo.app_version()
     if not force and parse(version) <= core(current, "appVersion"):
         raise BumpError(f"the release pointers already name {current}; refusing to point them at {version} "
@@ -294,6 +306,7 @@ def cmd_release(repo: Repo, args) -> int:
 def cmd_post_release(repo: Repo, args) -> int:
     tag = args.version
     tag_v = parse(tag)
+    repo.validate()
     notes = []
     before_app, before_pom, before_chart = repo.app_version(), repo.pom_version(), repo.chart_version()
 
