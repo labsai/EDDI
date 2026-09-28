@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, waitFor } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
 import { configure } from "@testing-library/react";
-import { toast } from "sonner";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
+import { drainToasts } from "./drain-toasts";
 
 // Increase default waitFor timeout to handle parallel test load. The suite is
 // large (~3.7k tests) and page tests do async data loading; under full-parallel
@@ -75,53 +75,10 @@ import "@/i18n/config";
 // Start MSW server before all tests
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 
-/**
- * Let sonner finish removing its toasts while the test's DOM still exists.
- *
- * A dismissed toast — dismissed explicitly, or when its `duration` runs out —
- * is removed by a bare `setTimeout(removeToast, 200)` (sonner's
- * TIME_BEFORE_UNMOUNT) that nothing cancels on unmount. `cleanup()` below
- * unmounts the Toaster first and that timer fires afterwards; in a file's LAST
- * test it can fire after vitest has torn the jsdom environment down, and the
- * state update it makes then dies in React on `window is not defined`. Vitest
- * reports that as an unhandled error and fails the run with every test green —
- * which is what happened, once, in CI (run 36418007466). It does not reproduce
- * on demand: it needs a runner slow enough to lose the race. A probe counting
- * those timers is deterministic, though — before this hook,
- * resource-detail-save-not-live.test.tsx ended every run with one still pending.
- *
- * So dismiss whatever is on screen and wait for sonner to take it out of the
- * DOM, which is exactly the moment its removal timer has fired. A file that
- * never renders a Toaster finds nothing and pays nothing. This also clears
- * sonner's module-global store between tests, so one test's toast cannot turn
- * up in the next.
- */
-async function drainToasts() {
-  if (!document.querySelector("[data-sonner-toast]")) {
-    return;
-  }
-  act(() => {
-    toast.dismiss();
-  });
-  if (vi.isFakeTimers()) {
-    // Under fake timers RTL's waitFor polls with the faked clock and would never
-    // advance; move it past the removal delay instead.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-  }
-  await waitFor(
-    () => {
-      if (document.querySelector("[data-sonner-toast]")) {
-        throw new Error("a sonner toast is still in the DOM after toast.dismiss()");
-      }
-    },
-    { timeout: 3_000 },
-  );
-}
-
 // Reset handlers after each test
 afterEach(async () => {
+  // Before cleanup(): sonner's timers must finish while its Toaster is mounted.
+  // See drain-toasts.ts.
   await drainToasts();
   cleanup();
   localStorage.clear();
