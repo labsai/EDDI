@@ -651,4 +651,47 @@ class SecretScrubberTest {
         assertFalse(scrubbed.contains("ghp_ABCDEFGH1234567890ijklmnop"), scrubbed);
         assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
     }
+
+    @Test
+    @DisplayName("a low-entropy password beside a vault reference in a secret-named field is redacted")
+    void scrubJson_lowEntropyPasswordBesideVaultReference_redacted() {
+        // Zero-entropy on purpose: the remainder must fail the entropy check, so only
+        // the field-name rule can catch it — the case the exemption used to skip.
+        String json = "{\"password\":\"aaaaaaa ${vault:default/k}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("aaaaaaa"), "the plaintext half must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains("\"password\":\"" + SecretScrubber.REDACTED + "\""), scrubbed);
+    }
+
+    @Test
+    @DisplayName("scheme words and separators beside a vault reference in a secret-named field stay legible")
+    void scrubJson_schemeScaffoldingInSecretField_preserved() {
+        String json = """
+                {"headers": {"Authorization": "Bearer ${vault:default/token}"},
+                 "password": "${vault:default/user}:${vault:default/pass}",
+                 "apiKey": "${vault:default/key}"}
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("\"Authorization\":\"Bearer ${vault:default/token}\""), scrubbed);
+        assertTrue(scrubbed.contains("\"password\":\"${vault:default/user}:${vault:default/pass}\""), scrubbed);
+        assertTrue(scrubbed.contains("\"apiKey\":\"${vault:default/key}\""), scrubbed);
+        assertFalse(scrubbed.contains("REDACTED"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("a credential with punctuation attached, beside a vault reference, is still redacted")
+    void scrubJson_credentialWithTrailingPunctuationBesideVaultReference_redacted() {
+        // Non-secret field name, so only the per-segment entropy check can catch it;
+        // a whitespace split kept the comma on the key and the key pattern rejected it.
+        String json = "{\"note\":\"Bearer sk-live-AbCdEf1234567890XyZq, ${vault:default/token}\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("sk-live-AbCdEf1234567890XyZq"), "the plaintext key must not survive export: " + scrubbed);
+        assertTrue(scrubbed.contains(SecretScrubber.REDACTED), scrubbed);
+    }
 }

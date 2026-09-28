@@ -54,10 +54,15 @@ authors, and existing vaults keep working.
   `${eddivault:…}` or `${connection:…}` reference now requires the `eddi-admin` role.
 
 - **Sensitive-data leak fixes.** The export scrubber no longer lets a vault reference
-  exempt a plaintext secret sitting beside it in the same value; Slack event/follow-up
-  logging records message length only at INFO (full preview at DEBUG); and the
-  pipeline task-error OpenTelemetry span carries the redacted audit summary and only
-  the exception type, never the raw exception message.
+  exempt a plaintext secret sitting beside it in the same value — the remainder is
+  split on punctuation as well as whitespace (so `sk-live-…,` is still judged as a
+  key), and in a credential-named field (`password`, an `Authorization` header, …)
+  only an auth-scheme word such as `Bearer` and separators may sit beside the
+  reference, so a short low-entropy password next to one is redacted too; Slack
+  event, follow-up and group-discussion logging records message length only, at every
+  level (no text preview, not even at DEBUG); and the pipeline task-error
+  OpenTelemetry span carries the redacted audit summary and only the exception type,
+  never the raw exception message.
 
 ### Migration / back-compat notes
 
@@ -66,7 +71,13 @@ authors, and existing vaults keep working.
   KEK rotation**, so rotation does **not** invalidate stored checksums (verified by a
   KEK-rotation + same-value re-verify test). First use on an upgraded deployment lazily
   generates and wraps the key; it touches no tenant DEK, so it has no boot/store side
-  effects.
+  effects. The key is created **only when the store confirms none exists**, through a
+  new atomic `ISecretPersistence.setMetaValueIfAbsent` (Mongo `$setOnInsert` on the
+  unique meta-key index, Postgres `ON CONFLICT DO NOTHING`): a failed read or a failed
+  unwrap of an existing key (e.g. a KEK mismatch) now fails the operation instead of
+  replacing the key, and racing nodes converge on the first key written rather than
+  the last. There is no KEK-derived fallback key any more — a checksum written under
+  one would be unverifiable later.
 - **GCM AAD:** existing (no-AAD) rows decrypt via fallback; DEK rotation rebinds AAD
   to the new generation. The grant list is intentionally not part of the AAD so grant
   edits (which do not re-encrypt) keep values readable.

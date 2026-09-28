@@ -12,6 +12,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -309,6 +310,18 @@ class VaultSecretProviderGrantTest {
         private final Map<String, EncryptedDek> deks = new LinkedHashMap<>();
         private final Map<String, String> meta = new LinkedHashMap<>();
 
+        /**
+         * When set, every {@link #getMetaValue} throws it — a transient store error.
+         */
+        RuntimeException metaReadFailure;
+
+        /**
+         * When true, the next {@link #getMetaValue} reports "absent" even though a
+         * value is stored — the read-then-create window another node's first write
+         * lands in, made deterministic.
+         */
+        boolean hideMetaOnce;
+
         int upsertSecretCalls;
         int updateSecretGrantCalls;
         int findDekCalls;
@@ -441,6 +454,13 @@ class VaultSecretProviderGrantTest {
 
         @Override
         public String getMetaValue(String key) {
+            if (metaReadFailure != null) {
+                throw metaReadFailure;
+            }
+            if (hideMetaOnce) {
+                hideMetaOnce = false;
+                return null;
+            }
             return meta.get(key);
         }
 
@@ -500,5 +520,72 @@ class VaultSecretProviderGrantTest {
         assertEquals(checksumBefore, checksumAfter, "the stored checksum bytes are unchanged by KEK rotation");
         assertTrue(provider2.matchesChecksum(TENANT_ID, checksumAfter, PLAINTEXT),
                 "the same value must still match its checksum after KEK rotation + restart — proving the checksum key is stable");
+    }
+
+    // ─── The checksum key is created only when truly absent ───
+
+    private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
+    /** A second node (or a restart) on the same store. */
+    private VaultSecretProvider newProvider(String masterKey) {
+        VaultSaltManager saltManager = mock(VaultSaltManager.class);
+        when(saltManager.getSalt()).thenReturn(FIXED_SALT);
+        when(saltManager.isUsingLegacySalt()).thenReturn(false);
+        VaultSecretProvider p = new VaultSecretProvider(Optional.of(masterKey), persistence, saltManager, new SimpleMeterRegistry());
+        p.initMetrics();
+        p.onStartup(mock(StartupEvent.class));
+        return p;
+    }
+
+    @Test
+    @DisplayName("a failed READ of the checksum key never replaces the stored key, and nothing is cached from the failure")
+    void checksumKeyNotReplacedAfterReadFailure() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        assertNotNull(storedKey);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        VaultSecretProvider restarted = newProvider(MASTER_KEY);
+        persistence.metaReadFailure = new PersistenceException("transient read failure");
+        assertThrows(SecretProviderException.class,
+                () -> restarted.store(new SecretReference(TENANT_ID, "other-key"), "other-value", null, List.of("*")));
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META),
+                "a transient read error must not be taken for 'no key yet' — replacing it strands every h1: checksum");
+
+        persistence.metaReadFailure = null;
+        assertTrue(restarted.matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "once the store recovers the same node uses the stored key — no fallback key was cached");
+    }
+
+    @Test
+    @DisplayName("a checksum key that cannot be UNWRAPPED (KEK mismatch) is never replaced")
+    void checksumKeyNotReplacedAfterUnwrapFailure() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        VaultSecretProvider wrongKek = newProvider("a-different-master-key-9876543210");
+        assertThrows(RuntimeException.class, () -> wrongKek.matchesChecksum(TENANT_ID, checksum, PLAINTEXT));
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META),
+                "a node on the wrong KEK must not overwrite the key every existing checksum was written with");
+
+        assertTrue(newProvider(MASTER_KEY).matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "the original key is intact, so a correctly configured node still verifies");
+    }
+
+    @Test
+    @DisplayName("a creator that raced another node's first write adopts the winner's key instead of overwriting it")
+    void racingCreatorAdoptsTheStoredKey() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        // Node B read "absent" just before node A's key landed.
+        persistence.hideMetaOnce = true;
+        VaultSecretProvider nodeB = newProvider(MASTER_KEY);
+
+        assertTrue(nodeB.matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "node B must end on node A's key, or checksums written by A are unverifiable on B");
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META), "the create is insert-if-absent, never an overwrite");
     }
 }

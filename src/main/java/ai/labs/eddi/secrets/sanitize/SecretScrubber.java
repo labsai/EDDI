@@ -87,6 +87,25 @@ public class SecretScrubber {
     private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
 
     /**
+     * Splits a vault-reference remainder into candidate credential segments: any
+     * run of characters {@link #KEY_LIKE_PATTERN} does not admit ends a segment.
+     * Splitting on whitespace alone left punctuation glued to a credential —
+     * {@code "sk-live-…,"} — and the whole-token key pattern then rejected it.
+     */
+    private static final Pattern NON_KEY_CHARACTERS = Pattern.compile("[^a-zA-Z0-9_.+/~$\\-]+");
+
+    /**
+     * Words that may legitimately sit beside a vault reference in a
+     * credential-named field: HTTP authorization schemes and their common vendor
+     * variants, as in {@code "Authorization": "Bearer ${vault:k}"}. Compared
+     * case-insensitively. Anything else next to a reference in such a field is
+     * treated as a possible plaintext credential — see
+     * {@link #isReferenceScaffolding(String)}.
+     */
+    private static final Set<String> AUTH_SCHEME_WORDS = Set.of("bearer", "basic", "digest", "token", "bot", "apikey", "api-key", "key",
+            "ssws", "oauth", "negotiate", "hmac");
+
+    /**
      * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
      * a memory path — and therefore never a credential. Exempt from the entropy
      * heuristic; see {@link #isStructuralFieldName(String)} for why.
@@ -256,13 +275,20 @@ public class SecretScrubber {
                 // exemption: the plaintext half would then be exported verbatim. Strip
                 // the references and judge only what is left.
                 String remainder = VAULT_REFERENCE.matcher(textValue).replaceAll("");
-                if (!containsSecretMaterial(remainder)) {
-                    return null;
-                }
                 // The non-reference remainder itself looks like a secret, so redact the
                 // whole value rather than leak the plaintext half. Losing the pointer
                 // costs nothing — this value could never be a valid single credential.
-                return REDACTED;
+                if (containsSecretMaterial(remainder)) {
+                    return REDACTED;
+                }
+                // In a credential-named field the entropy test is not enough: a short or
+                // low-entropy password ("hunter2 ${vault:k}") passes it and would be
+                // exported verbatim. There, only a scheme word and separators may sit
+                // beside the reference; anything else redacts the value.
+                if (isSecretFieldName(fieldName, parentFieldName) && !isReferenceScaffolding(remainder)) {
+                    return REDACTED;
+                }
+                return null;
             }
         }
 
@@ -441,25 +467,43 @@ public class SecretScrubber {
     }
 
     /**
-     * Whether any whitespace-separated token of {@code remainder} looks like a
-     * secret — the same length/key-shape/entropy heuristic {@code scrubTextValue}
-     * check 3 applies to a whole value, run per token here because the remainder of
-     * a vault-reference value ("Bearer sk-live-…") is not a single token.
+     * Whether any segment of {@code remainder} looks like a secret — the same
+     * length/key-shape/entropy heuristic {@code scrubTextValue} check 3 applies to
+     * a whole value, run per segment here because the remainder of a
+     * vault-reference value ("Bearer sk-live-…") is not a single token. Segments
+     * are split on every character the key pattern does not admit (see
+     * {@link #NON_KEY_CHARACTERS}), not just whitespace, so a credential followed
+     * by a comma or wrapped in quotes is still judged on its own.
      * <p>
-     * Deliberately does NOT re-run the field-name check: this feeds the vault-ref
-     * exemption, which only exists to keep pointer-bearing values legible, and the
-     * field-name check runs anyway on the value as a whole further down.
+     * Field names are judged separately, by the caller — see
+     * {@link #isReferenceScaffolding(String)}.
      */
     private static boolean containsSecretMaterial(String remainder) {
         if (remainder == null || remainder.isBlank()) {
             return false;
         }
-        for (String token : remainder.trim().split("\\s+")) {
+        for (String token : NON_KEY_CHARACTERS.split(remainder.trim())) {
             if (token.length() >= MIN_ENTROPY_LENGTH && KEY_LIKE_PATTERN.matcher(token).matches() && shannonEntropy(token) > ENTROPY_THRESHOLD) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Whether the non-reference remainder of a value is only scaffolding: nothing,
+     * separators, or an authorization-scheme word ({@link #AUTH_SCHEME_WORDS}).
+     * {@code "Bearer "} and the {@code ":"} of {@code "${vault:u}:${vault:p}"} are;
+     * {@code "hunter2 "} is not. An allow-list, because in a credential-named field
+     * a word that is not a known scheme cannot be told apart from a short password.
+     */
+    private static boolean isReferenceScaffolding(String remainder) {
+        for (String word : remainder.split("[^a-zA-Z0-9\\-]+")) {
+            if (!word.isEmpty() && !AUTH_SCHEME_WORDS.contains(word.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

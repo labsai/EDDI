@@ -946,34 +946,31 @@ public class VaultSecretProvider implements ISecretProvider {
 
     /**
      * Load the KEK-wrapped checksum key from the meta store, or create, wrap and
-     * persist a fresh random one. Concurrent creators converge by re-reading the
-     * meta value after writing it (last write wins), so all nodes end on one key.
-     * Falls back to a KEK-derived key only if the store is unreachable — logged,
-     * with the caveat that such a key does not survive KEK rotation.
+     * persist a fresh random one.
+     * <p>
+     * A new key is created ONLY when the store confirms none exists. Every
+     * {@code h1:} checksum in the vault was written with the stored key, so
+     * replacing it would make all of them unverifiable — permanently, because the
+     * old key would be gone. A failed read (a transient database error) or a failed
+     * unwrap of an existing key (a KEK mismatch) therefore propagates instead of
+     * falling through to creation; nothing is cached, so the next use retries. The
+     * create itself is an insert-if-absent, so racing creators on several nodes
+     * converge on the one key that won the insert rather than the last writer
+     * replacing a key another node has already used. There is no fallback key: a
+     * checksum written under any other key would be unverifiable later, which is
+     * the damage this method exists to prevent.
      */
     private byte[] loadOrCreateChecksumKey() {
-        try {
-            String stored = persistence.getMetaValue(CHECKSUM_KEY_META);
-            if (stored != null) {
-                return unwrapChecksumKey(stored);
-            }
-        } catch (Exception e) {
-            LOGGER.warnf("[VAULT] Could not read the persisted checksum key (%s); will attempt to create one", e.getClass().getSimpleName());
+        String stored = persistence.getMetaValue(CHECKSUM_KEY_META);
+        if (stored != null) {
+            return unwrapChecksumKey(stored);
         }
-        try {
-            byte[] raw = new byte[32];
-            new SecureRandom().nextBytes(raw);
-            persistence.setMetaValue(CHECKSUM_KEY_META, wrapChecksumKey(raw, kek));
-            // Re-read so racing creators on other nodes converge on the winning value
-            // rather than each keeping its own random key (which would make checksums
-            // written by one node unverifiable by another).
-            String confirmed = persistence.getMetaValue(CHECKSUM_KEY_META);
-            return confirmed != null ? unwrapChecksumKey(confirmed) : raw;
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[VAULT] Could not persist a KEK-wrapped checksum key; falling back to a KEK-derived key. "
-                    + "Checksums will NOT survive KEK rotation until the persisted key can be written.");
-            return VaultChecksum.deriveKey(kek);
-        }
+        byte[] raw = new byte[32];
+        new SecureRandom().nextBytes(raw);
+        String winner = persistence.setMetaValueIfAbsent(CHECKSUM_KEY_META, wrapChecksumKey(raw, kek));
+        // null only from a store that keeps no metadata at all; the key then lives
+        // for this process, as nothing could have been checksummed under another one.
+        return winner != null ? unwrapChecksumKey(winner) : raw;
     }
 
     /**

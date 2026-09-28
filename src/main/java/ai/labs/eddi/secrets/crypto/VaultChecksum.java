@@ -52,8 +52,8 @@ public final class VaultChecksum {
      * The current (keyed) checksum for a plaintext under a tenant.
      *
      * @param checksumKey
-     *            the HMAC key, derived from the vault KEK (see
-     *            {@link #deriveKey(byte[])})
+     *            the HMAC key — the vault's random deployment checksum key, stored
+     *            KEK-wrapped by {@code VaultSecretProvider}
      * @param tenantId
      *            the owning tenant, bound into the MAC so equal values in different
      *            tenants do not share a checksum
@@ -109,20 +109,6 @@ public final class VaultChecksum {
             expected = legacy(plaintext);
         }
         return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), storedChecksum.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Derive the checksum HMAC key from the vault KEK, domain-separated so it is
-     * independent of the KEK's other uses (DEK wrapping) and of the audit HMAC key.
-     * A single fixed derivation input is enough — the KEK is already high-entropy
-     * and per-deployment.
-     *
-     * @param kek
-     *            the 32-byte vault KEK
-     * @return the 32-byte checksum key
-     */
-    public static byte[] deriveKey(byte[] kek) {
-        return hmac(kek, "eddi-vault-checksum-key-v1".getBytes(StandardCharsets.UTF_8));
     }
 
     private static String hmacHex(byte[] key, String data) {

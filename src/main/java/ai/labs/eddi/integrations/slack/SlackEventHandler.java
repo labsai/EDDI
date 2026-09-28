@@ -246,16 +246,13 @@ public class SlackEventHandler {
         String eventSubtype = (String) event.get("subtype");
         String eventChannel = (String) event.get("channel");
         String eventThreadTs = (String) event.get("thread_ts");
-        // Never log the message BODY at INFO — a Slack message is end-user content and
-        // may carry secrets pasted into a channel. Only its length is logged here; the
-        // full preview is available at DEBUG for local troubleshooting.
+        // Never log the message BODY, at any level — a Slack message is end-user
+        // content and may carry secrets pasted into a channel, and sanitize() strips
+        // control characters, not credentials. Only its length is logged.
         int textLength = event.get("text") instanceof String t ? t.length() : 0;
         LOGGER.infof("[SLACK] Event received: type=%s, subtype=%s, channel=%s, thread_ts=%s, has_bot_id=%s, text_len=%d",
                 sanitize(eventType), sanitize(eventSubtype), sanitize(eventChannel),
                 sanitize(eventThreadTs), event.containsKey("bot_id"), textLength);
-        if (LOGGER.isDebugEnabled() && event.get("text") instanceof String dt) {
-            LOGGER.debugf("[SLACK] Event text preview: %s", sanitize(dt.length() > 50 ? dt.substring(0, 50) + "..." : dt));
-        }
 
         // Filter bot's own messages (prevent infinite loop)
         if (event.containsKey("bot_id") || "bot_message".equals(event.get("subtype"))) {
@@ -883,8 +880,9 @@ public class SlackEventHandler {
 
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
-            LOGGER.infof("Starting group discussion in channel %s, group %s, question: %s",
-                    sanitize(channelId), sanitize(groupId), sanitize(question.substring(0, Math.min(80, question.length()))));
+            // The question is end-user message content — log its length, not its text.
+            LOGGER.infof("Starting group discussion in channel %s, group %s (question_len=%d)",
+                    sanitize(channelId), sanitize(groupId), question.length());
 
             groupConversationService.startAndDiscussAsync(groupId, question, userId, listener);
 
@@ -951,13 +949,10 @@ public class SlackEventHandler {
             return false;
         }
 
-        // Log routing identity at INFO but never the message body — it is end-user
-        // content that may contain secrets. Length only; preview at DEBUG.
+        // Log routing identity but never the message body, at any level — it is
+        // end-user content that may contain secrets. Length only.
         LOGGER.infof("Follow-up in agent %s thread from user %s (text_len=%d)",
                 sanitize(ctx.displayName()), sanitize(userId), text.length());
-        if (LOGGER.isDebugEnabled()) {
-            LOGGER.debugf("Follow-up text preview: %s", sanitize(text.substring(0, Math.min(60, text.length()))));
-        }
 
         // Build context-enriched input
         String enrichedInput = buildFollowUpInput(ctx, text);
