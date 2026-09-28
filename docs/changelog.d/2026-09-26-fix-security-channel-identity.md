@@ -255,7 +255,10 @@ residual; the second is mutation-checked.
   instead of starting a conversation whose mapping would shadow the legacy one
   (`failedLegacyLookup_failsTheRequestInsteadOfShadowingTheLegacyMapping`). The
   channel-name uniqueness check refuses the save (503) when its scan cannot run,
-  rather than allowing it (`uniquenessScanFailureRefusesSave`). An adopted chat's
+  rather than allowing it (`uniquenessScanFailureRefusesSave`), and so does a
+  transient failure reading one existing integration; only an integration that no
+  longer exists, or whose document no longer deserialises, is skipped
+  (`transientEntryReadFailureRefusesSave`). An adopted chat's
   conversation stays owned by the raw id, so GDPR export/erasure must address both
   `openwebui:<id>` and `<id>`; this is documented, not automated, because deriving
   the raw id could reach an OIDC principal's data.

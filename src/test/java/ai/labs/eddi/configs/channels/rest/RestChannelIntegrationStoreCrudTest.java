@@ -16,6 +16,7 @@ import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
+import com.fasterxml.jackson.core.JsonParseException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -279,6 +280,43 @@ class RestChannelIntegrationStoreCrudTest {
                     .thenThrow(new RuntimeException("store down"));
 
             assertThrows(ServiceUnavailableException.class, () -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        private void oneExistingIntegration() throws Exception {
+            var entry = new DocumentDescriptor();
+            entry.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445509?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(entry));
+        }
+
+        @Test
+        @DisplayName("a transient failure reading an existing integration refuses the save — it may hold the same name")
+        void transientEntryReadFailureRefusesSave() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        @Test
+        @DisplayName("an existing integration whose document no longer deserialises is skipped, not a blocker")
+        void corruptEntryIsSkipped() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1)).thenThrow(new IResourceStore.ResourceStoreException(
+                    "unreadable", new JsonParseException(null, "unexpected token")));
+
+            assertDoesNotThrow(() -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        @Test
+        @DisplayName("a descriptor whose integration no longer exists is skipped")
+        void missingEntryIsSkipped() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertDoesNotThrow(() -> sut.validateUniqueName(validConfig(), null));
         }
 
         @Test

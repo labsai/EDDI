@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -474,8 +475,22 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     }
                 } catch (BadRequestException e) {
                     throw e;
+                } catch (IResourceStore.ResourceNotFoundException e) {
+                    // The descriptor points at an integration that no longer exists — it
+                    // cannot hold the name, so it is not a conflict.
+                    LOG.debugf("Skipping a missing channel integration during the name uniqueness check: %s",
+                            sanitize(e.getMessage()));
                 } catch (Exception e) {
-                    LOG.debugf("Skipping descriptor during name uniqueness check: %s", e.getMessage());
+                    if (!isUnreadableDocument(e)) {
+                        // A transient store failure: this entry may carry the very name being
+                        // saved, so the check is inconclusive — the outer handler fails closed.
+                        throw e;
+                    }
+                    // A stored document that cannot be deserialised is skipped, so one corrupt
+                    // entry cannot block every channel write on the instance. A duplicate that
+                    // slips past it still cannot be used: the router refuses an ambiguous name.
+                    LOG.warnf("Skipping an unreadable channel integration during the name uniqueness check: %s",
+                            sanitize(e.getMessage()));
                 }
             }
         } catch (BadRequestException e) {
@@ -487,6 +502,23 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             throw new ServiceUnavailableException(
                     "Could not verify that the channel integration name is unique. Please retry.");
         }
+    }
+
+    /**
+     * Whether a read failure means the stored document itself is unreadable (it no
+     * longer deserialises) rather than that the store could not be reached. Only
+     * the former is safe to skip in the uniqueness scan.
+     */
+    private static boolean isUnreadableDocument(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof JsonProcessingException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
     }
 
     /**
@@ -506,8 +538,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     /**
      * The lower-cased names of every integration of {@code channelType}. Best
-     * effort, like {@link #validateUniqueName}: an unreadable entry is skipped, and
-     * a failed scan yields what was read so far.
+     * effort: an entry that cannot be read is skipped and a failed scan yields what
+     * was read so far — {@link #validateUniqueName} stays the authoritative check
+     * and fails closed on a transient read failure.
      */
     private Set<String> namesInUseLowerCase(String channelType) {
         Set<String> used = new HashSet<>();
