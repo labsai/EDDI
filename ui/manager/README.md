@@ -58,7 +58,7 @@ npm run build        # Production build
 
 | Layer      | Technology                                      |
 | ---------- | ----------------------------------------------- |
-| Build      | Vite 6                                          |
+| Build      | Vite 8                                          |
 | UI         | React 19 + TypeScript 5 (strict)                |
 | Styling    | Tailwind CSS v4                                 |
 | State      | TanStack Query v5 + Zustand                     |
