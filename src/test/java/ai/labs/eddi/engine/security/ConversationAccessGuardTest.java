@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -104,22 +105,90 @@ class ConversationAccessGuardTest {
         }
 
         @Test
-        @DisplayName("skips the check when the descriptor is not found — the operation itself reports the 404")
-        void skipsWhenDescriptorNotFound() throws Exception {
-            doThrow(new ResourceNotFoundException("no descriptor"))
+        @DisplayName("C1a: a soft-deleted conversation is still owner-checked, against its archived descriptor")
+        void softDeletedConversationDeniesNonOwner() throws Exception {
+            // A soft delete archives the descriptor and keeps the memory. This used to
+            // return null ("allowed"), opening the conversation to every caller.
+            doThrow(new ResourceNotFoundException("archived"))
                     .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            var archived = new ConversationDescriptor();
+            archived.setUserId(OWNER);
+            doReturn(archived).when(descriptorStore).readDescriptorWithHistory(CONVERSATION_ID, 0);
             var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("C1a: the owner of a soft-deleted conversation is still admitted")
+        void softDeletedConversationAdmitsOwner() throws Exception {
+            doThrow(new ResourceNotFoundException("archived"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            var archived = new ConversationDescriptor();
+            archived.setUserId(OWNER);
+            doReturn(archived).when(descriptorStore).readDescriptorWithHistory(CONVERSATION_ID, 0);
+            var guard = guardFor(identityOf(OWNER, "eddi-viewer"), true);
+
+            assertEquals(OWNER, guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("C1a/C1c: no descriptor at all (live or archived) is a 404 for a non-admin")
+        void noDescriptorAtAllIsNotFoundForNonAdmin() throws Exception {
+            // Permanently deleted, swept, never existed, or its descriptor was never
+            // written: no owner to check against, so nobody but an admin gets in —
+            // the audit trail of a deleted conversation included.
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+            var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+
+            assertThrows(NotFoundException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("a store that answers null for both reads is treated as no descriptor")
+        void nullDescriptorsAreNotFoundForNonAdmin() throws Exception {
+            doReturn(null).when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doReturn(null).when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+            var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+
+            assertThrows(NotFoundException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("an admin may still reach a conversation without any descriptor (orphans, audit of deleted ones)")
+        void noDescriptorAtAllAdmitsAdmin() throws Exception {
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+            var guard = guardFor(identityOf(OTHER, "eddi-admin"), true);
 
             assertNull(guard.requireConversationOwner(CONVERSATION_ID));
         }
 
         @Test
-        @DisplayName("skips the check when the store returns no descriptor at all")
-        void skipsWhenDescriptorNull() throws Exception {
-            doReturn(null).when(descriptorStore).readDescriptor(anyString(), anyInt());
-            var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
+        @DisplayName("authorization disabled: a missing descriptor is still admitted, as before")
+        void noDescriptorAuthDisabledAdmits() throws Exception {
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            var guard = guardFor(identityOf(OTHER), false);
 
             assertNull(guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("fails closed when the archive read fails")
+        void failsClosedOnArchiveStoreError() throws Exception {
+            doThrow(new ResourceNotFoundException("archived"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doThrow(new ResourceStoreException("db down"))
+                    .when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+            var guard = guardFor(identityOf(OWNER, "eddi-viewer"), true);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
         }
 
         @Test
@@ -148,6 +217,55 @@ class ConversationAccessGuardTest {
             var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
 
             assertNull(guard.requireConversationOwner(CONVERSATION_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("callerActor")
+    class CallerActor {
+
+        @Test
+        @DisplayName("a named caller is the actor")
+        void namedCaller() {
+            assertEquals(OWNER, guardFor(identityOf(OWNER, "eddi-editor"), true).callerActor("system:x"));
+        }
+
+        @Test
+        @DisplayName("anonymous or nameless callers fall back")
+        void fallsBack() {
+            assertEquals("system:x", guardFor(identityOf(null), true).callerActor("system:x"));
+            assertEquals("system:x", guardFor(namelessIdentity(), true).callerActor("system:x"));
+        }
+    }
+
+    @Nested
+    @DisplayName("requireExistingConversationOwner")
+    class RequireExistingConversationOwner {
+
+        @Test
+        @DisplayName("a missing conversation is a 404 even for an admin")
+        void missingIsNotFoundForAdmin() throws Exception {
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doThrow(new ResourceNotFoundException("gone"))
+                    .when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+            var guard = guardFor(identityOf(OTHER, "eddi-admin"), true);
+
+            assertThrows(NotFoundException.class, () -> guard.requireExistingConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("a soft-deleted conversation is owner-checked against its archived descriptor")
+        void softDeletedIsOwnerChecked() throws Exception {
+            doThrow(new ResourceNotFoundException("archived"))
+                    .when(descriptorStore).readDescriptor(anyString(), anyInt());
+            var archived = new ConversationDescriptor();
+            archived.setUserId(OWNER);
+            doReturn(archived).when(descriptorStore).readDescriptorWithHistory(CONVERSATION_ID, 0);
+
+            assertThrows(ForbiddenException.class,
+                    () -> guardFor(identityOf(OTHER, "eddi-viewer"), true).requireExistingConversationOwner(CONVERSATION_ID));
+            assertEquals(OWNER, guardFor(identityOf(OWNER, "eddi-viewer"), true).requireExistingConversationOwner(CONVERSATION_ID));
         }
     }
 

@@ -250,6 +250,11 @@ public class DreamService {
      */
     private static List<UserMemoryEntry> scopeToOwningAgent(List<UserMemoryEntry> entries, String agentId,
                                                             AgentConfiguration.DreamConfig dreamConfig) {
+        // GDPR bookkeeping is never maintained, whatever the scope. The Art. 18 flag
+        // has no owning agent, so whole-set maintenance used to include it: a stale
+        // prune deleted it — lifting a legal restriction with no admin involved and
+        // no audit entry — and a consolidation could rewrite it.
+        entries = entries.stream().filter(entry -> !IUserMemoryStore.isReservedKey(entry.key())).toList();
         if (dreamConfig.isCrossAgentMaintenance()) {
             return entries;
         }
