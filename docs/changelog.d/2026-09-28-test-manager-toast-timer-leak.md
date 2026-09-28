@@ -74,5 +74,5 @@ This covers all four files that render `<Toaster>` (`resource-detail-save-not-li
 
 - **Probe, the same file:** 1 pending removal timer at teardown before the fix, 0 after, over 3
   runs each. The three sibling files also end with 0. The probe was never committed.
-- **Full `npx vitest run --coverage`, as CI runs it:** 427 files and 6,861 tests pass, with no unhandled errors.
+- **Full `npx vitest run --coverage`, as CI runs it:** 427 files and 6,866 tests pass, with no unhandled errors.
   `npm run lint` and `npm run typecheck` pass.
