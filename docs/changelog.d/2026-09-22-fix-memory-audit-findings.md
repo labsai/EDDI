@@ -36,6 +36,11 @@ observed there, and carries a regression test.
   it or it came from joining two same-key values, keeps the group's originals instead. And a
   config whose `summarizationPrompt` is null or blank uses the built-in prompt, where it used to
   send the model the literal text "null".
+  A consolidated entry that does not reuse an original is written with `insertIfAbsent`, so a
+  memory another writer creates with the same key between the collision check and the write is
+  refused atomically (and the group rolled back) instead of overwritten; only an entry that
+  reuses one of the group's originals is upserted over it. `insertIfAbsent` now returns the new
+  entry's id, which the rollback needs.
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
 - **`scope: "secret"` values of different users shared one vault slot.** The slot was
   `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to

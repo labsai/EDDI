@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doReturn;
@@ -45,7 +45,7 @@ class IUserMemoryStoreInsertIfAbsentTest {
     void scopedEntryDoesNotBlockGlobal() throws Exception {
         var store = storeHolding(entry("lang", Visibility.self, "agent-a"));
 
-        assertTrue(store.insertIfAbsent(entry("lang", Visibility.global, null)));
+        assertNotNull(store.insertIfAbsent(entry("lang", Visibility.global, null)));
         verify(store).upsert(any());
     }
 
@@ -54,7 +54,7 @@ class IUserMemoryStoreInsertIfAbsentTest {
     void existingGlobalWins() throws Exception {
         var store = storeHolding(entry("lang", Visibility.global, "agent-a"));
 
-        assertFalse(store.insertIfAbsent(entry("lang", Visibility.global, null)));
+        assertNull(store.insertIfAbsent(entry("lang", Visibility.global, null)));
         verify(store, never()).upsert(any());
     }
 
@@ -63,6 +63,6 @@ class IUserMemoryStoreInsertIfAbsentTest {
     void selfIdentityIsPerAgent() throws Exception {
         var store = storeHolding(entry("lang", Visibility.self, "agent-b"), entry("lang", Visibility.global, null));
 
-        assertTrue(store.insertIfAbsent(entry("lang", Visibility.self, "agent-a")));
+        assertNotNull(store.insertIfAbsent(entry("lang", Visibility.self, "agent-a")));
     }
 }

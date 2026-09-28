@@ -432,10 +432,10 @@ class MongoUserMemoryStoreTest {
         when(updateResult.getUpsertedId()).thenReturn(null); // an entry was already there
         when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
 
-        boolean inserted = store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "OLD-v5", "legacy", Visibility.global, null,
+        String inserted = store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "OLD-v5", "legacy", Visibility.global, null,
                 List.of(), null, false, 0, null, null));
 
-        assertFalse(inserted);
+        assertNull(inserted, "an entry was already there");
         var update = ArgumentCaptor.forClass(Bson.class);
         var options = ArgumentCaptor.forClass(UpdateOptions.class);
         verify(collection).updateOne(any(Bson.class), update.capture(), options.capture());
@@ -461,7 +461,8 @@ class MongoUserMemoryStoreTest {
         when(updateResult.getUpsertedId()).thenReturn(new BsonObjectId(TEST_OID));
         when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
 
-        assertTrue(store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
-                false, 0, null, null)));
+        assertEquals(TEST_OID.toHexString(),
+                store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
+                        false, 0, null, null)));
     }
 }

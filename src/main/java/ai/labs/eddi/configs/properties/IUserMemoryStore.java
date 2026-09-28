@@ -174,25 +174,22 @@ public interface IUserMemoryStore {
      * {@code (userId, key)} for a {@code global} entry, {@code (userId, key,
      * sourceAgentId)} for a self or group one — and never replaces a value that is
      * there. For writers whose value must lose to anything already stored, such as
-     * a migration of frozen legacy data.
+     * a migration of frozen legacy data, or that must never land on an entry they
+     * did not account for, such as Dream's newly consolidated entries.
      * <p>
      * This default checks and then writes, so a concurrent writer can slip in
      * between; stores that can do it atomically override it.
      *
-     * @return {@code true} when the entry was inserted, {@code false} when one
-     *         already existed
+     * @return the id of the inserted entry, or {@code null} when one already
+     *         existed
      */
-    default boolean insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+    default String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         boolean global = entry.visibility() == Visibility.global;
         boolean exists = getAllEntries(entry.userId()).stream()
                 .anyMatch(e -> entry.key().equals(e.key()) && (global
                         ? e.visibility() == Visibility.global
                         : e.visibility() != Visibility.global && Objects.equals(entry.sourceAgentId(), e.sourceAgentId())));
-        if (exists) {
-            return false;
-        }
-        upsert(entry);
-        return true;
+        return exists ? null : upsert(entry);
     }
 
     /**

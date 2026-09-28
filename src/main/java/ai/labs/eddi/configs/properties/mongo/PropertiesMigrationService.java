@@ -141,7 +141,7 @@ public class PropertiesMigrationService {
                 // different memory and does not stand in for the shared one. The insert
                 // is atomic, so a value another node writes meanwhile cannot be lost.
                 try {
-                    if (userMemoryStore.insertIfAbsent(entry)) {
+                    if (userMemoryStore.insertIfAbsent(entry) != null) {
                         entryCount++;
                     } else {
                         keptNewerEntries++;

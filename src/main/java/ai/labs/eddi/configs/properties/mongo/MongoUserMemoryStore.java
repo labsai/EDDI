@@ -439,7 +439,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
      * this call can no longer be overwritten.
      */
     @Override
-    public boolean insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entry, "entry");
         RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
@@ -454,7 +454,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
                 Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
-        return memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId() != null;
+        var upserted = memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId();
+        return upserted != null ? upserted.asObjectId().getValue().toHexString() : null;
     }
 
     /**

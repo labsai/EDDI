@@ -58,6 +58,7 @@ class DreamServiceTest {
         // A store returns the id of the entry it wrote; a null one is an unconfirmed
         // write that DreamService rolls back.
         when(store.upsert(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
     }
 
     // === Existing tests (updated for new constructor) ===
@@ -254,7 +255,7 @@ class DreamServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals(4, result.entriesSummarized()); // 6 originals - 2 consolidated = 4 reduced
-        verify(store, times(2)).upsert(any(UserMemoryEntry.class));
+        verify(store, times(2)).insertIfAbsent(any(UserMemoryEntry.class));
         verify(store, times(6)).deleteEntry(anyString());
     }
 
@@ -335,7 +336,7 @@ class DreamServiceTest {
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
-        doThrow(new RuntimeException("DB write failed")).when(store).upsert(any(UserMemoryEntry.class));
+        doThrow(new RuntimeException("DB write failed")).when(store).insertIfAbsent(any(UserMemoryEntry.class));
 
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
@@ -540,7 +541,7 @@ class DreamServiceTest {
 
         // Verify the upserted entry has Visibility.self (most restrictive)
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store).upsert(captor.capture());
+        verify(store).insertIfAbsent(captor.capture());
         assertEquals(Visibility.self, captor.getValue().visibility());
     }
 
@@ -688,7 +689,7 @@ class DreamServiceTest {
         dreamConfig.setSummarizeTargetEntries(2);
         var entries = makeEntries(8, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-a", "new-b", "new-c", "new-d");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-a", "new-b", "new-c", "new-d");
 
         // LLM returns 4 (< 8 originals, but > 2 target). Truncating to 2 would
         // delete all 8 originals while keeping only half of what the model
@@ -702,7 +703,7 @@ class DreamServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals(4, result.entriesSummarized()); // 8 deleted - 4 created
-        verify(store, times(4)).upsert(any(UserMemoryEntry.class));
+        verify(store, times(4)).insertIfAbsent(any(UserMemoryEntry.class));
         verify(store, times(8)).deleteEntry(anyString());
     }
 
@@ -779,12 +780,33 @@ class DreamServiceTest {
         dreamConfig.setSummarizeMinEntries(3);
         when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
-                .thenReturn(llmResult("[{\"key\":\"coffee\",\"value\":\"black, no sugar, oat milk, large\"}]"));
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"black, no sugar, oat milk, large\"}]"));
         when(store.upsert(any(UserMemoryEntry.class))).thenReturn(null);
 
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
         assertEquals(0, result.entriesSummarized());
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * The collision check runs before the writes. A memory another writer creates
+     * with the consolidated key in between must not be overwritten: the new entry
+     * goes through the atomic insertIfAbsent, and a refusal rolls the group back.
+     */
+    @Test
+    void summarize_keyCreatedConcurrently_isNotOverwritten_groupRolledBack() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"coffee\",\"value\":\"black, no sugar, oat milk, large\"}]"));
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn(null); // someone else got there first
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(argThat(e -> e != null && "coffee".equals(e.key())));
         verify(store, never()).deleteEntry(anyString());
     }
 
@@ -860,14 +882,14 @@ class DreamServiceTest {
     void summarize_duplicateConsolidatedKeys_mergedNotOverwritten() throws Exception {
         enableSummarization();
         when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-1");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-1");
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\":\"pets\",\"value\":\"has a dog\"},{\"key\":\"pets\",\"value\":\"has a cat\"}]"));
 
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(1)).upsert(captor.capture());
+        verify(store, times(1)).insertIfAbsent(captor.capture());
         assertEquals("has a dog; has a cat", captor.getValue().value());
     }
 
@@ -876,10 +898,10 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class)))
-                .thenReturn("id-0") // overwrote original id-0 in place
-                .thenThrow(new IResourceStore.ResourceStoreException("DB down")) // second consolidated entry fails
-                .thenReturn("id-0"); // the restore
+        // key-0 reuses original id-0 (an upsert in place); "other" is new
+        // (insertIfAbsent) and fails
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("id-0");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenThrow(new IResourceStore.ResourceStoreException("DB down"));
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"merged\"},{\"key\":\"other\",\"value\":\"x\"}]"));
 
@@ -888,8 +910,8 @@ class DreamServiceTest {
         assertEquals(0, result.entriesSummarized());
         verify(store, never()).deleteEntry(anyString());
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(3)).upsert(captor.capture());
-        assertEquals("value-0", captor.getAllValues().get(2).value(), "the overwritten original must be written back");
+        verify(store, times(2)).upsert(captor.capture());
+        assertEquals("value-0", captor.getAllValues().get(1).value(), "the overwritten original must be written back");
     }
 
     @Test
@@ -1217,7 +1239,7 @@ class DreamServiceTest {
                     "fact", Visibility.self, "agent-2", List.of(), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -1227,7 +1249,7 @@ class DreamServiceTest {
 
         // One consolidated entry per contributing agent — never a merged one
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(2)).upsert(captor.capture());
+        verify(store, times(2)).insertIfAbsent(captor.capture());
         var written = captor.getAllValues();
         assertTrue(written.stream().allMatch(e -> e.visibility() == Visibility.self),
                 "self-scoped memories must never be widened, got: "
@@ -1259,7 +1281,7 @@ class DreamServiceTest {
                     "fact", Visibility.global, "agent-2", List.of(), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
@@ -1267,7 +1289,7 @@ class DreamServiceTest {
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(2)).upsert(captor.capture());
+        verify(store, times(2)).insertIfAbsent(captor.capture());
         var byAgent = captor.getAllValues().stream()
                 .collect(Collectors.toMap(UserMemoryEntry::sourceAgentId, UserMemoryEntry::visibility));
         assertEquals(Visibility.self, byAgent.get("agent-1"));
@@ -1286,7 +1308,7 @@ class DreamServiceTest {
                     List.of("group-A", "group-B"), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -1295,7 +1317,7 @@ class DreamServiceTest {
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store).upsert(captor.capture());
+        verify(store).insertIfAbsent(captor.capture());
         assertTrue(captor.getValue().groupIds().contains("group-A"));
         assertTrue(captor.getValue().groupIds().contains("group-B"));
     }
@@ -1369,7 +1391,7 @@ class DreamServiceTest {
                 .thenReturn(llmResult(llmResponse));
 
         // First upsert succeeds, second throws
-        when(store.upsert(any(UserMemoryEntry.class)))
+        when(store.insertIfAbsent(any(UserMemoryEntry.class)))
                 .thenReturn("inserted-1")
                 .thenThrow(new RuntimeException("DB write failed"));
 

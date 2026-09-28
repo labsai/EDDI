@@ -683,12 +683,29 @@ public class DreamService {
             Set<String> overwrittenOriginalIds = new LinkedHashSet<>();
             try {
                 for (var entry : consolidated) {
-                    String id = userMemoryStore.upsert(new UserMemoryEntry(
+                    var toWrite = new UserMemoryEntry(
                             null, userId, entry.key(), entry.value(),
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
-                            earliestCreated, Instant.now()));
+                            earliestCreated, Instant.now());
+                    // An entry that reuses an original is meant to overwrite it. Any other
+                    // entry must be new: the collision check above ran before this write,
+                    // so a memory a conversation, REST or MCP created with this key in the
+                    // meantime would otherwise be overwritten — and, not being one of the
+                    // originals, never restored by the rollback. insertIfAbsent refuses
+                    // atomically instead.
+                    boolean reusesOriginal = reusedOriginals.values().stream().anyMatch(o -> entry.key().equals(o.key()));
+                    if (!reusesOriginal) {
+                        String id = userMemoryStore.insertIfAbsent(toWrite);
+                        if (id == null) {
+                            throw new IllegalStateException("a memory with key '" + LogSanitizer.sanitize(entry.key())
+                                    + "' appeared outside this group while consolidating");
+                        }
+                        createdIds.add(id);
+                        continue;
+                    }
+                    String id = userMemoryStore.upsert(toWrite);
                     if (id == null) {
                         // The write cannot be confirmed, so it may have landed on an original
                         // with this key: restore that one too, then roll everything back.

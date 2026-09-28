@@ -318,7 +318,7 @@ class DreamServiceExtendedTest {
 
             var entries = makeEntries(5, "fact", "agent-1");
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             // LLM returns 3 entries (target 1, but fewer than the 5 originals) → all 3
             // written
@@ -328,7 +328,7 @@ class DreamServiceExtendedTest {
 
             var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
-            verify(store, times(3)).upsert(any(UserMemoryEntry.class));
+            verify(store, times(3)).insertIfAbsent(any(UserMemoryEntry.class));
         }
     }
 
@@ -391,7 +391,7 @@ class DreamServiceExtendedTest {
                             Visibility.self, "agent-2", null, "source", false, 0,
                             Instant.now().minusSeconds(40), Instant.now())));
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"consolidated\", \"value\": \"merged\"}]";
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -401,9 +401,9 @@ class DreamServiceExtendedTest {
             assertTrue(result.isSuccess());
 
             // One self-scoped entry per contributing agent; nothing widened
-            verify(store, never()).upsert(argThat(entry -> entry.visibility() != Visibility.self));
-            verify(store).upsert(argThat(entry -> "agent-1".equals(entry.sourceAgentId())));
-            verify(store).upsert(argThat(entry -> "agent-2".equals(entry.sourceAgentId())));
+            verify(store, never()).insertIfAbsent(argThat(entry -> entry.visibility() != Visibility.self));
+            verify(store).insertIfAbsent(argThat(entry -> "agent-1".equals(entry.sourceAgentId())));
+            verify(store).insertIfAbsent(argThat(entry -> "agent-2".equals(entry.sourceAgentId())));
         }
 
         @Test
@@ -422,7 +422,7 @@ class DreamServiceExtendedTest {
                             Visibility.group, "agent-2", List.of("team-a"), "source", false, 0,
                             Instant.now().minusSeconds(50), Instant.now())));
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult("[{\"key\": \"c\", \"value\": \"m\"}]", 0, 0));
@@ -431,7 +431,7 @@ class DreamServiceExtendedTest {
             assertTrue(result.isSuccess());
 
             // Already shared → a single merged entry, still group-scoped
-            verify(store, times(1)).upsert(argThat(entry -> entry.visibility() == Visibility.group));
+            verify(store, times(1)).insertIfAbsent(argThat(entry -> entry.visibility() == Visibility.group));
         }
     }
 

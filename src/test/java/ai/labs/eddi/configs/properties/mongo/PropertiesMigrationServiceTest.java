@@ -299,8 +299,8 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(doc);
 
             // "lang" already has a global entry: the store declines the insert
-            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "lang".equals(e.key())))).thenReturn(false);
-            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "color".equals(e.key())))).thenReturn(true);
+            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "lang".equals(e.key())))).thenReturn(null);
+            when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "color".equals(e.key())))).thenReturn("new-id");
 
             service.onStartup(startupEvent);
 
