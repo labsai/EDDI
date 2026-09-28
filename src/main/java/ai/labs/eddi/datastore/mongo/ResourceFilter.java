@@ -71,6 +71,8 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
             for (QueryFilter queryFilter : queryFilters.getQueryFilters()) {
                 if (queryFilter.getFilter() instanceof String) {
                     filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.NotMatching notMatching) {
+                    filters.add(Filters.not(Filters.regex(queryFilter.getField(), notMatching.pattern())));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }

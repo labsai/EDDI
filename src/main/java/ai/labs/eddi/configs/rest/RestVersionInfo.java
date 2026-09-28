@@ -93,8 +93,17 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
      * see {@link AccessScope#withinSpace}.
      */
     public List<DocumentDescriptor> readDescriptors(String filter, Integer index, Integer limit, String space) {
+        return readDescriptors(filter, index, limit, space, null);
+    }
+
+    /**
+     * As {@link #readDescriptors(String, Integer, Integer, String)}, further
+     * narrowed by who owns the resource — see {@link AccessScope#withOwnership}. An
+     * ownership value other than {@code mine}, {@code shared} or blank is a 400.
+     */
+    public List<DocumentDescriptor> readDescriptors(String filter, Integer index, Integer limit, String space, String ownership) {
         return readDescriptors(RestUtilities.extractDescriptorType(resourceURI), filter, index, limit,
-                accessGuard.listingScope().withinSpace(space));
+                accessGuard.listingScope(space, ownership));
     }
 
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit) {

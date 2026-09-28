@@ -15,6 +15,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
 import java.util.Date;
@@ -93,6 +94,25 @@ public class ResourceAccessGuard {
             return AccessScope.unrestricted();
         }
         return AccessScope.forCaller(spaceContext.current(), settings.admitsLegacy());
+    }
+
+    /**
+     * {@link #listingScope()} narrowed to one space and by ownership — the two view
+     * filters a listing endpoint accepts.
+     *
+     * @param space
+     *            a space id, or blank for every space
+     * @param ownership
+     *            {@code mine}, {@code shared}, or blank
+     * @throws BadRequestException
+     *             for an unrecognised ownership value
+     */
+    public AccessScope listingScope(String space, String ownership) {
+        Ownership parsed = Ownership.parseOrNull(ownership);
+        if (parsed == null) {
+            throw new BadRequestException("ownership must be 'mine', 'shared' or blank — was '" + sanitize(ownership) + "'");
+        }
+        return listingScope().withinSpace(space).withOwnership(parsed, spaceContext.currentPrincipal());
     }
 
     /**

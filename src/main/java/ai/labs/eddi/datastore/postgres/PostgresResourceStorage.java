@@ -714,6 +714,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                     // Regex filter → use SQL LIKE on JSONB field cast to text
                     clauses.add(fieldExpression + " ~ ?");
                     params.add(filterStr);
+                } else if (qf.getFilter() instanceof IResourceFilter.NotMatching notMatching) {
+                    // COALESCE so an absent field counts as "not matching", as it does on
+                    // MongoDB: NULL !~ x is NULL, which a WHERE clause treats as false.
+                    clauses.add("COALESCE(" + fieldExpression + ", '') !~ ?");
+                    params.add(notMatching.pattern());
                 } else if (qf.getFilter() instanceof Boolean boolVal) {
                     clauses.add("COALESCE((" + fieldExpression + ")::boolean, false) = ?");
                     params.add(boolVal);

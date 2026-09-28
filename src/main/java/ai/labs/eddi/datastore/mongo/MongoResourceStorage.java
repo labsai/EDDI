@@ -424,6 +424,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             for (IResourceFilter.QueryFilter queryFilter : queryFilters.getQueryFilters()) {
                 if (queryFilter.getFilter() instanceof String) {
                     filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.NotMatching notMatching) {
+                    // $not also matches documents lacking the field, which is the
+                    // contract NotMatching documents.
+                    filters.add(Filters.not(Filters.regex(queryFilter.getField(), notMatching.pattern())));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }
