@@ -320,7 +320,18 @@ public class OpenAiConversationBridge {
         if (rawId == null) {
             return null;
         }
-        UserConversation legacy = readMapping(intent, rawId);
+        UserConversation legacy;
+        try {
+            legacy = userConversationStore.readUserConversation(intent, rawId);
+        } catch (IResourceStore.ResourceStoreException e) {
+            // Inconclusive, not absent: starting a new conversation here would write a
+            // namespaced mapping that shadows the legacy one on every later request, and
+            // the chat would lose its conversation for good. Fail this request instead.
+            LOGGER.warnf("Could not read the legacy conversation mapping for %s: %s", sanitize(intent),
+                    e.getMessage());
+            throw OpenAiApiException.serverError(null,
+                    "Could not establish a conversation for this chat. Please retry.");
+        }
         if (legacy == null) {
             return null;
         }

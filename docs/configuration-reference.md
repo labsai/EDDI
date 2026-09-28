@@ -345,7 +345,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed |
 | `eddi.openai-compat.environment` | `production` | Deployment environment agents are resolved from |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Also list `…-stateless` model ids |
-| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |

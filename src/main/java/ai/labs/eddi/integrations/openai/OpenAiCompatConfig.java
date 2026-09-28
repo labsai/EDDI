@@ -146,6 +146,10 @@ public class OpenAiCompatConfig {
      * period with {@code http-policy=authenticated}) created it, so adopting it
      * could hand an OIDC user's conversation to a shared-key caller who names that
      * principal. Enable only when {@code /v1} has never run in OIDC mode.
+     * <p>
+     * An adopted conversation keeps its raw-id owner, so GDPR export and erasure
+     * for {@code openwebui:<id>} do not reach it; address the raw {@code <id>} as
+     * well while such conversations exist.
      */
     public boolean isAdoptLegacyHeaderMappings() {
         return adoptLegacyHeaderMappings;

@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -269,6 +270,15 @@ class RestChannelIntegrationStoreCrudTest {
                     .thenReturn(List.of());
 
             assertDoesNotThrow(() -> sut.duplicateChannel(CHANNEL_ID, 1));
+        }
+
+        @Test
+        @DisplayName("a name-uniqueness scan that cannot run refuses the save instead of skipping the check")
+        void uniquenessScanFailureRefusesSave() throws Exception {
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenThrow(new RuntimeException("store down"));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.validateUniqueName(validConfig(), null));
         }
 
         @Test

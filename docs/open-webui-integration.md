@@ -275,6 +275,13 @@ ran with `http-policy=authenticated`) created it, so it is only adopted when
 `adopt-legacy-header-mappings=true`. Leave it off if `/v1` ever ran in OIDC mode;
 otherwise a pre-upgrade chat starts a new conversation on its next message.
 
+An adopted chat keeps its conversation, and that conversation keeps its raw-id
+owner (so its memories keep loading). GDPR export and erasure resolve data by
+user id, so for an Open WebUI user of such a chat **address both
+`openwebui:<id>` and the raw `<id>`**. EDDI does not do this automatically: the
+raw id shares a namespace with OIDC principals, so deriving it from the
+namespaced id could export or erase another user's data.
+
 > [!IMPORTANT]
 > **`trust-user-headers` is a deliberate delegation.** The header is believed only because the caller already proved possession of the API key — i.e. Open WebUI is a trusted proxy that authenticated its own users. **A leaked API key therefore allows impersonating any user.** Rotate it as you would any shared secret, and prefer `http-policy=authenticated` where per-user tokens are available.
 

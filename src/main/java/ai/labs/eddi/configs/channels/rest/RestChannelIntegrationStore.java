@@ -19,6 +19,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -439,7 +440,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * {@code ChannelTargetRouter.getIntegrationByName} resolves by name). If two
      * integrations shared a name, a decision could authorize against one while the
      * record belonged to the other — so the name must be unique, and an ambiguous
-     * lookup already refuses fail-closed (Finding C).
+     * lookup already refuses fail-closed (Finding C). A scan that cannot run at all
+     * refuses the save (503) rather than skipping the check; a single unreadable
+     * entry is skipped, so one corrupt document cannot block every channel write.
      *
      * @param excludeId
      *            the resource id being updated (null on create)
@@ -478,7 +481,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
-            LOG.warn("Failed to check channel name uniqueness — allowing save", e);
+            // Fail closed: a save that skipped the check could create a duplicate name,
+            // and the router then refuses to resolve either integration by it.
+            LOG.warn("Failed to check channel name uniqueness — refusing save", e);
+            throw new ServiceUnavailableException(
+                    "Could not verify that the channel integration name is unique. Please retry.");
         }
     }
 

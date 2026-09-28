@@ -755,6 +755,23 @@ class OpenAiConversationBridgeTest {
     }
 
     @Test
+    void failedLegacyLookup_failsTheRequestInsteadOfShadowingTheLegacyMapping() throws Exception {
+        // The raw-id read is inconclusive. Starting a new conversation would write a
+        // namespaced mapping that hides the legacy one forever; the request must fail
+        // (retryable) and nothing may be written.
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI))
+                .thenThrow(new IResourceStore.ResourceStoreException("store down"));
+        var adopting = adoptingBridge();
+
+        assertThrows(OpenAiApiException.class,
+                () -> adopting.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI));
+
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(userConversationStore, never()).createUserConversation(any());
+    }
+
+    @Test
     void rekeyFailure_keepsTheLegacyMapping() throws Exception {
         // The namespaced mapping cannot be written and is not there on re-read: a real
         // store failure, not a race. The legacy mapping must survive, or the next

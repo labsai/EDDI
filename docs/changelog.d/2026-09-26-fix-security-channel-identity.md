@@ -251,6 +251,14 @@ residual; the second is mutation-checked.
   mutation-checked.
 - **Duplicate-name derivation scanned every integration per candidate.** It now reads
   the used names once; `validateUniqueName` stays the authoritative check.
+- **Round 2.** A failed raw-id lookup during adoption now fails the request (retryable)
+  instead of starting a conversation whose mapping would shadow the legacy one
+  (`failedLegacyLookup_failsTheRequestInsteadOfShadowingTheLegacyMapping`). The
+  channel-name uniqueness check refuses the save (503) when its scan cannot run,
+  rather than allowing it (`uniquenessScanFailureRefusesSave`). An adopted chat's
+  conversation stays owned by the raw id, so GDPR export/erasure must address both
+  `openwebui:<id>` and `<id>`; this is documented, not automated, because deriving
+  the raw id could reach an OIDC principal's data.
 
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
