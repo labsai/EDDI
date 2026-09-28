@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -237,6 +238,55 @@ class ConversationMemoryUtilitiesTest {
             String stepStr = String.valueOf(stepData.getValue());
             assertFalse(stepStr.contains(secret), "the raw secret must not survive in a structured step value");
             assertTrue(stepStr.contains("<REDACTED>"), "the nested secret must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true masks a shapeless credential under a credential-named key")
+        void detailedMasksValueUnderCredentialNamedKey() {
+            // "mytenantsecret12345" has no credential SHAPE (no sk-/Bearer prefix), so
+            // only the key says what it is — and walking the Map separates key from
+            // value. The key must be judged before the value is recursed into.
+            String shapeless = "mytenantsecret12345";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("apiKey", shapeless);
+            body.put("auth", Map.of("password", shapeless, "clientSecret", List.of(shapeless)));
+            // a non-credential key nested under a credential key inherits the masking
+            body.put("authorization", Map.of("value", "tenant-credential-9876"));
+            body.put("accessToken", 1234567890123L);
+            body.put("vaultToken", "${vault:tenant-key}");
+            body.put("maxTokens", 4096);
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-shapeless");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("token", shapeless);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            String outStr = String.valueOf(out.get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapeless), "a shapeless credential under a credential key must be masked: " + outStr);
+            assertFalse(outStr.contains("1234567890123"), "a numeric credential under a credential key must be masked");
+            assertFalse(outStr.contains("tenant-credential-9876"), "everything under a credential key is masked, at any depth");
+            assertTrue(outStr.contains("${vault:tenant-key}"), "a vault reference is a pointer, not a secret");
+            assertTrue(outStr.contains("4096"), "a short value under the 8-character floor is kept");
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            assertFalse(String.valueOf(out.get("token")).contains(shapeless), "a top-level credential key is masked too");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapeless),
+                    "a shapeless credential under a credential key must be masked in step data");
         }
 
         @Test

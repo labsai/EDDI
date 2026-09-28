@@ -44,7 +44,11 @@ keep working, while the missing owner/role/redaction checks are added.
   owner/admin-gated raw endpoint. Redaction recurses into `Map` keys and values,
   collection elements and `Object[]` elements, so a secret embedded in a structured value
   (e.g. a deserialized httpCall response body under an agent-chosen key, or a
-  token-keyed map) is masked too, not just top-level strings.
+  token-keyed map) is masked too, not just top-level strings. A value under a
+  credential-named key (`apiKey`, `token`, `secret`, `password`, `authorization`, at any
+  depth) is masked outright even without a credential shape, since walking a map
+  separates the name from the value the name-bound filter rules need; the filter's
+  usual exemptions (under 8 characters, a vault reference) still apply.
 - **Semantic parser endpoint.** `POST /parser/{parserId}` was role-less; it now requires
   `eddi-admin`/`eddi-editor` and a `VIEW` check on the specific parser configuration.
 - **Postgres health readiness.** The anonymous readiness payload no longer returns the

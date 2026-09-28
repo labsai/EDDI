@@ -246,30 +246,52 @@ public class ConversationMemoryUtilities {
      * (including primitive arrays, which cannot hold a String) are returned
      * unchanged. The sensitive internal keys are already dropped by
      * {@link #isSensitiveDetailedKey} before this is reached.
+     * <p>
+     * The filter's name-bound rules ({@code apiKey}, {@code token}, {@code secret},
+     * ...) only fire when the name and the value share one string, and walking a
+     * Map separates them — so {@code {"apiKey": "tenantsecret123"}} carries no
+     * credential <em>shape</em> the value rules would see. The key is therefore
+     * judged here, BEFORE its value is recursed into: everything under a
+     * credential-named key (at any depth) is masked outright via
+     * {@link SecretRedactionFilter#maskCredentialValue}, with the filter's usual
+     * exemptions (under 8 characters, a vault reference).
+     *
+     * @param underCredentialKey
+     *            whether this value sits, at any depth, under a credential-named
+     *            key
      */
-    private static Object redactDetailedValue(Object value) {
+    private static Object redactDetailedValue(Object value, boolean underCredentialKey) {
         if (value instanceof String s) {
-            return SecretRedactionFilter.redact(s);
+            return underCredentialKey
+                    ? SecretRedactionFilter.redact(SecretRedactionFilter.maskCredentialValue(s))
+                    : SecretRedactionFilter.redact(s);
+        }
+        if (underCredentialKey && value instanceof Number number) {
+            String asText = number.toString();
+            String masked = SecretRedactionFilter.maskCredentialValue(asText);
+            return masked.equals(asText) ? value : masked;
         }
         if (value instanceof Map<?, ?> map) {
             var redacted = new LinkedHashMap<Object, Object>();
             for (var entry : map.entrySet()) {
+                boolean credentialKey = underCredentialKey
+                        || entry.getKey() instanceof String k && SecretRedactionFilter.isCredentialFieldName(k);
                 var key = entry.getKey() instanceof String k ? SecretRedactionFilter.redact(k) : entry.getKey();
-                redacted.put(key, redactDetailedValue(entry.getValue()));
+                redacted.put(key, redactDetailedValue(entry.getValue(), credentialKey));
             }
             return redacted;
         }
         if (value instanceof Collection<?> collection) {
             var redacted = new ArrayList<Object>(collection.size());
             for (var element : collection) {
-                redacted.add(redactDetailedValue(element));
+                redacted.add(redactDetailedValue(element, underCredentialKey));
             }
             return redacted;
         }
         if (value instanceof Object[] array) {
             var redacted = new Object[array.length];
             for (int i = 0; i < array.length; i++) {
-                redacted[i] = redactDetailedValue(array[i]);
+                redacted[i] = redactDetailedValue(array[i], underCredentialKey);
             }
             return redacted;
         }
@@ -299,7 +321,8 @@ public class ConversationMemoryUtilities {
                     if (isSensitiveDetailedKey(key)) {
                         continue;
                     }
-                    newConversationOutput.put(key, redactDetailedValue(conversationOutput.get(key)));
+                    newConversationOutput.put(key,
+                            redactDetailedValue(conversationOutput.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
                 }
                 newConversationOutputs.add(newConversationOutput);
             }
@@ -340,7 +363,9 @@ public class ConversationMemoryUtilities {
                         continue;
                     }
 
-                    var result = returnDetailed ? redactDetailedValue(resultSnapshot.getResult()) : resultSnapshot.getResult();
+                    var result = returnDetailed
+                            ? redactDetailedValue(resultSnapshot.getResult(), SecretRedactionFilter.isCredentialFieldName(key))
+                            : resultSnapshot.getResult();
                     simpleConversationStep.getConversationStep()
                             .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
