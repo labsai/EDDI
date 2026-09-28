@@ -495,6 +495,7 @@ public class AuditLedgerService {
     public void submit(AuditEntry entry) {
         if (!enabled || entry == null)
             return;
+        entry = pseudonymiseIfErased(entry);
 
         // Take the queue slot BEFORE a chain position is consumed. G18 puts the
         // sequence inside the signed payload so a deleted row leaves a gap that
@@ -860,7 +861,9 @@ public class AuditLedgerService {
             AuditEntry entry;
             while ((entry = queue.poll()) != null) {
                 queueSize.decrementAndGet();
-                batch.add(entry);
+                // Again at drain time: an entry queued before the erasure and flushed
+                // after the store-side pseudonymisation would otherwise land raw.
+                batch.add(pseudonymiseIfErased(entry));
             }
             inFlightBatch = batch;
         } finally {
@@ -1381,6 +1384,59 @@ public class AuditLedgerService {
      * (covers full entry integrity), otherwise signs the entry ID. Gracefully
      * returns the original entry if no signing key exists.
      */
+    /**
+     * How long after an erasure this node keeps rewriting the erased user's id in
+     * new audit entries. It covers entries still produced by work the erasure
+     * cancelled (a turn blocked in an LLM or HTTP call flushes its audit buffer
+     * when it unwinds) and entries already queued. An hour is far longer than any
+     * turn; a user who comes back within it has their first hour of new records
+     * pseudonymised too, which errs in the privacy-preserving direction.
+     */
+    static final Duration ERASED_USER_REWRITE_WINDOW = Duration.ofHours(1);
+
+    /**
+     * userId -> until when this node rewrites it; node-local, see markUserErased.
+     */
+    private final ConcurrentHashMap<String, Instant> recentlyErasedUsers = new ConcurrentHashMap<>();
+
+    /**
+     * Tells the ledger a GDPR erasure of {@code userId} has started, so audit
+     * entries for that user written from now on — by work the erasure cancelled but
+     * which is still unwinding, or already queued — carry the pseudonym instead of
+     * the raw id. The erasure pseudonymises the stored rows once; without this,
+     * anything flushed after that step landed with the raw id and stayed that way.
+     * <p>
+     * The signature is unaffected: since the v3 canonical form the HMAC covers
+     * {@code AuditHmac.identityToken}, which maps an id and its pseudonym to the
+     * same value, and the agent signature signs the HMAC.
+     * <p>
+     * Node-local: an entry produced on another replica after the erasure is not
+     * covered (documented residual, like the rest of the in-flight handling).
+     */
+    public void markUserErased(String userId) {
+        if (userId == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        recentlyErasedUsers.values().removeIf(until -> until.isBefore(now));
+        recentlyErasedUsers.put(userId, now.plus(ERASED_USER_REWRITE_WINDOW));
+    }
+
+    AuditEntry pseudonymiseIfErased(AuditEntry entry) {
+        String userId = entry.userId();
+        if (userId == null || recentlyErasedUsers.isEmpty()) {
+            return entry;
+        }
+        Instant until = recentlyErasedUsers.get(userId);
+        if (until == null || until.isBefore(Instant.now())) {
+            return entry;
+        }
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(),
+                AuditHmac.pseudonymFor(userId), entry.environment(), entry.stepIndex(), entry.taskId(), entry.taskType(),
+                entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(), entry.toolCalls(),
+                entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
     private AuditEntry applyAgentSignature(AuditEntry entry) {
         try {
             String payload = entry.hmac() != null ? entry.hmac() : entry.id();

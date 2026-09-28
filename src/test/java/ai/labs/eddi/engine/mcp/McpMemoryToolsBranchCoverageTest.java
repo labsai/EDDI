@@ -390,18 +390,21 @@ class McpMemoryToolsBranchCoverageTest {
         @Test
         @DisplayName("success with CONFIRM")
         void success() throws Exception {
-            when(userMemoryStore.countEntries("user1")).thenReturn(5L);
+            when(userMemoryStore.deleteAllExceptReserved("user1")).thenReturn(5L);
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"deleted\"}");
 
             String result = tools.deleteAllUserMemories("user1", "CONFIRM");
             assertTrue(result.contains("deleted"));
-            verify(userMemoryStore).deleteAllForUser("user1");
+            // Memory housekeeping keeps the _gdpr_ bookkeeping rows: only the GDPR
+            // erasure cascade may call deleteAllForUser.
+            verify(userMemoryStore).deleteAllExceptReserved("user1");
+            verify(userMemoryStore, never()).deleteAllForUser(any());
         }
 
         @Test
         @DisplayName("exception returns error")
         void exception() throws Exception {
-            when(userMemoryStore.countEntries("user1")).thenThrow(new RuntimeException("fail"));
+            when(userMemoryStore.deleteAllExceptReserved("user1")).thenThrow(new RuntimeException("fail"));
             assertTrue(tools.deleteAllUserMemories("user1", "CONFIRM").contains("error"));
         }
     }
