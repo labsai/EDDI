@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
@@ -415,7 +415,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
       {(hasHitl || canEditHitl) && (
         <div>
           <h4 className="mb-1.5 flex items-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <HandMetal className="inline h-3 w-3 me-1" />
+            <Hand className="inline h-3 w-3 me-1" />
             {t("groups.hitlSection", "Human Approval")}
             {canEditHitl && !editingHitl && (
               <button

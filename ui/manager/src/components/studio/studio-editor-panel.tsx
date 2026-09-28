@@ -14,7 +14,7 @@ import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
-import { Layers, AlertTriangle } from "lucide-react";
+import { AlertTriangle, SquarePen } from "lucide-react";
 
 // ==================== Types ====================
 
@@ -233,7 +233,7 @@ export function StudioEditorEmpty() {
   const { t } = useTranslation();
   return (
     <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-      <Layers className="h-16 w-16 text-muted-foreground/15 mb-4" />
+      <SquarePen className="h-16 w-16 text-muted-foreground/15 mb-4" />
       <p className="text-sm font-medium text-foreground">
         {t("studio.selectStage", "Click a pipeline stage to open its editor")}
       </p>

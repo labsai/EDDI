@@ -14,13 +14,13 @@ import {
   FileText,
   ShieldCheck,
   KeyRound,
-  Boxes,
-  Activity,
   Server,
   Cloud,
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  Network,
+  Users,
 } from "lucide-react";
 import {
   useDashboardStats,
@@ -171,7 +171,7 @@ export function DashboardPage() {
               <Server className="h-3.5 w-3.5 text-purple-500" />
             )
           ) : (
-            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            <Network className="h-3.5 w-3.5 text-muted-foreground" />
           )}
           <span className="text-muted-foreground">
             {coordinatorStatus
@@ -281,7 +281,7 @@ export function DashboardPage() {
           </Button>
           <Button variant="outline" asChild>
             <Link to="/manage/groups/wizard">
-              <Boxes className="h-4 w-4" />
+              <Users className="h-4 w-4" />
               {t("dashboard.createGroup", "Create Group")}
             </Link>
           </Button>

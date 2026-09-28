@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Check,
   Users,
-  Brain,
   Rocket,
   RefreshCw,
   Plus,
@@ -20,9 +19,12 @@ import {
   Star,
   AlertTriangle,
   Pencil,
-  HandMetal,
   UserCheck,
   Clock,
+  Hand,
+  LayoutTemplate,
+  Settings2,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -178,10 +180,10 @@ const INITIAL_STATE: WizardState = {
 };
 
 const STEPS = [
-  { id: "template", icon: Sparkles },
-  { id: "config", icon: Brain },
+  { id: "template", icon: LayoutTemplate },
+  { id: "config", icon: Settings2 },
   { id: "members", icon: Users },
-  { id: "review", icon: Rocket },
+  { id: "review", icon: ClipboardCheck },
 ] as const;
 
 /** Style-specific accent colors */
@@ -891,7 +893,7 @@ function HitlWizardSection({
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-            <HandMetal className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            <Hand className="h-4 w-4 text-amber-500" aria-hidden="true" />
             {t("groupWizard.hitlTitle", "Require human approval")}
           </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -1857,7 +1859,7 @@ function ReviewStep({
             )}
             {state.hitlEnabled && (
               <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400">
-                <HandMetal className="me-1 h-3 w-3" />
+                <Hand className="me-1 h-3 w-3" />
                 {t("groupWizard.hitlReviewBadge", "Human approval")}
                 {state.approvalPhases.length > 0 && ` · ${state.approvalPhases.length}`}
               </Badge>

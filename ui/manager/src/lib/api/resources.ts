@@ -12,7 +12,8 @@ export interface ResourceTypeConfig {
   /** The backend extension type used in eddi:// URI schemes (e.g. "ai.labs.property") */
   extension: string;
   labelKey: string;
-  icon: string;
+  // No icon here: resolve it with getResourceTypeIcon(slug) from
+  // lib/resource-type-icons.ts, the one table every surface shares.
 }
 
 /** All supported resource types */
@@ -23,7 +24,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "rulesets",
     extension: "ai.labs.rules",
     labelKey: "resources.types.rules",
-    icon: "GitBranch",
   },
   {
     slug: "apicalls",
@@ -31,7 +31,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "apicalls",
     extension: "ai.labs.apicalls",
     labelKey: "resources.types.apicalls",
-    icon: "Globe",
   },
   {
     slug: "output",
@@ -39,7 +38,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "outputsets",
     extension: "ai.labs.output",
     labelKey: "resources.types.output",
-    icon: "MessageSquareText",
   },
   {
     slug: "dictionary",
@@ -47,7 +45,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "dictionaries",
     extension: "ai.labs.dictionary",
     labelKey: "resources.types.dictionary",
-    icon: "BookOpen",
   },
   {
     slug: "llm",
@@ -55,7 +52,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "llms",
     extension: "ai.labs.llm",
     labelKey: "resources.types.llm",
-    icon: "Brain",
   },
   {
     slug: "propertysetter",
@@ -63,7 +59,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "propertysetters",
     extension: "ai.labs.property",
     labelKey: "resources.types.propertysetter",
-    icon: "Settings",
   },
   {
     slug: "mcpcalls",
@@ -71,7 +66,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "mcpcalls",
     extension: "ai.labs.mcpcalls",
     labelKey: "resources.types.mcpcalls",
-    icon: "Plug",
   },
   {
     slug: "rag",
@@ -79,7 +73,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "rags",
     extension: "ai.labs.rag",
     labelKey: "resources.types.rag",
-    icon: "BookOpenCheck",
   },
   {
     slug: "snippets",
@@ -87,7 +80,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "snippets",
     extension: "ai.labs.snippet",
     labelKey: "resources.types.snippets",
-    icon: "Puzzle",
   },
   {
     slug: "parser",
@@ -95,7 +87,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "parsers",
     extension: "ai.labs.parser",
     labelKey: "resources.types.parser",
-    icon: "FileText",
   },
 ];
 
