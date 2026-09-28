@@ -439,9 +439,9 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private static Context groupPolicyContext(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-            if (contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null) {
-                return ctx;
+            Context current = policyEntry(currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+            if (current != null) {
+                return current;
             }
         }
         var allSteps = memory.getAllSteps();
@@ -450,14 +450,43 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             if (entries != null) {
                 // Oldest step first — walk backwards for the most recent policy.
                 for (int i = entries.size() - 1; i >= 0; i--) {
-                    var entry = entries.get(i);
-                    if (entry != null && entry.getResult() instanceof Context ctx && ctx.getValue() != null) {
-                        return ctx;
+                    Context found = policyEntry(entries.get(i));
+                    if (found != null) {
+                        return found;
                     }
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * One step's policy entry, read for PRESENCE: {@code null} only when the step
+     * holds nothing under the key (no entry, no result, or a {@link Context} with
+     * no value). Anything else is a policy that is present — and a result that is
+     * not a {@link Context} at all is present but malformed, so it comes back as a
+     * {@link MalformedPolicy} marker that {@link #resolveDynamicAgentConfig}
+     * resolves to the disabled config. Skipping it instead would fall back to an
+     * older (possibly more permissive) policy or to the permissive standalone
+     * default — failing open on exactly the entry we could not read.
+     */
+    private static Context policyEntry(IData<?> entry) {
+        if (entry == null || entry.getResult() == null) {
+            return null;
+        }
+        if (entry.getResult() instanceof Context ctx) {
+            return ctx.getValue() != null ? ctx : null;
+        }
+        return new Context(Context.ContextType.object, new MalformedPolicy(entry.getResult().getClass().getName()));
+    }
+
+    /**
+     * Marks a group-policy entry that was present but not a {@link Context}.
+     *
+     * @param type
+     *            the class that was found under the key, for the log line
+     */
+    private record MalformedPolicy(String type) {
     }
 
     /**
@@ -506,6 +535,11 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         }
 
         Object value = ctx.getValue();
+        if (value instanceof MalformedPolicy malformed) {
+            LOGGER.warnf("[DYNAMIC] The group DynamicAgentConfig entry for agent='%s' held a %s instead of a context entry — "
+                    + "disabling dynamic agent capabilities for this turn", sanitize(memory.getAgentId()), sanitize(malformed.type()));
+            return disabledDynamicConfig();
+        }
         if (value instanceof DynamicAgentConfig groupConfig) {
             LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
             return groupConfig;

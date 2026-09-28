@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,6 +70,47 @@ class DynamicAgentGroupPolicyCarryOverTest {
         memory.startNextStep();
 
         assertFalse(DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory).isEnabled());
+    }
+
+    @Test
+    @DisplayName("a present entry that is not a context fails closed instead of falling back to an older policy")
+    void nonContextEntryFailsClosedOverOlderPolicy() {
+        var memory = new ConversationMemory(CONVERSATION_ID, AGENT_ID, 1, "user-1");
+        var permissive = new DynamicAgentConfig();
+        permissive.setEnabled(true);
+        permissive.setAllowCreation(true);
+        putPolicy(memory, permissive);
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(DynamicAgentToolsProvider.CONTEXT_DYNAMIC_AGENT_CONFIG,
+                (Object) Map.of("enabled", true, "allowCreation", true)));
+
+        var resolved = DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory);
+
+        assertFalse(resolved.isEnabled(), "a malformed current policy must not hand back the older permissive one");
+        assertFalse(resolved.isAllowCreation());
+        assertTrue(DynamicAgentToolsProvider.hasGroupPolicy(memory));
+    }
+
+    @Test
+    @DisplayName("a present entry that is not a context is a group policy, not a standalone conversation")
+    void nonContextEntryIsNotStandalone() {
+        var memory = new ConversationMemory(CONVERSATION_ID, AGENT_ID, 1, "user-1");
+        memory.getCurrentStep().storeData(new Data<>(DynamicAgentToolsProvider.CONTEXT_DYNAMIC_AGENT_CONFIG, (Object) "garbage"));
+
+        assertTrue(DynamicAgentToolsProvider.hasGroupPolicy(memory));
+        assertFalse(DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory).isEnabled(),
+                "an unreadable policy must not resolve to the permissive standalone default");
+    }
+
+    @Test
+    @DisplayName("a context entry with no value still counts as absent")
+    void contextWithoutValueIsAbsent() {
+        var memory = new ConversationMemory(CONVERSATION_ID, AGENT_ID, 1, "user-1");
+        memory.getCurrentStep().storeData(new Data<>(DynamicAgentToolsProvider.CONTEXT_DYNAMIC_AGENT_CONFIG,
+                new Context(Context.ContextType.object, null)));
+
+        assertFalse(DynamicAgentToolsProvider.hasGroupPolicy(memory));
+        assertTrue(DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory).isEnabled());
     }
 
     @Test

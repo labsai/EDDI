@@ -23,7 +23,9 @@ context of any client request, so a caller could assert them and be believed.
 - **Group policy carries over.** A conversation governed by a group's
   dynamic-agent policy now keeps the most recent policy on a turn that carries no
   group context (such as one its owner sends into the member conversation
-  directly), instead of falling back to the permissive standalone default.
+  directly), instead of falling back to the permissive standalone default. An
+  entry that is present but is not a context entry resolves to the disabled
+  policy rather than being skipped for an older or the standalone one.
 - **`groupId` properties no longer select a memory scope.** The `usermemory`
   tool's group scope used to fall back to a `groupId` conversation property;
   properties are client- and input-settable, so only the orchestrator-injected
