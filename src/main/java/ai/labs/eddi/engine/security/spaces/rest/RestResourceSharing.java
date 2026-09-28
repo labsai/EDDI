@@ -10,10 +10,14 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceSharingService;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.security.spaces.notifications.WorkspaceNotifications;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
+
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -24,12 +28,38 @@ public class RestResourceSharing implements IRestResourceSharing {
     private final ResourceSharingService sharingService;
     private final UserDirectory directory;
     private final ResourceAccessGuard accessGuard;
+    private final WorkspaceNotifications notifications;
 
     @Inject
-    public RestResourceSharing(ResourceSharingService sharingService, UserDirectory directory, ResourceAccessGuard accessGuard) {
+    public RestResourceSharing(ResourceSharingService sharingService, UserDirectory directory, ResourceAccessGuard accessGuard,
+            WorkspaceNotifications notifications) {
         this.sharingService = sharingService;
         this.directory = directory;
         this.accessGuard = accessGuard;
+        this.notifications = notifications;
+    }
+
+    /** Without notifications — access requests are refused. Test seam. */
+    public RestResourceSharing(ResourceSharingService sharingService, UserDirectory directory, ResourceAccessGuard accessGuard) {
+        this(sharingService, directory, accessGuard, null);
+    }
+
+    @Override
+    public Response requestAccess(String id, String level, String message) {
+        AccessLevel requested = AccessLevel.parseOrNull(level);
+        if (requested == null || requested == AccessLevel.OWN) {
+            throw new BadRequestException("level must be one of USE, VIEW, EDIT — was '" + level + "'");
+        }
+        if (notifications == null) {
+            throw new ServiceUnavailableException("Access requests are not available");
+        }
+        var outcome = notifications.requestAccess(id, requested, message);
+        if (outcome == WorkspaceNotifications.RequestOutcome.RATE_LIMITED) {
+            return Response.status(429).entity(Map.of("outcome", outcome.name(), "error",
+                    "You have sent " + WorkspaceNotifications.MAX_REQUESTS_PER_DAY + " access requests in the last day. Try again later."))
+                    .build();
+        }
+        return Response.accepted(Map.of("outcome", outcome.name())).build();
     }
 
     @Override
@@ -61,7 +91,7 @@ public class RestResourceSharing implements IRestResourceSharing {
     public Response setVisibility(String id, String visibility, Boolean cascade, Boolean dryRun) {
         ResourceVisibility parsed = ResourceVisibility.parseOrNull(visibility);
         if (parsed == null) {
-            throw new BadRequestException("visibility must be one of private, space, published — was '" + visibility + "'");
+            throw new BadRequestException("visibility must be one of private, space, internal, published — was '" + visibility + "'");
         }
         return Response.ok(sharingService.setVisibility(id, parsed, !Boolean.FALSE.equals(cascade), Boolean.TRUE.equals(dryRun))).build();
     }

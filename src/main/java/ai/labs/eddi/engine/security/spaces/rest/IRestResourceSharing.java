@@ -90,6 +90,32 @@ public interface IRestResourceSharing {
         return share(id, subject, level, cascade, false);
     }
 
+    /**
+     * Asks the owner for access. Open to anybody signed in — asking is how somebody
+     * who cannot see a resource gets to.
+     * <p>
+     * The answer never discloses whether the resource exists, who owns it or what
+     * it is called: an id that matches nothing gets the same {@code SENT} as one
+     * that was delivered.
+     *
+     * @param level
+     *            {@code USE}, {@code VIEW} or {@code EDIT}
+     * @param message
+     *            an optional note for the owner, at most 500 characters
+     */
+    @POST
+    @Path("/requests")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
+    @Operation(summary = "Request access from the owner",
+               description = "Notifies the owner. The response never reveals whether the resource exists or who owns it.")
+    @APIResponse(responseCode = "202", description = "{outcome: SENT | ALREADY_HAS_ACCESS | ALREADY_REQUESTED}")
+    @APIResponse(responseCode = "429", description = "Too many access requests today.")
+    Response requestAccess(@PathParam("id") String id,
+                           @QueryParam("level")
+                           @DefaultValue("USE") String level,
+                           @QueryParam("message") String message);
+
     /** Removes a subject's grant, mirroring {@link #share}. */
     @DELETE
     @Produces(MediaType.APPLICATION_JSON)

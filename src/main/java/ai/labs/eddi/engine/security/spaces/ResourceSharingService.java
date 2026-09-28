@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.security.spaces.notifications.WorkspaceNotifications;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -64,14 +65,22 @@ public class ResourceSharingService {
     private final ResourceAccessGuard accessGuard;
     private final ConfigGraphResolver graphResolver;
     private final UserDirectory directory;
+    private final WorkspaceNotifications notifications;
 
     @Inject
     public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
-            ConfigGraphResolver graphResolver, UserDirectory directory) {
+            ConfigGraphResolver graphResolver, UserDirectory directory, WorkspaceNotifications notifications) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
         this.graphResolver = graphResolver;
         this.directory = directory;
+        this.notifications = notifications;
+    }
+
+    /** Without notifications. Test seam. */
+    public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
+            ConfigGraphResolver graphResolver, UserDirectory directory) {
+        this(documentDescriptorStore, accessGuard, graphResolver, directory, null);
     }
 
     /**
@@ -255,6 +264,9 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyGrant(referenced, subject, level, grantedBy, updated, skipped, dryRun);
         }
+        if (!dryRun && notifications != null && updated.stream().anyMatch(target -> target.id().equals(resourceId))) {
+            announce(resourceId, subject, level);
+        }
         return new ShareResult(updated, skipped, dryRun);
     }
 
@@ -396,6 +408,21 @@ public class ResourceSharingService {
             }
         }
         return new ShareResult(updated, skipped, dryRun);
+    }
+
+    /**
+     * Tells the recipient. Best effort: the grant is already written, and a share
+     * that succeeded must not be reported as failed because an inbox was down.
+     */
+    private void announce(String resourceId, String subject, AccessLevel level) {
+        try {
+            VersionedDescriptor root = loadOrNull(resourceId);
+            DocumentDescriptor descriptor = root == null ? null : root.descriptor();
+            notifications.onShared(resourceId, descriptor == null || descriptor.getResource() == null ? null : descriptor.getResource().toString(),
+                    descriptor == null ? null : descriptor.getName(), subject, level);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not announce the share of %s: %s", sanitize(resourceId), e.getMessage());
+        }
     }
 
     private Set<String> targets(String resourceId, boolean cascade) {

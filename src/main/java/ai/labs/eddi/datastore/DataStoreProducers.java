@@ -72,6 +72,12 @@ import ai.labs.eddi.connections.settings.PostgresConnectionSettingsStore;
 import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
 import ai.labs.eddi.engine.security.spaces.directory.MongoUserDirectoryStore;
 import ai.labs.eddi.engine.security.spaces.directory.PostgresUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.notifications.IWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.notifications.MongoWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.notifications.PostgresWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
+import ai.labs.eddi.engine.security.spaces.settings.MongoWorkspaceSettingsStore;
+import ai.labs.eddi.engine.security.spaces.settings.PostgresWorkspaceSettingsStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -261,6 +267,20 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IUserDirectoryStore userDirectoryStore(Instance<MongoUserDirectoryStore> mongo, Instance<PostgresUserDirectoryStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IWorkspaceNotificationStore workspaceNotificationStore(Instance<MongoWorkspaceNotificationStore> mongo,
+                                                                  Instance<PostgresWorkspaceNotificationStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
+                                                          Instance<PostgresWorkspaceSettingsStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }
