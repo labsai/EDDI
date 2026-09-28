@@ -959,6 +959,44 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a sitemap cut at the fetch cap means the source was not covered")
+        void truncatedSitemapIsNotCoverage() {
+            // Over the 1 MB cap: the fetch keeps the first megabyte and says so.
+            String padding = "<!--" + " ".repeat(1_100_000) + "-->";
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .raw(SITE + "/sitemap.xml", "application/xml",
+                            ("<urlset><url><loc>" + SITE + "/a</loc></url>" + padding + "<url><loc>" + SITE + "/b</loc></url></urlset>")
+                                    .getBytes(StandardCharsets.UTF_8))
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/a"), "what was read is still crawled");
+            assertFalse(summary.coveredWholeSource(), "the rest of the sitemap was never read");
+        }
+
+        @Test
+        @DisplayName("a plain-text sitemap cut at the fetch cap means the source was not covered")
+        void truncatedTextSitemapIsNotCoverage() {
+            // A text sitemap has no closing tag to miss: only the fetch's own
+            // truncation flag says the rest was never read.
+            String filler = "# filler\n".repeat(120_000);
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.txt")
+                    .raw(SITE + "/sitemap.txt", "text/plain",
+                            (SITE + "/a\n" + filler + SITE + "/b\n").getBytes(StandardCharsets.UTF_8))
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(summary.coveredWholeSource());
+        }
+
+        @Test
         @DisplayName("a site with no sitemap — the fallback answers 404 — is still covered")
         void noSitemapIsStillCoverage() {
             // The guard against the opposite mistake: were a missing sitemap read as

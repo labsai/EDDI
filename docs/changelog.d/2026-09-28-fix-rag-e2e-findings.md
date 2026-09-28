@@ -233,3 +233,12 @@ easier to reach. `CrawlSummary` gains `discoveryIncomplete`, which `coveredWhole
 honours; a sitemap answering 404 stays a definite answer, so sites without one keep reconciling.
 Tests: `unreadableSitemapIsNotCoverage`, `sitemapIndexBudget` (both fail with the flag ignored),
 `noSitemapIsStillCoverage`, and the parser's cap cases.
+- **A sitemap cut short read as complete** (CodeRabbit, fifth pass). The suggested fix — Jsoup's
+  `setTrackErrors` — would have caught nothing: probed against Jsoup 1.23.2, its XML parser reports
+  no error for a body that stops mid-element or for a mismatched end tag. Instead a sitemap is
+  incomplete when the fetch says it was truncated at the 1 MB cap, or when an XML sitemap
+  (`urlset`, `sitemapindex`, RSS, Atom) does not end with its own closing root tag. An HTML page
+  served at `/sitemap.xml` is not a sitemap root, lists nothing and stays complete, so sites that
+  answer that path with a 200 "not found" page keep reconciling. `truncatedSitemapIsNotCoverage`,
+  `truncatedTextSitemapIsNotCoverage` (fails if the truncation flag is ignored),
+  `cutShortIsIncomplete` (fails without the closing-tag check), `htmlPageIsNotASitemap`.

@@ -139,6 +139,36 @@ class SitemapParsingTest {
         }
 
         @Test
+        @DisplayName("a sitemap cut short keeps what it listed but is not complete")
+        void cutShortIsIncomplete() throws IOException {
+            // Jsoup's XML parser reports no error for this; without the check, the pages
+            // past the cut read as deleted.
+            Sitemap sitemap = parse("<urlset xmlns=\"" + NS + "\"><url><loc>" + BASE + "/a</loc></url><url><loc>" + BASE + "/b");
+
+            assertTrue(sitemap.pageUrls().contains(BASE + "/a"), sitemap.pageUrls().toString());
+            assertFalse(sitemap.complete());
+            assertFalse(parse("<sitemapindex><sitemap><loc>" + BASE + "/s1.xml</loc></sitemap>").complete());
+        }
+
+        @Test
+        @DisplayName("a closing root tag with a prefix or trailing whitespace is complete")
+        void closedWithPrefixAndWhitespace() throws IOException {
+            assertTrue(parse("<sm:urlset xmlns:sm=\"" + NS + "\"><sm:url><sm:loc>" + BASE + "/a</sm:loc></sm:url></sm:urlset>\n\n")
+                    .complete());
+        }
+
+        @Test
+        @DisplayName("an HTML page served as a sitemap lists nothing and does not count as cut short")
+        void htmlPageIsNotASitemap() throws IOException {
+            // Plenty of sites answer /sitemap.xml with a 200 "not found" page. Treated
+            // as an unread sitemap, it would stop deletions for every one of them.
+            Sitemap sitemap = parse("<html><head><title>Not found</title></head><body><p>Nope<br>here</body></html>");
+
+            assertTrue(sitemap.pageUrls().isEmpty());
+            assertTrue(sitemap.complete());
+        }
+
+        @Test
         @DisplayName("only absolute http(s) URLs are taken")
         void onlyAbsoluteHttp() throws IOException {
             Sitemap sitemap = parse(urlset("/relative", "ftp://docs.example.com/f", "javascript:alert(1)", "", BASE + "/ok"));
@@ -190,7 +220,9 @@ class SitemapParsingTest {
         void utf16() throws IOException {
             byte[] body = urlset(BASE + "/a").replace("UTF-8", "UTF-16").getBytes(StandardCharsets.UTF_16);
 
-            assertEquals(List.of(BASE + "/a"), WebCrawler.parseSitemap(body, null, BASE + "/sitemap.xml").pageUrls());
+            Sitemap sitemap = WebCrawler.parseSitemap(body, null, BASE + "/sitemap.xml");
+            assertEquals(List.of(BASE + "/a"), sitemap.pageUrls());
+            assertTrue(sitemap.complete(), "the closing tag is found in the declared encoding");
         }
 
         @Test

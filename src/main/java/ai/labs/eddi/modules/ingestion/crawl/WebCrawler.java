@@ -637,7 +637,10 @@ public class WebCrawler {
             if (page.body() == null || page.body().length == 0) {
                 return Sitemap.EMPTY;
             }
-            return parseSitemap(page.body(), page.declaredCharset(), sitemapUrl);
+            Sitemap sitemap = parseSitemap(page.body(), page.declaredCharset(), sitemapUrl);
+            // Cut at the fetch cap: what was read is still used, but the rest may list
+            // pages the crawl never queued.
+            return page.truncated() ? new Sitemap(sitemap.pageUrls(), sitemap.childSitemaps(), false) : sitemap;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Sitemap.UNREAD;
@@ -697,8 +700,34 @@ public class WebCrawler {
             default -> collectText(xml, "loc", "url", found);
         }
         List<String> urls = List.copyOf(found);
-        boolean complete = !decompressionCapped && urls.size() < MAX_SITEMAP_URLS;
+        boolean complete = !decompressionCapped && urls.size() < MAX_SITEMAP_URLS
+                && (!SITEMAP_ROOTS.contains(root) || endsWithClosingRoot(bytes, xml.charset(), root));
         return "sitemapindex".equals(root) ? new Sitemap(List.of(), urls, complete) : new Sitemap(urls, List.of(), complete);
+    }
+
+    /** The document elements of the forms read as sitemaps. */
+    private static final Set<String> SITEMAP_ROOTS = Set.of("urlset", "sitemapindex", "rss", "rdf", "feed");
+
+    /**
+     * Whether a sitemap body ends with its own closing root tag — the one sign that
+     * it arrived whole.
+     * <p>
+     * Jsoup's XML parser is lenient by design and reports nothing — not a body that
+     * stops mid-element, not a mismatched end tag — so a sitemap cut short (a
+     * dropped connection, an upstream timeout, a proxy limit) parsed as a smaller
+     * but complete one, and the pages past the cut read as deleted. Checked only
+     * for sitemap roots: an HTML page served at {@code /sitemap.xml} is not a
+     * sitemap, lists nothing, and must not stop deletions for a site that has none.
+     */
+    private static boolean endsWithClosingRoot(byte[] bytes, Charset charset, String root) {
+        String text = new String(bytes, charset).stripTrailing();
+        int open = text.lastIndexOf("</");
+        if (open < 0 || !text.endsWith(">")) {
+            return false;
+        }
+        String closing = text.substring(open + 2, text.length() - 1).strip();
+        int colon = closing.indexOf(':');
+        return (colon >= 0 ? closing.substring(colon + 1) : closing).equalsIgnoreCase(root);
     }
 
     private static void collectText(Document xml, String element, String parent, Set<String> into) {
