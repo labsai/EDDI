@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -15,11 +16,14 @@ import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.servers.Server;
+import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import io.swagger.v3.parser.util.DeserializationUtils;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -319,9 +323,17 @@ public final class McpApiToolBuilder {
      * filesystem-relative or {@code file:}/{@code classpath:} ref that
      * swagger-parser would resolve against the local filesystem without the
      * blocked-URL checker.
+     * <p>
+     * Two passes, both must pass. The raw-text scan is a cheap first gate; the
+     * authoritative check walks the <em>decoded</em> tree, built the same way
+     * {@link OpenAPIV3Parser#readContents} builds it, because JSON and YAML escape
+     * sequences (a Unicode- or hex-escaped dollar sign in the key) hide a key from
+     * any text scan while the parser still sees {@code $ref}. Content neither
+     * deserializer accepts is refused rather than passed through unchecked.
      *
      * @throws IllegalArgumentException
-     *             if an external, non-http(s) reference is present
+     *             if an external, non-http(s) reference is present, or the content
+     *             cannot be deserialized for inspection
      */
     static void rejectUnsafeInlineRefs(String specContent) {
         if (specContent == null) {
@@ -329,17 +341,56 @@ public final class McpApiToolBuilder {
         }
         Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
         while (matcher.find()) {
-            String ref = matcher.group(1).trim();
-            if (ref.isEmpty() || ref.startsWith("#")) {
-                continue; // internal fragment reference
-            }
-            String lower = ref.toLowerCase(Locale.ROOT);
-            if (lower.startsWith("http://") || lower.startsWith("https://")) {
-                continue; // URL ref — guarded by setSafelyResolveURL
-            }
-            throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
-                    + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
+            checkInlineRef(matcher.group(1));
         }
+
+        JsonNode root = deserializeLikeParser(specContent);
+        Deque<JsonNode> pending = new ArrayDeque<>();
+        if (root != null) {
+            pending.push(root);
+        }
+        while (!pending.isEmpty()) {
+            JsonNode node = pending.pop();
+            if (node.isObject()) {
+                JsonNode ref = node.get("$ref");
+                if (ref != null && ref.isValueNode()) {
+                    checkInlineRef(ref.asText());
+                }
+            }
+            if (node.isContainerNode()) {
+                node.forEach(pending::push);
+            }
+        }
+    }
+
+    /**
+     * Mirrors {@code OpenAPIV3Parser.readContents}: {@link DeserializationUtils}
+     * first, then the plain JSON/YAML mapper it falls back to.
+     */
+    private static JsonNode deserializeLikeParser(String specContent) {
+        try {
+            return DeserializationUtils.deserializeIntoTree(specContent, null, new ParseOptions(), new SwaggerParseResult());
+        } catch (RuntimeException e) {
+            try {
+                var mapper = specContent.trim().startsWith("{") ? ObjectMapperFactory.createJson() : ObjectMapperFactory.createYaml();
+                return mapper.readTree(specContent);
+            } catch (IOException | RuntimeException fallbackError) {
+                throw new IllegalArgumentException("Inline OpenAPI spec could not be parsed for $ref inspection", fallbackError);
+            }
+        }
+    }
+
+    private static void checkInlineRef(String rawRef) {
+        String ref = rawRef.trim();
+        if (ref.isEmpty() || ref.startsWith("#")) {
+            return; // internal fragment reference
+        }
+        String lower = ref.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return; // URL ref — guarded by setSafelyResolveURL
+        }
+        throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
+                + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
     }
 
     /**

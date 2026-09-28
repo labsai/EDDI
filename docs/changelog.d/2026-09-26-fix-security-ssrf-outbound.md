@@ -107,6 +107,25 @@ locally.
 Round-2 mutation checks (revert → named test fails → restore): cross-origin strip (3 tests
 killed) and the A2A watchdog (stalled-body test times out). Both restored.
 
+### Follow-up (CodeRabbit review round)
+
+- **Inline `$ref` guard now inspects the decoded document, not only the raw text.** A JSON
+  or YAML escape in the key (a Unicode- or hex-escaped `$`) hid `$ref` from the text scan
+  while swagger-parser still resolved it — so `"<escaped>ref": "/etc/passwd"` slipped past.
+  `McpApiToolBuilder.rejectUnsafeInlineRefs` keeps the text scan as a first gate and then walks
+  the tree built exactly as `OpenAPIV3Parser.readContents` builds it (`DeserializationUtils`,
+  then the plain JSON/YAML mapper it falls back to), checking every decoded `$ref`. Content
+  neither deserializer accepts is refused (the parser would reject it anyway). New
+  `McpApiToolBuilderTest` cases for the escaped key in JSON and YAML, and an escaped internal
+  `#/` ref that must still pass.
+- **`WebScraperTool` flags truncated pages.** A body cut off by the size cap or the read
+  deadline used to be decoded and handed to the model as if it were the whole page. Each tool
+  now appends `[Note: the page response was truncated …; the content above is partial.]`, and a
+  multi-byte UTF-8 character split by the cut is dropped rather than decoded to U+FFFD. New
+  `WebScraperToolExtendedTest.TruncatedResponseTests`.
+- The decision-log row on redirects now describes the design that ships (hop-level strip plus
+  the reference-credential redirect disable), not the superseded first cut.
+
 ### CI fixups
 
 - Documented the three new config keys in
@@ -139,5 +158,5 @@ should merge cleanly.
 ```decision-log
 | 2026-09-26 | Bound outbound response reads with a shared BoundedBodyReader (cap + deadline) rather than per-tool ad-hoc checks | One implementation across attachment/web/pdf/A2A paths, mirroring the crawler's tested readBounded; size is enforced while streaming, not after buffering | Keep per-tool post-buffer size checks (the status quo that let unbounded bodies into memory first) |
 | 2026-09-26 | Drop the shared WebClientSession cookie jar for httpcalls in favour of a plain WebClient | The single app-scoped session replayed one user's Set-Cookie on another user's call to the same host; no httpcalls feature needs cookies | Scope a WebClientSession per conversation/principal (more machinery for a capability nothing uses) |
-| 2026-09-26 | Disable redirect-following when a request header carries any credential, instead of stripping connection-owned headers per cross-origin hop | Simple and fails safe; Vert.x strips only the three RFC headers cross-origin, and the custom-header strip would have to be threaded through the Vert.x redirect handler | Strip all connection-owned headers on each cross-origin hop |
+| 2026-09-26 | Strip `SafeHttpClient.SENSITIVE_HEADERS` on every cross-origin redirect hop in the shared httpcalls client (`HttpClientModule`), and additionally disable redirect-following for a request whose header carries a resolved (reference) credential | Vert.x's redirect handler strips none of these headers cross-origin, so a literal credential written in the config leaked too; the hop-level strip covers every credential source, and the per-request disable is the stronger measure for resolved secrets | Disable redirects only for reference credentials (the first cut: missed literal credentials); strip only the three RFC headers (Vert.x does not even do that) |
 ```
