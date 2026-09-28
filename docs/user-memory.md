@@ -191,6 +191,11 @@ Returns: "✅ Forgotten: favorite_color"
 
 When agents participate in a [Group Conversation](group-conversations.md), the `groupId` is automatically injected into the conversation context. Memories stored with `group` visibility are visible to all agents in that group.
 
+The group is taken only from that injected context value. A client cannot supply
+`groupId` in its own request context (see [Reserved Context Keys](passing-context-information.md#reserved-context-keys)),
+and a conversation *property* named `groupId` does not select a group scope for the
+`usermemory` tool.
+
 ## REST API
 
 Base path: `/usermemorystore/memories`
