@@ -261,6 +261,14 @@ public class ConversationMemoryUtilities {
      *            key
      */
     private static Object redactDetailedValue(Object value, boolean underCredentialKey) {
+        if (underCredentialKey && (value instanceof Map<?, ?> || value instanceof Collection<?> || value instanceof Object[])) {
+            // Everything beneath a credential-named key is secret material — map KEYS
+            // included, and a pattern filter cannot recognise a shapeless credential used
+            // as a key ({"authorization":{"mytenantcredential123":"x"}}). Masking the keys
+            // one by one could also collapse distinct keys onto one placeholder, so the
+            // whole container is replaced.
+            return SecretRedactionFilter.REDACTED;
+        }
         if (value instanceof String s) {
             return underCredentialKey
                     ? SecretRedactionFilter.redact(SecretRedactionFilter.maskCredentialValue(s))

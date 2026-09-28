@@ -20,7 +20,8 @@ import java.util.regex.Pattern;
  */
 public final class SecretRedactionFilter {
 
-    private static final String REDACTED = "<REDACTED>";
+    /** The placeholder every redaction writes in place of secret material. */
+    public static final String REDACTED = "<REDACTED>";
 
     /** Shared, thread-safe, and used only to answer "is this a JSON document". */
     private static final JsonFactory JSON = new JsonFactory();

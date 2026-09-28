@@ -290,6 +290,39 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("returnDetailed=true masks a credential used as a map KEY beneath a credential-named key")
+        void detailedMasksKeysBeneathCredentialNamedKey() {
+            String shapelessKey = "mytenantcredential123";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("authorization", Map.of(shapelessKey, "value"));
+            body.put("secrets", List.of(Map.of(shapelessKey + "b", "x")));
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapelessKey), "a credential used as a key under a credential key must be masked: " + outStr);
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapelessKey),
+                    "the same key must be masked in step data");
+        }
+
+        @Test
         @DisplayName("returnDetailed=true must redact secrets in map KEYS and in Object[] elements")
         void detailedRedactsMapKeysAndArrays() {
             // A credential can sit in a map key (a token-keyed lookup) or in a String[]
