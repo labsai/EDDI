@@ -10,8 +10,12 @@ keep working, while the missing owner/role/redaction checks are added.
 
 - **Active-conversation endpoints role-gated.** `GET /conversationstore/conversations/active/{agentId}`
   and `POST /conversationstore/conversations/end` were reachable by any authenticated
-  token; both now require `eddi-admin`/`eddi-editor` (the tier the Manager's
-  conversation-monitoring page runs as).
+  token. The same gap was closed independently on `main` by the soft-delete owner-check
+  fix (`fix-conversation-access-guard`), which also adds an agent EDIT check under
+  workspace enforcement and server-side state for `/end`; that is the contract kept:
+  `eddi-admin`/`eddi-editor` (the tier the Manager's conversation-monitoring page runs
+  as), plus EDIT on the agent when workspaces are on. This batch adds
+  `SecurityAccessControlAnnotationsTest`, which pins the role set by reflection.
 - **`converse_with_agent` cross-user access.** The tool now requires a model-supplied
   `conversationId` to belong to the same user the tool is bound to, so the LLM can no
   longer continue another user's conversation by supplying its id. New conversations
@@ -44,7 +48,10 @@ keep working, while the missing owner/role/redaction checks are added.
   up) rather than mere authentication, and the reply returns only the text output instead
   of the serialized `ConversationOutput` map.
 - **`deleteConversationLog`.** Now uses the strict owner check, so a legacy no-owner
-  conversation is not deletable by an arbitrary token.
+  conversation is not deletable (soft or permanent) by an arbitrary token. The strict
+  check resolves the owner the same way as the soft-delete fix on `main` (live
+  descriptor, else the archived one; no descriptor at all is a 404 unless admin), so a
+  soft-deleted conversation can only be permanently deleted by its owner or an admin.
 
 ### Tests
 

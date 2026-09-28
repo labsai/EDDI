@@ -89,6 +89,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.activeAgents"),
       value: stats?.agentCount ?? 0,
+      capped: stats?.agentCountCapped ?? false,
       icon: Bot,
       gradient: "from-amber-500/10 to-primary/5",
       iconColor: "text-primary bg-primary/10",
@@ -97,6 +98,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalWorkflows"),
       value: stats?.workflowCount ?? 0,
+      capped: stats?.workflowCountCapped ?? false,
       icon: Workflow,
       gradient: "from-emerald-500/10 to-emerald-500/5",
       iconColor: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
@@ -105,6 +107,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalConversations"),
       value: stats?.conversationCount ?? 0,
+      capped: stats?.conversationCountCapped ?? false,
       icon: MessageSquare,
       gradient: "from-blue-500/10 to-blue-500/5",
       iconColor: "text-blue-600 dark:text-blue-400 bg-blue-500/10",
@@ -113,6 +116,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalResources"),
       value: stats?.resourceCount ?? 0,
+      capped: false,
       icon: FileCode,
       gradient: "from-violet-500/10 to-violet-500/5",
       iconColor: "text-violet-600 dark:text-violet-400 bg-violet-500/10",
@@ -216,8 +220,12 @@ export function DashboardPage() {
                 </CardContent>
               </Card>
             ))
-          : visibleStatCards.map((stat) => (
-              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${stat.value}`}>
+          : visibleStatCards.map((stat) => {
+              // A count that filled its whole page is a lower bound — say so
+              // rather than presenting the page size as the total.
+              const shown = `${stat.value.toLocaleString()}${stat.capped ? "+" : ""}`;
+              return (
+              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${shown}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
                   {/* Gradient background */}
                   <div className={cn("absolute inset-0 bg-linear-to-br opacity-0 transition-opacity group-hover:opacity-100", stat.gradient)} />
@@ -229,8 +237,8 @@ export function DashboardPage() {
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {stat.label}
                       </p>
-                      <p className="text-2xl font-bold text-foreground tabular-nums">
-                        {stat.value > 0 ? stat.value.toLocaleString() : (
+                      <p className="text-2xl font-bold text-foreground tabular-nums" data-testid={`stat-value-${stat.to.split("/").pop()}`}>
+                        {stat.value > 0 ? shown : (
                           <span className="flex items-center gap-1 text-muted-foreground/50">
                             0 <Plus className="h-3 w-3" />
                           </span>
@@ -240,7 +248,8 @@ export function DashboardPage() {
                   </CardContent>
                 </Card>
               </Link>
-            ))}
+              );
+            })}
       </div>
 
       {/* Quick Actions */}

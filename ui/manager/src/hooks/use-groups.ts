@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DISCUSSION_STYLES,
   type DiscussionStyle,
   getGroupDescriptors,
   getEnrichedGroupDescriptors,
   getGroup,
+  getGroupCurrentVersion,
   createGroup,
   updateGroup,
   deleteGroup,
@@ -19,6 +20,7 @@ import {
   type AgentGroupConfiguration,
   type GroupConversationState,
 } from "@/lib/api/groups";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 
 const GROUPS_KEY = ["groups"] as const;
 export const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
@@ -44,6 +46,9 @@ export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "") 
   return useQuery({
     queryKey: [...GROUPS_KEY, "enriched", { limit, index, filter }],
     queryFn: () => getEnrichedGroupDescriptors(limit, index, filter),
+    // A new filter keeps showing the previous results until its own arrive,
+    // instead of blanking the list to a skeleton on every search.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -53,6 +58,36 @@ export function useGroup(id: string, version?: number) {
     queryFn: () => getGroup(id, version),
     enabled: !!id,
   });
+}
+
+/**
+ * The version a page should read, given what its URL says.
+ *
+ * An explicit, valid `?version=` wins — a link can deliberately point at an
+ * older version. Without one, the group's CURRENT version is looked up rather
+ * than assumed to be 1: several Workforce links (the history page's way back,
+ * an advisor's thread) carried no version, and the pages behind them read the
+ * group's first version — its original name, members and phases — and linked
+ * onward to it, so one version-less hop pinned the whole session to history.
+ *
+ * `undefined` while the lookup is in flight, so callers leave `useGroup`
+ * disabled instead of fetching version 1 in the meantime. A failed lookup falls
+ * back to 1, the old behaviour, rather than blocking the page on it.
+ */
+export function useResolvedGroupVersion(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): number | undefined {
+  const explicit = urlVersion != null && /^[1-9]\d*$/.test(urlVersion) ? Number(urlVersion) : undefined;
+  const { data, isError } = useQuery({
+    queryKey: [...GROUPS_KEY, groupId, "currentVersion"],
+    queryFn: () => getGroupCurrentVersion(groupId!),
+    enabled: !!groupId && explicit === undefined,
+    staleTime: 30_000,
+  });
+  if (explicit !== undefined) return explicit;
+  if (typeof data === "number" && data > 0) return data;
+  return isError ? 1 : undefined;
 }
 
 export function useDiscussionStyles() {
@@ -120,10 +155,21 @@ export function useCreateGroup() {
   });
 }
 
+/**
+ * Save a group config. Resolves with the version the save CREATED.
+ *
+ * Every PUT makes a new version and the backend refuses a write to one that is
+ * no longer current, so the caller must move onto `version` — a page that kept
+ * the version it was opened with showed the pre-save document on the next
+ * refetch (the edit "reverted") and 409'd on its next save or delete.
+ *
+ * The saved document is seeded into the cache under the new version, so a page
+ * that switches to it renders the edit at once instead of a loading state.
+ */
 export function useUpdateGroup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       id,
       version,
       config,
@@ -131,8 +177,16 @@ export function useUpdateGroup() {
       id: string;
       version: number;
       config: AgentGroupConfiguration;
-    }) => updateGroup(id, version, config),
-    onSuccess: () => {
+    }): Promise<{ location: string; version: number | null }> => {
+      const result = await updateGroup(id, version, config);
+      // `null` only when the server named no version — the save itself worked,
+      // so it is not failed over that; the caller just cannot move forward.
+      return { location: result.location, version: parseVersionFromLocation(result.location) };
+    },
+    onSuccess: (result, { id, config }) => {
+      if (result.version !== null) {
+        queryClient.setQueryData([...GROUPS_KEY, id, result.version], config);
+      }
       queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
     },
   });

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -38,10 +39,11 @@ class SecurityAccessControlAnnotationsTest {
         var get = IRestConversationStore.class.getMethod("getActiveConversations", String.class, Integer.class);
         var end = IRestConversationStore.class.getMethod("endActiveConversations", List.class);
 
-        assertTrue(rolesOf(get.getAnnotation(RolesAllowed.class)).contains("eddi-admin"));
-        assertTrue(rolesOf(get.getAnnotation(RolesAllowed.class)).contains("eddi-editor"));
-        assertTrue(rolesOf(end.getAnnotation(RolesAllowed.class)).contains("eddi-admin"));
-        assertTrue(rolesOf(end.getAnnotation(RolesAllowed.class)).contains("eddi-editor"));
+        // Exactly the operator tier — the same contract RestConversationStoreTest
+        // pins; agent EDIT (under workspace enforcement) is checked in the resource.
+        var operatorTier = Set.of("eddi-admin", "eddi-editor");
+        assertEquals(operatorTier, rolesOf(get.getAnnotation(RolesAllowed.class)));
+        assertEquals(operatorTier, rolesOf(end.getAnnotation(RolesAllowed.class)));
     }
 
     @Test

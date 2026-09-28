@@ -33,13 +33,15 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * {@code eddi-admin} instead.
  * <p>
  * {@link #getActiveConversations} and {@link #endActiveConversations} are
- * agent-scoped operational endpoints, not per-conversation ones, so they have
- * no single owner to scope to. They are therefore role-gated to
- * {@code eddi-admin}/{@code eddi-editor} (the management tier the Manager's
- * conversation-monitoring page runs as): without a role, any authenticated
- * token — including one with no EDDI role at all — could enumerate every user's
- * open conversations for an agent and end them, and ending an
- * {@code AWAITING_HUMAN} conversation cancels its pending HITL approval.
+ * agent-scoped operational endpoints, not per-conversation ones, so they are
+ * gated like undeploy (which ends every active conversation of an agent) rather
+ * than by conversation owner: {@code eddi-admin} or {@code eddi-editor}, plus
+ * EDIT access on the agent. The EDIT check is enforced only with workspaces on
+ * ({@code eddi.workspaces.enabled=true}, off by default); without them any
+ * editor may list and end any agent's open conversations — the same reach
+ * undeploy-with-end already gives an editor. They used to carry no role at all,
+ * which let any authenticated principal list every user's open conversation ids
+ * and end any of them.
  *
  * @author ginccc
  */
@@ -96,6 +98,10 @@ public interface IRestConversationStore {
     Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 
+    /**
+     * The open (not ENDED) conversations of an agent, across all owners. Requires
+     * EDIT access on the agent when workspaces are enforced.
+     */
     @GET
     @Path("/active/{agentId}")
     @Produces(MediaType.APPLICATION_JSON)
@@ -106,8 +112,18 @@ public interface IRestConversationStore {
                                                     @QueryParam("agentVersion") Integer agentVersion)
             throws ResourceStoreException, ResourceNotFoundException;
 
+    /**
+     * Ends the listed conversations. Only each entry's {@code conversationId} is
+     * used — the agent and the current state are read from the server — and each
+     * conversation requires EDIT access on its agent (under workspace enforcement),
+     * checked for the whole list before anything is ended. Unknown and already
+     * ended conversations are skipped. Ending continues past a conversation that
+     * fails; the body lists the {@code ended}, {@code skipped} and {@code failed}
+     * ids, and the status is 500 if any failed, else 200.
+     */
     @POST
     @Path("end")
+    @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor"})
     Response endActiveConversations(List<ConversationStatus> conversationStatuses);
 }

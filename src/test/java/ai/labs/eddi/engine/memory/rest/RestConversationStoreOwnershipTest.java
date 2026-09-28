@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
@@ -120,7 +121,7 @@ class RestConversationStoreOwnershipTest {
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true),
                 mock(IConversationDescriptorStore.class));
         return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
     }
 
@@ -286,7 +287,7 @@ class RestConversationStoreOwnershipTest {
         lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
         var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
 
         assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));

@@ -30,7 +30,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseTranscriptContent, formatMarkdownText } from "@/components/groups/group-utils";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
-import { useGroup } from "@/hooks/use-groups";
+import { useGroup, useResolvedGroupVersion } from "@/hooks/use-groups";
+import { isImeComposing } from "@/lib/ime";
 import {
   startConversation,
   sendMessageStreaming,
@@ -382,6 +383,7 @@ function ThreadInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (isImeComposing(e)) return;
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -650,14 +652,17 @@ function WorkforceThread() {
   }>();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const version = Number(searchParams.get("version")) || 1;
+  // Resolved, not defaulted to 1: the links into a thread carry no version, and
+  // version 1 is the group's FIRST — its original roster and name.
+  const resolvedVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  const version = resolvedVersion ?? 1;
 
   // Group context from router state (passed by advisor-response-card)
   const groupContext = isGroupContext(location.state) ? location.state : null;
   const hasGroupContext = groupContext?.fromGroup === true;
 
   // Fetch board config to resolve member display name & role
-  const { data: groupConfig } = useGroup(boardId, version);
+  const { data: groupConfig } = useGroup(resolvedVersion ? boardId : "", resolvedVersion);
   const member = groupConfig?.members.find((m) => m.agentId === memberId);
   const memberRole = member?.role ?? null;
 
@@ -691,6 +696,10 @@ function WorkforceThread() {
   const [isLoading, setIsLoading] = useState(false);
   const [sendError, setSendError] = useState<ThreadSendError | null>(null);
   const [isStarting, setIsStarting] = useState(true);
+  /** Why the thread could not be opened, when it could not. */
+  const [initError, setInitError] = useState<string | null>(null);
+  /** Bumped by "Try again" to re-run the initialisation. */
+  const [initAttempt, setInitAttempt] = useState(0);
   /** A restart is in flight — keeps the button from firing twice. */
   const [isRestarting, setIsRestarting] = useState(false);
   const [inputPrefill, setInputPrefill] = useState("");
@@ -699,7 +708,8 @@ function WorkforceThread() {
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const initRef = useRef(false);
+  /** Which (board, member, attempt) the thread was last initialised for. */
+  const initKeyRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
   /** Aborts the in-flight stream — for the Stop button and for unmount. */
   const abortRef = useRef<AbortController | null>(null);
@@ -742,23 +752,26 @@ function WorkforceThread() {
    * contract the Manager's other chat surfaces have: "New Conversation" starts a
    * fresh one, it does not destroy the last.
    */
-  const startFreshConversation = useCallback(async () => {
+  const startFreshConversation = useCallback(async (isCurrent: () => boolean = () => true) => {
     if (!boardId || !memberId) return;
     const newConvId = await startConversation("production", memberId);
-    setConversationId(newConvId);
-    setMessages([]);
+    // The thread is still registered for its own (board, member) even when the
+    // page has moved on: it IS that advisor's conversation now.
     registerThreadRef.current({
       memberId,
       memberName: memberNameRef.current,
       conversationId: newConvId,
       boardId,
     });
+    if (!isCurrent()) return;
+    setConversationId(newConvId);
+    setMessages([]);
 
     // Read any welcome message the agent might have
     try {
       const snapshot = await readConversation("production", memberId, newConvId);
       const parsed = parseConversationSteps(snapshot.conversationSteps ?? []);
-      if (parsed.length > 0) {
+      if (parsed.length > 0 && isCurrent()) {
         setMessages(parsed);
       }
     } catch {
@@ -770,9 +783,28 @@ function WorkforceThread() {
   startFreshRef.current = startFreshConversation;
 
   // ─── Initialize conversation ─────────────────────────────────
+  //
+  // Keyed on (board, member, attempt) rather than run once per mount. Moving
+  // from one advisor's thread to another's keeps this page mounted — only the
+  // route param changes — and a once-per-mount guard left the second advisor
+  // showing the FIRST one's messages and sending into the first one's
+  // conversation. The key is re-checked after every await, so a slow init for
+  // the advisor just left cannot write into the one now on screen.
   useEffect(() => {
-    if (initRef.current || !boardId || !memberId) return;
-    initRef.current = true;
+    if (!boardId || !memberId) return;
+    const key = `${boardId}\u0000${memberId}\u0000${initAttempt}`;
+    if (initKeyRef.current === key) return;
+    initKeyRef.current = key;
+    const isCurrent = () => initKeyRef.current === key;
+
+    abortRef.current?.abort();
+    abortRef.current = null;
+    sendingRef.current = false;
+    setMessages([]);
+    setConversationId(null);
+    setSendError(null);
+    setInitError(null);
+    setIsStarting(true);
 
     async function init() {
       try {
@@ -780,29 +812,41 @@ function WorkforceThread() {
 
         if (existingThread) {
           // Resume existing conversation
-          setConversationId(existingThread.conversationId);
-          const snapshot = await readConversation(
-            "production",
-            memberId,
-            existingThread.conversationId,
-          );
-          const parsed = parseConversationSteps(
-            snapshot.conversationSteps ?? [],
-          );
-          setMessages(parsed);
-          updateActivityRef.current(boardId, memberId);
+          try {
+            const snapshot = await readConversation(
+              "production",
+              memberId,
+              existingThread.conversationId,
+            );
+            if (!isCurrent()) return;
+            setConversationId(existingThread.conversationId);
+            setMessages(parseConversationSteps(snapshot.conversationSteps ?? []));
+            updateActivityRef.current(boardId, memberId);
+          } catch (err) {
+            // The stored conversation no longer exists — deleted, erased, or
+            // cleaned up. Resuming it would leave a thread every send fails in,
+            // so start a fresh one instead; that is what the reader came for.
+            if (!(isApiError(err) && (err.status === 404 || err.status === 410))) throw err;
+            if (!isCurrent()) return;
+            await startFreshRef.current(isCurrent);
+          }
         } else {
-          await startFreshRef.current();
+          await startFreshRef.current(isCurrent);
         }
       } catch (err) {
+        if (!isCurrent()) return;
+        // Used to go to the console only: the page then showed an empty,
+        // healthy-looking thread whose composer was dead (no conversation to
+        // send to) and said nothing about why.
         console.error("Failed to initialize thread:", err);
+        setInitError(getErrorMessage(err));
       } finally {
-        setIsStarting(false);
+        if (isCurrent()) setIsStarting(false);
       }
     }
 
     init();
-  }, [boardId, memberId]);
+  }, [boardId, memberId, initAttempt]);
 
   /**
    * "New Conversation" — every other chat surface in the Manager has one
@@ -819,8 +863,14 @@ function WorkforceThread() {
     sendingRef.current = false;
     setSendError(null);
     setInputPrefill("");
+    // Bound to the thread it was pressed on: if the reader moves to another
+    // advisor while this is in flight, the new conversation is still registered
+    // for THIS advisor, but it must not land in the other one's view.
+    const key = initKeyRef.current;
+    const isCurrent = () => initKeyRef.current === key;
     try {
-      await startFreshConversation();
+      await startFreshConversation(isCurrent);
+      if (isCurrent()) setInitError(null);
     } catch (err) {
       console.error("Failed to start a new conversation:", err);
       toast.error(
@@ -1214,7 +1264,42 @@ function WorkforceThread() {
         className="relative flex-1 overflow-y-auto ps-4 pe-4 pt-4 pb-4"
       >
         <div className="ms-auto me-auto max-w-3xl space-y-4">
-          {messages.length === 0 && !isLoading && (
+          {initError && !conversationId && (
+            <div
+              className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm"
+              role="alert"
+              data-testid="thread-init-error"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-foreground">
+                  {t("Workforce.thread.initFailed", "This conversation could not be opened.")}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{initError}</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setInitAttempt((n) => n + 1)}
+                    className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                    data-testid="thread-init-retry"
+                  >
+                    {t("common.retry", "Retry")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleNewConversation()}
+                    disabled={isRestarting}
+                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    data-testid="thread-init-new"
+                  >
+                    {t("Workforce.thread.newConversation", "New conversation")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {messages.length === 0 && !isLoading && !(initError && !conversationId) && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <AdvisorAvatar
                 name={memberName}
