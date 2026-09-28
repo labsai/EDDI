@@ -152,6 +152,26 @@ class RagSourceIngestionServiceTest {
                     "an hour into a three-hour budget is a slow run, not a dead one");
         }
 
+        /**
+         * The claim records the deadline from the budget the run started under. A read
+         * judged it by the source's current settings instead — lowering the budget
+         * mid-run declared the live run dead, and purge and file delete could then
+         * proceed underneath its worker.
+         */
+        @Test
+        @DisplayName("lowering the budget mid-run does not have the live run reaped")
+        void loweredBudgetDoesNotReapALiveRun() {
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null)),
+                    Instant.now().plus(Duration.ofMinutes(180 + 15))).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(Duration.ofMinutes(20)));
+            var lowered = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(1);
+            lowered.setSettings(settings);
+
+            assertEquals(runId, service.activeRun(KB_ID, lowered).orElseThrow().runId());
+        }
+
         @Test
         @DisplayName("a reap that fails does not fail the read")
         void failingReapDoesNotBreakTheRead() {

@@ -165,7 +165,7 @@ public class IngestionPipeline {
         // source indefinitely; nothing else calls this.
         String sourceKey = stateKey(ragConfigId, source);
         stateStore.reapStaleRuns(sourceKey, staleBefore(source));
-        return stateStore.startRun(sourceKey);
+        return stateStore.startRun(sourceKey, staleAfterClaim(source));
     }
 
     /**
@@ -217,7 +217,7 @@ public class IngestionPipeline {
                 runId = reservedRunId;
             } else {
                 stateStore.reapStaleRuns(sourceKey, staleBefore(source));
-                var claimed = stateStore.startRun(sourceKey);
+                var claimed = stateStore.startRun(sourceKey, staleAfterClaim(source));
                 if (claimed.isEmpty()) {
                     // Not an error: an operator clicking "run now" while a scheduled run
                     // is in flight should be told, not start a second crawl into one
@@ -694,6 +694,14 @@ public class IngestionPipeline {
      */
     public static Instant staleBefore(IngestionSource source) {
         return Instant.now().minus(staleRunThreshold(source));
+    }
+
+    /**
+     * The deadline recorded on a run claimed now: from the budget it runs under, so
+     * a later change to the source's settings cannot move it.
+     */
+    private static Instant staleAfterClaim(IngestionSource source) {
+        return Instant.now().plus(staleRunThreshold(source));
     }
 
     private static Duration staleRunThreshold(IngestionSource source) {

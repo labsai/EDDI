@@ -189,3 +189,22 @@ the first two fail with the reap removed).
   underscores with `_+$`, quadratic on a long run of them (`java/polynomial-redos`). Both
   pre-existing on `main`; now `sanitize(...)` and a linear scan. The new timing test fails against
   the regex.
+
+### Second review round: a run's deadline is fixed at its claim
+
+- **A lowered time budget could reap a live run** (CodeRabbit, Major). The stale cut-off came from
+  the source's *current* settings, so lowering `timeBudgetMinutes` while a run was live declared it
+  dead — failing it and fencing its worker mid-crawl — and, with reaping now on reads, let purge and
+  file delete proceed underneath it. It predates this PR on the claim path. Each claim now records
+  `staleAfter` (claim time + the budget it runs under + 15 minutes) on the run — a `staleAfter`
+  field in MongoDB, a `stale_after` column in PostgreSQL added by `ADD COLUMN IF NOT EXISTS` — and
+  `reapStaleRuns` judges a run with a deadline by that alone. Runs claimed before the upgrade keep
+  the start-time rule. `IngestionStateStoreContract` gains `recordedDeadlineGoverns` and
+  `passedDeadlineIsReaped`, run against the in-memory, MongoDB and PostgreSQL stores (42/42 each,
+  the latter two in Testcontainers); `reservationRecordsItsDeadline` fails if the pipeline claims
+  without one.
+- **CodeQL `java/unreleased-lock`** on the replace lock: the conditional `lock()`/`unlock()` pair is
+  now a plain `lock(); try { … } finally { unlock(); }` on its own branch.
+- **Store URLs in logs** (CodeRabbit): `sanitize()` neutralises control characters but kept
+  `user:password@` and query-string tokens. The Chroma and Elasticsearch builders now log
+  `endpointForLog(url)` — scheme, host, port and path only.

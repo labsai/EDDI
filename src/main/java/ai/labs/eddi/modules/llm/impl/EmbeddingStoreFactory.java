@@ -33,6 +33,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -306,7 +307,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", endpointForLog(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -375,7 +376,7 @@ public class EmbeddingStoreFactory {
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", sanitize(baseUrl),
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", endpointForLog(baseUrl),
                 sanitize(tenantName), sanitize(databaseName), sanitize(collectionName), version.toString());
 
         return ChromaEmbeddingStore.builder()
@@ -441,6 +442,29 @@ public class EmbeddingStoreFactory {
             return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
+        }
+    }
+
+    /**
+     * A store URL as it may be logged: scheme, host, port and path. A URL in
+     * {@code storeParameters} can carry credentials — {@code user:password@} or a
+     * token in the query — and {@link ai.labs.eddi.utils.LogSanitizer#sanitize}
+     * only neutralises control characters, so it left both in the log line.
+     */
+    static String endpointForLog(String url) {
+        if (url == null) {
+            return "null";
+        }
+        try {
+            URI parsed = URI.create(url.trim());
+            if (parsed.getHost() == null) {
+                return "<unparseable URL>";
+            }
+            String port = parsed.getPort() >= 0 ? ":" + parsed.getPort() : "";
+            String path = parsed.getRawPath() == null ? "" : parsed.getRawPath();
+            return sanitize(parsed.getScheme() + "://" + parsed.getHost() + port + path);
+        } catch (IllegalArgumentException e) {
+            return "<unparseable URL>";
         }
     }
 

@@ -145,16 +145,16 @@ public class RagIngestionService {
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();
 
-            ReentrantLock replaceLock = replace ? replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock()) : null;
-            if (replaceLock != null) {
+            if (replace) {
+                ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock());
                 replaceLock.lock();
-            }
-            try {
-                storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, replace);
-            } finally {
-                if (replaceLock != null) {
+                try {
+                    storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, true);
+                } finally {
                     replaceLock.unlock();
                 }
+            } else {
+                storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, false);
             }
 
             ingestionStatus.put(ingestionId, "completed");

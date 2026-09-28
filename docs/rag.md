@@ -448,8 +448,9 @@ refused while a run is in flight, because it would delete the very row that guar
 whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
 of one configured for hours.
 
-A run counts as dead once it has been in flight for its `timeBudgetMinutes` plus 15 minutes. It is
-reaped at that point by whatever touches the source next — a run starting, **reading the run history,
+A run counts as dead once it has been in flight for its `timeBudgetMinutes` plus 15 minutes — the
+budget it was **started** under, recorded as its deadline when the run is claimed, so lowering a
+source's budget while it runs cannot have the live run declared dead. It is reaped at that point by whatever touches the source next — a run starting, **reading the run history,
 or a purge or file delete** — and shows as `FAILED` with "Run abandoned". Only a run starting used to
 reap, so on a source with no cron a dead run read as `RUNNING`, and refused purges and file deletes
 with a 409, until someone started another. Before that threshold a crashed run is indistinguishable

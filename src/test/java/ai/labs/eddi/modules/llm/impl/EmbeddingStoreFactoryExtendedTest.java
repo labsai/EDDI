@@ -41,6 +41,34 @@ class EmbeddingStoreFactoryExtendedTest {
         factory = new EmbeddingStoreFactory(globalVariableResolver, secretResolver);
     }
 
+    // ==================== endpointForLog Tests ====================
+
+    @Nested
+    @DisplayName("endpointForLog")
+    class EndpointForLogTests {
+
+        @Test
+        @DisplayName("drops credentials in the user info and in the query")
+        void dropsCredentials() {
+            assertEquals("http://chroma:8000/api", EmbeddingStoreFactory.endpointForLog(
+                    "http://admin:s3cret@chroma:8000/api?token=abc#frag"));
+        }
+
+        @Test
+        @DisplayName("keeps a plain URL as it is")
+        void plainUrl() {
+            assertEquals("https://es.example.com", EmbeddingStoreFactory.endpointForLog("https://es.example.com"));
+        }
+
+        @Test
+        @DisplayName("never echoes a URL it cannot parse")
+        void unparseable() {
+            assertEquals("<unparseable URL>", EmbeddingStoreFactory.endpointForLog("not a url with spaces s3cret"));
+            assertEquals("<unparseable URL>", EmbeddingStoreFactory.endpointForLog("chroma-without-scheme"));
+            assertEquals("null", EmbeddingStoreFactory.endpointForLog(null));
+        }
+    }
+
     // ==================== sanitizeCollection Tests ====================
 
     @Nested
