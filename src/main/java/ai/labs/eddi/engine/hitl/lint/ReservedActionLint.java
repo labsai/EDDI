@@ -34,7 +34,7 @@ public final class ReservedActionLint {
      * The four reserved action names that carry special pipeline meaning (see
      * {@link IConversation}). An agent-authored action that near-misses one of
      * these is almost always a typo, since designers are told to use dedicated
-     * identifiers instead (see AGENTS.md §5.3).
+     * identifiers instead (see docs/agent-config-authoring.md).
      */
     public static final List<String> RESERVED_ACTIONS = List.of(
             IConversation.PAUSE_CONVERSATION,
