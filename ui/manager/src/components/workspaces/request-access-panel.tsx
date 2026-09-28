@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { getErrorMessage } from "@/lib/api-client";
 import { getAgentProfile } from "@/lib/api/agents";
 import { requestAccess, type AccessLevel } from "@/lib/api/sharing";
-import { chatLinkFor } from "@/lib/resource-links";
+import { Link } from "react-router-dom";
+import { managerChatPath } from "@/lib/resource-links";
 
 type RequestableLevel = Exclude<AccessLevel, "OWN">;
 
@@ -90,10 +91,10 @@ export function RequestAccessPanel({ resourceId, isAgent }: RequestAccessPanelPr
 
       {canChat && (
         <Button variant="outline" asChild>
-          <a href={chatLinkFor(resourceId)} target="_blank" rel="noopener noreferrer" data-testid="request-access-open-chat">
+          <Link to={managerChatPath(resourceId, profile?.name)} data-testid="request-access-open-chat">
             <MessageSquare className="h-4 w-4" aria-hidden="true" />
             {t("workspaces.notifications.openChat", "Open chat")}
-          </a>
+          </Link>
         </Button>
       )}
 

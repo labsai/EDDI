@@ -94,13 +94,13 @@ describe("NotificationBell", () => {
     expect(screen.queryByTestId("notification-grant-n1")).not.toBeInTheDocument();
   });
 
-  it("sends a chat-only share to the chat, since the configuration will not open", async () => {
+  it("sends a chat-only share to the Manager's chat, since the configuration will not open", async () => {
     render([notification({ level: "USE" })]);
 
     await userEvent.click(await screen.findByTestId("notification-bell"));
     const item = await screen.findByTestId("notification-n1");
 
-    expect(item.querySelector("a")?.getAttribute("href")).toContain(`/chat/production/${RESOURCE_ID}`);
+    expect(item.querySelector("a")?.getAttribute("href")).toContain(`/manage/chat?agentId=${RESOURCE_ID}`);
   });
 
   it("says so when there is nothing new", async () => {

@@ -462,6 +462,17 @@ describe("ShareDialog", () => {
     await waitFor(() => expect(sentVisibility).toBe("internal"));
   });
 
+  it("offers the public chat address once the agent is published", async () => {
+    // The standalone Chat UI signs nobody in, so it is the right link only for
+    // an agent anonymous callers may reach.
+    server.use(http.get(SHARES, () => HttpResponse.json(shareInfo({ visibility: "published" }))));
+
+    renderWithProviders(<ShareDialog {...props} chatLink="http://localhost/manage/chat?agentId=abc" />);
+
+    expect(await screen.findByTestId("share-chat-link")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(`http://localhost:3000/chat/production/${RESOURCE_ID}`)).toBeInTheDocument();
+  });
+
   it("offers a copyable chat link for an agent", async () => {
     server.use(http.get(SHARES, () => HttpResponse.json(shareInfo())));
 

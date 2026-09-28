@@ -78,6 +78,15 @@ fixes all of that; [`docs/workspaces.md`](../workspaces.md) describes the result
 - Ownership transfer from the Manager sent `user:bob` as the new owner id,
   which matched nobody. It now sends the principal, and the server also strips
   the prefix.
+- The standalone Chat UI (`/chat`) has no sign-in, so on an OIDC deployment
+  it reaches only agents anonymous callers may reach — published ones. Chat
+  links for anything else now open the Manager's chat
+  (`/manage/chat?agentId=…`), which signs people in; the share dialog offers
+  the public `/chat` address only once an agent is published. Found on the
+  live instance, where a `/chat` link to an "everyone signed in" agent hung on
+  "Starting conversation…" behind a 401.
+- The share preview rendered unnamed workflows and configs as empty bullets:
+  the server sends `""`, and `name ?? id` only falls back on null.
 - `requestAccess` answered 202, and `ApiClient` discards the body of a 202, so
   "you already have access" showed as "sent". It now answers 200 with the
   outcome.

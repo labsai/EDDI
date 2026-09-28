@@ -22,7 +22,7 @@ import {
 } from "@/lib/api/workspaces";
 import { shareResource, type AccessLevel } from "@/lib/api/sharing";
 import { userSubject } from "@/lib/spaces";
-import { chatLinkFor, isAgentUri, managerRouteFor } from "@/lib/resource-links";
+import { isAgentUri, managerChatPath, managerRouteFor } from "@/lib/resource-links";
 import { useSpaces } from "@/hooks/use-spaces";
 
 const NOTIFICATION_KEYS = {
@@ -210,9 +210,9 @@ function NotificationItem({
         )}
         {chatOnly ? (
           <Button size="sm" variant="outline" asChild>
-            <a href={chatLinkFor(n.resourceId)} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
+            <Link to={managerChatPath(n.resourceId, n.resourceName)} onClick={onNavigate}>
               {t("workspaces.notifications.openChat", "Open chat")}
-            </a>
+            </Link>
           </Button>
         ) : (
           route && (

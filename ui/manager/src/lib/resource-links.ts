@@ -35,7 +35,30 @@ export function isAgentUri(resourceUri: string | null | undefined): boolean {
   return !!resourceUri && /^eddi:\/\/[^/]+\/agentstore\//.test(resourceUri);
 }
 
-/** The Chat UI address for an agent. */
-export function chatLinkFor(agentId: string, origin = window.location.origin): string {
+/**
+ * The Manager's chat for an agent, as an in-app route.
+ *
+ * This, not the standalone Chat UI, is where somebody an agent was shared with
+ * chats with it: the Manager signs them in, and the Chat UI at `/chat` has no
+ * sign-in of its own — it can only reach agents anonymous callers may reach,
+ * which under workspaces means published ones. A `/chat` link to a shared or
+ * "everyone signed in" agent hung on "Starting conversation…" behind a 401.
+ */
+export function managerChatPath(agentId: string, agentName?: string | null): string {
+  const params = new URLSearchParams({ agentId });
+  if (agentName?.trim()) params.set("agentName", agentName.trim());
+  return `/manage/chat?${params.toString()}`;
+}
+
+/** {@link managerChatPath} as an absolute address, for copying. */
+export function chatLinkFor(agentId: string, agentName?: string | null, origin = window.location.origin): string {
+  return `${origin}${managerChatPath(agentId, agentName)}`;
+}
+
+/**
+ * The standalone Chat UI address — the one to hand to people outside the
+ * deployment. Works only for a published agent, since it cannot sign anyone in.
+ */
+export function publicChatLinkFor(agentId: string, origin = window.location.origin): string {
   return `${origin}/chat/production/${encodeURIComponent(agentId)}`;
 }

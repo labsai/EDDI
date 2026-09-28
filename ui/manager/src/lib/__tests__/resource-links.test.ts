@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatLinkFor, isAgentUri, managerRouteFor } from "../resource-links";
+import { chatLinkFor, isAgentUri, managerChatPath, managerRouteFor, publicChatLinkFor } from "../resource-links";
 
 const ID = "aaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -24,7 +24,15 @@ describe("resource links", () => {
     expect(isAgentUri(undefined)).toBe(false);
   });
 
-  it("builds the chat address on the given origin", () => {
-    expect(chatLinkFor(ID, "https://eddi.example.com")).toBe(`https://eddi.example.com/chat/production/${ID}`);
+  it("sends people to the Manager's chat, which can sign them in", () => {
+    // The standalone Chat UI has no sign-in, so a link there to anything but a
+    // published agent hung behind a 401.
+    expect(managerChatPath(ID, "Support")).toBe(`/manage/chat?agentId=${ID}&agentName=Support`);
+    expect(managerChatPath(ID)).toBe(`/manage/chat?agentId=${ID}`);
+    expect(chatLinkFor(ID, null, "https://eddi.example.com")).toBe(`https://eddi.example.com/manage/chat?agentId=${ID}`);
+  });
+
+  it("keeps the public Chat UI address for published agents", () => {
+    expect(publicChatLinkFor(ID, "https://eddi.example.com")).toBe(`https://eddi.example.com/chat/production/${ID}`);
   });
 });

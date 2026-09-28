@@ -498,7 +498,7 @@ export function AgentsPage() {
           onClose={() => setShareTarget(null)}
           resourceId={shareTarget.id}
           resourceName={shareTarget.name}
-          chatLink={chatLinkFor(shareTarget.id)}
+          chatLink={chatLinkFor(shareTarget.id, shareTarget.name)}
         />
       )}
     </div>

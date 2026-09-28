@@ -37,6 +37,7 @@ import {
   type ShareResult,
   type ShareTarget,
 } from "@/lib/api/sharing";
+import { publicChatLinkFor } from "@/lib/resource-links";
 import { describeSpace, isUserSubject, parseSubjectInput } from "@/lib/spaces";
 import { useHasRole } from "@/hooks/use-auth";
 import { useSpaces } from "@/hooks/use-spaces";
@@ -271,7 +272,11 @@ export function ShareDialog({ open, onClose, resourceId, resourceName, chatLink 
           <div className="space-y-5">
             <OwnerLine owner={info.ownerLabel ?? info.ownerId ?? null} spaceId={info.spaceId ?? null} />
 
-            {chatLink && <CopyChatLink link={chatLink} />}
+            {/* A published agent gets the public Chat UI address, which works
+                without signing in; anything else needs the Manager's chat. */}
+            {chatLink && (
+              <CopyChatLink link={info.visibility === "published" ? publicChatLinkFor(resourceId) : chatLink} />
+            )}
 
             {pending && (
               <PendingPreview

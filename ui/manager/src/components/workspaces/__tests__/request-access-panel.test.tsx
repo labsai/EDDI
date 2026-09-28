@@ -62,7 +62,7 @@ describe("RequestAccessPanel", () => {
 
     expect(await screen.findByTestId("request-access-open-chat")).toHaveAttribute(
       "href",
-      expect.stringContaining(`/chat/production/${RESOURCE_ID}`)
+      expect.stringContaining(`/manage/chat?agentId=${RESOURCE_ID}`)
     );
     // Asking for chat access they already hold would be a no-op request.
     const options = Array.from(screen.getByTestId("request-access-level").querySelectorAll("option")).map((o) => o.value);
