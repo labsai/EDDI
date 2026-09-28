@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { PropertiesPage } from "@/pages/properties";
 import userEvent from "@testing-library/user-event";
+import { MOCK_PROPERTIES_EMPTY_USER } from "@/test/mocks/handlers";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -80,6 +81,33 @@ describe("PropertiesPage", () => {
       expect(screen.getAllByText("number").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("boolean").length).toBeGreaterThanOrEqual(1);
     });
+  });
+
+  it("types raw values by their JavaScript type — the endpoint sends no Property wrapper", async () => {
+    renderPage();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.type(screen.getByTestId("properties-user-id"), "user-123");
+    vi.advanceTimersByTime(600);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId("property-age")).getByText("number")).toBeInTheDocument();
+    });
+    expect(within(screen.getByTestId("property-age")).getByText("32")).toBeInTheDocument();
+    expect(within(screen.getByTestId("property-tags")).getByText("array")).toBeInTheDocument();
+    expect(within(screen.getByTestId("property-preferences")).getByText("object")).toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty table, not an error, for a user with no properties (204)", async () => {
+    renderPage();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.type(screen.getByTestId("properties-user-id"), MOCK_PROPERTIES_EMPTY_USER);
+    vi.advanceTimersByTime(600);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("properties-table")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No properties found")).toBeInTheDocument();
   });
 
   it("shows property count footer", async () => {
