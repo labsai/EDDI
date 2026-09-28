@@ -185,6 +185,15 @@ public class RagIngestionService {
                         + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
                 ingestionWarnings.put(ingestionId, warning);
                 LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
+            } catch (RuntimeException e) {
+                // The new chunks are already stored, so a failed delete (pgvector wraps
+                // its SQLException in a RuntimeException) leaves both versions
+                // retrievable. Still a failure — the operator should retry, and a retry
+                // removes every version but its own — but the status says what state it
+                // left, rather than a bare "failed".
+                ingestionWarnings.put(ingestionId, "The new version of '" + documentName + "' is stored, but removing the previous "
+                        + "version failed, so both may be retrievable until the replacement is retried.");
+                throw e;
             }
         }
     }

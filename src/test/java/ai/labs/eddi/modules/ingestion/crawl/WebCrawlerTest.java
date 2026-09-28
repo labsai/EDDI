@@ -925,6 +925,26 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a sitemap index is followed only to sitemaps on its own host")
+        void sitemapIndexChildrenStayOnItsHost() {
+            // The index is the site's to write; it must not be able to point the
+            // crawler at arbitrary public hosts.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemapIndex(SITE + "/sitemap.xml", SITE + "/sitemap-pages.xml", "https://elsewhere.test/sitemap.xml")
+                    .sitemap(SITE + "/sitemap-pages.xml", SITE + "/orphan")
+                    .sitemap("https://elsewhere.test/sitemap.xml", SITE + "/other")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+            assertFalse(site.wasRequested("https://elsewhere.test/sitemap.xml"));
+        }
+
+        @Test
         @DisplayName("an index of indexes cannot read more than the sitemap budget")
         void sitemapIndexBudget() {
             // Each index lists two more: unbounded, the requests made before the first

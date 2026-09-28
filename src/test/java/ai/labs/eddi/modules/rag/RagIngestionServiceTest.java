@@ -178,6 +178,22 @@ class RagIngestionServiceTest {
     }
 
     @Test
+    void replace_whoseCleanupFails_failsAndSaysBothVersionsMayRemain() {
+        wireRealStore(embeddingStore);
+        doThrow(new RuntimeException("connection reset")).when(embeddingStore).removeAll(any(Filter.class));
+
+        String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
+        long deadline = System.currentTimeMillis() + 5000;
+        while (service.getStatus(id).equals("pending") || service.getStatus(id).equals("processing")) {
+            assertTrue(System.currentTimeMillis() < deadline, "ingestion did not finish");
+            Thread.onSpinWait();
+        }
+
+        assertTrue(service.getStatus(id).startsWith("failed"), service.getStatus(id));
+        assertNotNull(service.getWarning(id), "the status must say the new version is stored alongside the old");
+    }
+
+    @Test
     void withoutReplace_nothingIsRemovedAndThereIsNoWarning() {
         wireRealStore(embeddingStore);
 

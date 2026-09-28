@@ -402,7 +402,7 @@ Every form the [sitemap protocol](https://www.sitemaps.org/protocol.html) allows
 | Form | What is taken |
 | --- | --- |
 | `<urlset>` | each `url/loc`. The `loc` of the image, video and news extensions sits under its own element and is **not** a page; `xhtml:link` hreflang alternates are not followed either — the scope decides which languages are crawled |
-| `<sitemapindex>` | each `sitemap/loc`, read as a further sitemap — indexes of indexes included |
+| `<sitemapindex>` | each `sitemap/loc` **on the index's own host**, read as a further sitemap — indexes of indexes included. A child on another host is skipped, as the protocol requires, so a site cannot point the crawler at arbitrary hosts; configured and robots.txt sitemaps may be on any host |
 | RSS 2.0 / Atom | each `item/link`, or each `entry/link` whose `rel` is absent or `alternate` |
 | Plain text | one URL per line |
 | gzip | any of the above compressed (`.xml.gz`), recognised by its content rather than its name or Content-Type |

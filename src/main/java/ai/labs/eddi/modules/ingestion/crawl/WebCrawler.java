@@ -418,9 +418,18 @@ public class WebCrawler {
                 break;
             }
             sitemapsRead++;
-            Sitemap sitemap = fetchSitemap(sitemapQueue.poll(), request, counters);
+            String sitemapUrl = sitemapQueue.poll();
+            Sitemap sitemap = fetchSitemap(sitemapUrl, request, counters);
+            String indexHost = CrawlUrls.host(sitemapUrl).orElse(null);
             for (String child : sitemap.childSitemaps()) {
-                if (sitemapsSeen.add(child)) {
+                // The protocol's own rule: an index lists sitemaps on its own host.
+                // Without it, any site the crawl reads could have it fetch sitemaps on
+                // any public host — SSRF protection stops only private ones. Not the
+                // page scope: a source scoped to /docs/ has its sitemaps outside it.
+                // Configured and robots.txt sitemaps may be cross-host; the protocol
+                // allows that through robots.txt, and the operator chose the others.
+                String childHost = CrawlUrls.host(child).orElse(null);
+                if (indexHost != null && indexHost.equalsIgnoreCase(childHost) && sitemapsSeen.add(child)) {
                     sitemapQueue.add(child);
                 }
             }

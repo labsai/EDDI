@@ -208,3 +208,16 @@ the first two fail with the reap removed).
 - **Store URLs in logs** (CodeRabbit): `sanitize()` neutralises control characters but kept
   `user:password@` and query-string tokens. The Chroma and Elasticsearch builders now log
   `endpointForLog(url)` — scheme, host and port only; a path can carry a token too.
+
+### Third review round: sitemap-index children, and a replacement whose cleanup fails
+
+- **A sitemap index could send the crawler to any host** (CodeRabbit, outside-diff). Its child
+  sitemaps were queued unchecked, so a crawled site could have EDDI fetch sitemaps from arbitrary
+  public hosts (SSRF protection stops private ones only). A child must now be on the index's own
+  host — the sitemap protocol's rule — rather than in the crawl's page scope, which would have
+  rejected `/sitemap-docs.xml` for a source scoped to `/docs/`. Configured and robots.txt sitemaps
+  keep cross-host, which the protocol allows. `sitemapIndexChildrenStayOnItsHost`.
+- **A replacement whose delete failed** — pgvector wraps its `SQLException` in a
+  `RuntimeException` — left both versions retrievable behind a bare `failed:` status. It is still
+  reported as failed (a retry removes every version but its own), with a `warning` saying the new
+  version is stored alongside the old. `replace_whoseCleanupFails_failsAndSaysBothVersionsMayRemain`.
