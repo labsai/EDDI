@@ -193,6 +193,18 @@ class PropertySetterTaskSecretScrubTest {
     }
 
     @Test
+    @DisplayName("a copy of the RAW input elsewhere in the step is scrubbed when the resolved value is the normalized one")
+    void rawInputCopyIsScrubbedWithNormalizedValue() throws Exception {
+        IWritableConversationStep step = stepWithParsedInput();
+        step.storeData(new Data<>("output:text:echo", List.of("you typed " + RAW_INPUT)));
+
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+
+        assertEquals(List.of("you typed " + PLACEHOLDER), step.getData("output:text:echo").getResult());
+        assertNoPlaintextAnywhere(step);
+    }
+
+    @Test
     @DisplayName("a scrubbed placeholder (e.g. after a RULE approval pause) is never vaulted over the real secret")
     void placeholderIsNeverVaulted() throws Exception {
         // After a RULE pause the turn's finally already replaced the input; on resume

@@ -541,11 +541,16 @@ public class PropertySetterTask implements ILifecycleTask {
         var currentStep = memory.getCurrentStep();
         boolean inputScrubbed = false;
         boolean anythingScrubbed = false;
+        // The resolved value plus every input form replaced below: when the match is
+        // normalization-insensitive, a copy of the differently formatted raw input
+        // elsewhere in the step does not contain the resolved value verbatim.
+        List<String> needles = new ArrayList<>(List.of(plaintext));
 
         // (1) The known input-carrying keys of this step.
         for (String inputKey : List.of(INPUT_INITIAL_IDENTIFIER, INPUT_NORMALIZED_IDENTIFIER)) {
             IData<String> inputData = currentStep.getLatestData(inputKey);
             if (inputData != null && carriesSecret(inputData.getResult(), plaintext)) {
+                needles.add(inputData.getResult());
                 storeScrubbed(currentStep, inputKey, SECRET_INPUT_PLACEHOLDER);
                 inputScrubbed = true;
                 anythingScrubbed = true;
@@ -560,7 +565,7 @@ public class PropertySetterTask implements ILifecycleTask {
             if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
                 continue;
             }
-            Object cleaned = SecretValueScrubber.scrubValue(data.getResult(), plaintext, SECRET_INPUT_PLACEHOLDER);
+            Object cleaned = SecretValueScrubber.scrubAll(data.getResult(), needles, SECRET_INPUT_PLACEHOLDER);
             if (cleaned != null) {
                 storeScrubbed(currentStep, key, cleaned);
                 anythingScrubbed = true;
@@ -572,7 +577,7 @@ public class PropertySetterTask implements ILifecycleTask {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = SecretValueScrubber.scrubValue(outputEntry.getValue(), plaintext, SECRET_INPUT_PLACEHOLDER);
+                Object cleaned = SecretValueScrubber.scrubAll(outputEntry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;

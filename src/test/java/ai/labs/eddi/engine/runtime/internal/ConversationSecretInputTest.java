@@ -325,6 +325,59 @@ class ConversationSecretInputTest {
         }
 
         @Test
+        @DisplayName("Secret input: a short PIN copied into the reply is removed as a whole token")
+        void secretInput_shortPinCopyScrubbed() throws Exception {
+            var lifecycleManager = mock(ILifecycleManager.class);
+            var workflow = mock(IExecutableWorkflow.class);
+            when(workflow.getWorkflowId()).thenReturn("wf-pin");
+            when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+            doAnswer(inv -> {
+                IConversationMemory mem = inv.getArgument(0);
+                mem.getCurrentStep().addConversationOutputList("output",
+                        List.of(Map.of("type", "text", "text", "PIN 739 saved for order 17391.")));
+                return null;
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            Conversation conversation = new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
+            try {
+                conversation.say("739", secretFlag());
+            } catch (Exception ignored) {
+                // Expected — no real lifecycle tasks configured beyond the stub
+            }
+
+            String output = String.valueOf(memory.getCurrentStep().getConversationOutput());
+            assertTrue(output.contains("PIN <secret input> saved for order 17391."), output);
+        }
+
+        @Test
+        @DisplayName("Secret input: raw copies are scrubbed even after a secret property already replaced input:initial")
+        void secretInput_rawCopyScrubbedAfterPropertyScrub() throws Exception {
+            var lifecycleManager = mock(ILifecycleManager.class);
+            var workflow = mock(IExecutableWorkflow.class);
+            when(workflow.getWorkflowId()).thenReturn("wf-vaulted");
+            when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
+            doAnswer(inv -> {
+                IConversationMemory mem = inv.getArgument(0);
+                var step = mem.getCurrentStep();
+                step.addConversationOutputList("output", List.of("echo: Raw-Secret_Value.9"));
+                // What PropertySetterTask leaves behind after vaulting a normalized match.
+                step.storeData(new Data<>("input:initial", "<secret input>"));
+                step.storeData(new Data<>("input:normalized", "<secret input>"));
+                return null;
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            Conversation conversation = new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
+            try {
+                conversation.say("Raw-Secret_Value.9", secretFlag());
+            } catch (Exception ignored) {
+                // Expected — no real lifecycle tasks configured beyond the stub
+            }
+
+            String output = String.valueOf(memory.getCurrentStep().getConversationOutput());
+            assertFalse(output.contains("Raw-Secret_Value.9"), "raw secret survived in the conversation output: " + output);
+        }
+
+        @Test
         @DisplayName("Normal input: input:initial keeps plaintext (no over-scrubbing)")
         void normalInput_inputInitialRetainsPlaintext() {
             Conversation conversation = newConversationWithNoOpWorkflow();
