@@ -470,4 +470,30 @@ describe("ShareDialog", () => {
     expect(await screen.findByTestId("share-chat-link")).toBeInTheDocument();
     expect(screen.getByDisplayValue("http://localhost/chat/production/abc")).toBeInTheDocument();
   });
+
+  it("names an unnamed resource in the preview by its id, not with a blank line", async () => {
+    // Workflows and configuration beneath an agent usually have no name, and the
+    // server sends "" for it. `name ?? id` rendered those as empty bullets.
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.post(SHARES, () =>
+        HttpResponse.json({
+          updated: [
+            { id: RESOURCE_ID, name: "Support Agent" },
+            { id: "bbbbbbbbbbbbbbbbbbbbbbbb", name: "" },
+          ],
+          skipped: [],
+          dryRun: true,
+        })
+      )
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+    await waitFor(() => expect(screen.getByTestId("share-subject-input")).toBeInTheDocument());
+    await userEvent.type(screen.getByTestId("share-subject-input"), "carol");
+    await userEvent.click(screen.getByTestId("share-submit"));
+
+    const preview = await screen.findByTestId("share-preview");
+    expect(preview).toHaveTextContent("bbbbbbbbbbbbbbbbbbbbbbbb");
+  });
 });

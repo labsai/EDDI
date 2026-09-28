@@ -35,6 +35,7 @@ import {
   type ResourceVisibility,
   type ShareOptions,
   type ShareResult,
+  type ShareTarget,
 } from "@/lib/api/sharing";
 import { describeSpace, isUserSubject, parseSubjectInput } from "@/lib/spaces";
 import { useHasRole } from "@/hooks/use-auth";
@@ -461,7 +462,7 @@ function PendingPreview({
       <ul className="list-inside list-disc text-xs text-muted-foreground">
         {updated.slice(0, MAX_LISTED).map((target) => (
           <li key={target.id} className="truncate">
-            {target.name ?? target.id}
+            <TargetLabel target={target} />
           </li>
         ))}
         {updated.length > MAX_LISTED && (
@@ -780,7 +781,7 @@ function CascadeSummary({ result, action }: { result: ShareResult; action: Share
           <ul className="list-inside list-disc text-xs text-muted-foreground">
             {skipped.slice(0, MAX_LISTED).map((target) => (
               <li key={target.id} className="truncate">
-                {target.name ?? target.id}
+                <TargetLabel target={target} />
               </li>
             ))}
             {skipped.length > MAX_LISTED && (
@@ -811,6 +812,17 @@ function friendlyError(t: (k: string, d: string) => string, error: unknown): str
 
 /** How many resources to name before summarising the rest. */
 const MAX_LISTED = 5;
+
+/**
+ * A resource in a preview or summary. Most workflows and configuration
+ * resources beneath an agent carry no name — the server sends `""`, not null —
+ * so a `name ?? id` fallback rendered an empty bullet for each of them: "this
+ * change reaches 3 resources" followed by one name and two blanks.
+ */
+function TargetLabel({ target }: { target: ShareTarget }) {
+  const name = target.name?.trim();
+  return name ? <>{name}</> : <span className="font-mono">{target.id}</span>;
+}
 
 /**
  * The level as a human reads it. Falls through to the raw value for a level
