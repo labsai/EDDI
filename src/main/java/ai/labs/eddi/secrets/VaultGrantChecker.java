@@ -97,6 +97,11 @@ public class VaultGrantChecker {
      */
     private static final Pattern VARS_PATTERN = Pattern.compile("\\$\\{vars:[^}]+\\}");
 
+    /**
+     * An explicit tenant in a vault or variable reference; group 1 is the tenant.
+     */
+    private static final Pattern TENANT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|vars):([^/}]+)/[^}]+\\}");
+
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
@@ -214,6 +219,70 @@ public class VaultGrantChecker {
             }
         }
         return false;
+    }
+
+    /**
+     * Every tenant the agent's configuration names explicitly in a
+     * {@code ${vault:<tenant>/…}} or {@code ${vars:<tenant>/…}} reference —
+     * including those that only appear once variables are expanded, twice over,
+     * since a variable may hold a reference to another variable or to a secret.
+     * <p>
+     * Feeds the workspace check that a deployer belongs to every space whose
+     * secrets or variables an agent uses. Reuses this class's traversal because it
+     * is the one that already reaches the agent document, every workflow step's
+     * extension config, and the variable expansion the runtime performs.
+     *
+     * @return the tenant ids; empty when the configuration cannot be read, which
+     *         the deployment itself then fails on
+     */
+    public Set<String> referencedTenants(String agentId, Integer agentVersion) {
+        AgentConfiguration agentConfiguration;
+        try {
+            agentConfiguration = agentStore.read(agentId, agentVersion);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read agent '%s' v%s for the space-reference check: %s", sanitize(agentId), agentVersion,
+                    sanitize(e.getMessage()));
+            return Set.of();
+        }
+        Set<String> tenants = new LinkedHashSet<>();
+        if (agentConfiguration == null) {
+            return tenants;
+        }
+        collectTenants(agentConfiguration, tenants);
+        if (agentConfiguration.getWorkflows() != null) {
+            for (URI workflowUri : agentConfiguration.getWorkflows()) {
+                WorkflowConfiguration workflow = readWorkflow(workflowUri);
+                if (workflow == null || workflow.getWorkflowSteps() == null) {
+                    continue;
+                }
+                for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                    Object configuredUri = step.getConfig() != null ? step.getConfig().get("uri") : null;
+                    if (step.getType() == null || configuredUri == null) {
+                        continue;
+                    }
+                    Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
+                    if (extensionConfig != null) {
+                        collectTenants(extensionConfig, tenants);
+                    }
+                }
+            }
+        }
+        return tenants;
+    }
+
+    private void collectTenants(Object config, Set<String> sink) {
+        String serialized;
+        try {
+            serialized = MAPPER.writeValueAsString(config);
+        } catch (Exception e) {
+            return;
+        }
+        String scanned = withVariablesExpanded(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT),
+                ConnectionReference.DEFAULT_TENANT);
+        Matcher matcher = TENANT_REFERENCE.matcher(scanned);
+        while (matcher.find()) {
+            sink.add(matcher.group(1));
+        }
     }
 
     /**

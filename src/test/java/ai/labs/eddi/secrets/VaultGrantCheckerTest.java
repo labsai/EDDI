@@ -33,6 +33,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -592,6 +593,47 @@ class VaultGrantCheckerTest {
             when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+    }
+
+    @Nested
+    @DisplayName("referenced tenants — the workspace deploy check")
+    class ReferencedTenants {
+
+        private static final String AGENT_ID = "7c1d2e3f4a5b6c7d8e9f0a1c";
+
+        private void agentWhoseCallCarries(String text) throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/?key=" + text);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+        }
+
+        @Test
+        @DisplayName("names every explicit tenant, vault and variables alike, and not the short forms")
+        void explicitTenants() throws Exception {
+            agentWhoseCallCarries("${vault:t.eng.1a2b3c4d/openai}&m=${vars:u.alice.5e6f7a8b/model}&x=${vault:plain}");
+
+            assertEquals(Set.of("t.eng.1a2b3c4d", "u.alice.5e6f7a8b"), checker.referencedTenants(AGENT_ID, 1));
+        }
+
+        @Test
+        @DisplayName("sees a secret hidden behind a variable, as the runtime does")
+        void seesThroughVariables() throws Exception {
+            agentWhoseCallCarries("${vars:u.carol.0a0b0c0d/token}");
+            when(globalVariableResolver.resolveValue("${vars:u.carol.0a0b0c0d/token}", "default")).thenReturn("${vault:t.finance.9e8d7c6b/key}");
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "a variable in carol's own space holding finance's secret must not smuggle it past the membership check");
+        }
+
+        @Test
+        @DisplayName("an unreadable agent names nothing")
+        void unreadable() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new RuntimeException("gone"));
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
         }
     }
 }
