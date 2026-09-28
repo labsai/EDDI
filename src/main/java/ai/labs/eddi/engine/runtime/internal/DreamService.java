@@ -572,6 +572,17 @@ public class DreamService {
                 continue;
             }
 
+            // 5b. An answer made only of originals repeated verbatim merged nothing, so
+            // it may only drop originals that were exact duplicates of what it kept.
+            // Seen live: a small model "consolidated" four coffee preferences by
+            // returning three of them unchanged, and "no sugar" was gone. Refuse that.
+            if (verbatimSubsetDroppingFacts(consolidated, groupEntries)) {
+                LOGGER.warnf("[DREAM] Consolidation of group '%s' for user='%s' repeated %d of %d originals verbatim and "
+                        + "dropped the rest, which were not duplicates. Skipping the group.", LogSanitizer.sanitize(group.getKey()),
+                        LogSanitizer.sanitize(userId), consolidated.size(), groupEntries.size());
+                continue;
+            }
+
             // 6. summarizeTargetEntries is communicated to the model in the prompt
             // (consolidationInstructions). An answer above it is NOT truncated: the
             // originals are deleted below, so cutting the list would silently throw
@@ -941,6 +952,25 @@ public class DreamService {
         return config.getSummarizationPrompt() + "\n\nYou are given " + originalCount + " entries. Consolidate them into at most "
                 + target + " entr" + (target == 1 ? "y" : "ies")
                 + ", and in any case fewer than " + originalCount + ". Every important detail must survive in some entry.";
+    }
+
+    /**
+     * True when every consolidated entry is an original repeated verbatim and at
+     * least one left-out original holds a value none of them repeats: such an
+     * answer merged nothing, and deleting that original would lose the fact.
+     */
+    static boolean verbatimSubsetDroppingFacts(List<ConsolidatedEntry> consolidated, List<UserMemoryEntry> originals) {
+        boolean allVerbatim = consolidated.stream().allMatch(c -> originals.stream()
+                .anyMatch(o -> c.key().equals(o.key()) && c.value().equals(String.valueOf(o.value()))));
+        if (!allVerbatim) {
+            return false;
+        }
+        Set<String> keptValues = consolidated.stream().map(c -> normalized(c.value())).collect(Collectors.toSet());
+        return originals.stream().anyMatch(o -> !keptValues.contains(normalized(String.valueOf(o.value()))));
+    }
+
+    private static String normalized(String value) {
+        return value.strip().toLowerCase(Locale.ROOT);
     }
 
     /**

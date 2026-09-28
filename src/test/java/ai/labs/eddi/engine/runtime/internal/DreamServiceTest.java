@@ -179,6 +179,12 @@ class DreamServiceTest {
 
     // === Summarization tests ===
 
+    private static UserMemoryEntry entryWith(String key, String value) {
+        Instant now = Instant.now();
+        return new UserMemoryEntry("id-" + key, "user-1", key, value, "preference", Visibility.self, "agent-1", List.of(), "conv-1",
+                false, 0, now, now);
+    }
+
     private List<UserMemoryEntry> makeEntries(int count, String category, String agentId) {
         Instant now = Instant.now();
         var entries = new ArrayList<UserMemoryEntry>();
@@ -736,6 +742,51 @@ class DreamServiceTest {
             verify(store).deleteEntry("id-" + i);
         }
         assertEquals(4, result.entriesSummarized()); // 5 deleted - 1 created; id-0 reused in place
+    }
+
+    /**
+     * Live-reproduced on Ollama: four entries in, the model returned three of them
+     * unchanged, and the fourth ("no sugar") was deleted. A verbatim subset merges
+     * nothing — it must not be allowed to delete the rest.
+     */
+    @Test
+    void summarize_answerOnlyRepeatsOriginalsVerbatim_groupSkipped() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"value-0\"},{\"key\":\"key-1\",\"value\":\"value-1\"},"
+                        + "{\"key\":\"key-2\",\"value\":\"value-2\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void verbatimSubset_droppingOnlyExactDuplicates_isAllowed() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("coffee_pref", "Black "), entryWith("tea", "green"));
+        var kept = List.of(new DreamService.ConsolidatedEntry("coffee", "black"), new DreamService.ConsolidatedEntry("tea", "green"));
+
+        assertFalse(DreamService.verbatimSubsetDroppingFacts(kept, originals));
+    }
+
+    @Test
+    void verbatimSubset_droppingADistinctFact_isRefused() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("sugar", "none"), entryWith("tea", "green"));
+        var kept = List.of(new DreamService.ConsolidatedEntry("coffee", "black"), new DreamService.ConsolidatedEntry("tea", "green"));
+
+        assertTrue(DreamService.verbatimSubsetDroppingFacts(kept, originals));
+    }
+
+    @Test
+    void rewrittenAnswer_isNotAVerbatimSubset() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("sugar", "none"));
+        var merged = List.of(new DreamService.ConsolidatedEntry("coffee", "black, no sugar"));
+
+        assertFalse(DreamService.verbatimSubsetDroppingFacts(merged, originals));
     }
 
     @Test

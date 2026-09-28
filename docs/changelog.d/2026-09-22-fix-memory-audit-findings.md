@@ -27,6 +27,9 @@ observed there, and carries a regression test.
   model's answer are merged, and a failed insert restores the originals it overwrote. The answer
   is no longer truncated to `summarizeTargetEntries` — truncation dropped facts the model had
   preserved while the originals were deleted anyway; the target is now part of the prompt.
+  An answer that only repeats some originals verbatim merged nothing, so it may drop an original
+  only if that original duplicated a kept value; otherwise the group is skipped. Seen live on
+  qwen2.5:3b, which returned three of four coffee preferences unchanged and lost "no sugar".
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
 - **`scope: "secret"` values of different users shared one vault slot.** The slot was
   `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to
