@@ -65,8 +65,10 @@ jobs:
           set -euo pipefail
           # Only a stable release moves anything. An RC is not what a reader
           # should deploy, and the next version is already the RC's own.
+          # The input is not echoed: on a manual dispatch it is free text, and a
+          # newline in it would start a workflow command of its own.
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::'${VERSION}' is not a stable MAJOR.MINOR.PATCH release"
+            echo "::error::the version input is not a stable MAJOR.MINOR.PATCH release (no 'v', no suffix)"
             exit 1
           fi
           echo "BRANCH=chore/post-release-${VERSION}" >> "$GITHUB_ENV"
@@ -78,6 +80,22 @@ jobs:
           # Persisted for the push below, so the branch — and therefore the PR —
           # is authored by whoever owns this token. See the TOKEN note above.
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # The whole point of moving the pointers AFTER the release is that the
+      # image they name exists. From ci.yml that is guaranteed; a manual
+      # dispatch could name a version that was never tagged, and the PR would
+      # send every quickstart to a missing image. Check both halves.
+      - name: Check the release was published
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" > /dev/null; then
+            echo "::error::there is no tag ${VERSION} on origin — post-release runs only after a release"
+            exit 1
+          fi
+          if ! docker manifest inspect "labsai/eddi:${VERSION}" > /dev/null; then
+            echo "::error::labsai/eddi:${VERSION} is not on Docker Hub — the PR would point readers at a missing image"
+            exit 1
+          fi
 
       - name: Check for an open post-release PR
         id: open_pr
@@ -113,7 +131,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           {
             echo "notes<<EOF_NOTES"
-            grep -v '^  \|^changed:$\|^nothing to change$' bump.log || true
+            # One bullet per note: consecutive plain lines would render as a
+            # single run-on paragraph in the PR body.
+            grep -v '^  \|^changed:$\|^nothing to change$' bump.log | sed 's/^/- /' || true
             echo "EOF_NOTES"
           } >> "$GITHUB_OUTPUT"
           rm -f bump.log

@@ -268,7 +268,10 @@ grep -o -- '--color-warning[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
   rot — a prop renamed in `src/` leaves the design agent coding against the old name.
 - **`__APP_VERSION__` in `ds-entry.tsx` is the fixed string `"preview"`**, so the sidebar
   footer reads "EDDI Demo preview" in designs. It used to be a version literal that every
-  release had to bump; nothing reads it but that footer.
+  release had to bump; nothing reads it but that footer. For the same reason `package.json`
+  carries no `version` any more (the Manager takes EDDI's from `pom.xml`, see `vite.config.ts`),
+  so `.ds-sync/package-build.mjs` falls back to `0.0.0` and the synced bundle's README says
+  `eddi-manager@0.0.0`. Cosmetic; the tool is vendored, so it is noted here rather than patched.
 - **`src/assets/logo_eddi.png` must stay importable.** Moving it back under `public/`
   silently reintroduces a broken image in every design using the expanded `Sidebar`.
 - **`build-css.mjs` depends on `src/index.css`'s `@import 'tailwindcss';` line** and on

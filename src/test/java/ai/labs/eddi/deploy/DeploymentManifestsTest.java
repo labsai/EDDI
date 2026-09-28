@@ -2964,7 +2964,7 @@ class DeploymentManifestsTest {
     void docsDoNotAdvertiseMutableTag() throws IOException {
         for (Path doc : OPERATOR_DOCS) {
             assertFalse(read(doc).contains("labsai/eddi:latest"),
-                    doc + " advertises labsai/eddi:latest while k8s/base/eddi-deployment.yaml pins an "
+                    doc + " advertises labsai/eddi:latest while k8s/base/kustomization.yaml pins an "
                             + "immutable patch version under a comment forbidding exactly that");
         }
     }

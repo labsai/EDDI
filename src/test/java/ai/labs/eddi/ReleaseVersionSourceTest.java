@@ -302,7 +302,7 @@ class ReleaseVersionSourceTest {
         for (Path file : files) {
             String rel = root.relativize(file).toString().replace('\\', '/');
             if (extensions.stream().noneMatch(rel::endsWith)
-                    || excludes.stream().anyMatch(ex -> rel.equals(ex) || (ex.endsWith("/") && rel.startsWith(ex)))) {
+                    || excludes.stream().anyMatch(rel::startsWith)) {
                 continue;
             }
             List<String> lines = read(file).lines().toList();
@@ -319,8 +319,8 @@ class ReleaseVersionSourceTest {
     }
 
     private static String chartAppVersion() throws IOException {
-        Matcher m = Pattern.compile("(?m)^appVersion:\\s*\"([^\"]+)\"").matcher(read(CHART));
-        assertTrue(m.find(), CHART + " has no appVersion: \"<x.y.z>\" line");
+        Matcher m = Pattern.compile("(?m)^appVersion:\\s*[\"']?([^\"'\\s]+)[\"']?\\s*$").matcher(read(CHART));
+        assertTrue(m.find(), CHART + " has no appVersion: line");
         return m.group(1);
     }
 
@@ -441,5 +441,72 @@ class ReleaseVersionSourceTest {
                 MANAGER_PACKAGE_JSON + " declares \"version\": " + pkg.path("version")
                         + ". The Manager is a private package inside this repository and takes its version from"
                         + " pom.xml; remove the field (and the matching root entries in package-lock.json)");
+    }
+
+    /**
+     * Three readers take "the first {@code <version>} in pom.xml" to be the
+     * project's version: {@code ci.yml} ({@code grep -m1 '<version>'}, which names
+     * the image and gates the release tag), the Manager's {@code vite.config.ts},
+     * and {@code scripts/bump-version.py}, which also WRITES it. A {@code <parent>}
+     * block — or a commented-out version — ahead of the project's own would make
+     * all three silently read, and the script rewrite, somebody else's version.
+     */
+    @Test
+    @DisplayName("the first <version> in pom.xml is the project's own")
+    void firstPomVersionIsTheProjects() throws IOException {
+        String pom = read(POM);
+        assertFalse(pom.contains("<parent>"),
+                "pom.xml has a <parent>. ci.yml, ui/manager/vite.config.ts and scripts/bump-version.py all take the"
+                        + " FIRST <version> element as the project's; move them to a rule that skips the parent's"
+                        + " before adding one");
+        Matcher m = Pattern.compile("<artifactId>eddi</artifactId>\\s*<version>([^<]+)</version>").matcher(pom);
+        assertTrue(m.find() && m.group(1).equals(projectVersion()),
+                "the first <version> in pom.xml must be the one directly after <artifactId>eddi</artifactId>");
+    }
+
+    /**
+     * The sweep above lives in Build &amp; Test, which a docs-only pull request
+     * skips — and a skipped required check still satisfies branch protection. So
+     * {@code ci.yml} runs {@code bump-version.py check} in its own cheap job, gated
+     * on the {@code release_pointers} path filter, and that filter has to cover
+     * every root the JSON sweeps, or a stale pointer in the uncovered root merges
+     * and turns main red on somebody else's PR. The script and the JSON are graded
+     * by Java tests, so they must also trigger Build &amp; Test.
+     */
+    @Test
+    @DisplayName("CI checks the release pointers on every change that can break them")
+    void ciRunsThePointerCheckOnEveryRoot() throws IOException {
+        String filters = "";
+        JsonNode workflow = new YAMLMapper().readTree(read(CI_WORKFLOW));
+        for (JsonNode step : workflow.path("jobs").path("detect-changes").path("steps")) {
+            if (step.path("with").has("filters")) {
+                filters = step.path("with").path("filters").asText();
+            }
+        }
+        JsonNode parsed = new YAMLMapper().readTree(filters);
+
+        List<String> pointerFilter = new ArrayList<>();
+        parsed.path("release_pointers").forEach(p -> pointerFilter.add(p.asText()));
+        JsonNode config = new ObjectMapper().readTree(read(RELEASE_POINTERS));
+        for (JsonNode root : config.path("roots")) {
+            String r = root.asText();
+            assertTrue(pointerFilter.contains(r) || pointerFilter.contains(r + "/**"),
+                    CI_WORKFLOW + "'s release_pointers filter must cover " + r + ", a root " + RELEASE_POINTERS
+                            + " sweeps. It lists: " + pointerFilter);
+        }
+
+        List<String> operatorDocs = new ArrayList<>();
+        parsed.path("operator_docs").forEach(p -> operatorDocs.add(p.asText()));
+        for (String graded : List.of("scripts/bump-version.py", "scripts/release-pointers.json")) {
+            assertTrue(operatorDocs.contains(graded),
+                    CI_WORKFLOW + "'s operator_docs filter must list " + graded + ": Java tests grade it, and"
+                            + " `scripts/**` alone triggers only Shell Lint. It lists: " + operatorDocs);
+        }
+
+        JsonNode job = workflow.path("jobs").path("release-pointers");
+        assertTrue(job.path("if").asText().contains("release_pointers"),
+                CI_WORKFLOW + " needs a release-pointers job gated on the release_pointers filter");
+        assertTrue(job.toString().contains("scripts/bump-version.py check"),
+                CI_WORKFLOW + "'s release-pointers job must run `python3 scripts/bump-version.py check`");
     }
 }

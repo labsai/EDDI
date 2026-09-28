@@ -11,7 +11,7 @@ EDDI's version lives in two kinds of place, and they move at different times.
 
   THE PUBLISHED RELEASE: the version a reader should deploy. It appears in the
   Helm chart's appVersion, the k8s manifests and the copy-pasteable commands in
-  the docs, all listed by scripts/release-pointers.json. It may only move once
+  the docs, all found by scripts/release-pointers.json. It may only move once
   that image exists, or a quickstart followed from main pulls a tag that is not
   there.
 
@@ -21,10 +21,12 @@ Commands:
   check                  exit 1 if the pointers disagree, or run ahead of the pom
   next <x.y.z>           set the build version (pom.xml)
   release <x.y.z>        point every release pointer at a published release,
-                         and bump the Helm chart's own version to match
-  post-release <x.y.z>   what CI runs after publishing release <x.y.z>:
-                         `release` if the pointers are older, then `next` to
-                         the following minor if the pom has not moved past it
+                         and bump the Helm chart's own version to match.
+                         `release <current> --force` repairs stray pointers
+                         without bumping the chart.
+  post-release <x.y.z>   what CI runs after publishing release <x.y.z>: moves
+                         pom.xml to the following minor unless it is already
+                         past <x.y.z>, then `release` if the pointers are older
 
 The usual cycle, if CI does not do it for you:
 
@@ -44,8 +46,11 @@ import sys
 from pathlib import Path
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# The numeric core of a version that may carry a suffix (7.0.0-SNAPSHOT).
+SEMVER_CORE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 POM_VERSION = re.compile(r"<version>([^<]+)</version>")
 CHART_VERSION = re.compile(r"^version:\s*(\S+)\s*$", re.MULTILINE)
+APP_VERSION = re.compile(r"""^appVersion:\s*["']?([^"'\s]+)["']?\s*$""", re.MULTILINE)
 EXPECTED_CHART_CONSTANT = re.compile(r'(EXPECTED_CHART_VERSION = ")([^"]+)(")')
 
 CHART = Path("helm/eddi/Chart.yaml")
@@ -60,9 +65,19 @@ class BumpError(Exception):
 
 
 def parse(version: str) -> tuple[int, int, int]:
+    """A release version: exactly MAJOR.MINOR.PATCH."""
     m = SEMVER.match(version)
     if not m:
         raise BumpError(f"'{version}' is not MAJOR.MINOR.PATCH (release tags carry no 'v' and no suffix)")
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def core(version: str, what: str) -> tuple[int, int, int]:
+    """The numeric core of a version that may carry a suffix, such as the pom's."""
+    m = SEMVER_CORE.match(version)
+    if not m:
+        raise BumpError(f"{what} is '{version}', which does not start with MAJOR.MINOR.PATCH; "
+                        "refusing to compare against it")
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
@@ -81,6 +96,13 @@ def write(path: Path, text: str) -> None:
         f.write(text)
 
 
+def lines_of(text: str) -> list[str]:
+    """Lines split on "\\n" only, each keeping its terminator. str.splitlines()
+    also splits on form feeds and other separators Java's String.lines() does
+    not, which would number lines differently from ReleaseVersionSourceTest."""
+    return re.split(r"(?<=\n)", text)
+
+
 class Repo:
     def __init__(self, root: Path):
         self.root = root
@@ -88,7 +110,8 @@ class Repo:
         self.roots = cfg["roots"]
         self.extensions = tuple(cfg["extensions"])
         self.exclude = cfg["exclude"]
-        self.patterns = [re.compile(p) for p in cfg["patterns"]]
+        # ASCII, so \d and \w mean what they mean in Java's regex.
+        self.patterns = [re.compile(p, re.ASCII) for p in cfg["patterns"]]
         self.changed: list[str] = []
 
     # ── discovery ────────────────────────────────────────────────────────────
@@ -101,7 +124,9 @@ class Repo:
                 rel = path.relative_to(self.root).as_posix()
                 if not rel.endswith(self.extensions):
                     continue
-                if any(rel == ex or (ex.endswith("/") and rel.startswith(ex)) for ex in self.exclude):
+                # Each exclusion is a path prefix: a file, a directory ending in
+                # "/", or a family such as "docs/release-notes-".
+                if any(rel.startswith(ex) for ex in self.exclude):
                     continue
                 files.append(path)
         return files
@@ -111,9 +136,9 @@ class Repo:
         found = []
         for path in self.pointer_files():
             rel = path.relative_to(self.root).as_posix()
-            for lineno, line in enumerate(read(path).splitlines(), start=1):
+            for lineno, line in enumerate(lines_of(read(path)), start=1):
                 for pattern in self.patterns:
-                    for m in pattern.finditer(line):
+                    for m in pattern.finditer(line.rstrip("\r\n")):
                         found.append((rel, lineno, m.group(1)))
         return found
 
@@ -124,9 +149,9 @@ class Repo:
         return m.group(1).strip()
 
     def app_version(self) -> str:
-        m = re.search(r'^appVersion:\s*"([^"]+)"', read(self.root / CHART), re.MULTILINE)
+        m = APP_VERSION.search(read(self.root / CHART))
         if not m:
-            raise BumpError(f'no appVersion: "<x.y.z>" line in {CHART}')
+            raise BumpError(f"no appVersion: line in {CHART}")
         return m.group(1)
 
     def chart_version(self) -> str:
@@ -139,23 +164,35 @@ class Repo:
     def _rewrite(self, path: Path, text: str) -> None:
         if text != read(path):
             write(path, text)
-            self.changed.append(path.relative_to(self.root).as_posix())
+            rel = path.relative_to(self.root).as_posix()
+            if rel not in self.changed:
+                self.changed.append(rel)
 
     def set_pom(self, version: str) -> None:
         path = self.root / POM
         text = read(path)
         m = POM_VERSION.search(text)
         # Only the FIRST <version> — the project's own. Every later one is a
-        # dependency or plugin, and ci.yml reads the version with the same rule.
+        # dependency or plugin, and ci.yml reads the version with the same rule;
+        # ReleaseVersionSourceTest keeps a <parent> from ever getting there first.
         self._rewrite(path, text[: m.start(1)] + version + text[m.end(1):])
 
     def set_pointers(self, version: str) -> None:
+        def swap(m: re.Match) -> str:
+            whole = m.group(0)
+            return whole[: m.start(1) - m.start(0)] + version + whole[m.end(1) - m.start(0):]
+
         for path in self.pointer_files():
-            text = read(path)
-            for pattern in self.patterns:
-                text = pattern.sub(lambda m: m.group(0)[: m.start(1) - m.start(0)] + version
-                                   + m.group(0)[m.end(1) - m.start(0):], text)
-            self._rewrite(path, text)
+            out = []
+            # Line by line, exactly as pointers() and the Java sweep match, so a
+            # pattern means the same thing to the check and to the rewrite.
+            for line in lines_of(read(path)):
+                body = line.rstrip("\r\n")
+                ending = line[len(body):]
+                for pattern in self.patterns:
+                    body = pattern.sub(swap, body)
+                out.append(body + ending)
+            self._rewrite(path, "".join(out))
 
     def set_chart_version(self, version: str) -> None:
         path = self.root / CHART
@@ -180,7 +217,7 @@ def problems(repo: Repo) -> list[str]:
     for rel, lineno, version in stray:
         found.append(f"{rel}:{lineno} names {version}, but helm/eddi/Chart.yaml's appVersion is {app}")
     pom = repo.pom_version()
-    if SEMVER.match(pom) and parse(app) > parse(pom):
+    if core(app, "appVersion") > core(pom, "pom.xml's version"):
         found.append(f"the release pointers name {app}, which is AHEAD of pom.xml's {pom}")
     return found
 
@@ -206,22 +243,30 @@ def cmd_check(repo: Repo, _args) -> int:
 
 
 def do_next(repo: Repo, version: str, force: bool) -> None:
+    parse(version)
     current = repo.pom_version()
-    if not force and SEMVER.match(current) and parse(version) <= parse(current):
+    if not force and parse(version) <= core(current, "pom.xml's version"):
         raise BumpError(f"pom.xml is already {current}; refusing to move the build version to {version} "
                         "(pass --force to go backwards)")
     repo.set_pom(version)
 
 
 def do_release(repo: Repo, version: str, chart_bump: str | None, force: bool) -> None:
+    """Point every release pointer at `version`."""
+    parse(version)
     current = repo.app_version()
-    if not force and parse(version) <= parse(current):
+    if not force and parse(version) <= core(current, "appVersion"):
         raise BumpError(f"the release pointers already name {current}; refusing to point them at {version} "
-                        "(pass --force to go backwards)")
+                        "(pass --force to go backwards, or to repair stray pointers)")
     pom = repo.pom_version()
-    if not force and SEMVER.match(pom) and parse(version) > parse(pom):
+    if not force and parse(version) > core(pom, "pom.xml's version"):
         raise BumpError(f"{version} is ahead of pom.xml's {pom}, so it cannot have been released yet. "
                         f"Run `next {version}` first, or pass --force")
+    repo.set_pointers(version)
+    if version == current:
+        # --force on the current release: a repair, not a release, so the
+        # chart's contents are what they were and its version must not move.
+        return
     # A patch release moves the chart by a patch, anything else by a minor:
     # the chart's templates did not change, only the image it defaults to.
     # Breaking chart changes are a human decision and bump the major by hand.
@@ -233,12 +278,10 @@ def do_release(repo: Repo, version: str, chart_bump: str | None, force: bool) ->
         "minor": (major, minor + 1, 0),
         "patch": (major, minor, patch + 1),
     }[chart_bump]
-    repo.set_pointers(version)
     repo.set_chart_version(fmt(new_chart))
 
 
 def cmd_next(repo: Repo, args) -> int:
-    parse(args.version)
     do_next(repo, args.version, args.force)
     return report(repo)
 
@@ -250,23 +293,27 @@ def cmd_release(repo: Repo, args) -> int:
 
 def cmd_post_release(repo: Repo, args) -> int:
     tag = args.version
-    parse(tag)
+    tag_v = parse(tag)
     notes = []
     before_app, before_pom, before_chart = repo.app_version(), repo.pom_version(), repo.chart_version()
 
-    if parse(tag) > parse(before_app):
-        do_release(repo, tag, None, force=False)
-        notes.append(f"Release pointers: {before_app} → {tag} (Helm chart {before_chart} → {repo.chart_version()})")
-    else:
-        notes.append(f"Release pointers already name {before_app}; {tag} does not move them.")
-
-    if not SEMVER.match(before_pom) or parse(before_pom) <= parse(tag):
-        major, minor, _ = parse(tag)
-        following = fmt((major, minor + 1, 0))
+    # The pom FIRST. It is behind the tag when the tag was cut somewhere main
+    # has not caught up with (a release branch). Moving the pointers first would
+    # then be refused as "ahead of the pom" — correctly, for a hand-run release,
+    # which is why the order here is what makes the published case work.
+    if core(before_pom, "pom.xml's version") <= tag_v:
+        following = fmt((tag_v[0], tag_v[1] + 1, 0))
         repo.set_pom(following)
         notes.append(f"Build version (pom.xml): {before_pom} → {following}")
     else:
         notes.append(f"Build version (pom.xml) is already {before_pom}, past {tag}; left alone.")
+
+    if tag_v > core(before_app, "appVersion"):
+        do_release(repo, tag, None, force=False)
+        notes.insert(0, f"Release pointers: {before_app} → {tag} "
+                        f"(Helm chart {before_chart} → {repo.chart_version()})")
+    else:
+        notes.insert(0, f"Release pointers already name {before_app}; {tag} does not move them.")
 
     if repo.changed and args.changelog:
         write_fragment(repo, tag, notes)
@@ -278,13 +325,15 @@ def cmd_post_release(repo: Repo, args) -> int:
 
 def write_fragment(repo: Repo, tag: str, notes: list[str]) -> None:
     today = datetime.date.today().isoformat()
-    path = repo.root / CHANGELOG_DIR / f"{today}-post-release-{tag.replace('.', '-')}.md"
-    files = [f for f in repo.changed]
+    slug = tag.replace(".", "-")
+    path = repo.root / CHANGELOG_DIR / f"{today}-post-release-{slug}.md"
+    files = list(repo.changed)
     body = [f"## 🔖 chore(release): after {tag} ({today})", "",
-            "**Repo:** EDDI (opened by `post-release.yml` after the release pipeline published the image)", "",
+            f"**Repo:** EDDI (`chore/post-release-{tag}`, opened by `post-release.yml` after the "
+            "release pipeline published the image)", "",
             "### What", ""]
     body += [f"- {n}" for n in notes]
-    body += ["", "Generated by `python scripts/bump-version.py post-release " + tag + "`. Files:", ""]
+    body += ["", f"Generated by `python scripts/bump-version.py post-release {tag}`. Files:", ""]
     body += [f"- `{f}`" for f in files]
     path.parent.mkdir(parents=True, exist_ok=True)
     write(path, "\n".join(body) + "\n")
@@ -331,6 +380,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     # The notes use "→"; a Windows console defaults to a code page without it.
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     try:
         return args.func(Repo(args.root.resolve()), args)
     except BumpError as e:

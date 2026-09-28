@@ -25,10 +25,11 @@ resources:
 commonAnnotations:
   app.kubernetes.io/managed-by: kustomize
 
-# The EDDI release this base deploys. The tag and the version label below are
-# the only two places it is written, and `python scripts/bump-version.py
-# release <version>` moves them together. ReleaseVersionSourceTest fails the
-# build if either disagrees with helm/eddi/Chart.yaml's appVersion.
+# The EDDI release this base deploys. This file is the only place in k8s/base
+# that names it — the tag, the version label, and the two example commands just
+# below — and `python scripts/bump-version.py release <version>` moves all four
+# together. ReleaseVersionSourceTest fails the build if any of them disagrees
+# with helm/eddi/Chart.yaml's appVersion.
 #
 # Pin an immutable patch version, never the mutable major tag: with ":6" +
 # IfNotPresent nothing ties the running bits to the digest CI cosign-signed and
@@ -43,9 +44,14 @@ images:
   - name: labsai/eddi
     newTag: "6.4.0"
 
-# app.kubernetes.io/version on every base resource and on the pod template.
-# Selectors are left alone: a Deployment selector naming the version would turn
-# every upgrade into an immutable-field error.
+# app.kubernetes.io/version on every base resource — the Namespace, ConfigMap
+# and Service as well as the Deployment and its pod template. That is on
+# purpose: it is the label the Kubernetes recommended-labels scheme defines for
+# "the release of the application this object belongs to", and each of these is
+# EDDI's. Every upgrade relabels them, which is metadata only. Selectors are left
+# alone: a Deployment selector naming the version would turn every upgrade into
+# an immutable-field error, and a Service selector would stop matching the pods
+# of the release being rolled out.
 labels:
   - pairs:
       app.kubernetes.io/version: "6.4.0"

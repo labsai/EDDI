@@ -133,9 +133,16 @@ This is the only trigger that publishes the moving `6.3` and `6` aliases alongsi
 `latest`.
 
 `pom.xml` must already say `6.3.0` — CI refuses a tag that disagrees with it. It normally does: the
-previous release's post-release PR set it (see [After a GA Release](#after-a-ga-release)). If this
-release is a different number than that PR assumed, run `python scripts/bump-version.py next
-<version>` and merge that first.
+previous release's post-release PR set it (see [After a GA Release](#after-a-ga-release)). Two
+cases where it does not:
+
+- **The next release is a major** (the PR assumed `6.4.0`, you are shipping `7.0.0`): run
+  `python scripts/bump-version.py next 7.0.0` on a branch and merge it before tagging. `next`
+  refuses to go backwards, so this only works upwards.
+- **A patch release** (`6.3.1` while main already says `6.4.0`): do not pull main's pom back. Cut
+  a release branch from the `6.3.0` tag, fix there, run `python scripts/bump-version.py next
+  6.3.1` on that branch and tag it. After it is published, the post-release PR on main moves the
+  release pointers to `6.3.1` and leaves main's `6.4.0` alone.
 
 > **If nothing happens after pushing a tag, check the prefix first.** A `v`-prefixed tag does not
 > match the `[0-9]*` trigger, and GitHub reports no error for a tag that matches no workflow — the
@@ -309,12 +316,22 @@ decision: pass `--chart-bump major`. `post-release` never moves `pom.xml` backwa
 release cut from an older line moves only the pointers.
 
 `ReleaseVersionSourceTest` enforces the result: every release pointer must name the chart's
-`appVersion`, which may never be ahead of `pom.xml`. A new doc that writes `labsai/eddi:<x.y.z>` is
-covered without anyone listing it, and a stale one fails the build instead of shipping.
+`appVersion`, which may never be ahead of `pom.xml`. The `Release Pointers` job in `ci.yml` runs the
+same check (`bump-version.py check`) on any PR that touches `docs/`, `k8s/`, `helm/` or `README.md`,
+including a docs-only one that skips Build & Test. A new doc that writes `labsai/eddi:<x.y.z>` is
+covered without anyone listing it, and a stale one fails the build instead of shipping. History is
+excluded (the changelog, `docs/archive/`, `docs/release-notes-*`), and so is this page, whose
+version numbers are worked examples.
 
 **Tokens.** The PR is opened with `RELEASE_BOT_TOKEN`, or `CHANGELOG_BOT_TOKEN`, a bot account's
 fine-grained PAT. With neither set, it falls back to the default `GITHUB_TOKEN`, and GitHub then
-does not start the PR's required checks. Close and reopen the PR to start them.
+does not start the PR's required checks: close and reopen the PR to start them. That fallback also
+needs the repository setting *Actions → General → Allow GitHub Actions to create and approve pull
+requests*, which the nightly changelog collation relies on as well.
+
+**Redoing a run.** The workflow can be dispatched by hand with the release version. It refuses a
+version that has no tag on `origin` or no image on Docker Hub, and does nothing if main already
+reflects it.
 
 ---
 
