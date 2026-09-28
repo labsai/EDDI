@@ -191,10 +191,15 @@ public class ConversationSummarizer {
             // never cut to make room: it is the only record of the turns it covers, and
             // the reply replaces it. Skip the update instead, with no model call: the
             // boundary stays put, so the turns past it keep reaching the model verbatim
-            // (the same fallback as a failed summarizer call) until the settings fit.
+            // (the same fallback as a failed summarizer call) until maxCharsPerUpdate is
+            // raised. Lowering maxSummaryTokens cannot release it: that limit only shapes
+            // the NEXT summary, and no next summary is produced while this summary is
+            // stored — it only keeps summaries small once updates resume.
             LOGGER.warnf("[SUMMARY] Skipping the rolling summary update for conversation='%s': the previous summary and its headings "
                     + "take %d of maxCharsPerUpdate=%d chars, leaving less than a quarter for new turns. "
-                    + "Raise maxCharsPerUpdate or lower maxSummaryTokens.", sanitize(memory.getConversationId()), reserved, maxChars);
+                    + "Raise maxCharsPerUpdate to at least %d so updates resume (the stored summary is not shortened by lowering "
+                    + "maxSummaryTokens, which only bounds summaries written after that).", sanitize(memory.getConversationId()), reserved,
+                    maxChars, reserved * MIN_TURN_SHARE_DIVISOR / (MIN_TURN_SHARE_DIVISOR - 1) + 1);
             return;
         }
 

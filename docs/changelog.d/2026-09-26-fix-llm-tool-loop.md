@@ -107,9 +107,11 @@ blank window look non-empty and cost a call that re-summarizes an unchanged summ
 `maxCharsPerUpdate` bounds the **complete** request: the previous summary and its section headings
 are reserved first, and the new turns get the rest. The previous summary is never cut to make room —
 it is the only record of the turns it covers, and the reply replaces it. When it leaves the new turns
-less than a quarter of the budget, the update is skipped with a WARN naming `maxCharsPerUpdate` and
-`maxSummaryTokens`, with no model call; the boundary stays put, so the turns past it keep reaching the
-model verbatim — the same fallback as a failed summarizer call.
+less than a quarter of the budget, the update is skipped with a WARN, with no model call; the
+boundary stays put, so the turns past it keep reaching the model verbatim — the same fallback as a
+failed summarizer call. The WARN names the `maxCharsPerUpdate` that would let updates resume. Lowering
+`maxSummaryTokens` does not release the state, since the stored summary is not rewritten while updates
+are skipped; it only keeps the summaries written afterwards small.
 
 ### M-L4 — `convertToObject` failed the turn on `[` or on malformed JSON
 

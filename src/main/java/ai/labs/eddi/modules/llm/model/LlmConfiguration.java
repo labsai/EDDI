@@ -1925,7 +1925,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * turn by turn to fit the rest; a single turn larger than the rest is cut. The
          * previous summary itself is never cut — when it leaves the new turns less than
          * a quarter of this budget, the update is skipped with a WARN and the
-         * unsummarized turns keep reaching the model verbatim.
+         * unsummarized turns keep reaching the model verbatim until this ceiling is
+         * raised. Lowering {@code maxSummaryTokens} does not release that state: the
+         * stored summary is not rewritten while updates are skipped. It only keeps the
+         * summaries written after updates resume small enough not to get there again.
          */
         private int maxCharsPerUpdate = 60_000;
 
