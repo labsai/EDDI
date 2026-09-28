@@ -164,7 +164,18 @@ final class PropertyAccessValueResolver implements ValueResolver {
         return Optional.empty();
     }
 
+    /**
+     * A {@code getX}, {@code isX} or {@code hasX} name — except {@code getAndX}.
+     * That prefix is the JDK's read-modify-write naming ({@code AtomicInteger}'s
+     * {@code getAndIncrement}/{@code getAndDecrement}): getter-shaped, no
+     * arguments, and it mutates the object it is read from. A property named
+     * {@code andIncrement} reaches the same method, so the check runs on every
+     * candidate name, not only on the name as written.
+     */
     private static boolean isGetterName(String name) {
+        if (hasPrefix(name, "getAnd")) {
+            return false;
+        }
         return hasPrefix(name, "get") || hasPrefix(name, "is") || hasPrefix(name, "has");
     }
 

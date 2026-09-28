@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,6 +78,13 @@ class RuntimeTemplateEngineFactoryTest {
     }
 
     public record Entry(String speaker, String content) {
+    }
+
+    /** A getter whose name merely starts with "getAnd" is still a getter. */
+    public static final class Star {
+        public String getAndromeda() {
+            return "galaxy";
+        }
     }
 
     /** Mirrors the Quarkus-managed engine closely enough to prove the filtering. */
@@ -216,6 +224,22 @@ class RuntimeTemplateEngineFactoryTest {
             render("{list.removeFirst}", data);
 
             assertEquals(List.of("a", "b"), list);
+        }
+
+        @Test
+        @DisplayName("getAndX read-modify-write methods are not invoked, so counters cannot be advanced")
+        void getAndMethodsAreNotInvoked() throws Exception {
+            AtomicInteger probe = new AtomicInteger(5);
+            renderSource("{counter.getAndIncrement}", Map.of("counter", probe));
+            assertEquals(6, probe.get(), "precondition: the stock resolver invokes getAndIncrement");
+
+            AtomicInteger counter = new AtomicInteger(5);
+            Map<String, Object> data = Map.of("counter", counter, "star", new Star());
+
+            assertEquals("[][][][]5 galaxy galaxy",
+                    render("[{counter.getAndIncrement}][{counter.andIncrement}][{counter.getAndDecrement}][{counter.andDecrement}]"
+                            + "{counter.plain} {star.andromeda} {star.getAndromeda}", data));
+            assertEquals(5, counter.get());
         }
 
         @Test

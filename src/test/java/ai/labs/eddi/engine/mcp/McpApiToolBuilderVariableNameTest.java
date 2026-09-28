@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,6 +92,17 @@ class McpApiToolBuilderVariableNameTest {
         assertTrue(call.getParameters().containsKey("config_PATH"));
         assertTrue(call.getParameters().containsKey("item_id"));
         call.getParameters().keySet().forEach(name -> assertTrue(SAFE.matcher(name).matches(), "unsafe tool parameter: " + name));
+    }
+
+    @Test
+    @DisplayName("an undeclared path placeholder never takes a declared parameter's variable")
+    void undeclaredPlaceholderDoesNotReuseDeclaredVariable() {
+        var declared = Map.of("item_id", "item_id");
+
+        assertEquals("/items/{item_id_2}/{item_id_2}/{item_id}",
+                McpApiToolBuilder.convertPathParams("/items/{item-id}/{item-id}/{item_id}", declared));
+        // two undeclared placeholders that reduce to the same name stay apart too
+        assertEquals("/a/{x_y}/{x_y_2}", McpApiToolBuilder.convertPathParams("/a/{x-y}/{x.y}", Map.of()));
     }
 
     @Test

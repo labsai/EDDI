@@ -507,13 +507,31 @@ public final class McpApiToolBuilder {
      * safe template variable name — the one {@code variableNames} assigned to that
      * parameter, or {@link #safeVariableName} of it for a placeholder the spec does
      * not declare as a parameter.
+     * <p>
+     * An undeclared placeholder never takes a name a declared parameter already
+     * holds: {@code {item-id}} next to a declared {@code item_id} would otherwise
+     * reduce to {@code item_id} and silently be filled with that parameter's value,
+     * addressing the wrong resource. It gets a suffixed name instead (reused if the
+     * same placeholder repeats), and stays unfilled as the spec leaves it.
      */
     static String convertPathParams(String path, Map<String, String> variableNames) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
         var sb = new StringBuilder();
+        Set<String> taken = new HashSet<>(variableNames.values());
+        Map<String, String> undeclared = new HashMap<>();
         while (matcher.find()) {
             String paramName = matcher.group(1);
-            String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
+            String variableName = variableNames.get(paramName);
+            if (variableName == null) {
+                variableName = undeclared.computeIfAbsent(paramName, name -> {
+                    String base = safeVariableName(name);
+                    String candidate = base;
+                    for (int suffix = 2; !taken.add(candidate); suffix++) {
+                        candidate = base + "_" + suffix;
+                    }
+                    return candidate;
+                });
+            }
             matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + variableName + "}"));
         }
         matcher.appendTail(sb);
