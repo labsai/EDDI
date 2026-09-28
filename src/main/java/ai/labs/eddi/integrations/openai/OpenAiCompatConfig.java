@@ -43,6 +43,7 @@ public class OpenAiCompatConfig {
     private final int maxConcurrentRequests;
     private final int modelCacheSeconds;
     private final boolean exposeStatelessVariants;
+    private final boolean adoptLegacyHeaderMappings;
 
     @Inject
     @SuppressWarnings("java:S107") // configuration carrier — one parameter per knob is the point
@@ -57,7 +58,8 @@ public class OpenAiCompatConfig {
             @ConfigProperty(name = "eddi.openai-compat.request-timeout-seconds", defaultValue = "120") int requestTimeoutSeconds,
             @ConfigProperty(name = "eddi.openai-compat.max-concurrent-requests", defaultValue = "64") int maxConcurrentRequests,
             @ConfigProperty(name = "eddi.openai-compat.model-cache-seconds", defaultValue = "30") int modelCacheSeconds,
-            @ConfigProperty(name = "eddi.openai-compat.expose-stateless-variants", defaultValue = "true") boolean exposeStatelessVariants) {
+            @ConfigProperty(name = "eddi.openai-compat.expose-stateless-variants", defaultValue = "true") boolean exposeStatelessVariants,
+            @ConfigProperty(name = "eddi.openai-compat.adopt-legacy-header-mappings", defaultValue = "false") boolean adoptLegacyHeaderMappings) {
 
         this.enabled = enabled;
         this.apiKey = apiKey.map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
@@ -70,6 +72,7 @@ public class OpenAiCompatConfig {
         this.maxConcurrentRequests = maxConcurrentRequests;
         this.modelCacheSeconds = modelCacheSeconds;
         this.exposeStatelessVariants = exposeStatelessVariants;
+        this.adoptLegacyHeaderMappings = adoptLegacyHeaderMappings;
     }
 
     public boolean isEnabled() {
@@ -134,5 +137,17 @@ public class OpenAiCompatConfig {
 
     public boolean isExposeStatelessVariants() {
         return exposeStatelessVariants;
+    }
+
+    /**
+     * Whether an Open WebUI chat mapped under the raw, pre-namespacing header id is
+     * adopted by the namespaced {@code openwebui:<id>} caller. Off by default: a
+     * raw mapping does not record whether the header or an OIDC principal (from a
+     * period with {@code http-policy=authenticated}) created it, so adopting it
+     * could hand an OIDC user's conversation to a shared-key caller who names that
+     * principal. Enable only when {@code /v1} has never run in OIDC mode.
+     */
+    public boolean isAdoptLegacyHeaderMappings() {
+        return adoptLegacyHeaderMappings;
     }
 }

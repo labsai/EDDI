@@ -288,6 +288,26 @@ class OpenAiAuthFilterTest {
     }
 
     @Test
+    void oidcMode_refusesAPrincipalCarryingTheReservedOpenWebUiPrefix() {
+        // An OIDC user named "openwebui:alice" would be the same EDDI identity as the
+        // shared-key caller who sends X-OpenWebUI-User-Id: alice. The prefix is
+        // reserved for header-derived ids, so such a principal is refused outright —
+        // not served as itself, and not downgraded to the anonymous default either.
+        Principal principal = mock(Principal.class);
+        when(principal.getName()).thenReturn("openwebui:alice");
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(principal);
+
+        run(OpenAiTestFixtures.config(b -> {
+            b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED;
+            b.allowAnonymous = true;
+        }));
+
+        assertEquals(401, abortedResponse().getStatus());
+        assertNull(resolvedUserId());
+    }
+
+    @Test
     void oidcMode_refusesAnonymousIdentity() {
         when(identity.isAnonymous()).thenReturn(true);
 

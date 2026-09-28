@@ -230,9 +230,11 @@ public class OpenAiConversationBridge {
             // id here: that namespace is shared with OIDC principals and every other
             // source, and the raw id is caller-supplied (a leaked /v1 key lets the
             // header be set to any string), so a standalone move would let a caller
-            // relocate and erase an OIDC user's memories (Finding A). Adoption is safe
-            // because it is scoped to a conversation MAPPING under this exact intent,
-            // which only this bridge ever writes.
+            // relocate and erase an OIDC user's memories (Finding A). Adoption is
+            // scoped to a conversation MAPPING under this exact intent, which only this
+            // bridge writes — but in OIDC mode it writes them under the bare principal,
+            // so a raw mapping's origin is unknowable and adoption is opt-in (see
+            // OpenAiCompatConfig#isAdoptLegacyHeaderMappings).
             String legacyConversationId = adoptLegacyMapping(model, userId, intent);
             if (legacyConversationId != null) {
                 return legacyConversationId;
@@ -299,12 +301,21 @@ public class OpenAiConversationBridge {
      * Adopt a chat mapping stored under the raw header id, re-keying it to the
      * namespaced id so the chat keeps its conversation. The conversation is not
      * touched — it keeps the raw id as its owner, and with it the memories it has
-     * always loaded. Only attempted for a namespaced Open WebUI caller.
+     * always loaded. Only attempted for a namespaced Open WebUI caller, and only
+     * when the operator enabled it: a raw mapping under this intent may equally
+     * have been written for an OIDC principal while {@code /v1} ran with
+     * {@code http-policy=authenticated}, and nothing in it records which — adopting
+     * that would hand an OIDC user's conversation (and, through its owner, their
+     * memories) to a shared-key caller who names the principal in the header.
      *
      * @return the adopted conversation id, or {@code null} when there is nothing to
-     *         adopt (not a namespaced caller, no legacy mapping, or a stale one)
+     *         adopt (disabled, not a namespaced caller, no legacy mapping, or a
+     *         stale one)
      */
     private String adoptLegacyMapping(AgentModelResolver.ResolvedModel model, String userId, String intent) {
+        if (!config.isAdoptLegacyHeaderMappings()) {
+            return null;
+        }
         String rawId = OpenAiUserIdentity.rawId(userId);
         if (rawId == null) {
             return null;
@@ -322,9 +333,22 @@ public class OpenAiConversationBridge {
                     intent, userId, legacy.getEnvironment() != null ? legacy.getEnvironment() : model.environment(),
                     legacy.getAgentId() != null ? legacy.getAgentId() : model.agentId(), legacy.getConversationId()));
         } catch (Exception e) {
-            // A concurrent request re-keyed it first; fall through and drop the legacy
-            // mapping anyway. Returning the conversation is still correct.
-            LOGGER.debugf("Namespaced mapping for %s already exists: %s", sanitize(intent), e.getMessage());
+            // Either a concurrent request re-keyed it first, or the store failed. Only
+            // the re-read tells them apart (the stores report a duplicate differently —
+            // see getOrCreateConversation). Drop the legacy mapping only once a
+            // namespaced one for the same conversation is confirmed; otherwise keep it,
+            // so the next request can still find this chat's conversation.
+            UserConversation rekeyed = readMapping(intent, userId);
+            if (rekeyed == null) {
+                LOGGER.warnf("Could not re-key legacy Open WebUI conversation mapping %s; keeping it: %s",
+                        sanitize(intent), e.getMessage());
+                return legacy.getConversationId();
+            }
+            if (!legacy.getConversationId().equals(rekeyed.getConversationId())) {
+                // Another request already bound this chat to a different conversation.
+                // That mapping wins; the legacy one is left for the operator to inspect.
+                return rekeyed.getConversationId();
+            }
         }
         deleteMapping(intent, rawId);
         LOGGER.infof("Re-keyed legacy Open WebUI conversation mapping %s to the namespaced user id", sanitize(intent));

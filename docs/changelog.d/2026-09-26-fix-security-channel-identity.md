@@ -55,9 +55,8 @@ Compatibility, with no migration step to run:
 - A thread mapping stored under the raw id is found, **re-keyed** to the namespaced id,
   and the thread keeps its conversation. That conversation keeps its raw-id owner and
   its memories.
-- Before a **new** conversation starts, long-term memory entries under the raw id are
-  **moved** to the namespaced id. Only `U…`/`W…`-shaped ids are touched, and an entry the
-  namespaced identity already holds for the same key and agent wins.
+- A **new** conversation does not inherit long-term memories stored under the raw id;
+  they are not moved (see the adversarial review section, Finding B).
 
 ### Design decisions
 
@@ -66,8 +65,7 @@ Compatibility, with no migration step to run:
 - **`UNKNOWN_PAUSE` records** (card posted before the bookmark was readable) only match
   a pause that began at or before the record was written. A card cannot be for a pause
   that did not exist yet.
-- **Moving memories, not copying them**, makes the migration idempotent without a
-  marker. A copy would bring back entries the user had erased under the new id.
+- **No memory migration at all** (neither move nor copy): see Finding B below.
 - **Residual, documented:** checking the pause and resuming are two separate steps.
   Closing that window would need an expected-pause parameter on `resumeConversation`.
 
@@ -76,8 +74,8 @@ Compatibility, with no migration step to run:
 - The approval records are not in the GDPR erasure cascade. They hold only an
   integration name, a conversation or group id and a channel id, and they expire on
   their TTL.
-- The legacy `IUserMemoryStore` Properties blob (`readProperties`) is not migrated. Only
-  structured entries are.
+- Neither structured legacy memory entries nor the `IUserMemoryStore` Properties blob
+  (`readProperties`) are migrated.
 
 **Files:** [`ISlackApprovalRecordStore.java`](../../src/main/java/ai/labs/eddi/integrations/slack/hitl/ISlackApprovalRecordStore.java),
 [`MongoSlackApprovalRecordStore.java`](../../src/main/java/ai/labs/eddi/integrations/slack/hitl/MongoSlackApprovalRecordStore.java),
@@ -106,11 +104,14 @@ key still impersonates any *Open WebUI* user; only the cross-namespace reach int
 OIDC-owned identities is closed (`application.properties` `trust-user-headers`
 comment still holds).
 
-Compatibility is adopt-only, in `OpenAiConversationBridge` and only for the
-`openwebui:`-namespaced path: a chat mapping stored under the raw header id is
-adopted and re-keyed to the namespaced id, and because the conversation keeps its
-raw-id owner its long-term memories load without any move. See the adversarial
-review section below for why the standalone memory move was removed.
+Compatibility is adopt-only, in `OpenAiConversationBridge`, only for the
+`openwebui:`-namespaced path, and **opt-in**
+(`eddi.openai-compat.adopt-legacy-header-mappings`, default `false`): a chat
+mapping stored under the raw header id is adopted and re-keyed to the namespaced
+id, and because the conversation keeps its raw-id owner its long-term memories
+load without any move. See the adversarial review section below for why the
+standalone memory move was removed, and the CodeRabbit section for why adoption
+is opt-in.
 
 Test `OpenAiAuthFilterTest.headerUserId_isNamespaced_soItCannotEqualABareOidcPrincipal`
 proves an OpenAI-compat identity can never collide with a bare OIDC principal;
@@ -198,9 +199,9 @@ Completed the pin (`RestSlackWebhook` + `SlackEventHandler.slackUser`):
   `event.get("team")` fallback in `slackUser` is removed.
 - An **unowned** channel whose signing integration declares no `teamId` is treated
   as **unbindable**: the payload team is not trusted and the identity is team-less
-  (`slack:<user>`), which reaches no victim's `slack:<team>:<user>`. An **owned**
-  channel with no declared `teamId` still trusts its own payload `team_id` (only the
-  owner's secret validates that event), so per-workspace ids keep working there.
+  (`slack:<user>`), which reaches no victim's `slack:<team>:<user>`. (An owned channel
+  with no declared `teamId` was first left trusting its payload `team_id`; that was
+  closed in the CodeRabbit round below.)
 
 Also: removed two now-unused test imports in `OpenAiConversationBridgeTest`, and
 corrected the `OpenAiUserIdentity`/`SlackUserIdentity` Javadoc that still described
@@ -211,13 +212,56 @@ Test `RestSlackWebhookTest.dmForgedTeamAgainstDeclaredWorkspaceIsRejected` (403)
 `dmForgedTeamOnTeamlessIntegrationResolvesToNoVictim` (team-less identity) cover the
 residual; the second is mutation-checked.
 
+### CodeRabbit review fixes (2026-09-28)
+
+- **Owned Slack channel trusted the payload `team_id`.** With no declared
+  `platformConfig.teamId`, an event in an owned channel took its workspace from the
+  payload. The owner's signing secret proves the integration, not the workspace, so
+  its holder could forge `team_id` + `user` and reach any `slack:<team>:<user>` —
+  including users of integrations that *do* declare a `teamId`. The workspace now
+  comes only from the declared `teamId`, for owned channels and DMs alike; without one
+  the identity is team-less (`slack:<user>`). Residual, documented: all team-less
+  integrations share that namespace, so `teamId` should be declared on every
+  integration of a multi-workspace deployment (`docs/slack-integration.md`, which now
+  lists `platformConfig.teamId`). Test
+  `RestSlackWebhookTest.ownedChannelOnTeamlessIntegrationIgnoresPayloadTeam`,
+  mutation-checked.
+- **Legacy `/v1` mapping adoption could hand over an OIDC user's chat.** In
+  `http-policy=authenticated` the bridge writes mappings under the bare OIDC
+  principal, with the same intent. After a switch to shared-key mode, a caller
+  sending `X-OpenWebUI-User-Id: <principal>` (and a matching chat key, which falls
+  back to `default`) adopted that conversation — and through its owner, the user's
+  memories. A raw mapping does not record its origin, so adoption is now opt-in:
+  `eddi.openai-compat.adopt-legacy-header-mappings` (default `false`). Upgrading
+  Open WebUI deployments whose `/v1` never ran in OIDC mode can enable it to keep
+  in-flight chats on their conversations; otherwise such a chat starts a new
+  conversation on its next message. Test
+  `OpenAiConversationBridgeTest.namespacedCaller_doesNotAdoptARawMapping_byDefault`,
+  mutation-checked.
+- **A failed re-key dropped the legacy mapping.** When writing the namespaced mapping
+  failed, the bridge deleted the raw mapping anyway, so the next request found
+  neither. It now re-reads the namespaced mapping and deletes the raw one only when it
+  points to the same conversation. Tests `rekeyFailure_keepsTheLegacyMapping`
+  (mutation-checked) and `rekeyRace_dropsTheLegacyMappingOnceTheSameConversationIsConfirmed`.
+- **OIDC principals could carry the `openwebui:` prefix.** An OIDC user named
+  `openwebui:alice` was the same EDDI identity as the shared-key caller sending
+  `alice`. `OpenAiAuthFilter` now refuses (401) an OIDC principal carrying the
+  reserved prefix. Test
+  `OpenAiAuthFilterTest.oidcMode_refusesAPrincipalCarryingTheReservedOpenWebUiPrefix`,
+  mutation-checked.
+- **Duplicate-name derivation scanned every integration per candidate.** It now reads
+  the used names once; `validateUniqueName` stays the authoritative check.
+
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
-| 2026-09-26 | Slack users are `slack:<team_id>:<user_id>` in EDDI; raw-id data is re-keyed/moved lazily | Raw Slack ids shared the OIDC principal namespace | Keeping raw ids for existing users (leaves the collision open); a one-shot bulk migration |
-| 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id data is re-keyed lazily | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
+| 2026-09-26 | Slack users are `slack:<team_id>:<user_id>` in EDDI; raw-id mappings are re-keyed only | Raw Slack ids shared the OIDC principal namespace | Keeping raw ids for existing users (leaves the collision open); a one-shot bulk migration |
+| 2026-09-26 | OpenAI-compat header users are `openwebui:<id>` in EDDI; raw-id mappings are re-keyed only (opt-in since 2026-09-28) | `X-OpenWebUI-User-Id` shared the OIDC principal namespace, so a shared-key holder reached OIDC users | Namespacing OIDC principals too (they are already canonical); a one-shot bulk migration |
 | 2026-09-27 | Removed the standalone bare-id memory MOVE for both OpenAI-compat and Slack; kept adopt/rekey only | The move read the shared bare-id namespace on an attacker-chosen id and could relocate+erase an OIDC user's memories (review Finding A/B) | A mapping-gated move (still leaks on a bare-id string collision with an OIDC principal) |
 | 2026-09-27 | HITL owner binding refuses an ambiguous integration name and enforces global per-type name uniqueness | Integration display names were not unique, so a copied name could bind a decision to the attacker's config (review Finding C) | Keying everything on a unique resource id (larger blast radius on a security branch) |
 | 2026-09-27 | Slack webhook rejects an event whose claimed workspace disagrees with the signing integration's declared teamId; a teamId-less unowned (DM) event is bound team-less, not to the payload team | Payload team_id was attacker-controllable in a validly-signed DM event → cross-tenant memory read (review residual #1) | Trusting the payload team when the integration declares none |
+| 2026-09-28 | The Slack workspace comes only from a declared `platformConfig.teamId`, for owned channels too; without one the identity is team-less | A signing secret authenticates the integration, not the workspace in the payload | Trusting an owned channel's payload team_id; scoping team-less ids by integration name (names are mutable) |
+| 2026-09-28 | Adoption of raw-id `/v1` chat mappings is opt-in (`adopt-legacy-header-mappings`, default false) | A raw mapping may have been written for an OIDC principal under `http-policy=authenticated`; its origin is unrecorded | Adopting by default (reopens the cross-namespace reach); heuristics on the id's shape |
+| 2026-09-28 | `/v1` refuses an OIDC principal carrying the reserved `openwebui:` prefix | Such a principal equals a header-derived identity | Namespacing OIDC principals too |
 ```
 
 ```regression-note

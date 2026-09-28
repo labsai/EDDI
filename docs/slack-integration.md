@@ -460,19 +460,30 @@ Keycloak user whose principal equalled a Slack id shared that Slack user's
 memories and passed ownership checks on their conversations. Slack ids are also
 only unique per workspace.
 
+The `team_id` comes **only** from the integration's declared
+`platformConfig.teamId`, never from the event payload: a signing secret proves
+which integration signed the event, not which workspace it came from, so its
+holder could otherwise put any `team_id` in the payload and reach another
+workspace's users. An event whose `team_id` (or `event.team`) disagrees with the
+declared `teamId` is rejected with HTTP 403. An integration that declares no
+`teamId` gets team-less ids (`slack:<user_id>`) for its users, in owned channels
+and DMs alike. Team-less ids never equal a `slack:<team_id>:<user_id>`, but every
+team-less integration on the instance shares that one namespace — **declare
+`teamId` on every Slack integration** of a multi-workspace or multi-tenant
+deployment.
+
 Data stored under the raw id keeps working, without a migration step:
 
 - **Ongoing threads** — the thread's conversation mapping is found under the raw
   id, re-keyed to the namespaced id, and the thread keeps its conversation. That
   conversation still carries the raw id as its owner (it is not rewritten), so it
   keeps loading the memories it always did.
-- **New conversations** — before one starts, long-term memory entries stored
-  under the raw id are **moved** to the namespaced id, so the new conversation
-  still remembers them. Only ids shaped like a Slack user id (`U…`/`W…`) are
-  migrated; if the namespaced identity already holds an entry for the same key
-  and agent, it wins and the legacy copy is dropped. A still-running legacy
-  conversation that writes under the raw id later is picked up by the next new
-  conversation.
+- **New conversations** — are owned by the namespaced id and do **not**
+  inherit long-term memories stored under the raw id. Those entries are not
+  moved: the raw id carries no workspace and shares a namespace with every other
+  identity source, so a move keyed on an event's claims could relocate another
+  user's memories. They stay under the raw id, where the legacy conversations
+  that own them keep loading them.
 
 For **GDPR erasure or export** of a Slack user, address the namespaced id; until
 their legacy conversations have ended, also address the raw id. Group
@@ -548,6 +559,7 @@ When running EDDI as a multi-instance cluster behind a load balancer:
 | `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
 | `platformConfig.botToken` | ✅ | Bot User OAuth Token. Use vault reference. |
 | `platformConfig.signingSecret` | ✅ | Slack Signing Secret. Use vault reference. |
+| `platformConfig.teamId` | ❌ (recommended) | Slack workspace id (`T…`). The only source of the workspace in user ids; events claiming another workspace are rejected. Without it, users get team-less ids — see [Slack User Identity](#slack-user-identity). |
 | `defaultTargetName` | ✅ | Name of the target used when no trigger keyword matches |
 | `targets[].name` | ✅ | Target name (must match `defaultTargetName` for the default) |
 | `targets[].type` | ✅ | `AGENT` or `GROUP` |

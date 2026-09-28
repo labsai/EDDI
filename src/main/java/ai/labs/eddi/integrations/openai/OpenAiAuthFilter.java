@@ -138,6 +138,15 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
             if (securityIdentity != null && !securityIdentity.isAnonymous()
                     && securityIdentity.getPrincipal() != null) {
                 String name = securityIdentity.getPrincipal().getName();
+                if (OpenAiUserIdentity.isNamespaced(name)) {
+                    // openwebui: is reserved for header-derived ids. An OIDC principal
+                    // carrying it would share an identity with the shared-key caller who
+                    // names the rest of it in X-OpenWebUI-User-Id — refuse, never serve
+                    // it as anonymous either.
+                    LOGGER.warnf("Refusing an OIDC principal that carries the reserved '%s' prefix",
+                            OpenAiUserIdentity.PREFIX);
+                    return null;
+                }
                 if (name != null && !name.isBlank()) {
                     return name;
                 }

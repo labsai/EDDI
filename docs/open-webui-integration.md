@@ -240,6 +240,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.max-concurrent-requests` | `64` | In-flight completions; excess gets `429`. |
 | `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let a chat mapped under the raw `X-OpenWebUI-User-Id` (before ids were namespaced) keep its conversation. Enable only if `/v1` never ran with `http-policy=authenticated` — see §4. |
 
 Every property has an environment-variable form: `eddi.openai-compat.api-key` → `EDDI_OPENAI_COMPAT_API_KEY`.
 
@@ -259,10 +260,20 @@ Every property has an environment-variable form: `eddi.openai-compat.api-key` �
 
 ```
 1. OIDC principal                       (http-policy=authenticated)
-2. X-OpenWebUI-User-Id                  (when trust-user-headers=true)
+2. X-OpenWebUI-User-Id → openwebui:<id> (when trust-user-headers=true)
 3. default-user                         (only when allow-anonymous=true)
 4. otherwise → 401
 ```
+
+The header value is namespaced to `openwebui:<id>`, so a header can never name an
+OIDC principal or any other identity source. The prefix is reserved: an OIDC
+principal that begins with `openwebui:` is refused with `401`.
+
+Chats created before header ids were namespaced are mapped under the raw id. Such
+a mapping does not record whether the header or an OIDC principal (while `/v1`
+ran with `http-policy=authenticated`) created it, so it is only adopted when
+`adopt-legacy-header-mappings=true`. Leave it off if `/v1` ever ran in OIDC mode;
+otherwise a pre-upgrade chat starts a new conversation on its next message.
 
 > [!IMPORTANT]
 > **`trust-user-headers` is a deliberate delegation.** The header is believed only because the caller already proved possession of the API key — i.e. Open WebUI is a trusted proxy that authenticated its own users. **A leaked API key therefore allows impersonating any user.** Rotate it as you would any shared secret, and prefer `http-policy=authenticated` where per-user tokens are available.

@@ -193,18 +193,38 @@ class RestSlackWebhookTest {
         }
 
         @Test
-        @DisplayName("an event in an owned channel signed by its owner is dispatched with the workspace")
+        @DisplayName("an event in an owned channel signed by its owner is dispatched with the DECLARED workspace")
         void ownedChannelSignedByOwnerIsDispatched() {
             pooledCheckPasses();
             when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
             when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.of("secret-b"));
             when(signatureVerifier.verifyWithSecret("ts", CHANNEL_EVENT, "sig", "secret-b")).thenReturn(true);
+            when(channelTargetRouter.getIntegration("slack", "C_OWNED")).thenReturn(Optional.of(withTeam("T1")));
 
             Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
                     eq(new SlackEventHandler.EventOrigin("T1", null)));
+        }
+
+        @Test
+        @DisplayName("an owned channel whose owner declares no teamId does not trust the payload team")
+        void ownedChannelOnTeamlessIntegrationIgnoresPayloadTeam() {
+            pooledCheckPasses();
+            when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.of("secret-b"));
+            when(signatureVerifier.verifyWithSecret("ts", CHANNEL_EVENT, "sig", "secret-b")).thenReturn(true);
+            // The owner declares no teamId. Its secret signs the event, but that proves
+            // the integration, not the workspace: team_id=T1 may be forged by the secret's
+            // holder to reach slack:T1:U1. The identity must be team-less.
+            when(channelTargetRouter.getIntegration("slack", "C_OWNED")).thenReturn(Optional.of(withTeam(null)));
+
+            Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin(null, null)));
         }
 
         @Test

@@ -156,20 +156,13 @@ public class RestSlackWebhook {
                                 .entity("{\"error\":\"Invalid signature\"}")
                                 .build();
                     }
-                    String teamId;
-                    if (origin.pinnedTeamId() != null) {
-                        teamId = origin.pinnedTeamId();
-                    } else if (origin.owned()) {
-                        // Owned channel signed by its own owner: the payload team_id is
-                        // trustworthy (only the owner's secret validates the event).
-                        teamId = payloadTeam;
-                    } else {
-                        // Unowned channel (a DM) whose signing integration declares no
-                        // teamId: the workspace is unbindable. Do NOT trust the payload
-                        // team — a team-less identity is used so a forged team cannot
-                        // reach a victim's slack:<team>:<user> memories (review #1).
-                        teamId = null;
-                    }
+                    // Only the signing/owning integration's DECLARED teamId names the
+                    // workspace. Without one the workspace is unbindable, for an owned
+                    // channel as much as for a DM: the signing secret identifies the
+                    // integration, not the workspace, so its holder can put any team_id
+                    // in the payload. A team-less identity (slack:<user>) is used, which
+                    // never equals a slack:<team>:<user> of a workspace that is declared.
+                    String teamId = origin.pinnedTeamId();
                     eventHandler.handleEventAsync(eventId, event, botUserId(payload),
                             new SlackEventHandler.EventOrigin(teamId, origin.signingIntegrationName()));
                 }
@@ -196,14 +189,9 @@ public class RestSlackWebhook {
      * @param pinnedTeamId
      *            the workspace the signing/owning integration declares
      *            ({@code platformConfig.teamId}), or {@code null} when it declares
-     *            none
-     * @param owned
-     *            whether the event's channel is owned by a configured integration
-     *            (as opposed to a DM routed by signing secret). Only an owned
-     *            channel's payload {@code team_id} is trusted when no
-     *            {@code teamId} is declared; an unowned channel's is not
+     *            none — the payload {@code team_id} is never used in its place
      */
-    private record VerifiedOrigin(String signingIntegrationName, String pinnedTeamId, boolean owned) {
+    private record VerifiedOrigin(String signingIntegrationName, String pinnedTeamId) {
     }
 
     /**
@@ -226,7 +214,7 @@ public class RestSlackWebhook {
         if (channel == null) {
             // Nothing channel-bound to act on: the handler drops events without a
             // channel, so the pooled check is all there is to bind.
-            return new VerifiedOrigin(null, null, false);
+            return new VerifiedOrigin(null, null);
         }
         if (channelTargetRouter.isChannelOwned(CHANNEL_TYPE_SLACK, channel)) {
             var ownerSecret = channelTargetRouter.getSigningSecretForChannel(CHANNEL_TYPE_SLACK, channel);
@@ -237,14 +225,13 @@ public class RestSlackWebhook {
                 return null;
             }
             return new VerifiedOrigin(null,
-                    configuredTeamId(channelTargetRouter.getIntegration(CHANNEL_TYPE_SLACK, channel).orElse(null)),
-                    true);
+                    configuredTeamId(channelTargetRouter.getIntegration(CHANNEL_TYPE_SLACK, channel).orElse(null)));
         }
         for (var identity : channelTargetRouter.getSigningIdentities(CHANNEL_TYPE_SLACK)) {
             if (signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, identity.signingSecret())) {
                 var config = channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, identity.integrationName())
                         .orElse(null);
-                return new VerifiedOrigin(identity.integrationName(), configuredTeamId(config), false);
+                return new VerifiedOrigin(identity.integrationName(), configuredTeamId(config));
             }
         }
         // The pooled check passed a moment ago, so this is a refresh racing the

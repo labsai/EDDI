@@ -484,30 +484,51 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     /**
      * A copy name that does not collide with an existing one: "{name} (copy)", then
-     * "{name} (copy 2)", "{name} (copy 3)", … until one is free.
+     * "{name} (copy 2)", "{name} (copy 3)", … until one is free. The names in use
+     * are read in ONE scan; the caller's {@link #validateUniqueName} stays the
+     * authoritative check.
      */
     private String deriveUniqueDuplicateName(String baseName, String channelType) {
+        Set<String> used = namesInUseLowerCase(channelType);
         String candidate = baseName + " (copy)";
-        for (int n = 2; nameInUse(candidate, channelType) && n < 1000; n++) {
+        for (int n = 2; used.contains(candidate.toLowerCase(Locale.ROOT)) && n < 1000; n++) {
             candidate = baseName + " (copy " + n + ")";
         }
         return candidate;
     }
 
-    private boolean nameInUse(String name, String channelType) {
-        try {
-            validateUniqueName(newNamed(name, channelType), null);
-            return false;
-        } catch (BadRequestException e) {
-            return true;
+    /**
+     * The lower-cased names of every integration of {@code channelType}. Best
+     * effort, like {@link #validateUniqueName}: an unreadable entry is skipped, and
+     * a failed scan yields what was read so far.
+     */
+    private Set<String> namesInUseLowerCase(String channelType) {
+        Set<String> used = new HashSet<>();
+        if (channelType == null) {
+            return used;
         }
-    }
-
-    private static ChannelIntegrationConfiguration newNamed(String name, String channelType) {
-        var probe = new ChannelIntegrationConfiguration();
-        probe.setName(name);
-        probe.setChannelType(channelType);
-        return probe;
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resId == null || resId.getId() == null) {
+                        continue;
+                    }
+                    var existing = channelStore.read(resId.getId(), resId.getVersion());
+                    if (existing != null && existing.getName() != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())) {
+                        used.add(existing.getName().toLowerCase(Locale.ROOT));
+                    }
+                } catch (Exception e) {
+                    LOG.debugf("Skipping descriptor while collecting channel names: %s", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to collect channel names for the duplicate's name", e);
+        }
+        return used;
     }
 
     // ─── Descriptor sync ───────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -268,6 +269,37 @@ class RestChannelIntegrationStoreCrudTest {
                     .thenReturn(List.of());
 
             assertDoesNotThrow(() -> sut.duplicateChannel(CHANNEL_ID, 1));
+        }
+
+        @Test
+        @DisplayName("picks the first free copy name, reading the existing names in one scan")
+        void duplicatePicksFirstFreeCopyName() throws Exception {
+            when(channelStore.read(CHANNEL_ID, 1)).thenReturn(validConfig());
+            when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("newId12345678901234", 1));
+
+            var copy1 = new DocumentDescriptor();
+            copy1.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445501?version=1"));
+            var copy2 = new DocumentDescriptor();
+            copy2.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445502?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(copy1, copy2));
+            var existing1 = validConfig();
+            existing1.setName("my slack hub (COPY)");
+            var existing2 = validConfig();
+            existing2.setName("My Slack Hub (copy 2)");
+            when(channelStore.read("aabbccddeeff112233445501", 1)).thenReturn(existing1);
+            when(channelStore.read("aabbccddeeff112233445502", 1)).thenReturn(existing2);
+
+            sut.duplicateChannel(CHANNEL_ID, 1);
+
+            var created = ArgumentCaptor.forClass(ChannelIntegrationConfiguration.class);
+            verify(channelStore).create(created.capture());
+            assertEquals("My Slack Hub (copy 3)", created.getValue().getName());
+            // One scan to derive the name, one for the authoritative uniqueness check —
+            // not one scan per candidate.
+            verify(documentDescriptorStore, atMost(2)).readDescriptors(eq("ai.labs.channel"), eq(""), eq(0),
+                    eq(IDescriptorStore.NO_LIMIT), eq(false));
         }
     }
 

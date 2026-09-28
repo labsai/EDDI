@@ -23,10 +23,13 @@ package ai.labs.eddi.integrations.openai;
  * <p>
  * OIDC principals (in {@code authenticated} mode) and the configured anonymous
  * default are NOT namespaced here: the first is already a real, verified
- * identity and the second is operator config, not caller-controlled.
+ * identity and the second is operator config, not caller-controlled. The prefix
+ * is reserved, so an OIDC principal that carries it is refused
+ * ({@link OpenAiAuthFilter}).
  * <p>
  * <b>Compatibility with data stored under the raw header id.</b> Handled in
- * {@link OpenAiConversationBridge} and it is <b>adopt-only</b>: a chat whose
+ * {@link OpenAiConversationBridge}; it is <b>adopt-only</b> and opt-in
+ * ({@code eddi.openai-compat.adopt-legacy-header-mappings}): a chat whose
  * conversation mapping was stored under the raw id is re-keyed to the
  * namespaced id, and because that conversation keeps its raw-id owner its
  * long-term memories load with no move. There is deliberately <b>no</b>

@@ -44,6 +44,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -719,8 +720,74 @@ class OpenAiConversationBridgeTest {
     private static final String NS_OWUI = "openwebui:u_812";
     private static final String INTENT_A = OpenAiConversationBridge.INTENT_PREFIX + AGENT_ID_SUPPORT + ":chat-a";
 
+    /** A bridge with legacy-mapping adoption switched on (it is off by default). */
+    private OpenAiConversationBridge adoptingBridge() {
+        var adopting = new OpenAiConversationBridge(conversationService, userConversationStore, userMemoryStore,
+                new OpenAiMessageMapper(objectMapper, 5),
+                OpenAiTestFixtures.config(b -> {
+                    b.requestTimeoutSeconds = 2;
+                    b.adoptLegacyHeaderMappings = true;
+                }),
+                new SimpleMeterRegistry(), permissiveUseGuard());
+        adopting.initMetrics();
+        return adopting;
+    }
+
+    /**
+     * A raw mapping under this intent may have been written for an OIDC principal
+     * while /v1 ran with http-policy=authenticated. A shared-key caller who names
+     * that principal in the header must not inherit it unless the operator opted in
+     * — by default a fresh namespaced conversation starts and the raw mapping is
+     * left alone.
+     */
+    @Test
+    void namespacedCaller_doesNotAdoptARawMapping_byDefault() throws Exception {
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(new UserConversation(
+                INTENT_A, RAW_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(CONVERSATION_ID, turn.conversationId());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID_SUPPORT), eq(NS_OWUI), any());
+        verify(userConversationStore, never()).readUserConversation(INTENT_A, RAW_OWUI);
+        verify(userConversationStore, never()).deleteUserConversation(INTENT_A, RAW_OWUI);
+    }
+
+    @Test
+    void rekeyFailure_keepsTheLegacyMapping() throws Exception {
+        // The namespaced mapping cannot be written and is not there on re-read: a real
+        // store failure, not a race. The legacy mapping must survive, or the next
+        // request finds neither and the chat loses its conversation.
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(new UserConversation(
+                INTENT_A, RAW_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        doThrow(new RuntimeException("store down")).when(userConversationStore).createUserConversation(any());
+
+        var turn = adoptingBridge().prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
+        verify(userConversationStore, never()).deleteUserConversation(INTENT_A, RAW_OWUI);
+    }
+
+    @Test
+    void rekeyRace_dropsTheLegacyMappingOnceTheSameConversationIsConfirmed() throws Exception {
+        UserConversation legacy = new UserConversation(
+                INTENT_A, RAW_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID);
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null,
+                new UserConversation(INTENT_A, NS_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(legacy);
+        doThrow(new RuntimeException("E11000 duplicate key")).when(userConversationStore).createUserConversation(any());
+
+        var turn = adoptingBridge().prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
+        verify(userConversationStore).deleteUserConversation(INTENT_A, RAW_OWUI);
+    }
+
     @Test
     void namespacedCaller_adoptsAndRekeysALegacyRawMapping() throws Exception {
+        bridge = adoptingBridge();
         // No mapping under the namespaced id; a usable one exists under the raw id.
         when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
         when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(new UserConversation(

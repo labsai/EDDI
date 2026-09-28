@@ -1112,9 +1112,9 @@ public class SlackEventHandler {
      * <p>
      * Compatibility (see {@link SlackUserIdentity}): a mapping stored under the raw
      * Slack id by an earlier release is honoured and re-keyed to the namespaced id,
-     * so an ongoing thread keeps its conversation; and before a brand-new
-     * conversation starts, long-term memories still stored under the raw id are
-     * moved to the namespaced id so it starts with them.
+     * so an ongoing thread keeps its conversation. Nothing else is migrated: a
+     * brand-new conversation does not inherit long-term memories stored under the
+     * raw id.
      */
     // Package-private for unit testing (the identity-namespacing compatibility
     // paths).
