@@ -54,15 +54,15 @@ if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
 fi
 COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 EDDI_ALREADY_RUNNING=false
-# Credentials the compose overlays refuse to start without. An exported value
-# wins; otherwise resolve_stack_passwords keeps the one already in .env or
-# generates one. Nothing here ever has a default — docker-compose.auth.yml and
-# docker-compose.monitoring.yml used to hard-code admin/admin.
-# KC_BOOTSTRAP_ADMIN_* (Keycloak's own names) are accepted as well: the GCP
-# provisioner generates the admin password on the VM and exports it under
-# those names before running this installer.
-KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_ADMIN_USERNAME:-${KC_BOOTSTRAP_ADMIN_USERNAME:-}}"
-KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-${KC_BOOTSTRAP_ADMIN_PASSWORD:-}}"
+# Admin credentials of the auth/monitoring overlays, under the names the compose
+# files read. Compose falls back to admin/admin, which is acceptable only while
+# the port stays on 127.0.0.1; the installer never leaves it at that. An exported
+# value wins (the GCP provisioner generates the Keycloak password on the VM and
+# exports it); otherwise resolve_stack_passwords keeps the one already in .env
+# or generates one, and .env carries it to every later compose run.
+KC_BOOTSTRAP_ADMIN_USERNAME="${KC_BOOTSTRAP_ADMIN_USERNAME:-}"
+KC_BOOTSTRAP_ADMIN_PASSWORD="${KC_BOOTSTRAP_ADMIN_PASSWORD:-}"
+GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-}"
 GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-}"
 # Set by keycloak_admin_login; read by the steps that call the Admin API.
 KC_ADMIN_TOKEN=""
@@ -74,9 +74,9 @@ FIRST_LOGIN_PASSWORDS=()
 # shipping passwords, that is viewer/viewer and user/user.
 LEGACY_FIXTURE_LOGINS=()
 # Set by keycloak_admin_login when it moved a legacy admin/admin login to
-# KEYCLOAK_ADMIN_PASSWORD, so a caller knows the new value is now the true one.
+# KC_BOOTSTRAP_ADMIN_PASSWORD, so a caller knows the new value is now the true one.
 KC_ADMIN_ROTATED=false
-# True when this run generated KEYCLOAK_ADMIN_PASSWORD rather than finding one.
+# True when this run generated KC_BOOTSTRAP_ADMIN_PASSWORD rather than finding one.
 KC_ADMIN_PASSWORD_GENERATED=false
 # True when this run generated GRAFANA_ADMIN_PASSWORD rather than finding one.
 GRAFANA_PASSWORD_GENERATED=false
@@ -456,8 +456,9 @@ for arg in "$@"; do
       echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
       echo "  MONGO_PORT          Host port for MongoDB (default: 27017)"
       echo "  KEYCLOAK_PORT       Host port for Keycloak (default: 8180)"
-      echo "  KEYCLOAK_ADMIN_PASSWORD  Keycloak bootstrap admin password (default: generated,"
+      echo "  KC_BOOTSTRAP_ADMIN_PASSWORD  Keycloak bootstrap admin password (default: generated,"
       echo "                      kept in .env across re-runs)"
+      echo "  GRAFANA_ADMIN_USER       Grafana admin user (default: admin)"
       echo "  GRAFANA_ADMIN_PASSWORD   Grafana admin password (default: generated, kept in .env)"
       echo "  GRAFANA_PORT        Host port for Grafana (default: 3000)"
       echo "  PROMETHEUS_PORT     Host port for Prometheus (default: 9090)"
@@ -700,7 +701,7 @@ env_file_value() {
   printf '%s' "$value"
 }
 
-# Resolves the credentials the selected compose overlays require, BEFORE .env is
+# Resolves the admin credentials of the selected compose overlays, BEFORE .env is
 # written: an exported value, else the one a previous run stored in .env, else a
 # new one. Keeping the stored value matters — Keycloak and Grafana read theirs
 # only when their volume is first initialised, so a new value on every re-run
@@ -712,13 +713,14 @@ resolve_stack_passwords() {
   # copy of the password that volume answers to, so a later --with-auth run
   # generated a new one and was locked out of the master realm. A stale
   # password in .env is harmless; a lost one is not.
-  [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME=$(env_file_value KEYCLOAK_ADMIN_USERNAME)
-  [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(env_file_value KEYCLOAK_ADMIN_PASSWORD)
+  [[ -n "$KC_BOOTSTRAP_ADMIN_USERNAME" ]] || KC_BOOTSTRAP_ADMIN_USERNAME=$(env_file_value KC_BOOTSTRAP_ADMIN_USERNAME)
+  [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]] || KC_BOOTSTRAP_ADMIN_PASSWORD=$(env_file_value KC_BOOTSTRAP_ADMIN_PASSWORD)
+  [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
   [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(env_file_value GRAFANA_ADMIN_PASSWORD)
   if [[ "$WITH_AUTH" == "true" ]]; then
-    [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME="admin"
-    if [[ -z "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
-      KEYCLOAK_ADMIN_PASSWORD=$(generate_password)
+    [[ -n "$KC_BOOTSTRAP_ADMIN_USERNAME" ]] || KC_BOOTSTRAP_ADMIN_USERNAME="admin"
+    if [[ -z "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]]; then
+      KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
       KC_ADMIN_PASSWORD_GENERATED=true
     fi
   fi
@@ -729,12 +731,12 @@ resolve_stack_passwords() {
   # Written single-quoted into .env, where compose reads the value literally;
   # a single quote is the one character that cannot be carried that way.
   local value
-  for value in "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD"; do
+  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD"; do
     if [[ "$value" == *"'"* ]]; then
-      fail "KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
     fi
   done
-  if [[ ( "$WITH_AUTH" == "true" && -z "$KEYCLOAK_ADMIN_PASSWORD" ) \
+  if [[ ( "$WITH_AUTH" == "true" && -z "$KC_BOOTSTRAP_ADMIN_PASSWORD" ) \
      || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) ]]; then
     fail "Could not generate an admin password (neither openssl nor /dev/urandom produced one)."
   fi
@@ -1108,17 +1110,21 @@ EOF
     echo "KEYCLOAK_PORT=$KEYCLOAK_PORT" >> "$EDDI_DIR/.env"
   fi
   # The admin passwords are written whenever one is known, not only when this
-  # run selected the overlay — see resolve_stack_passwords. docker-compose.auth.yml
-  # and docker-compose.monitoring.yml have no default for them and refuse to
-  # start without them. Single-quoted: compose reads the value literally.
-  if [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
+  # run selected the overlay — see resolve_stack_passwords. Without them
+  # docker-compose.auth.yml and docker-compose.monitoring.yml fall back to their
+  # loopback-only admin/admin dev default. Single-quoted: compose reads the value
+  # literally.
+  if [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]]; then
     {
-      echo "KEYCLOAK_ADMIN_USERNAME='${KEYCLOAK_ADMIN_USERNAME:-admin}'"
-      echo "KEYCLOAK_ADMIN_PASSWORD='${KEYCLOAK_ADMIN_PASSWORD}'"
+      echo "KC_BOOTSTRAP_ADMIN_USERNAME='${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}'"
+      echo "KC_BOOTSTRAP_ADMIN_PASSWORD='${KC_BOOTSTRAP_ADMIN_PASSWORD}'"
     } >> "$EDDI_DIR/.env"
   fi
   if [[ -n "$GRAFANA_ADMIN_PASSWORD" ]]; then
-    echo "GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'" >> "$EDDI_DIR/.env"
+    {
+      echo "GRAFANA_ADMIN_USER='${GRAFANA_ADMIN_USER:-admin}'"
+      echo "GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'"
+    } >> "$EDDI_DIR/.env"
   fi
   if [[ "$WITH_MONITORING" == "true" ]]; then
     {
@@ -1263,18 +1269,18 @@ kc_reset_password() {
 # KC_ADMIN_TOKEN (empty on failure). Called directly, never in $(...), so the
 # token survives.
 #
-# KEYCLOAK_ADMIN_PASSWORD is tried first. A stack whose keycloak-data volume
+# KC_BOOTSTRAP_ADMIN_PASSWORD is tried first. A stack whose keycloak-data volume
 # predates generated passwords still answers to the admin/admin that
 # docker-compose.auth.yml used to hard-code — Keycloak reads the bootstrap
 # password only when it first creates the master realm — so that is tried next
-# and, when it works, rotated to KEYCLOAK_ADMIN_PASSWORD on the spot. After that
+# and, when it works, rotated to KC_BOOTSTRAP_ADMIN_PASSWORD on the spot. After that
 # the password in .env is the one that is true.
 keycloak_admin_login() {
   local kc_base="$1" json_tool="$2"
-  local user="${KEYCLOAK_ADMIN_USERNAME:-admin}"
-  KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master "$user" "$KEYCLOAK_ADMIN_PASSWORD")
+  local user="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+  KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master "$user" "$KC_BOOTSTRAP_ADMIN_PASSWORD")
   [[ -n "$KC_ADMIN_TOKEN" ]] && return 0
-  [[ "$user" == "admin" && "$KEYCLOAK_ADMIN_PASSWORD" != "admin" ]] || return 0
+  [[ "$user" == "admin" && "$KC_BOOTSTRAP_ADMIN_PASSWORD" != "admin" ]] || return 0
 
   KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master admin admin)
   [[ -n "$KC_ADMIN_TOKEN" ]] || return 0
@@ -1283,15 +1289,15 @@ keycloak_admin_login() {
   users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${kc_base}/admin/realms/master/users?username=admin&exact=true" 2>/dev/null) || users_json=""
   admin_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || admin_id=""
-  if [[ -n "$admin_id" && -n "$KEYCLOAK_ADMIN_PASSWORD" ]]; then
-    status=$(kc_reset_password "$kc_base" "$json_tool" master "$admin_id" "$KEYCLOAK_ADMIN_PASSWORD" false)
+  if [[ -n "$admin_id" && -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]]; then
+    status=$(kc_reset_password "$kc_base" "$json_tool" master "$admin_id" "$KC_BOOTSTRAP_ADMIN_PASSWORD" false)
   else
     status="000"
   fi
   echo ""
   if [[ "$status" == "204" ]]; then
     KC_ADMIN_ROTATED=true
-    warn "Keycloak still had the old admin/admin console login — changed it to KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
+    warn "Keycloak still had the old admin/admin console login — changed it to KC_BOOTSTRAP_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
   else
     warn "Keycloak still accepts admin/admin and it could not be changed (HTTP ${status})."
     echo -e "     ${DIM}Change it now: http://localhost:${KEYCLOAK_PORT:-8180}/admin -> master realm -> Users -> admin -> Credentials${RESET}"
@@ -1415,60 +1421,67 @@ append_env_line() {
 }
 
 # The already-running path, for an install whose .env predates generated admin
-# passwords. docker-compose.auth.yml / docker-compose.monitoring.yml now refuse
-# to start without KEYCLOAK_ADMIN_PASSWORD / GRAFANA_ADMIN_PASSWORD, so leaving
-# .env as it is breaks the next `eddi update` or `eddi restart`. The running
-# services still answer to the admin/admin the old compose files hard-coded:
-# generate a password, move the service to it, and only THEN write it to .env.
-# When that is not possible (the operator already changed the password), fail
-# with the exact line to add — that password is theirs to supply.
+# passwords. The compose overlays would fall back to admin/admin, and a service
+# that still answers to it can be administered by anything on this machine.
+# Generate a password, move the running service to it, and only THEN write it to
+# .env. When that is not possible (the operator already changed the password),
+# warn: the password is theirs, and the running service keeps it — compose's
+# default only applies when a volume is first created.
 ensure_stack_passwords_for_running_install() {
   local json_tool="$1"
   if grep -q "docker-compose.auth.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null \
-     && [[ -z "$(env_file_value KEYCLOAK_ADMIN_PASSWORD)" ]]; then
+     && [[ -z "$(env_file_value KC_BOOTSTRAP_ADMIN_PASSWORD)" ]]; then
     local kc_port kc_base
     kc_port=$(env_file_value KEYCLOAK_PORT)
     kc_base="http://localhost:${kc_port:-8180}"
-    KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_ADMIN_USERNAME:-admin}"
-    [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(generate_password)
+    KC_BOOTSTRAP_ADMIN_USERNAME="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+    [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]] || KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
     KEYCLOAK_PORT="${kc_port:-8180}"
     KC_ADMIN_ROTATED=false
     keycloak_admin_login "$kc_base" "$json_tool"
     # A token that came from the NEW password means the operator had already
     # set exactly that (only possible when they exported it for this run).
     if [[ "$KC_ADMIN_ROTATED" == "true" ]] \
-       || [[ -n "$(kc_password_token "$kc_base" "$json_tool" master "$KEYCLOAK_ADMIN_USERNAME" "$KEYCLOAK_ADMIN_PASSWORD")" ]]; then
-      append_env_line KEYCLOAK_ADMIN_USERNAME "$KEYCLOAK_ADMIN_USERNAME"
-      append_env_line KEYCLOAK_ADMIN_PASSWORD "$KEYCLOAK_ADMIN_PASSWORD"
-      info "KEYCLOAK_ADMIN_PASSWORD added to ${EDDI_DIR}/.env"
+       || [[ -n "$(kc_password_token "$kc_base" "$json_tool" master "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD")" ]]; then
+      append_env_line KC_BOOTSTRAP_ADMIN_USERNAME "$KC_BOOTSTRAP_ADMIN_USERNAME"
+      append_env_line KC_BOOTSTRAP_ADMIN_PASSWORD "$KC_BOOTSTRAP_ADMIN_PASSWORD"
+      info "KC_BOOTSTRAP_ADMIN_PASSWORD added to ${EDDI_DIR}/.env"
     else
-      fail "${EDDI_DIR}/.env has no KEYCLOAK_ADMIN_PASSWORD, and docker-compose.auth.yml now refuses to start without one — the next 'eddi update' or 'eddi restart' would fail.\n     The running Keycloak no longer accepts admin/admin, so the installer cannot set it for you. Add your Keycloak console admin password:\n       echo \"KEYCLOAK_ADMIN_PASSWORD='<your console admin password>'\" >> ${EDDI_DIR}/.env\n     then re-run the installer."
+      warn "${EDDI_DIR}/.env has no KC_BOOTSTRAP_ADMIN_PASSWORD, and the running Keycloak no longer accepts admin/admin, so the installer could not record its console password.\n     To let the installer manage Keycloak on later runs, add it:\n       echo \"KC_BOOTSTRAP_ADMIN_PASSWORD='<your console admin password>'\" >> ${EDDI_DIR}/.env"
+      KC_BOOTSTRAP_ADMIN_PASSWORD=""
     fi
   fi
 
   if grep -q "docker-compose.monitoring.yml" "$EDDI_DIR/.eddi-config" 2>/dev/null \
      && [[ -z "$(env_file_value GRAFANA_ADMIN_PASSWORD)" ]]; then
-    local g_port g_base g_status body
+    local g_port g_base g_status g_user body="" legacy_auth
     g_port=$(env_file_value GRAFANA_PORT)
     g_base="http://localhost:${g_port:-3000}"
+    [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
+    g_user="${GRAFANA_ADMIN_USER:-admin}"
     [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
-    g_status=$(curl -s -o /dev/null -w "%{http_code}" -u "admin:admin" "${g_base}/api/user" 2>/dev/null) || g_status="000"
+    g_status=$(grafana_login_status "$g_base" "$g_user" admin)
     if [[ "$g_status" == "200" ]]; then
       if [[ "$json_tool" == "jq" ]]; then
         body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
       else
         body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | python3 -c 'import sys, json; p = sys.stdin.read(); print(json.dumps({"oldPassword": "admin", "newPassword": p, "confirmNew": p}))' 2>/dev/null) || body=""
       fi
-      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT -u "admin:admin" \
+      # Built into a header rather than a curl -u literal (see confirm_grafana_login).
+      legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
+      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
     else
       g_status="none"
     fi
     if [[ "$g_status" == "200" ]]; then
+      append_env_line GRAFANA_ADMIN_USER "$g_user"
       append_env_line GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
       warn "Grafana still had the old admin/admin login — changed it to GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env"
     else
-      fail "${EDDI_DIR}/.env has no GRAFANA_ADMIN_PASSWORD, and docker-compose.monitoring.yml now refuses to start without one — the next 'eddi update' or 'eddi restart' would fail.\n     Grafana does not accept admin/admin any more, so the installer cannot set it for you. Add your Grafana admin password:\n       echo \"GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'\" >> ${EDDI_DIR}/.env\n     then re-run the installer."
+      warn "${EDDI_DIR}/.env has no GRAFANA_ADMIN_PASSWORD, and Grafana does not accept ${g_user}/admin any more, so the installer could not record its admin password.\n     To let the installer check Grafana on later runs, add it:\n       echo \"GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'\" >> ${EDDI_DIR}/.env"
+      GRAFANA_ADMIN_PASSWORD=""
     fi
   fi
 }
@@ -1657,8 +1670,8 @@ repair_running_keycloak() {
   # The already-running path never ran resolve_stack_passwords; read what the
   # install stored. ensure_stack_passwords_for_running_install has already
   # made sure there is something to read (or stopped the run).
-  [[ -n "$KEYCLOAK_ADMIN_USERNAME" ]] || KEYCLOAK_ADMIN_USERNAME=$(env_file_value KEYCLOAK_ADMIN_USERNAME)
-  [[ -n "$KEYCLOAK_ADMIN_PASSWORD" ]] || KEYCLOAK_ADMIN_PASSWORD=$(env_file_value KEYCLOAK_ADMIN_PASSWORD)
+  [[ -n "$KC_BOOTSTRAP_ADMIN_USERNAME" ]] || KC_BOOTSTRAP_ADMIN_USERNAME=$(env_file_value KC_BOOTSTRAP_ADMIN_USERNAME)
+  [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]] || KC_BOOTSTRAP_ADMIN_PASSWORD=$(env_file_value KC_BOOTSTRAP_ADMIN_PASSWORD)
   KEYCLOAK_PORT="${kc_port:-8180}"
   # print_success shows the login block only for an auth install.
   WITH_AUTH=true
@@ -1668,7 +1681,7 @@ repair_running_keycloak() {
   admin_token="$KC_ADMIN_TOKEN"
   if [[ -z "$admin_token" ]]; then
     rm -f "$realm_defs"
-    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not log in to ${kc_base} as ${KEYCLOAK_ADMIN_USERNAME:-admin} — see docs/security.md, Identity claims)${RESET}"
+    echo -e "  Checking Keycloak identity scopes  ${YELLOW}⚠️${RESET}  ${DIM}(could not log in to ${kc_base} as ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin} — see docs/security.md, Identity claims)${RESET}"
     return 0
   fi
   set_first_login_passwords "$kc_base" "$json_tool"
@@ -2024,9 +2037,9 @@ configure_first_logins() {
     # nothing answers to. Say so, with the fix, instead of leaving it silent.
     if [[ -z "$KC_ADMIN_TOKEN" && "$KC_ADMIN_PASSWORD_GENERATED" == "true" ]]; then
       echo ""
-      warn "KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env was just generated, but this Keycloak's console does not accept it (nor admin/admin)."
+      warn "KC_BOOTSTRAP_ADMIN_PASSWORD in ${EDDI_DIR}/.env was just generated, but this Keycloak's console does not accept it (nor admin/admin)."
       echo -e "     ${DIM}Its data volume predates it. Replace the value in .env with your real console admin password, then re-run the installer:${RESET}"
-      echo -e "     ${DIM}  KEYCLOAK_ADMIN_PASSWORD='<your console admin password>'${RESET}"
+      echo -e "     ${DIM}  KC_BOOTSTRAP_ADMIN_PASSWORD='<your console admin password>'${RESET}"
     fi
   fi
 
@@ -2064,7 +2077,7 @@ grafana_login_status() {
 # EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
-  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_status body="" waited=0 rotation_failure=""
+  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
   until curl -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
     if (( waited >= 60 )); then
       warn "Grafana did not answer on ${g_base} within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env."
@@ -2074,7 +2087,7 @@ confirm_grafana_login() {
     waited=$(( waited + 2 ))
   done
 
-  g_status=$(grafana_login_status "$g_base" admin admin)
+  g_status=$(grafana_login_status "$g_base" "$g_user" admin)
   if [[ "$g_status" == "200" ]]; then
     if [[ "$json_tool" == "jq" ]]; then
       body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
@@ -2091,7 +2104,7 @@ confirm_grafana_login() {
       # The legacy login is built into a variable rather than written out as a
       # curl -u literal, which secret scanners report as a leaked credential.
       local legacy_auth
-      legacy_auth=$(printf '%s:%s' admin admin | base64 | tr -d '\n')
+      legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
       g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
         -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
@@ -2105,7 +2118,7 @@ confirm_grafana_login() {
 
   # Whatever happened above, the only thing that matters now is whether the
   # value in .env works — a change reported as failed may still have applied.
-  g_status=$(grafana_login_status "$g_base" admin "$GRAFANA_ADMIN_PASSWORD")
+  g_status=$(grafana_login_status "$g_base" "$g_user" "$GRAFANA_ADMIN_PASSWORD")
   [[ "$g_status" == "200" ]] && return 0
 
   if [[ -n "$rotation_failure" ]]; then
@@ -2134,7 +2147,7 @@ print_success() {
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(admin / GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env)${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:${GRAFANA_PORT}${RESET}  ${DIM}(${GRAFANA_ADMIN_USER:-admin} / GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env)${RESET}"
     echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:${PROMETHEUS_PORT}${RESET}"
     echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:${JAEGER_PORT}${RESET}  ${DIM}(trace visualization)${RESET}"
     if [[ "$WITH_AUTH" == "true" ]]; then
@@ -2199,7 +2212,7 @@ print_success() {
     fi
     echo ""
     echo -e "  ${BOLD}Keycloak console${RESET}  →  ${CYAN}http://localhost:${KEYCLOAK_PORT}/admin${RESET}"
-    echo -e "  ${DIM}  ${KEYCLOAK_ADMIN_USERNAME:-admin} / KEYCLOAK_ADMIN_PASSWORD in ${EDDI_DIR}/.env${RESET}"
+    echo -e "  ${DIM}  ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin} / KC_BOOTSTRAP_ADMIN_PASSWORD in ${EDDI_DIR}/.env${RESET}"
   fi
 
   echo ""
@@ -2439,21 +2452,6 @@ case "${1:-help}" in
       fi
     fi
 
-    # The refreshed auth/monitoring overlays have no default admin password and
-    # refuse to start without one. Say so here, with the fix, rather than let
-    # compose stop halfway through an update.
-    for required in "docker-compose.auth.yml:KEYCLOAK_ADMIN_PASSWORD" "docker-compose.monitoring.yml:GRAFANA_ADMIN_PASSWORD"; do
-      overlay="${required%%:*}"; variable="${required#*:}"
-      if printf '%s\n' "${COMPOSE_FILE_LIST[@]}" | grep -q "/${overlay}$" \
-         && ! grep -q "^${variable}=." "$ENV_FILE" 2>/dev/null; then
-        echo "" >&2
-        echo "Aborting before restart: ${overlay} now needs ${variable} in ${ENV_FILE}," >&2
-        echo "and this install predates it. Re-run the install script — it generates the" >&2
-        echo "password, moves the running service to it and records it." >&2
-        exit 1
-      fi
-    done
-
     echo ""
     echo "Pulling images..."
     docker compose "${compose_args[@]}" pull
@@ -2584,6 +2582,7 @@ CFGEOF
       running_grafana_port=$(env_file_value GRAFANA_PORT)
       GRAFANA_PORT="${running_grafana_port:-$GRAFANA_PORT}"
       GRAFANA_ADMIN_PASSWORD=$(env_file_value GRAFANA_ADMIN_PASSWORD)
+      [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
       if command -v jq &>/dev/null; then
         running_grafana_tool="jq"
       elif command -v python3 &>/dev/null; then

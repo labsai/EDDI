@@ -51,10 +51,10 @@
     it is never moved -- if it is busy the install stops and says so, rather
     than starting somewhere you did not ask for.
 
-    The Keycloak bootstrap admin (KEYCLOAK_ADMIN_PASSWORD) and the Grafana admin
-    (GRAFANA_ADMIN_PASSWORD) passwords are generated and kept in .env across
-    re-runs; export either to choose your own. The compose overlays have no
-    default for them and refuse to start without one.
+    The Keycloak bootstrap admin (KC_BOOTSTRAP_ADMIN_PASSWORD) and the Grafana admin
+    (GRAFANA_ADMIN_USER / GRAFANA_ADMIN_PASSWORD) passwords are generated and kept
+    in .env across re-runs; export either to choose your own. Without them the
+    compose overlays fall back to a loopback-only admin/admin dev default.
 
       -WithAuth        KEYCLOAK_PORT    (8180)
       -WithMonitoring  GRAFANA_PORT     (3000)
@@ -186,11 +186,13 @@ $Healthy = $false
 $EddiAlreadyRunning = $false
 $ComposeFiles = @()
 $EddiVaultMasterKey = ""
-# Credentials the compose overlays refuse to start without (they used to
-# hard-code admin/admin). An exported value wins; otherwise Resolve-StackCredential
-# keeps the one already in .env or generates one.
-$KeycloakAdminUser = $env:KEYCLOAK_ADMIN_USERNAME
-$KeycloakAdminSecret = $env:KEYCLOAK_ADMIN_PASSWORD
+# Admin credentials of the auth/monitoring overlays, under the names the compose
+# files read. Compose falls back to admin/admin (loopback-only dev default); the
+# installer never leaves it at that. An exported value wins; otherwise
+# Resolve-StackCredential keeps the one already in .env or generates one.
+$KeycloakAdminUser = $env:KC_BOOTSTRAP_ADMIN_USERNAME
+$KeycloakAdminSecret = $env:KC_BOOTSTRAP_ADMIN_PASSWORD
+$GrafanaAdminUser = $env:GRAFANA_ADMIN_USER
 $GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
 # One entry per realm account this run looked at: Account, and Secret (empty
 # when the account already had a password and was left alone).
@@ -202,7 +204,7 @@ $LegacyFixtureLogins = @()
 # Set when a legacy admin/admin login was moved to the generated password.
 $KcAdminRotated = $false
 $GrafanaRotated = $false
-# True when this run generated KEYCLOAK_ADMIN_PASSWORD rather than finding one.
+# True when this run generated KC_BOOTSTRAP_ADMIN_PASSWORD rather than finding one.
 $KcAdminPasswordGenerated = $false
 # True when this run generated GRAFANA_ADMIN_PASSWORD rather than finding one.
 $GrafanaPasswordGenerated = $false
@@ -570,8 +572,9 @@ function Resolve-StackCredential {
     # .env without them while the keycloak-data volume survived -- deleting the
     # only copy of the password that volume answers to. A stale password in
     # .env is harmless; a lost one is not.
-    if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = Get-EnvFileValue "KEYCLOAK_ADMIN_USERNAME" }
-    if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-EnvFileValue "KEYCLOAK_ADMIN_PASSWORD" }
+    if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = Get-EnvFileValue "KC_BOOTSTRAP_ADMIN_USERNAME" }
+    if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-EnvFileValue "KC_BOOTSTRAP_ADMIN_PASSWORD" }
+    if (-not $script:GrafanaAdminUser) { $script:GrafanaAdminUser = Get-EnvFileValue "GRAFANA_ADMIN_USER" }
     if (-not $script:GrafanaAdminSecret) { $script:GrafanaAdminSecret = Get-EnvFileValue "GRAFANA_ADMIN_PASSWORD" }
     if ($WithAuth) {
         if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = "admin" }
@@ -585,9 +588,9 @@ function Resolve-StackCredential {
         $script:GrafanaPasswordGenerated = $true
     }
     # Written single-quoted into .env, where compose reads the value literally.
-    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminSecret)) {
+    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret)) {
         if ($value -and $value.Contains("'")) {
-            Write-Fail "KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
         }
     }
 }
@@ -900,14 +903,17 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     if ($MongoPort) { $publishedPorts["MONGO_PORT"] = $MongoPort }
     if ($WithAuth) { $publishedPorts["KEYCLOAK_PORT"] = $KeycloakPort }
     # The admin passwords are written whenever one is known, not only when this
-    # run selected the overlay -- see Resolve-StackCredential. The overlays have
-    # no default for them and refuse to start without them. Single-quoted:
-    # compose reads the value literally.
+    # run selected the overlay -- see Resolve-StackCredential. Without them the
+    # overlays fall back to their loopback-only admin/admin dev default.
+    # Single-quoted: compose reads the value literally.
     if ($KeycloakAdminSecret) {
-        $publishedPorts["KEYCLOAK_ADMIN_USERNAME"] = "'$(if ($KeycloakAdminUser) { $KeycloakAdminUser } else { 'admin' })'"
-        $publishedPorts["KEYCLOAK_ADMIN_PASSWORD"] = "'$KeycloakAdminSecret'"
+        $publishedPorts["KC_BOOTSTRAP_ADMIN_USERNAME"] = "'$(if ($KeycloakAdminUser) { $KeycloakAdminUser } else { 'admin' })'"
+        $publishedPorts["KC_BOOTSTRAP_ADMIN_PASSWORD"] = "'$KeycloakAdminSecret'"
     }
-    if ($GrafanaAdminSecret) { $publishedPorts["GRAFANA_ADMIN_PASSWORD"] = "'$GrafanaAdminSecret'" }
+    if ($GrafanaAdminSecret) {
+        $publishedPorts["GRAFANA_ADMIN_USER"] = "'$(if ($GrafanaAdminUser) { $GrafanaAdminUser } else { 'admin' })'"
+        $publishedPorts["GRAFANA_ADMIN_PASSWORD"] = "'$GrafanaAdminSecret'"
+    }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort
         $publishedPorts["PROMETHEUS_PORT"] = $PrometheusPort
@@ -1048,11 +1054,11 @@ function Wait-ForReady {
 
 # -- Post-start credentials -------------------------------
 
-# Returns a master-realm admin token, or $null. Tries KEYCLOAK_ADMIN_PASSWORD
+# Returns a master-realm admin token, or $null. Tries KC_BOOTSTRAP_ADMIN_PASSWORD
 # first. A keycloak-data volume from before the compose file stopped hard-coding
 # admin/admin still answers to that — Keycloak reads the bootstrap password only
 # when it first creates the master realm — so it is tried next and, when it
-# works, rotated to KEYCLOAK_ADMIN_PASSWORD so .env tells the truth.
+# works, rotated to KC_BOOTSTRAP_ADMIN_PASSWORD so .env tells the truth.
 function Connect-KeycloakAdmin([string]$KcBase) {
     $tokenUri = "$KcBase/realms/master/protocol/openid-connect/token"
     $user = if ($KeycloakAdminUser) { $KeycloakAdminUser } else { "admin" }
@@ -1060,7 +1066,7 @@ function Connect-KeycloakAdmin([string]$KcBase) {
         $body = @{ client_id = "admin-cli"; grant_type = "password"; username = $user; password = $KeycloakAdminSecret }
         return (Invoke-RestMethod -Method Post -Uri $tokenUri -Body $body -TimeoutSec 10 -ErrorAction Stop).access_token
     } catch {
-        Write-Verbose "Keycloak admin login with KEYCLOAK_ADMIN_PASSWORD failed: $($_.Exception.Message)"
+        Write-Verbose "Keycloak admin login with KC_BOOTSTRAP_ADMIN_PASSWORD failed: $($_.Exception.Message)"
     }
     if ($user -ne "admin" -or $KeycloakAdminSecret -eq "admin") { return $null }
 
@@ -1076,7 +1082,7 @@ function Connect-KeycloakAdmin([string]$KcBase) {
         $reset = @{ type = "password"; value = $KeycloakAdminSecret; temporary = $false } | ConvertTo-Json
         Invoke-RestMethod -Method Put -Uri "$KcBase/admin/realms/master/users/$($admin.id)/reset-password" -Headers $headers -Body $reset -ContentType "application/json" -ErrorAction Stop | Out-Null
         $script:KcAdminRotated = $true
-        Write-Warn "Keycloak still had the old admin/admin console login -- changed it to KEYCLOAK_ADMIN_PASSWORD in $EddiDir\.env"
+        Write-Warn "Keycloak still had the old admin/admin console login -- changed it to KC_BOOTSTRAP_ADMIN_PASSWORD in $EddiDir\.env"
     } catch {
         Write-Warn "Keycloak still accepts admin/admin and it could not be changed ($($_.Exception.Message)). Change it in the admin console: master realm -> Users -> admin -> Credentials."
     }
@@ -1098,7 +1104,7 @@ function Set-FirstLoginPassword {
         if ($KcAdminPasswordGenerated) {
             # A stopped legacy stack whose volume accepts neither the generated
             # password nor admin/admin: .env now holds a value nothing answers to.
-            Write-Warn "KEYCLOAK_ADMIN_PASSWORD in $EddiDir\.env was just generated, but this Keycloak's console does not accept it (nor admin/admin) -- its data volume predates it. Replace the value in .env with your real console admin password (KEYCLOAK_ADMIN_PASSWORD='<password>') and re-run the installer."
+            Write-Warn "KC_BOOTSTRAP_ADMIN_PASSWORD in $EddiDir\.env was just generated, but this Keycloak's console does not accept it (nor admin/admin) -- its data volume predates it. Replace the value in .env with your real console admin password (KC_BOOTSTRAP_ADMIN_PASSWORD='<password>') and re-run the installer."
         }
         else {
             Write-Warn "Could not log in to the Keycloak admin API -- set the eddi account's password in the admin console."
@@ -1167,13 +1173,12 @@ function Close-SpaPasswordGrant([string]$KcBase, [hashtable]$Headers) {
 }
 
 # The already-running path, for an install whose .env predates generated admin
-# passwords. The auth / monitoring overlays now refuse to start without
-# KEYCLOAK_ADMIN_PASSWORD / GRAFANA_ADMIN_PASSWORD, so leaving .env alone breaks
-# the next `eddi update`. The running services still answer to the admin/admin
-# the old compose files hard-coded: generate a password, move the service to it,
-# and only THEN record it. Where that is impossible (the operator already changed
-# it), stop with the exact line to add. Then close the password grant and report
-# the realm accounts, exactly as a fresh install does.
+# passwords. The overlays would fall back to admin/admin, and a service that
+# still answers to it can be administered by anything on this machine: generate
+# a password, move the service to it, and only THEN record it. Where that is
+# impossible (the operator already changed it), warn with the line to add -- the
+# running service keeps its own password either way. Then close the password
+# grant and report the realm accounts, exactly as a fresh install does.
 function Repair-RunningStack {
     [CmdletBinding(SupportsShouldProcess)]
     param()
@@ -1187,9 +1192,9 @@ function Repair-RunningStack {
         $script:WithAuth = $true
         $port = Get-EnvFileValue "KEYCLOAK_PORT"
         if ($port) { $script:KeycloakPort = $port }
-        if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = Get-EnvFileValue "KEYCLOAK_ADMIN_USERNAME" }
+        if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = Get-EnvFileValue "KC_BOOTSTRAP_ADMIN_USERNAME" }
         if (-not $script:KeycloakAdminUser) { $script:KeycloakAdminUser = "admin" }
-        $stored = Get-EnvFileValue "KEYCLOAK_ADMIN_PASSWORD"
+        $stored = Get-EnvFileValue "KC_BOOTSTRAP_ADMIN_PASSWORD"
         if ($stored) {
             $script:KeycloakAdminSecret = $stored
         }
@@ -1209,13 +1214,14 @@ function Repair-RunningStack {
                 $accepted = $false
             }
             if ($accepted) {
-                Add-Content -Path $envPath -Value "KEYCLOAK_ADMIN_USERNAME='$($script:KeycloakAdminUser)'"
-                Add-Content -Path $envPath -Value "KEYCLOAK_ADMIN_PASSWORD='$($script:KeycloakAdminSecret)'"
+                Add-Content -Path $envPath -Value "KC_BOOTSTRAP_ADMIN_USERNAME='$($script:KeycloakAdminUser)'"
+                Add-Content -Path $envPath -Value "KC_BOOTSTRAP_ADMIN_PASSWORD='$($script:KeycloakAdminSecret)'"
                 Protect-SensitiveFile $envPath
-                Write-Ok "KEYCLOAK_ADMIN_PASSWORD added to $envPath"
+                Write-Ok "KC_BOOTSTRAP_ADMIN_PASSWORD added to $envPath"
             }
             else {
-                Write-Fail "$envPath has no KEYCLOAK_ADMIN_PASSWORD, and docker-compose.auth.yml now refuses to start without one -- the next 'eddi update' or 'eddi restart' would fail. The running Keycloak no longer accepts admin/admin, so the installer cannot set it for you. Add the line KEYCLOAK_ADMIN_PASSWORD='<your console admin password>' to $envPath and re-run the installer."
+                Write-Warn "$envPath has no KC_BOOTSTRAP_ADMIN_PASSWORD, and the running Keycloak no longer accepts admin/admin, so the installer could not record its console password. To let the installer manage Keycloak on later runs, add the line KC_BOOTSTRAP_ADMIN_PASSWORD='<your console admin password>' to $envPath."
+                $script:KeycloakAdminSecret = $null
             }
         }
         Set-FirstLoginPassword
@@ -1225,6 +1231,7 @@ function Repair-RunningStack {
         $script:WithMonitoring = $true
         $port = Get-EnvFileValue "GRAFANA_PORT"
         if ($port) { $script:GrafanaPort = $port }
+        if (-not $script:GrafanaAdminUser) { $script:GrafanaAdminUser = Get-EnvFileValue "GRAFANA_ADMIN_USER" }
         $stored = Get-EnvFileValue "GRAFANA_ADMIN_PASSWORD"
         if ($stored) {
             $script:GrafanaAdminSecret = $stored
@@ -1239,14 +1246,22 @@ function Repair-RunningStack {
             $script:GrafanaRotated = $false
             Update-LegacyGrafanaLogin
             if ($script:GrafanaRotated) {
+                Add-Content -Path $envPath -Value "GRAFANA_ADMIN_USER='$(Get-GrafanaAdminUser)'"
                 Add-Content -Path $envPath -Value "GRAFANA_ADMIN_PASSWORD='$($script:GrafanaAdminSecret)'"
                 Protect-SensitiveFile $envPath
             }
             else {
-                Write-Fail "$envPath has no GRAFANA_ADMIN_PASSWORD, and docker-compose.monitoring.yml now refuses to start without one -- the next 'eddi update' or 'eddi restart' would fail. Grafana no longer accepts admin/admin, so the installer cannot set it for you. Add the line GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>' to $envPath and re-run the installer."
+                Write-Warn "$envPath has no GRAFANA_ADMIN_PASSWORD, and Grafana no longer accepts $(Get-GrafanaAdminUser)/admin, so the installer could not record its admin password. To let the installer check Grafana on later runs, add the line GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>' to $envPath."
+                $script:GrafanaAdminSecret = $null
             }
         }
     }
+}
+
+# The Grafana admin user: GRAFANA_ADMIN_USER, else Grafana's default, admin.
+function Get-GrafanaAdminUser {
+    if ($script:GrafanaAdminUser) { return $script:GrafanaAdminUser }
+    return "admin"
 }
 
 # Grafana applies GF_SECURITY_ADMIN_PASSWORD only when it creates its database,
@@ -1257,7 +1272,7 @@ function Update-LegacyGrafanaLogin {
     if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
     if (-not $PSCmdlet.ShouldProcess("Grafana", "Replace the legacy admin/admin login")) { return }
     $gBase = "http://localhost:$GrafanaPort"
-    $legacyAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin")) }
+    $legacyAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$(Get-GrafanaAdminUser):admin")) }
     try {
         Invoke-RestMethod -Uri "$gBase/api/user" -Headers $legacyAuth -TimeoutSec 10 -ErrorAction Stop | Out-Null
     } catch {
@@ -1273,9 +1288,9 @@ function Update-LegacyGrafanaLogin {
     }
 }
 
-# $true when Grafana accepts admin:<Secret> on /api/user.
+# $true when Grafana accepts <GRAFANA_ADMIN_USER>:<Secret> on /api/user.
 function Test-GrafanaLogin([string]$GrafanaBase, [string]$Secret) {
-    $auth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("admin:$Secret")) }
+    $auth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$(Get-GrafanaAdminUser):$Secret")) }
     try {
         Invoke-RestMethod -Uri "$GrafanaBase/api/user" -Headers $auth -TimeoutSec 10 -ErrorAction Stop | Out-Null
         return $true
@@ -1356,7 +1371,7 @@ function Write-Success {
 
     if ($WithMonitoring) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  (admin / GRAFANA_ADMIN_PASSWORD in $EddiDir\.env)"
+        Write-Information -MessageData "  Grafana    ->  http://localhost:${GrafanaPort}  ($(Get-GrafanaAdminUser) / GRAFANA_ADMIN_PASSWORD in $EddiDir\.env)"
         Write-Information -MessageData "  Prometheus ->  http://localhost:${PrometheusPort}"
         Write-Information -MessageData "  Jaeger     ->  http://localhost:${JaegerPort}  (trace visualization)"
         if ($WithAuth) {
@@ -1410,7 +1425,7 @@ function Write-Success {
         }
         Write-Information -MessageData ""
         Write-Information -MessageData "  Keycloak console  ->  http://localhost:${KeycloakPort}/admin"
-        Write-Information -MessageData "    $(if ($KeycloakAdminUser) { $KeycloakAdminUser } else { 'admin' }) / KEYCLOAK_ADMIN_PASSWORD in $EddiDir\.env"
+        Write-Information -MessageData "    $(if ($KeycloakAdminUser) { $KeycloakAdminUser } else { 'admin' }) / KC_BOOTSTRAP_ADMIN_PASSWORD in $EddiDir\.env"
     }
 
     Write-Information -MessageData ""

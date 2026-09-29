@@ -101,9 +101,10 @@ class ComposeStackTest {
             "^(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND:-127\\.0\\.0\\.1\\}):.+");
 
     /**
-     * Administrator passwords of the bundled third-party services. Each must come
-     * from a REQUIRED variable ({@code ${VAR:?message}}), never a literal and never
-     * a {@code :-} default.
+     * Administrator passwords of the bundled third-party services. Each comes from
+     * an overridable variable, never a hard-coded literal, so the installers (which
+     * generate one into .env) and an operator can replace it. The default keeps a
+     * plain {@code docker compose up} working; the port is loopback-bound.
      */
     private static final Set<String> ADMIN_PASSWORD_VARIABLES = Set.of("KC_BOOTSTRAP_ADMIN_PASSWORD",
             "GF_SECURITY_ADMIN_PASSWORD");
@@ -326,14 +327,15 @@ class ComposeStackTest {
 
     /**
      * {@code KC_BOOTSTRAP_ADMIN_PASSWORD: admin} and
-     * {@code GF_SECURITY_ADMIN_PASSWORD: admin} were literals, and a literal is a
-     * default nobody changes. {@code ${VAR:?message}} is the only compose form that
-     * refuses to start without a value AND says what to set; {@code ${VAR:-admin}}
-     * would be the same hole behind one more indirection.
+     * {@code GF_SECURITY_ADMIN_PASSWORD: admin} used to be literals, which nothing
+     * could override. Each is now a variable with a loopback-only dev default
+     * ({@code ${VAR:-admin}}): the installers write a generated value into .env,
+     * and a bare {@code docker compose up} still starts. A {@code :?} requirement
+     * would break that first run.
      */
     @Test
-    @DisplayName("bundled admin passwords come from required variables, never a default")
-    void adminPasswordsHaveNoDefault() {
+    @DisplayName("bundled admin passwords come from overridable variables with a dev default")
+    void adminPasswordsAreOverridable() {
         List<String> offenders = new ArrayList<>();
         int checked = 0;
         for (Path file : composeFiles()) {
@@ -354,7 +356,7 @@ class ComposeStackTest {
                         continue;
                     }
                     checked++;
-                    if (!value.matches("^\\$\\{[A-Z_]+:\\?[^}]+\\}$")) {
+                    if (!value.matches("^\\$\\{[A-Z_]+:-[^}]*\\}$")) {
                         offenders.add(name(file) + " sets " + variable + " on `" + entry.getKey() + "` to `" + value + "`");
                     }
                 }
@@ -364,8 +366,9 @@ class ComposeStackTest {
                 "expected each of " + ADMIN_PASSWORD_VARIABLES + " exactly once across the compose files — a renamed"
                         + " variable would otherwise leave this sweep checking nothing");
         assertEquals(List.of(), offenders,
-                "an administrator password has a literal value or a default. Use ${SOME_VARIABLE:?what to set}, so"
-                        + " `docker compose up` refuses to start without one and says why.");
+                "an administrator password is a literal or a required variable. Use ${SOME_VARIABLE:-admin}, so the"
+                        + " installers can supply a generated value through .env and a bare `docker compose up` still"
+                        + " starts.");
     }
 
     /**

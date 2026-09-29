@@ -3,24 +3,6 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# ⚠️  KEYCLOAK_ADMIN_PASSWORD must be set — in .env or the environment — or
-# `docker compose up` refuses to start. It is the bootstrap superuser of
-# Keycloak's master realm, which can mint an eddi-admin for anyone, and it used
-# to be hard-coded here as admin/admin on a port published to every interface —
-# anyone on the same network could administer the identity provider.
-#   echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
-# install.sh / install.ps1 --with-auth generate it for you. Keycloak reads it
-# only when it first creates the master realm: on an existing keycloak-data
-# volume the password is whatever it was then (the old admin/admin, for a
-# stack started before this change) — change it in the admin console, or
-# re-run the installer, which rotates it for you.
-#
-# Keycloak is published on 127.0.0.1 only, which matches KC_HOSTNAME below:
-# tokens name http://localhost as their issuer, so a browser on another machine
-# could not complete a login anyway. To expose it deliberately (behind TLS, with
-# KC_HOSTNAME and the two EDDI URLs below changed to the public name), set
-# KEYCLOAK_BIND=0.0.0.0.
-#
 # keycloak/eddi-realm.json seeds three accounts, and NONE of them has a
 # password:
 #   eddi    (eddi-admin + eddi-editor + eddi-viewer)
@@ -37,8 +19,7 @@
 #   http://localhost:${KEYCLOAK_PORT:-8180}/admin → Users → eddi
 #     → Credentials → Set password
 #
-# (log in there as KEYCLOAK_ADMIN_USERNAME, default `admin`, with
-# KEYCLOAK_ADMIN_PASSWORD).
+# (log in there as the KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD pair below).
 
 services:
   eddi:
@@ -83,10 +64,17 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev --import-realm
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN_USERNAME:-admin}"
-      # No default: `:?` stops `docker compose up` with this message instead of
-      # booting the identity provider with a password anyone can guess.
-      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is not set - add KEYCLOAK_ADMIN_PASSWORD=<a strong password> to .env (openssl rand -base64 24). See the header of docker-compose.auth.yml}"
+      # admin/admin is the DEV default for the local docker-compose quick start,
+      # where Keycloak is only reachable on 127.0.0.1 (see `ports:` below — the
+      # bind is loopback unless KEYCLOAK_BIND says otherwise). Any deployment that exposes
+      # Keycloak off-box must override these — the GCP provisioner
+      # (gcp/provision-vm.sh) generates a random KC_BOOTSTRAP_ADMIN_PASSWORD per VM
+      # and exports it before `docker compose up`, so this default is never what a
+      # public instance runs with. Override locally too:
+      #   KC_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 24)" docker compose ... up
+      # install.sh / install.ps1 --with-auth generate one and record it in .env.
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
       # KC_HOSTNAME must equal what browsers use to reach Keycloak.

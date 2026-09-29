@@ -547,8 +547,8 @@ export EDDI_BIND="0.0.0.0"
 # on the VM (containers included) can read from the metadata server. Created
 # once; later boots re-read the same file, so it keeps matching the admin
 # Keycloak bootstrapped into its volume on first start. Exported so
-# install.sh adopts it as KEYCLOAK_ADMIN_PASSWORD (which docker-compose.auth.yml
-# requires) instead of generating its own, and records it in .env.
+# docker-compose.auth.yml's \${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin} and
+# install.sh use it instead of admin/admin; install.sh records it in .env.
 if [[ "${p_with_auth}" == "true" ]]; then
   if [[ ! -s "${p_kc_admin_file}" ]]; then
     KC_PW=\$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-24)
@@ -706,10 +706,10 @@ OVERRIDE_EOF
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""
-  # install.sh recorded this in .env (generated, or adopted from the file above);
-  # the compose overlay has no admin/admin default. The password travels on stdin.
-  KC_ADMIN_USER=\$(grep -m1 '^KEYCLOAK_ADMIN_USERNAME=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_USER=""
-  KC_ADMIN_PW=\$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_PW=""
+  # install.sh recorded this in .env (adopted from the file above). The
+  # password travels on stdin.
+  KC_ADMIN_USER=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_USERNAME=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_USER=""
+  KC_ADMIN_PW=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_PASSWORD=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_PW=""
   for attempt in \$(seq 1 18); do
     KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl -sf -X POST \\
       "http://localhost:8180/realms/master/protocol/openid-connect/token" \\

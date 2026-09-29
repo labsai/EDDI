@@ -122,14 +122,11 @@ docker compose up
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
 docker compose -f docker-compose.postgres-only.yml up
 
-# With Keycloak authentication. The overlay has no default admin password and
-# refuses to start without one; no realm account ships a password either (see
-# the header of docker-compose.auth.yml, or let install.sh --with-auth do both)
-echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+# With Keycloak authentication. No realm account ships a password (see the
+# header of docker-compose.auth.yml, or let install.sh --with-auth set one)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 
-# With Prometheus + Grafana monitoring (same rule for the Grafana admin)
-echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+# With Prometheus + Grafana monitoring
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 
 # With a local LLM — Ollama on the same Docker network, reachable as

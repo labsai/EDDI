@@ -15,15 +15,12 @@ This starts EDDI on port `7070` and MongoDB. No login required.
 This repository ships a Keycloak overlay. Layer it on the base stack:
 
 ```bash
-# The overlay has no default for the Keycloak admin password and refuses to
-# start without one
-echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 ```
 
 This starts:
 
-- **Keycloak 26** on `127.0.0.1:8180` (admin console: `http://localhost:8180/admin`, login `admin` / your `KEYCLOAK_ADMIN_PASSWORD`)
+- **Keycloak 26** on `127.0.0.1:8180` (admin console: `http://localhost:8180/admin`, login `admin` / `KC_BOOTSTRAP_ADMIN_PASSWORD` — `admin` unless you set it; the installers generate one into `.env`)
 - **EDDI** on port `7070` with OIDC auth enabled
 - **MongoDB** for data storage
 

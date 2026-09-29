@@ -3663,14 +3663,15 @@ class DeploymentManifestsTest {
         private static final Path INSTALL_PS1 = Path.of("install.ps1");
 
         /**
-         * docker-compose.monitoring.yml refuses to start without
+         * docker-compose.monitoring.yml falls back to admin/admin without
          * GRAFANA_ADMIN_PASSWORD, so the value an install generates has to be in .env
          * before Compose reads it. Both installers write .env in the step that
          * downloads the compose files, and that step has to come after the one that
          * resolves the passwords — or a fresh {@code --with-monitoring} install hands
-         * Compose a .env with no password in it and the overlay aborts. Pinned by
-         * position, since nothing else would notice a reordering until an install
-         * failed on a user's machine.
+         * Compose a .env with no password in it, Grafana initialises its volume as
+         * admin/admin, and the installer advertises a password nothing answers to.
+         * Pinned by position, since nothing else would notice a reordering until an
+         * install failed on a user's machine.
          */
         @Test
         @DisplayName("both installers resolve the admin passwords before writing .env and starting Compose")
