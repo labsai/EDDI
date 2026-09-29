@@ -11,6 +11,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.io.*;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
@@ -103,6 +104,16 @@ public class ZipArchive implements IZipArchive {
                     addToZip(directoryToZip, file, zos);
                 }
             }
+        } catch (IOException | RuntimeException e) {
+            // Do not leave a truncated archive behind under the target name: it
+            // would sit in the download directory until the retention sweep and
+            // read as a valid-looking but incomplete export.
+            try {
+                Files.deleteIfExists(targetPath);
+            } catch (IOException cleanup) {
+                e.addSuppressed(cleanup);
+            }
+            throw e;
         }
     }
 

@@ -113,6 +113,18 @@ class TeamCadenceServiceTest {
     // =================================================================
 
     @Test
+    @DisplayName("a schedule other than the one the cadence registered cannot fire it (H2e)")
+    void fire_fromAForgedSchedule_isRefusedBeforeAnythingRuns() throws Exception {
+        workspace(cadence(2, null), new TaskItem("Secret", "the victim team's work", 9));
+
+        var result = service.processScheduledFire("forged-schedule", metadata());
+
+        assertFalse(result.isSuccess(), "a forged cadence schedule must fail, so it dead-letters where an operator sees it");
+        assertTrue(result.error().contains("not the one registered"), result.error());
+        verify(groupConversationService, never()).prepareCadenceDiscussion(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("a fire pulls the top-priority executable tasks, starts the discussion, and claims the workspace")
     void fire_pullsByPriority_startsAndClaims() throws Exception {
         var workspace = workspace(cadence(2, 3.50),
@@ -121,7 +133,7 @@ class TeamCadenceServiceTest {
                 new TaskItem("Mid", "do second", 5));
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess(), String.valueOf(result.error()));
         assertNull(result.skippedReason());
@@ -153,7 +165,7 @@ class TeamCadenceServiceTest {
     void fire_emptyBacklog_skipsWithoutADiscussion() throws Exception {
         workspace(cadence(5, null));
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertNotNull(result.skippedReason());
@@ -163,18 +175,18 @@ class TeamCadenceServiceTest {
     @Test
     void fire_missingWorkspaceOrCadence_fails() throws Exception {
         when(workspaceStore.find(GROUP_ID)).thenReturn(null);
-        assertFalse(service.processScheduledFire(metadata()).isSuccess());
+        assertFalse(service.processScheduledFire("sched-1", metadata()).isSuccess());
 
         workspace(null, new TaskItem("T", "", 0)); // workspace exists, cadence does not
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
         assertFalse(result.isSuccess());
         assertTrue(result.error().contains(CADENCE_ID));
     }
 
     @Test
     void fire_missingMetadata_fails() {
-        assertFalse(service.processScheduledFire(null).isSuccess());
-        assertFalse(service.processScheduledFire(Map.of()).isSuccess());
+        assertFalse(service.processScheduledFire("sched-1", null).isSuccess());
+        assertFalse(service.processScheduledFire("sched-1", Map.of()).isSuccess());
     }
 
     @Test
@@ -187,7 +199,7 @@ class TeamCadenceServiceTest {
         runningGc.setState(GroupConversationState.AWAITING_APPROVAL);
         when(conversationStore.read("older-gc")).thenReturn(runningGc);
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertTrue(result.skippedReason().contains("older-gc"));
@@ -206,7 +218,7 @@ class TeamCadenceServiceTest {
         when(conversationStore.read("done-gc")).thenReturn(doneGc);
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertEquals(GC_ID, result.discussionId());
@@ -236,7 +248,7 @@ class TeamCadenceServiceTest {
         // Another reconciler got there first.
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertNotNull(result.skippedReason());
@@ -254,7 +266,7 @@ class TeamCadenceServiceTest {
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertNotNull(result.skippedReason());
@@ -283,7 +295,7 @@ class TeamCadenceServiceTest {
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(false, true);
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         assertNull(result.skippedReason(), "not a lost claim — nobody else holds the workspace");
@@ -310,7 +322,7 @@ class TeamCadenceServiceTest {
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertNotNull(result.skippedReason());
         verify(workspaceStore).casRunningDiscussion(any());
@@ -326,7 +338,7 @@ class TeamCadenceServiceTest {
         when(templatingEngine.processTemplate(anyString(), any())).thenThrow(new RuntimeException("bad template"));
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertTrue(result.isSuccess());
         ArgumentCaptor<String> questionCaptor = ArgumentCaptor.forClass(String.class);
@@ -552,7 +564,7 @@ class TeamCadenceServiceTest {
         when(workspaceStore.casRunningDiscussion(any())).thenThrow(new RuntimeException("store down"));
         startedGc();
 
-        var result = service.processScheduledFire(metadata());
+        var result = service.processScheduledFire("sched-1", metadata());
 
         assertFalse(result.isSuccess());
         verify(prepared, never()).launch();
