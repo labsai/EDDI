@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -611,11 +612,15 @@ class DynamicAgentToolsTest {
         private static final String CONVERSATION_ID = "conv-12345";
 
         @BeforeEach
-        void setUp() {
+        void setUp() throws Exception {
             conversationService = mock(IConversationService.class);
-            // CONVERSATION_ID counts as started by this tool on an earlier turn, so the
-            // continuation tests below may name it (C6).
-            tool = new ConverseWithAgentTool(conversationService, USER_ID, null, 0, new HashSet<>(Set.of(CONVERSATION_ID)));
+            // A supplied conversationId is ownership-checked before it is driven, and
+            // a conversation that records no owner is refused; these tests continue a
+            // conversation the bound user owns.
+            var ownSnapshot = new ConversationMemorySnapshot();
+            ownSnapshot.setUserId(USER_ID);
+            lenient().when(conversationService.getConversationMemorySnapshot(anyString())).thenReturn(ownSnapshot);
+            tool = new ConverseWithAgentTool(conversationService, USER_ID);
         }
 
         /**

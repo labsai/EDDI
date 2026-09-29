@@ -80,7 +80,7 @@ public class MemoryItemConverter implements IMemoryItemConverter {
             conversationDataObjects.put(KEY_MEMORY, convertMemoryItems(memory));
         }
 
-        addSnippetsAndVars(conversationDataObjects);
+        addSnippetsAndVars(conversationDataObjects, memory.getAgentId());
 
         addInfoObject(conversationDataObjects, memory.getUserId(), KEY_USER_INFO, KEY_USER_ID);
         addInfoObject(conversationDataObjects, memory.getConversationId(), KEY_CONVERSATION_INFO, KEY_CONVERSATION_ID);
@@ -105,10 +105,12 @@ public class MemoryItemConverter implements IMemoryItemConverter {
      * would suddenly resolve the deployment's. Explicit per-turn context wins, as
      * it always did.
      */
-    private void addSnippetsAndVars(Map<String, Object> conversationDataObjects) {
+    private void addSnippetsAndVars(Map<String, Object> conversationDataObjects, String agentId) {
         if (promptSnippetService != null) {
             try {
-                Map<String, Object> snippets = promptSnippetService.getAll();
+                // Only the snippets this agent may use — under enforced workspaces
+                // getAll() would expose every workspace's snippets to this render.
+                Map<String, Object> snippets = promptSnippetService.getForAgent(agentId);
                 if (!snippets.isEmpty()) {
                     putNamespaceIfAbsent(conversationDataObjects, KEY_SNIPPETS, snippets);
                 }

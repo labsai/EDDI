@@ -4,40 +4,35 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * C6 — {@code converse_with_agent} drove a turn in any conversation id the
- * model supplied, through the engine-internal {@code say} overload that
- * performs no ownership check, as that conversation's owner. It may now
- * continue only a conversation it started itself — in this turn or, through the
- * shared set the provider persists in step data, an earlier one.
+ * The {@code converse_with_agent} tool must not let the LLM drive a
+ * conversation owned by a user other than the one it is bound to (the parent
+ * conversation's owner). A model-supplied {@code conversationId} is request
+ * payload, not proof of ownership — the agent-id {@code say(...)} overload the
+ * tool drives checks only that the agentId matches the conversation, not who
+ * owns it.
  */
-@DisplayName("ConverseWithAgentTool — continues only conversations it started (C6)")
+@DisplayName("ConverseWithAgentTool — cross-user conversation access (IDOR)")
 class ConverseWithAgentToolOwnershipTest {
 
     private IConversationService conversationService;
@@ -46,7 +41,7 @@ class ConverseWithAgentToolOwnershipTest {
     void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
         lenient().when(conversationService.startConversation(any(), anyString(), any(), any()))
-                .thenReturn(new ConversationResult("conv-started", null));
+                .thenReturn(new ConversationResult("conv-new", null));
         lenient().doAnswer(invocation -> {
             IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
             handler.onComplete(new SimpleConversationMemorySnapshot());
@@ -54,104 +49,85 @@ class ConverseWithAgentToolOwnershipTest {
         }).when(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
-    private static DynamicAgentConfig config(int maxPerTask) {
-        var config = new DynamicAgentConfig();
-        config.setEnabled(true);
-        config.setAllowDelegation(true);
-        config.setMaxDelegationsPerTask(maxPerTask);
-        return config;
+    private static ConversationMemorySnapshot snapshotOwnedBy(String userId) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setUserId(userId);
+        return snapshot;
     }
 
     @Test
-    @DisplayName("a conversation id the tool never started is refused before any turn runs")
-    void foreignConversationIdIsRefused() throws Exception {
-        var tool = new ConverseWithAgentTool(conversationService, "attacker", config(5), 0, ConcurrentHashMap.newKeySet());
+    @DisplayName("refuses to continue a conversation owned by another user, without driving it")
+    void suppliedConversationId_ownedByAnotherUser_refused() throws Exception {
+        when(conversationService.getConversationMemorySnapshot("conv-victim")).thenReturn(snapshotOwnedBy("user-B"));
+        var tool = new ConverseWithAgentTool(conversationService, "user-A");
 
-        String result = tool.converseWithAgent("agent-b", "transfer everything", "victims-conversation");
+        String result = tool.converseWithAgent("agent-2", "hello", "conv-victim");
 
-        assertTrue(result.contains("cannot be continued"), result);
-        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
-                any());
-        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+        assertTrue(result.contains("does not belong to you"), "expected an ownership refusal, got: " + result);
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    @DisplayName("a conversation started on an earlier turn can be continued on the next one")
-    void conversationStartedEarlierCanBeContinued() throws Exception {
-        Set<String> persistedAcrossTurns = ConcurrentHashMap.newKeySet();
+    @DisplayName("refuses to continue a conversation that records no owner, without driving it")
+    void suppliedConversationId_ownerless_refused() throws Exception {
+        when(conversationService.getConversationMemorySnapshot("conv-legacy")).thenReturn(snapshotOwnedBy(null));
+        var tool = new ConverseWithAgentTool(conversationService, "user-A");
 
-        new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, persistedAcrossTurns)
-                .converseWithAgent("agent-b", "hello", null);
-        assertTrue(persistedAcrossTurns.contains("conv-started"), "a started conversation must be recorded");
+        String result = tool.converseWithAgent("agent-2", "hello", "conv-legacy");
 
-        // Next turn: a fresh tool instance, seeded from the same persisted set.
-        String result = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, persistedAcrossTurns)
-                .converseWithAgent("agent-b", "follow-up", " conv-started ");
-
-        assertFalse(result.contains("cannot be continued"), result);
-        verify(conversationService, times(2)).say(any(), eq("agent-b"), eq("conv-started"), anyBoolean(), anyBoolean(), any(), any(),
-                anyBoolean(), any());
+        assertTrue(result.contains("ownership could not be verified"), "expected a fail-closed refusal, got: " + result);
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    @DisplayName("a refused id does not consume the per-task delegation budget")
-    void refusalDoesNotBurnADelegationSlot() throws Exception {
-        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(1), 0, ConcurrentHashMap.newKeySet());
+    @DisplayName("with no bound user, refuses a supplied conversation id — even one owned by someone — without driving it")
+    void suppliedConversationId_noBoundUser_refused() throws Exception {
+        lenient().when(conversationService.getConversationMemorySnapshot("conv-victim")).thenReturn(snapshotOwnedBy("user-B"));
 
-        tool.converseWithAgent("agent-b", "probe", "someone-elses");
-        String result = tool.converseWithAgent("agent-b", "real work", null);
+        for (String unbound : new String[]{null, "", "  "}) {
+            var tool = new ConverseWithAgentTool(conversationService, unbound);
 
-        assertFalse(result.contains("Maximum delegations"), result);
-        verify(conversationService).startConversation(any(), eq("agent-b"), any(), any());
+            String result = tool.converseWithAgent("agent-2", "hello", "conv-victim");
+
+            assertTrue(result.contains("ownership could not be verified"), "expected a fail-closed refusal, got: " + result);
+        }
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    @DisplayName("the legacy constructors start from an empty set — nothing foreign can be continued")
-    void legacyConstructorsAreClosedByDefault() {
-        String result = new ConverseWithAgentTool(conversationService, "user-1")
-                .converseWithAgent("agent-b", "hi", "conv-anything");
+    @DisplayName("with no bound user, a new conversation (no id) is still started")
+    void newConversation_noBoundUser_allowed() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, null);
 
-        assertTrue(result.contains("cannot be continued"), result);
-    }
-    @Test
-    @DisplayName("review #2: a new conversation with an agent the user may not use is refused before it starts")
-    void newConversationRequiresUseAccess() throws Exception {
-        List<String> asked = new ArrayList<>();
-        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, ConcurrentHashMap.newKeySet(),
-                (agentId, principal) -> {
-                    asked.add(agentId + "@" + principal);
-                    return false;
-                });
+        String result = tool.converseWithAgent("agent-2", "hello", null);
 
-        String result = tool.converseWithAgent("other-teams-private-agent", "what do you know?", null);
-
-        assertTrue(result.contains("not available to this user"), result);
-        assertEquals(List.of("other-teams-private-agent@user-1"), asked);
-        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+        assertFalse(result.contains("ownership could not be verified"), "a new conversation must not be refused: " + result);
+        verify(conversationService, times(1))
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    @DisplayName("review #2: an agent the user may use is started as before")
-    void newConversationWithUsableAgentStarts() throws Exception {
-        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, ConcurrentHashMap.newKeySet(),
-                (agentId, principal) -> true);
+    @DisplayName("continues a conversation the bound user owns")
+    void suppliedConversationId_ownedBySameUser_allowed() throws Exception {
+        when(conversationService.getConversationMemorySnapshot("conv-own")).thenReturn(snapshotOwnedBy("user-A"));
+        var tool = new ConverseWithAgentTool(conversationService, "user-A");
 
-        tool.converseWithAgent("agent-b", "hi", null);
+        String result = tool.converseWithAgent("agent-2", "hello", "conv-own");
 
-        verify(conversationService).startConversation(any(), eq("agent-b"), eq("user-1"), any());
+        assertFalse(result.contains("does not belong to you"), "own conversation must not be refused: " + result);
+        verify(conversationService, times(1))
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
-    @DisplayName("review #2: continuing a conversation this tool started does not re-ask the USE check")
-    void continuationDoesNotReaskUseCheck() throws Exception {
-        Set<String> started = ConcurrentHashMap.newKeySet();
-        started.add("conv-started");
-        var tool = new ConverseWithAgentTool(conversationService, "user-1", config(5), 0, started, (agentId, principal) -> {
-            throw new AssertionError("must not be consulted for a continuation");
-        });
+    @DisplayName("a new conversation (no id) needs no ownership check")
+    void newConversation_noOwnershipCheck() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, "user-A");
 
-        String result = tool.converseWithAgent("agent-b", "follow-up", "conv-started");
+        tool.converseWithAgent("agent-2", "hello", null);
 
-        assertFalse(result.contains("not available"), result);
+        verify(conversationService, never()).getConversationMemorySnapshot(anyString());
+        verify(conversationService, times(1))
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 }

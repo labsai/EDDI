@@ -7,17 +7,14 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
 import java.util.GregorianCalendar;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.net.http.HttpResponse;
 import java.net.http.HttpRequest;
 import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.*;
@@ -165,15 +162,23 @@ class PdfReaderToolTest {
             mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
+        private void mockStatus(int status) throws Exception {
+            org.mockito.Mockito.doReturn(new SafeHttpClient.BoundedResponse(status, new byte[0], false))
+                    .when(mockedHttpClient).sendBounded(
+                            org.mockito.ArgumentMatchers.any(HttpRequest.class),
+                            org.mockito.ArgumentMatchers.anyLong());
+        }
+
+        private void mockThrow(Throwable t) throws Exception {
+            org.mockito.Mockito.doThrow(t).when(mockedHttpClient).sendBounded(
+                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
+                    org.mockito.ArgumentMatchers.anyLong());
+        }
+
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — non-200 status returns error")
-        @SuppressWarnings("unchecked")
         void extractText_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(404);
-            org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockStatus(404);
 
             String result = mockedTool.extractTextFromPdf("https://example.com/notfound.pdf");
 
@@ -183,13 +188,8 @@ class PdfReaderToolTest {
 
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — non-200 status returns error")
-        @SuppressWarnings("unchecked")
         void extractPages_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(500);
-            org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockStatus(500);
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 3);
 
@@ -199,13 +199,8 @@ class PdfReaderToolTest {
 
         @Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — non-200 status returns error")
-        @SuppressWarnings("unchecked")
         void pdfInfo_non200_returnsError() throws Exception {
-            var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(403);
-            org.mockito.Mockito.doReturn(mockResponse).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockStatus(403);
 
             String result = mockedTool.getPdfInfo("https://example.com/forbidden.pdf");
 
@@ -214,11 +209,23 @@ class PdfReaderToolTest {
         }
 
         @Test
+        @org.junit.jupiter.api.DisplayName("extractTextFromPdf — over-size download returns error")
+        void extractText_oversize_returnsError() throws Exception {
+            org.mockito.Mockito.doReturn(new SafeHttpClient.BoundedResponse(200, new byte[0], true))
+                    .when(mockedHttpClient).sendBounded(
+                            org.mockito.ArgumentMatchers.any(HttpRequest.class),
+                            org.mockito.ArgumentMatchers.anyLong());
+
+            String result = mockedTool.extractTextFromPdf("https://example.com/huge.pdf");
+
+            assertTrue(result.startsWith("Error:"));
+            assertTrue(result.contains("maximum download size"));
+        }
+
+        @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — IOException returns error")
         void extractText_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new IOException("Connection refused")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockThrow(new IOException("Connection refused"));
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
 
@@ -229,9 +236,7 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdfPages — IOException returns error")
         void extractPages_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new IOException("Timeout")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockThrow(new IOException("Timeout"));
 
             String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 5);
 
@@ -242,9 +247,7 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("getPdfInfo — IOException returns error")
         void pdfInfo_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new IOException("DNS failed")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockThrow(new IOException("DNS failed"));
 
             String result = mockedTool.getPdfInfo("https://example.com/doc.pdf");
 
@@ -255,9 +258,7 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — InterruptedException returns error")
         void extractText_interruptedException_returnsError() throws Exception {
-            org.mockito.Mockito.doThrow(new InterruptedException("Interrupted")).when(mockedHttpClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            mockThrow(new InterruptedException("Interrupted"));
 
             String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
 
@@ -347,34 +348,15 @@ class PdfReaderToolTest {
             return tempFile;
         }
 
-        @SuppressWarnings("unchecked")
         private void mockHttpToServePdf(Path sourcePdf) throws Exception {
-            org.mockito.Mockito.doAnswer(invocation -> {
-                // downloadPdf() creates a temp file with prefix "eddi-pdf-" immediately
-                // before calling send(). Find that temp file and copy our PDF into it.
-                Path tempDir = Path.of(System.getProperty("java.io.tmpdir"));
-                Path target = Files.list(tempDir)
-                        .filter(p -> p.getFileName().toString().startsWith("eddi-pdf-")
-                                && p.getFileName().toString().endsWith(".pdf"))
-                        .max(Comparator.comparingLong(p -> {
-                            try {
-                                return Files.getLastModifiedTime(p).toMillis();
-                            } catch (Exception e) {
-                                return 0L;
-                            }
-                        }))
-                        .orElseThrow(() -> new RuntimeException("Could not find eddi-pdf temp file"));
-
-                Files.copy(sourcePdf, target,
-                        StandardCopyOption.REPLACE_EXISTING);
-
-                var mockResponse = (HttpResponse<Path>) org.mockito.Mockito.mock(HttpResponse.class);
-                org.mockito.Mockito.when(mockResponse.statusCode()).thenReturn(200);
-                org.mockito.Mockito.when(mockResponse.body()).thenReturn(target);
-                return mockResponse;
-            }).when(mockedHttpClient).send(
+            // The tool now reads the body straight into memory via sendBounded(), so
+            // hand back the PDF bytes in a BoundedResponse rather than staging a temp
+            // file.
+            byte[] pdfBytes = Files.readAllBytes(sourcePdf);
+            org.mockito.Mockito.when(mockedHttpClient.sendBounded(
                     org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+                    org.mockito.ArgumentMatchers.anyLong()))
+                    .thenReturn(new SafeHttpClient.BoundedResponse(200, pdfBytes, false));
         }
 
         @org.junit.jupiter.api.Test

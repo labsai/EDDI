@@ -200,6 +200,13 @@ public final class MemoryKeys {
      */
     public static final String QUICK_REPLIES_PREFIX = "quickReplies";
 
+    /**
+     * Output key under which a failed task is reported to the caller —
+     * {@code [{type: "errorDigest", taskId, taskType, text}]}. Written by
+     * {@code LifecycleManager}; one of the keys a non-detailed response keeps.
+     */
+    public static final String TASK_ERRORS = "taskErrors";
+
     // ---- ApiCalls ----
 
     /** ApiCalls prefix key. Used for dynamic keys like "httpCalls:callName". */

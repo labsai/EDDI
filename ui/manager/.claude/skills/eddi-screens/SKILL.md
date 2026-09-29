@@ -19,7 +19,7 @@ there — those pages *do* supply their own padding, and the rules below are abo
 
 ## Page skeleton
 
-Most pages are a single `space-y-6` column — 29 of the 40 files in `src/pages/`.
+Most pages are a single `space-y-6` column — roughly three in four of the files in `src/pages/`.
 Reference: `src/pages/agents.tsx`.
 
 ```tsx
@@ -57,15 +57,15 @@ Rules that hold across pages:
   `p-6` inside `@container/main mx-auto max-w-screen-2xl`, so a page that pads itself
   renders at 48px. Every page currently complies; keep it that way.
 - `h1` is `flex items-center gap-2 text-3xl font-bold text-foreground` with an
-  `h-8 w-8 text-primary` Lucide icon. **Heading size is genuinely mixed** — 22 `text-3xl`
-  against 18 `text-2xl` (plus 3 `text-xl` on dense detail headers). `text-3xl` is the one to
+  `h-8 w-8 text-primary` Lucide icon. **Heading size is genuinely mixed** — `text-3xl` is the
+  most common, `text-2xl` close behind, and `text-xl` on a few dense detail headers. `text-3xl` is the one to
   reach for on a new top-level page, but match the neighbouring screens rather than treating
   either as absolute.
 - The page's primary action is a `primary` Button top-right; secondary actions sit beside it
   in a `flex flex-wrap items-center gap-2` group. Buttons already supply `gap-2` from `cva`.
 - Toolbar: search on `flex-1`, `ViewToggle` after it. Persist the choice with
   `getStoredViewMode(page)` / `setStoredViewMode(page, mode)` from
-  `src/components/shared/view-mode.ts` — all 6 pages with a `ViewToggle` do.
+  `src/components/shared/view-mode.ts` — every page with a `ViewToggle` does.
   Where a result count is shown, it is a
   `text-xs font-semibold uppercase tracking-wider text-muted-foreground` line above the grid.
 - Inline guidance banners: `rounded-xl border border-primary/20 bg-primary/5 p-4`.
@@ -106,7 +106,7 @@ const loadFailed = isError && !data;
 ```
 
 Use the `Skeleton` primitive inside a card-shaped wrapper, not a bare `animate-pulse` div.
-`ErrorState` is in 19 pages, `EmptyState` in 9. Empty state distinguishes "no results for
+`ErrorState` is used far more widely than `EmptyState`. Empty state distinguishes "no results for
 this search" from "nothing exists yet", and only the latter offers the create action.
 
 **Every page that loads data has an error branch — keep it that way.** Falling through to

@@ -104,48 +104,9 @@ class ContextualToolsProviderGroupIdTest {
     }
 
     @Test
-    void groupIdFromAnEarlierStep_isResolvedForAVerifiedMember() {
-        // A resumed turn re-enters without the original context map, so the value
-        // only exists on an earlier step — trusted because the running discussion
-        // confirms this conversation is its member, in that group.
-        var memory = memoryWithEarlierStep("group-earlier", "gc-1");
-
-        assertEquals(List.of("group-earlier"),
-                ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "group-earlier", "conv-1")));
-    }
-
-    @Test
-    void forgedPreFixGroupId_onAnEarlierStep_isIgnored() {
-        // Review #4: a client that forged context:groupId before the strip existed
-        // left it on an earlier step, with no discussion behind it.
-        var memory = memoryWithEarlierStep("another-teams-group", null);
-
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, new LiveDiscussionRegistry()).isEmpty());
-    }
-
-    @Test
-    void earlierGroupId_notMatchingTheDiscussionsGroup_isIgnored() {
-        var memory = memoryWithEarlierStep("another-teams-group", "gc-1");
-
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "conv-1")).isEmpty());
-    }
-
-    @Test
-    void earlierGroupId_forANonMemberConversation_isIgnored() {
-        var memory = memoryWithEarlierStep("my-group", "gc-1");
-
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "someone-else")).isEmpty());
-    }
-
-    @Test
-    void earlierGroupId_withoutARegistry_isIgnored() {
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memoryWithEarlierStep("my-group", "gc-1")).isEmpty());
-    }
-
-    @Test
-    void groupIdProperty_isNotTrusted() {
-        // C3c: a client can set conversation properties (a properties* context entry
-        // of type expressions), so a groupId property must never scope group memory.
+    void groupIdProperty_doesNotGrantGroupScope() {
+        // Properties are client- and input-settable, so they are not evidence of
+        // group membership. Only the context value the orchestrator injects counts.
         var memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(null);
         when(memory.getAllSteps()).thenReturn(null);
@@ -154,7 +115,7 @@ class ContextualToolsProviderGroupIdTest {
         when(memory.getConversationProperties()).thenReturn(props);
 
         assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
-                "only the engine-written context:groupId may name the group");
+                "a groupId conversation property must not select a group memory scope");
     }
 
     @Test

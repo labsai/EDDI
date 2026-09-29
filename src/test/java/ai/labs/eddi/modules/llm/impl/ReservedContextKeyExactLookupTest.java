@@ -53,7 +53,6 @@ class ReservedContextKeyExactLookupTest {
         putContext(memory, "groupIdSuffix", "another-teams-group");
 
         assertEquals(List.of(), ContextualToolsProvider.resolveGroupIds(memory));
-        assertEquals(List.of(), ContextualToolsProvider.resolveGroupIds(memory, new LiveDiscussionRegistry()));
     }
 
     @Test
@@ -85,7 +84,7 @@ class ReservedContextKeyExactLookupTest {
         gc.getMemberConversationIds().put("agent-1", "conv-1");
         registry.register(gc);
 
-        assertEquals(List.of("my-group"), ContextualToolsProvider.resolveGroupIds(memory, registry));
+        assertEquals(List.of("my-group"), ContextualToolsProvider.resolveGroupIds(memory));
     }
 
     @Test

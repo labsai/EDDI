@@ -678,9 +678,10 @@ describe("withdrawing a SECRET turn", () => {
     messages: [{ id: "u1", role: "user" as const, content: "●●●●●●●●", timestamp: 1 }],
   };
 
-  it("does not hand the secret back as a restorable draft", () => {
-    // The composer that would receive it is unmasked, and the secret marking
-    // is lost — so the value would be shown in clear and re-sent unmarked.
+  it("hands a secret back only into a masked, secret-mode composer", () => {
+    // Restoring it into the plain composer would show it in clear and re-send
+    // it unmarked; dropping it made the user retype a key the server never
+    // consumed. Secret mode ON keeps it masked and re-sends it as secret.
     const next = chatReducer(secretState, {
       type: "WITHDRAW_LAST_USER_MESSAGE",
       messageId: "u1",
@@ -688,7 +689,8 @@ describe("withdrawing a SECRET turn", () => {
       wasSecret: true,
     });
 
-    expect(next.restoreDraft).toBeNull();
+    expect(next.restoreDraft).toBe("hunter2");
+    expect(next.isSecretMode).toBe(true);
     expect(next.messages).toHaveLength(0);
   });
 

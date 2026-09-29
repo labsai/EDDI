@@ -44,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -102,12 +103,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * status alone leaves the live session cookie flowing into persisted memory and
      * the model's context.
      * <p>
-     * {@code Set-Cookie} is the case that matters: {@code HttpClientModule} builds
-     * a cookie-aware, application-scoped {@code WebClientSession}, so that value is
-     * a session credential EDDI is actively replaying, and {@code HttpOnly} exists
-     * precisely to keep such values out of scriptable — here, prompt-injectable —
-     * context. The authenticate headers carry challenge material with the same
-     * property.
+     * {@code Set-Cookie} is the case that matters: it is a session credential, and
+     * {@code HttpOnly} exists precisely to keep such values out of scriptable —
+     * here, prompt-injectable — context. (The shared outbound client no longer
+     * keeps a cookie jar, so the value is not replayed on later calls either; see
+     * {@code HttpClientModule}. Dropping it from memory remains defense in depth.)
+     * The authenticate headers carry challenge material with the same property.
      * <p>
      * A deny-list rather than an allow-list, deliberately: the useful header on any
      * given API is not knowable here ({@code Location}, {@code ETag}, a pagination
@@ -858,15 +859,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // never decide, because one side of it is a credential.
         var claimedHeaders = new HashMap<String, Boolean>();
         var connectionOwnedHeaders = new HashSet<String>();
+        // Whether ANY header carries a RESOLVED credential — a connection reference, a
+        // vault secret, or a caller token/identity. These are the highest-value
+        // secrets (a live vault value, the end user's own token), so for them we do
+        // not merely rely on the cross-origin header stripping the shared client now
+        // applies to every redirect hop
+        // (HttpClientModule.strippingCrossOriginCredentials,
+        // which also covers a static/literal credential written in the config): we
+        // disable redirect-following outright, so the request can only ever reach the
+        // origin the caller vouched for.
+        boolean headerCarriesCredential = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);
+            int secretsBefore = resolvedSecrets.size();
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
+            if (resolvedSecrets.size() > secretsBefore) {
+                // A vault ${secret} was substituted into this header.
+                headerCarriesCredential = true;
+            }
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
+            String beforeCallerResolution = headerValue;
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            if (!Objects.equals(beforeCallerResolution, headerValue)) {
+                // A ${caller:token}/${caller:userId} was resolved into this header.
+                headerCarriesCredential = true;
+            }
             // Connections resolve last, and only in a header. A ${connection:name}
             // resolves to a credential bound to THIS caller and THIS moment, so
             // unlike a vault reference it cannot be substituted into a cached
@@ -896,6 +917,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
                 connectionOwnedHeaders.add(credential.headerName());
+                headerCarriesCredential = true;
                 continue;
             }
             // The same map, read from the other side. A plain header sharing a name
@@ -909,6 +931,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
+        }
+
+        // A resolved credential in any header must never be replayed to another
+        // origin by a redirect. When ssrf-protection is on, redirects are already
+        // disabled above; when it is off (redirects followed), disable them for this
+        // request alone so a cross-origin 3xx cannot carry a connection/vault/caller
+        // credential anywhere. The shared client also strips credential headers on
+        // cross-origin hops for literal credentials; this is the stronger measure for
+        // the resolved ones.
+        if (headerCarriesCredential) {
+            request.setFollowRedirects(false);
         }
 
         Map<String, String> queryParams = requestConfig.getQueryParams();

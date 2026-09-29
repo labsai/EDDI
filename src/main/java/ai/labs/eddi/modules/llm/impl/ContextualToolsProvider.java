@@ -9,11 +9,10 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
+import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
@@ -84,8 +83,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
 
     /**
      * Verifies an earlier step's {@code groupId} before it is trusted — see
-     * {@link #resolveGroupIds(IConversationMemory, LiveDiscussionRegistry)}. May be
-     * null, in which case only the current step's value counts.
+     * {@link #resolveGroupIds(IConversationMemory)}. May be null, in which case
+     * only the current step's value counts.
      */
     private final LiveDiscussionRegistry liveDiscussionRegistry;
 
@@ -186,7 +185,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
-        if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
+        if (!ctx.memory().isMemoryToolsEnabled() || ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
         }
         // Suppressed per agent, not per turn: this fires on every turn of a
@@ -210,13 +209,18 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * context.
      */
     void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        // The config alone is not the switch: it is present for every agent that
+        // declares a userMemoryConfig block (its recall and visibility settings apply
+        // to the longTerm property path of every agent). Only enableMemoryTools
+        // grants the persistent cross-conversation WRITE capability this tool is.
         AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (config == null || userMemoryStore == null)
+        if (!memory.isMemoryToolsEnabled() || config == null || userMemoryStore == null)
             return;
 
-        List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);
+        List<String> groupIds = resolveGroupIds(memory);
 
-        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
+        var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
+                memory::isCancelled);
         tools.add(tool);
         // Conversation id, not user id: sanitize() strips control characters, it does
         // not make an identifier non-personal, and this line fires on every turn that
@@ -248,85 +252,17 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * and then to any earlier step, since a resumed turn re-enters without the
      * original context map.
      * <p>
-     * <b>No property fallback any more (C3c).</b> A last-resort read of a
-     * {@code groupId} conversation <em>property</em> used to follow, "so a config
-     * that genuinely sets one still works". But a client can set conversation
-     * properties — a {@code properties*} context entry of type {@code expressions}
-     * is turned into properties by {@code PropertySetterTask} on any agent that has
-     * one — so that fallback let a caller name any group and read or write its
-     * group-visible memories. Group membership is a runtime fact only the group
-     * orchestrator knows; the context key it writes is reserved
-     * ({@code ReservedContextKeys}) and stripped from client input, so it is the
-     * one source trusted here.
-     * <p>
-     * <b>An earlier step's value is verified (review #4).</b> The current step's
-     * {@code context:groupId} was written this turn and can only have come from the
-     * orchestrator. An earlier step's may predate the strip: a conversation where a
-     * client forged {@code groupId} before the fix still carries it, and trusting
-     * it would keep that client in another team's group memory indefinitely. So a
-     * fallback value counts only when the same step's {@code groupConversationId}
-     * names a discussion that is running now, that this conversation is a member
-     * of, and that belongs to that group. Anything else is self-scope.
+     * The context value is the only source. A {@code groupId} conversation
+     * <em>property</em> used to be honoured as a last resort, but properties are
+     * not a trusted channel — a client can set them per turn through
+     * {@code properties} context expressions, and property setters can capture user
+     * input into them — so the fallback let a conversation claim membership of any
+     * group and reach its shared memories. Group membership is a runtime fact the
+     * group orchestrator asserts, and {@code ClientContextGuard} keeps clients from
+     * asserting it through the context key instead.
      */
     static List<String> resolveGroupIds(IConversationMemory memory) {
-        return resolveGroupIds(memory, null);
-    }
-
-    static List<String> resolveGroupIds(IConversationMemory memory, LiveDiscussionRegistry registry) {
-        // Exact-key lookups throughout (getData / getExactDataPerStep), never the
-        // prefix-matching getLatestData / getAllLatestData: those would also return a
-        // client-sent context:groupIdSuffix, which is not a reserved key and so
-        // survives the strip, as this conversation's group (CodeRabbit on PR #831).
-        String contextKey = "context:" + ReservedContextKeys.GROUP_ID;
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            String fromCurrent = contextValueAsString(currentStep.getData(contextKey));
-            if (fromCurrent != null) {
-                return List.of(fromCurrent);
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (registry == null || allSteps == null) {
-            return List.of();
-        }
-        List<IData<Object>> priorGroupIds = allSteps.getExactDataPerStep(contextKey);
-        List<IData<Object>> priorDiscussions = allSteps.getExactDataPerStep("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
-        if (priorGroupIds == null || priorDiscussions == null || priorGroupIds.size() != priorDiscussions.size()) {
-            return List.of();
-        }
-        // Latest first: both lists are per step, in step order.
-        for (int i = priorGroupIds.size() - 1; i >= 0; i--) {
-            String groupId = contextValueAsString(priorGroupIds.get(i));
-            if (groupId == null) {
-                continue;
-            }
-            String discussionId = contextValueAsString(priorDiscussions.get(i));
-            boolean verified = registry.getForMember(discussionId, memory.getConversationId())
-                    .filter(gc -> groupId.equals(gc.getGroupId()))
-                    .isPresent();
-            if (!verified) {
-                LOGGER.debugf("[MEMORY] Ignoring an earlier step's groupId for conversation '%s': not a verified member of a running discussion",
-                        sanitize(memory.getConversationId()));
-            }
-            return verified ? List.of(groupId) : List.of();
-        }
-        return List.of();
-    }
-
-    /** Unwraps a {@code context:*} data entry, which holds a {@link Context}. */
-    private static String contextValueAsString(IData<?> data) {
-        if (data == null || data.getResult() == null) {
-            return null;
-        }
-        Object result = data.getResult();
-        Object value = result instanceof Context ctx ? ctx.getValue() : result;
-        if (value == null) {
-            return null;
-        }
-        String asString = String.valueOf(value);
-        return asString.isBlank() ? null : asString;
+        return ConversationGroups.resolveGroupIds(memory);
     }
 
     /**

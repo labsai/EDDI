@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { KeyRound, Lock, Server, UserCheck, HelpCircle, Hand } from "lucide-react";
+import { KeyRound, Lock, Server, UserCheck, HelpCircle, UserRoundKey } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { authTypeLabel, bindingLabel, grantStatusLabel } from "@/lib/connection-labels";
 import type { AuthType, Binding, GrantStatus } from "@/lib/api/connections";
@@ -78,7 +78,7 @@ export function BindingBadge({ binding, className }: BindingBadgeProps) {
   return (
     <Badge variant={variant} className={className} data-testid={`binding-${binding}`}>
       {binding === "CALLER_SUPPLIED" && (
-        <Hand className="me-1 h-3 w-3" aria-hidden="true" />
+        <UserRoundKey className="me-1 h-3 w-3" aria-hidden="true" />
       )}
       {bindingLabel(t, binding)}
     </Badge>
