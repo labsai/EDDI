@@ -119,9 +119,59 @@ Findings from the 2026-09-25 code review, each with a regression test.
 [`VaultGrantChecker.java`](../../src/main/java/ai/labs/eddi/secrets/VaultGrantChecker.java),
 [`secrets-vault.md`](../secrets-vault.md), [`audit-ledger.md`](../audit-ledger.md).
 
+## 🔐 fix(vault): reconcile key safety with main's secrets-crypto hardening (2026-09-29)
+
+**Repo:** EDDI (`fix/vault-key-safety`, merge of `origin/main`)
+
+`main` landed a parallel pass over the same code (the 2026-09-26 "security(secrets): vault master-key, checksum, crypto and reference hardening" entry).
+Where both sides fixed the same thing, main's implementation is kept and this branch's copy is dropped;
+what main still lacked is ported onto main's code.
+
+**Kept from main (this branch's version dropped):**
+
+- **Secret AAD (L-S1).** Main's `tenantId|keyName|dekId` associated data with the no-AAD fallback and no
+  prefix. The `a1:` marker, the `String` AAD overloads of `EnvelopeCrypto` and the tenant/key binding are
+  gone — one on-disk format. The DEK-wrapping AAD is dropped too: main does not bind DEK wrappings, and a
+  second wrapping encoding is not worth a low-value binding (a swapped wrapping already fails at the
+  secret's own AAD).
+- **Insert-if-absent metadata.** `ISecretPersistence.setMetaValueIfAbsent` (null = no metadata store)
+  replaces `putMetaValueIfAbsent`; the salt, the KEK check value and system values use it. Main's Mongo and
+  Postgres implementations and tests are kept.
+- **KEK rotation rollback.** Main's commit-failure rollback, weak-new-key refusal and checksum-key re-wrap
+  stay. On top of them: the pending salt is persisted first, verify accepts DEKs already under the new KEK,
+  the KEK check value is announced before the first re-wrap, re-wraps are guarded (`updateDekWrapping`,
+  never an upsert that could resurrect a reset tenant's DEK) with a catch-up sweep, and the checksum key
+  is re-read and re-wrapped last. A failed commit rolls the DEKs back and restores the check value; only if
+  that rollback fails too does the announcement stay, and a re-run with the same keys completes it.
+
+**Ported onto main's code:** salt race and fail-closed salt read (H6a), first-DEK insert (H6b),
+KEK check value / stale-replica refusal and take-back (H6c, m2), audit keyring and v5 (H6d, M1), keyed
+pseudonyms (L-S2), tenant-reset discard and system-tenant guard (L-S3, m4), value rotation keeps the grant
+(S1), grant precondition (S6), impact-analysis `UNKNOWN` (S7), `adopt-master-key` (B1).
+
+**Adapted to main's additions:**
+
+- **Checksum key.** Main's KEK-wrapped checksum key is covered by the stale-replica guard (not created
+  under a retired KEK), opens with the pending-salt KEK after an interrupted legacy migration, and is
+  discarded by `adopt-master-key` — reported as `checksumKeyReset` — and by the empty-vault adoption at
+  startup when the adopted key cannot unwrap it. Otherwise every `store()` failed for good after a lost key.
+- **Late audit entries.** Main's `markUserErased` rewrite now writes the keyed v5 pseudonym whenever the
+  ledger signs, so an entry flushed after an erasure does not carry the unkeyed hash L-S2 removes.
+- Main's tests are kept; four needed adapting: the checksum-key write failure targets only that key (the
+  announcement precedes it), the racing-creator hide applies to the checksum-key read, the wrong-old-key
+  refusal message starts with `KEK rotation failed` and keeps the unwrap failure as its cause, and the
+  erased-user signature check verifies through the ledger (entries are v5 now).
+
+**Files:** [`VaultSecretProvider.java`](../../src/main/java/ai/labs/eddi/secrets/impl/VaultSecretProvider.java),
+[`VaultSaltManager.java`](../../src/main/java/ai/labs/eddi/secrets/crypto/VaultSaltManager.java),
+[`ISecretPersistence.java`](../../src/main/java/ai/labs/eddi/secrets/persistence/ISecretPersistence.java),
+[`AuditLedgerService.java`](../../src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java),
+[`secrets-vault.md`](../secrets-vault.md), [`gdpr-compliance.md`](../gdpr-compliance.md).
+
 ```decision-log
 | 2026-09-26 | Audit HMAC key pinned in the vault (sealed under a reserved system tenant's DEK) and keyed by id in v5 signatures | KEK rotation silently changed the audit key and invalidated the whole ledger | Requiring operators to configure a separate key (kept as an option, eddi.audit.hmac-key); a KEK-wrapped meta value (would need its own re-wrap step in rotateKek) |
 | 2026-09-26 | Lost master key is resolved by an explicit admin call (adopt-master-key), not automatically | A stale replica and a lost key look identical from a node; guessing either way loses data | Auto-adopting on mismatch (lets a stale replica strand tenants); manual DB edit (undocumented) |
 | 2026-09-26 | UNKNOWN_KEY only for key ids recorded as sealed system values | The key id in a row is attacker-writable text | Rewording docs only |
+| 2026-09-29 | KEK rotation keeps main's rollback and adds re-runnability only for what a rollback cannot undo | Both branches fixed "a half-way rotation strands DEKs"; one mechanism, main's, with the pending salt and either-KEK verify for the unrecoverable cases | Forward-only re-run (this branch's original); rollback without the pending salt (loses DEKs when the salt write fails) |
 | 2026-09-26 | Unreadable vault salt fails startup | Legacy-salt fallback derives the wrong KEK on random-salt deployments | Falling back and warning; marking the vault unavailable |
 ```
