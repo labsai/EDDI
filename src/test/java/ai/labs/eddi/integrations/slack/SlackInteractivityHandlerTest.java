@@ -240,6 +240,49 @@ class SlackInteractivityHandlerTest {
         assertEquals(HitlDecision.HitlVerdict.REJECTED, captor.getValue().getVerdict());
     }
 
+    // ─── The decision names the pause its card was checked against ───
+
+    @Test
+    void conversationDecision_carriesThePauseIdTheCardWasCheckedAgainst() throws Exception {
+        // The handler reads the pause, matches the card to it, then resumes. The
+        // resume must be bound to THAT pause, so a resume and re-pause landing in
+        // between is refused by the engine under its CAS instead of approving the
+        // newer request with this card.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        ArgumentCaptor<HitlDecision> captor = ArgumentCaptor.forClass(HitlDecision.class);
+        verify(conversationService).resumeConversation(eq("conv-1"), captor.capture(), isNull());
+        assertEquals(HitlDecision.pauseIdOf(PAUSED_AT), captor.getValue().getPauseId());
+    }
+
+    @Test
+    void groupDecision_carriesThePauseIdTheCardWasCheckedAgainst() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+
+        handler.handlePayload(approvePayload("U_APPROVER",
+                value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7")));
+
+        ArgumentCaptor<GroupApprovalRequest> captor = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc-7"), captor.capture(), isNull());
+        assertEquals(HitlDecision.pauseIdOf(PAUSED_AT), captor.getValue().getDecision().getPauseId());
+    }
+
+    @Test
+    void pauseChangedBeforeTheResume_isMarkedResolved() throws Exception {
+        // The engine refuses the decision because the pause changed after the
+        // handler's check: the card is stale, so it reads as resolved, not as an error.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        doThrow(new IConversationService.PauseMismatchException("pause changed"))
+                .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                contains("already been resolved"), any());
+    }
+
     // ─── H1: cross-integration IDOR — decision binds to the value's integration
     // ───
 

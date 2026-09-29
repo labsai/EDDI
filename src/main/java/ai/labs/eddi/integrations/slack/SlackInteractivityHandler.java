@@ -236,10 +236,12 @@ public class SlackInteractivityHandler {
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
             return;
         }
-        // Residual TOCTOU (review Finding D, accepted): reading the pause and resuming
-        // are two steps, so a resume+re-pause landing between them is not detected.
-        // Closing it fully needs an expected-pausedAt threaded into
-        // resumeConversation/resumeDiscussion and a CAS there — disproportionate here.
+        // Reading the pause and resuming are two steps. The decision therefore names
+        // the pause the card was matched against (HitlDecision.pauseId), and the
+        // engine re-checks it under the resume CAS: a resume and re-pause landing in
+        // between is refused there (PauseMismatchException /
+        // GroupPauseMismatchException,
+        // handled as "already resolved") instead of approving the newer request.
         PauseState pause = currentPause(parsed.value());
         if (pause == PauseState.UNKNOWN) {
             return; // could not read the subject — leave the card so it can be retried
@@ -259,11 +261,12 @@ public class SlackInteractivityHandler {
             return;
         }
 
+        String pauseId = HitlDecision.pauseIdOf(pause.pausedAt());
         if (parsed.value().isGroup()) {
-            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(),
+            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(), pauseId,
                     auth, parsed.approvalChannelId(), parsed.messageTs());
         } else {
-            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(),
+            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(), pauseId,
                     auth, parsed.approvalChannelId(), parsed.messageTs());
         }
     }
@@ -324,14 +327,15 @@ public class SlackInteractivityHandler {
         return channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, integrationName);
     }
 
-    private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId,
+    private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId, String pauseId,
                                      String auth, String approvalChannelId, String messageTs) {
-        HitlDecision decision = buildDecision(verdict, slackUserId);
+        HitlDecision decision = buildDecision(verdict, slackUserId, pauseId);
         try {
             conversationService.resumeConversation(conversationId, decision, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId);
         } catch (IllegalStateException e) {
-            // Already decided / timed out / not paused — idempotent. Do NOT
+            // Already decided / timed out / not paused, or the pause changed after
+            // the check above (PauseMismatchException) — idempotent. Do NOT
             // error-spam; reflect the resolved state on the original message.
             LOGGER.debugf("HITL conversation %s already resolved: %s",
                     sanitize(conversationId), e.getMessage());
@@ -348,10 +352,10 @@ public class SlackInteractivityHandler {
         }
     }
 
-    private void resolveGroup(String groupConversationId, HitlVerdict verdict, String slackUserId,
+    private void resolveGroup(String groupConversationId, HitlVerdict verdict, String slackUserId, String pauseId,
                               String auth, String approvalChannelId, String messageTs) {
         var request = new GroupApprovalRequest();
-        request.setDecision(buildDecision(verdict, slackUserId));
+        request.setDecision(buildDecision(verdict, slackUserId, pauseId));
         try {
             groupConversationService.resumeDiscussion(groupConversationId, request, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId);
@@ -432,11 +436,13 @@ public class SlackInteractivityHandler {
 
     /**
      * Build a decision. {@code decidedBy} is ALWAYS derived from the verified Slack
-     * user id ({@code slack:<userId>}) — never trusted from the payload.
+     * user id ({@code slack:<userId>}) — never trusted from the payload. The
+     * decision is bound to {@code pauseId}, the pause its card was matched against.
      */
-    private HitlDecision buildDecision(HitlVerdict verdict, String slackUserId) {
+    private HitlDecision buildDecision(HitlVerdict verdict, String slackUserId, String pauseId) {
         var decision = new HitlDecision();
         decision.setVerdict(verdict);
+        decision.setPauseId(pauseId);
         decision.setDecidedBy("slack:" + slackUserId);
         decision.setNote("Decided via Slack by " + slackUserId);
         return decision;
