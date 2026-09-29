@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
@@ -53,9 +54,11 @@ import static org.mockito.Mockito.when;
 
 /**
  * The dynamic-agent state that has to survive the turn boundary, on a real
- * {@link ConversationMemory}: the retain flags (M-T2) and the conversations
- * {@code converse_with_agent} started (C6). Both are rebuilt from step data on
- * every turn, because the tool instances themselves are built per turn.
+ * {@link ConversationMemory}: the retain flags (M-T2), rebuilt from step data
+ * on every turn because the tool instances themselves are built per turn — and
+ * the delegation USE gate (M-A1), whose exemption for agents this conversation
+ * created is decided from that same state plus the agent's own
+ * {@code dynamicOrigin}.
  */
 class DynamicAgentCrossTurnStateTest {
 
@@ -135,45 +138,12 @@ class DynamicAgentCrossTurnStateTest {
     }
 
     @Test
-    @DisplayName("C6: a conversation started through the tool on turn 1 can be continued on turn 2")
-    void delegatedConversationSurvivesTheTurn() throws Exception {
-        var memory = memory();
-        memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_DELEGATED_CONVERSATION_IDS, Set.of("conv-b")));
-        memory.startNextStep();
-
-        String result = build(memory, "converse_with_agent", ConverseWithAgentTool.class).converseWithAgent("agent-b", "follow-up",
-                "conv-b");
-
-        assertFalse(result.contains("cannot be continued"), result);
-        verify(conversationService).say(any(), eq("agent-b"), eq("conv-b"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
-    }
-
-    @Test
-    @DisplayName("C6: the started set is written back to this turn's step, so the next turn can seed from it")
-    void delegatedConversationsArePersistedOnTheCurrentStep() {
-        var memory = memory();
-        memory.getCurrentStep().storeData(new Data<Object>(MemoryKeys.DYNAMIC_DELEGATED_CONVERSATION_IDS, Set.of("conv-b")));
-        memory.startNextStep();
-
-        build(memory, "converse_with_agent", ConverseWithAgentTool.class);
-
-        var stored = memory.getCurrentStep().getLatestData(MemoryKeys.DYNAMIC_DELEGATED_CONVERSATION_IDS);
-        assertTrue(stored != null && stored.getResult() instanceof Collection<?> ids && ids.contains("conv-b"),
-                "the current step must carry the cumulative set");
-    }
-
-    @Test
-    @DisplayName("C6: a conversation id this conversation never started is refused")
-    void foreignConversationRefused() throws Exception {
-        String result = build(memory(), "converse_with_agent", ConverseWithAgentTool.class).converseWithAgent("agent-b", "hi",
-                "someone-elses-conversation");
-
-        assertTrue(result.contains("cannot be continued"), result);
-    }
-
-    @Test
-    @DisplayName("review #1: create_sub_agent's initial-message conversation can be continued by converse_with_agent")
+    @DisplayName("create_sub_agent's initial-message conversation can be continued by converse_with_agent")
     void createThenContinue() throws Exception {
+        // Engine-started as this same user, so main's ownership check admits it.
+        var owned = new ConversationMemorySnapshot();
+        owned.setUserId("user-1");
+        when(conversationService.getConversationMemorySnapshot("conv-briefing")).thenReturn(owned);
         when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                 .thenReturn(new SetupResult("created", "sub-1", "agent-1/Analyst", "anthropic", "m", true, "ready", null, null, null, null,
                         null, null));
@@ -190,7 +160,7 @@ class DynamicAgentCrossTurnStateTest {
         assertTrue(created.contains("conv-briefing"), created);
         String followUp = converse.converseWithAgent("sub-1", "follow-up", "conv-briefing");
 
-        assertFalse(followUp.contains("cannot be continued"), followUp);
+        assertFalse(followUp.startsWith("⚠️"), followUp);
         verify(conversationService).say(any(), eq("sub-1"), eq("conv-briefing"), anyBoolean(), anyBoolean(), any(),
                 argThat((InputData input) -> input != null && "follow-up".equals(input.getInput())), anyBoolean(), any());
     }
@@ -213,7 +183,7 @@ class DynamicAgentCrossTurnStateTest {
     }
 
     @Test
-    @DisplayName("review #2: delegation to an agent this conversation created skips the USE check; any other agent needs it")
+    @DisplayName("delegation to an agent this conversation created skips the USE check; any other agent needs it")
     void createdAgentsAreExemptFromTheDelegationUseCheck() throws Exception {
         when(conversationService.startConversation(any(), anyString(), any(), any())).thenReturn(new ConversationResult("conv-new", null));
         storedWithOrigin("sub-1", new AgentConfiguration.DynamicOrigin("agent-1", "conv-1", null, "user-1"));

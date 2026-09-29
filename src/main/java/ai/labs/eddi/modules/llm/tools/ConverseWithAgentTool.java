@@ -25,9 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,13 +44,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * When a {@code conversationId} is provided, the tool continues an existing
  * conversation; otherwise it starts a new one.
  * <p>
- * <b>Only conversations this tool started can be continued.</b> The id is
- * model-supplied, and the agent-id {@code say} overload this tool drives is the
- * engine-internal one: it performs no ownership check, because its other
- * callers (group members, sub-agent creation) are the engine itself. Without
- * the {@link #startedConversationIds} check the model — or whoever steers it
- * through a prompt — could drive a turn in <em>any</em> conversation whose id
- * it had seen, as that conversation's owner.
+ * Every delegation, new or continued, is gated on the bound user being allowed
+ * to use the target agent ({@link #useCheck}), the same USE rule the REST, MCP
+ * and {@code /v1} starts apply: the engine-internal start and {@code say} this
+ * tool drives run no such gate of their own.
  *
  * @since 6.0.0
  */
@@ -83,18 +78,9 @@ public class ConverseWithAgentTool {
     private final AtomicInteger delegationCount = new AtomicInteger();
 
     /**
-     * The conversations this caller has started through this tool — the only ones a
-     * supplied {@code conversationId} may name. Shared with
-     * {@code DynamicAgentToolsProvider}, which seeds it from earlier turns' step
-     * data and persists it back, so a multi-turn delegation survives the turn
-     * boundary. Server-written step data, never context: a client cannot add to it.
-     */
-    private final Set<String> startedConversationIds;
-
-    /**
      * {@code (agentId, principal) -> may that principal use that agent}, asked
-     * before a NEW conversation is started (review #2). {@code null} skips it
-     * (direct construction; CDI always supplies one through the provider).
+     * before any delegation. {@code null} skips it (direct construction;
+     * {@code DynamicAgentToolsProvider} always supplies one under CDI).
      */
     private final BiPredicate<String, String> useCheck;
 
@@ -133,33 +119,19 @@ public class ConverseWithAgentTool {
     }
 
     /**
-     * @param startedConversationIds
-     *            conversations started by this caller in earlier turns, and the
-     *            sink this instance records new ones into. {@code null} starts from
-     *            an empty set, so only conversations this instance itself starts
-     *            can be continued.
-     */
-    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
-            Set<String> startedConversationIds) {
-        this(conversationService, userId, config, currentDepth, startedConversationIds, null);
-    }
-
-    /**
      * @param useCheck
      *            {@code (agentId, principal) -> boolean}: whether this user may use
-     *            the agent a new conversation would be started with. Without it the
-     *            model could open a conversation with any deployed agent in any
-     *            workspace — the gate REST, MCP and {@code /v1} starts all apply.
-     *            {@code null} skips the check.
+     *            the target agent. Without it the model could open — or, through a
+     *            conversation this user owns, keep talking to — any deployed agent
+     *            in any workspace. {@code null} skips the check.
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
-            Set<String> startedConversationIds, BiPredicate<String, String> useCheck) {
+            BiPredicate<String, String> useCheck) {
         this.useCheck = useCheck;
         this.conversationService = conversationService;
         this.userId = userId;
         this.config = config != null ? config : permissiveDefault();
         this.currentDepth = Math.max(0, currentDepth);
-        this.startedConversationIds = startedConversationIds != null ? startedConversationIds : ConcurrentHashMap.newKeySet();
     }
 
     @Tool("Send a message to another deployed EDDI agent and receive its response. "
@@ -194,25 +166,11 @@ public class ConverseWithAgentTool {
                 return "⚠️ Agent '%s' is not an allowed delegation target. Allowed: %s".formatted(agentId, allowedTargets);
             }
 
-            // --- Guardrail: only conversations this tool started (C6) ---
-            // Checked before the per-task counter so a refused id does not burn a
-            // delegation slot. Trimmed the same way the start branch below treats a
-            // blank id as "none".
-            boolean continuing = conversationId != null && !conversationId.isBlank();
-            if (continuing) {
-                conversationId = conversationId.trim();
-                if (!startedConversationIds.contains(conversationId)) {
-                    LOGGER.warnf("[CONVERSE] Refused to continue conversation '%s' with agent '%s': not started by this agent",
-                            sanitize(conversationId), sanitize(agentId));
-                    return ("⚠️ Conversation '%s' was not started by you through this tool, so it cannot be continued. "
-                            + "Omit conversationId to start a new conversation with agent '%s'.").formatted(conversationId, agentId);
-                }
-            }
-
-            // --- Guardrail: the user may use the target (review #2) ---
-            // Only for a new conversation: one being continued was started by this
-            // tool, which passed this same check to start it.
-            if (!continuing && useCheck != null && !useCheck.test(agentId, userId)) {
+            // --- Guardrail: the user may use the target (M-A1) ---
+            // For a continuation too: the ownership check below admits any conversation
+            // of this user's, which says nothing about whether the user may still use the
+            // agent behind it. Before the per-task counter, so a refusal burns no slot.
+            if (useCheck != null && !useCheck.test(agentId, userId)) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the user has no access to it", sanitize(agentId));
                 return "⚠️ Agent '%s' is not available to this user, so it cannot be consulted.".formatted(agentId);
             }
@@ -265,14 +223,11 @@ public class ConverseWithAgentTool {
                     new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
 
             // --- Start new conversation if no conversationId provided ---
-            if (!continuing) {
+            if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
-                    if (conversationId != null) {
-                        startedConversationIds.add(conversationId);
-                    }
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
                 } catch (Exception e) {

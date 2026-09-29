@@ -980,12 +980,12 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   alone, and only **undeploys** — never deletes — an agent with no marker (one
   created before markers existed, or never created by `create_sub_agent`).
 - `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
-- `converse_with_agent` continues only a conversation it started itself, on this
-  turn or an earlier one — or the one `create_sub_agent` opened with its initial
-  message. Any other `conversationId` is refused; omit it to start a new
-  conversation. Starting one requires the user to be allowed to use the target
-  agent, the same rule as recruitment above; agents this conversation or its
-  discussion created are exempt — "created" meaning tracked **and** carrying a
+- `converse_with_agent` continues only a conversation owned by the same user the
+  calling conversation belongs to (a conversation of another user, or one that
+  records no owner, is refused). Every delegation — a new conversation or a
+  continued one — requires that user to be allowed to use the target agent, the
+  same rule as recruitment above; agents this conversation or its discussion
+  created are exempt — "created" meaning tracked **and** carrying a
   `dynamicOrigin` that names this conversation or its discussion.
 
 #### Model and credential inheritance
