@@ -131,7 +131,7 @@ Read EDDI's own documentation over MCP **tools** — the counterpart to the `edd
 
 ### HITL Tools (10)
 
-Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | PAUSE_CHANGED | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`; `PAUSE_CHANGED` when a `pauseId` names a pause that is no longer current).
 
 | Tool                              | Description                                                                                                                    |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
