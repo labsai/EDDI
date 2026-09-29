@@ -2,6 +2,16 @@
 
 **Repo:** EDDI (`chore/deps-major-backend-infra`, built on `chore/deps-minor-upgrades`)
 
+### Aligned with what Quarkus ships
+
+All three follow the rule the dependency PRs share. If a library comes from Quarkus or integrates
+with it, EDDI takes the version the Quarkus platform ships, and nothing newer.
+
+- **MCP server 2.0.1** is exactly what the Quarkus 3.39.5 platform's `quarkus-mcp-server-bom` ships.
+- **Testcontainers 2.0.5** is exactly what the 3.39.5 `quarkus-bom` manages. That is why the
+  explicit version pins are gone.
+- **The vert.x web client** stays at the BOM's 4.5.34 until Quarkus moves to Vert.x 5.
+
 ### What changed
 
 | Artifact | From → To | Note |
