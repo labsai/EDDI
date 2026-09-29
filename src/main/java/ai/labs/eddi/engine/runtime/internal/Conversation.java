@@ -274,6 +274,40 @@ public class Conversation implements IConversation {
      * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
      * defaults.
      */
+    /**
+     * One entry per key. A key can be visible more than once — the shared
+     * {@code global} row and this agent's own {@code self} or {@code group} row are
+     * different documents, and they coexist, for instance when an agent whose
+     * {@code defaultVisibility} is {@code self} writes a key that an older version
+     * stored globally. Each lands in the same property slot, so without a choice
+     * the last one listed won — for a recall ordered by update time, the OLDER
+     * value. The most specific scope wins ({@code self}, then {@code group}, then
+     * {@code global}), the newest breaking a tie; the shared row itself is left
+     * untouched, since other agents may still read it.
+     */
+    static List<UserMemoryEntry> mostSpecificPerKey(List<UserMemoryEntry> entries) {
+        Map<String, UserMemoryEntry> byKey = new LinkedHashMap<>();
+        for (UserMemoryEntry entry : entries) {
+            byKey.merge(entry.key(), entry, (kept, candidate) -> precedes(candidate, kept) ? candidate : kept);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    private static boolean precedes(UserMemoryEntry a, UserMemoryEntry b) {
+        int byScope = Integer.compare(scopeRank(a.visibility()), scopeRank(b.visibility()));
+        if (byScope != 0) {
+            return byScope < 0;
+        }
+        return a.updatedAt() != null && (b.updatedAt() == null || a.updatedAt().isAfter(b.updatedAt()));
+    }
+
+    private static int scopeRank(Visibility visibility) {
+        if (visibility == Visibility.self) {
+            return 0;
+        }
+        return visibility == Visibility.group ? 1 : 2;
+    }
+
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
@@ -300,7 +334,7 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+            List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
 
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);

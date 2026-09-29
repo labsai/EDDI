@@ -41,6 +41,9 @@ observed there, and carries a regression test.
   refused atomically (and the group rolled back) instead of overwritten; only an entry that
   reuses one of the group's originals is upserted over it. `insertIfAbsent` now returns the new
   entry's id, which the rollback needs.
+  PostgreSQL implements it atomically too (`INSERT … ON CONFLICT … DO NOTHING RETURNING id`
+  against the existing unique partial indexes), where it had inherited the check-then-write
+  default and, through `upsert`'s `DO UPDATE`, could still overwrite the concurrent entry.
   [`DreamService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java)
 - **`scope: "secret"` values of different users shared one vault slot.** The slot was
   `<agentId>.<propertyName>`, so after Bob entered his API key Alice's conversation resolved to
@@ -89,6 +92,11 @@ observed there, and carries a regression test.
   removal of the `groupId` *property* fallback (clients and property setters can set a property,
   so it let a conversation claim any group), which now covers this persistence path and the
   undo/redo sync as well as the memory tool.
+  When a key is visible twice — the shared `global` row and this agent's own scoped row, which
+  coexist for instance after `defaultVisibility: self` starts writing a key an older version
+  stored globally — loading now keeps the most specific one (`self`, then `group`, then
+  `global`; the newest breaks a tie). The last one listed used to win, which for a recall
+  ordered by update time was the older global value. The shared row is left untouched.
   [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
   [`ConversationGroups.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationGroups.java),
   [`UserMemoryEntry.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java)

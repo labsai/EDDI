@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -397,5 +398,38 @@ class ConversationLongTermPersistenceTest {
         assertFalse(memory.getConversationProperties().containsKey("temp"));
         assertNull(memory.getConversationProperties().toMap().get("temp"));
         assertTrue(memory.getConversationProperties().containsKey("keep"));
+    }
+
+    /**
+     * A key visible twice — the shared global row and this agent's own self row —
+     * lands in one property slot. The last one listed used to win, which for a
+     * recall ordered by update time was the older global value.
+     */
+    @Test
+    @DisplayName("a self entry wins over a global entry with the same key, whatever the recall order")
+    void mostSpecificScopeWinsAtLoad() {
+        Instant now = Instant.now();
+        var self = new UserMemoryEntry("s", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now);
+        var global = new UserMemoryEntry("g", "user-1", "lang", "en", "fact", Visibility.global, null, List.of(), null, false, 0,
+                now.minusSeconds(3600), now.minusSeconds(3600));
+        var other = new UserMemoryEntry("o", "user-1", "color", "teal", "fact", Visibility.global, null, List.of(), null, false, 0, now, now);
+
+        var chosen = Conversation.mostSpecificPerKey(List.of(self, global, other));
+
+        assertEquals(List.of("s", "o"), chosen.stream().map(UserMemoryEntry::id).toList());
+        assertEquals(List.of("s", "o"), Conversation.mostSpecificPerKey(List.of(global, self, other)).stream().map(UserMemoryEntry::id).toList());
+    }
+
+    @Test
+    @DisplayName("within one scope, the newest entry wins")
+    void newestWinsWithinAScope() {
+        Instant now = Instant.now();
+        var older = new UserMemoryEntry("old", "user-1", "lang", "en", "fact", Visibility.group, "agent-1", List.of("g"), null, false, 0, now,
+                now.minusSeconds(60));
+        var newer = new UserMemoryEntry("new", "user-1", "lang", "de", "fact", Visibility.group, "agent-2", List.of("g"), null, false, 0, now,
+                now);
+
+        assertEquals("new", Conversation.mostSpecificPerKey(List.of(older, newer)).getFirst().id());
+        assertEquals("new", Conversation.mostSpecificPerKey(List.of(newer, older)).getFirst().id());
     }
 }
