@@ -197,7 +197,9 @@ Resolution is narrow and fails loudly rather than degrading quietly:
 - **Headers only** — `${caller:token}` in a query parameter, request body or
   path is rejected. `${caller:userId}` is allowed in headers and query
   parameters. An MCP server's `apiKey` may also carry it, which sends the tool
-  call as the chatting user (see [MCP Server](mcp-server.md)).
+  call as the chatting user. The same destination rule applies there — the
+  MCP server's URL is the target checked — so a third-party MCP endpoint never
+  receives the token (see [MCP Server](mcp-server.md)).
 - **Authenticated turns only** — scheduled jobs and triggers cannot satisfy it.
 - **Fails closed** — an unsatisfiable reference errors instead of sending
   `"Bearer "` with an empty token.
