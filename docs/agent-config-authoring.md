@@ -188,7 +188,7 @@ Resolution is narrow and fails loudly rather than degrading quietly:
   config), or to this deployment's own address (`SelfUrlResolver`:
   `eddi.self.base-url`, else the `quarkus.http.host` address when the listener
   binds one specific address (loopback ones such as `127.0.0.5` or `::1`
-  included), else `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty
+  included; an IPv6 literal is bracketed, `http://[::1]:7070`), else `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty
   or `localhost` bind — deployment
   config only, never agent config or a request; on a random port
   (`quarkus.http.port=0`) with no override it is *unresolved* and only the
