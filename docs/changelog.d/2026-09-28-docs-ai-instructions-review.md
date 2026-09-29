@@ -53,6 +53,10 @@ compile or does not work, stale counts and paths, and a context cost (84 KB for 
   `properties`, `httpcalls`, `open-webui-integration`) — now names the new page, and
   `DocumentationAccuracyTest` / `DocumentedRestPathsTest` grade the page instead of `AGENTS.md`.
 - `docs/langchain.md` taught the same nonexistent `buildToolList` diagram and now matches §4.2.
+- #858 corrected two paragraphs of the old §5 while this was open (rule groups fire only their first
+  matching rule by default; runtime data is never template text, and runtime templates use a
+  restricted engine). Both are carried into the new page, §5's pitfall list and — the Java half —
+  §4.4, so the move does not revert them.
 - **§3's "Completed" table** (phase history) became a table of what already exists, each row
   pointing at its doc — the part an assistant actually needs before building something parallel.
 - Generic advice models already follow (null checks, log levels) collapsed to the EDDI-specific

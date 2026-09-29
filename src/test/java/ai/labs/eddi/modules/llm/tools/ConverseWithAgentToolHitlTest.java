@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -29,8 +30,13 @@ class ConverseWithAgentToolHitlTest {
     private ConverseWithAgentTool tool;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
+        // A supplied conversationId is ownership-checked before it is driven; these
+        // tests continue conversations the bound user owns.
+        var ownSnapshot = new ConversationMemorySnapshot();
+        ownSnapshot.setUserId("user-1");
+        lenient().when(conversationService.getConversationMemorySnapshot(anyString())).thenReturn(ownSnapshot);
         tool = new ConverseWithAgentTool(conversationService, "user-1");
     }
 

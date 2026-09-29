@@ -19,7 +19,7 @@ import { DeploymentEnvironmentBadge } from "./deployment-environments";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { accessFor, type ResourceAccess } from "@/lib/access";
 import { useEnvironmentLabel } from "@/hooks/use-environment-label";
-import { deployedEnvironments, isAnyEnvironmentBusy } from "@/lib/deployment-environments";
+import { deployedEnvironments, isAnyEnvironmentBusy, isLiveAtRequestedVersion } from "@/lib/deployment-environments";
 
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
@@ -73,9 +73,12 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
   // affordance, and per-environment control lives on the agent's own page. Its
   // label names the environment so it cannot be misread next to a badge that
   // says "Test".
-  const productionStatus =
-    envStatuses?.find((s) => s.environment === "production")?.status ?? "NOT_FOUND";
-  const isProductionDeployed = productionStatus === "READY";
+  const productionEntry = envStatuses?.find((s) => s.environment === "production");
+  const productionStatus = productionEntry?.status ?? "NOT_FOUND";
+  // The toggle acts on THIS card's version. When production still runs an
+  // older version, the badge says live (it is), but the action is "Deploy" —
+  // undeploying `agent.version` would target a version that is not deployed.
+  const isProductionDeployed = isLiveAtRequestedVersion(productionEntry);
   const config = statusIcons[isProductionDeployed ? "READY" : productionStatus];
   const isBusy =
     deployMutation.isPending ||

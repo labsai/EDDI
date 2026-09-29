@@ -404,6 +404,8 @@ public void execute(IConversationMemory memory, Object component) {
 }
 ```
 
+**Only author-written config fields are templates; runtime data never is.** Never pass user input, a property value or an API response as the template *string* to `ITemplatingEngine.processTemplate` — substitute it as data. If generated text must be spliced into a template's source, wrap it with `TemplateEscaping.unparsedBlock`. Runtime templates run on the restricted engine from `RuntimeTemplateEngineFactory` (no `config:`/`inject:`/`cdi:` namespaces, no `{#eval}`/`{#include}`, per-render caps) — see [`docs/security.md`](docs/security.md#runtime-template-engine).
+
 #### PrePostUtils
 
 `PrePostUtils` (`modules/apicalls/impl`) runs the `preRequest` / `postResponse` property instructions shared by the API-call, MCP-call and LLM tasks:
@@ -554,7 +556,7 @@ Writing or editing agent JSON — `behavior`, `property`, `output`, `httpcalls`,
 The five mistakes it exists to prevent:
 
 1. **`{properties.x}` is a raw value.** `{properties.x.valueString}` fails at runtime. Templates are Qute `{…}`, not Thymeleaf `[[${…}]]`.
-2. **Every behavior rule needs an `actionmatcher` on `lastStep`.** A rule with only an `inputmatcher` fires on any step of the conversation.
+2. **Every behavior rule needs an `actionmatcher` on `lastStep`.** A rule with only an `inputmatcher` fires on any step of the conversation. And within a group only the **first** matching rule fires by default (`executeUntilFirstSuccess`) — put independent rules in separate groups.
 3. **A comma list in `actionmatcher` means AND** (a contiguous sublist), not OR. Use a shared action or an `OR` connector.
 4. **Any `{…}` placeholder in output or a prompt needs `eddi://ai.labs.templating` as the last workflow step**, or users see the raw template.
 5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION` and `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)).

@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { X, AlertCircle, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
@@ -20,6 +21,7 @@ import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import {
   entryTypeInfo,
+  type DiscussionStyle,
   type TaskDefinition,
   type TranscriptEntry,
   type GroupConversationState,
@@ -34,6 +36,12 @@ interface ConversationViewerProps {
   groupName?: string;
   /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
   preConfiguredTasks?: TaskDefinition[];
+  /**
+   * The group's discussion style. The overview picks its per-style emphasis
+   * from it (a TASK_FORCE opens on the task board, a DEBATE on the verdict);
+   * without it the history view rendered every discussion as a generic one.
+   */
+  style?: DiscussionStyle | null;
   onClose?: () => void;
   className?: string;
 }
@@ -282,7 +290,7 @@ function AgentEntryCard({
               )}
             >
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                   {truncateContent(
                     parsedContent,
                     t("groups.contentTruncated", "[Content truncated]"),
@@ -380,7 +388,7 @@ function SynthesisEntryCard({
           <AgentFailedNotice className="ps-6" />
         ) : hasContent ? (
           <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
               {truncateContent(
                 parsedContent,
                 t("groups.contentTruncated", "[Content truncated]"),
@@ -527,7 +535,7 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           {isAgentFailurePlaceholder(content) ? (
             <AgentFailedNotice />
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
               {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
             </ReactMarkdown>
           )}
@@ -586,6 +594,7 @@ function ConversationViewer({
   conversationId,
   groupName,
   preConfiguredTasks,
+  style,
   onClose,
   className,
 }: ConversationViewerProps) {
@@ -770,6 +779,7 @@ function ConversationViewer({
         className="flex-1 min-h-0"
         surface="workforce-history"
         conversation={conversation}
+        style={style}
         // No group config on this surface: it opens a stored conversation by
         // id and never fetches the group. The digest derives phases from the
         // transcript instead, so the rail shows the phases that ran — only

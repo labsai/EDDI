@@ -1160,6 +1160,10 @@ back into the full text through the `conversationRecall` built-in tool.
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 
+Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
+the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A requested range such as
+`turns 3-5` is inclusive.
+
 > **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
 > not include `conversationRecall` leaves the model unable to drill back into summarized turns — it

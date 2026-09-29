@@ -9,9 +9,19 @@ import {
 
 describe("properties API", () => {
   describe("readProperties", () => {
-    it("reads properties for a user", async () => {
+    it("reads properties for a user — raw values, not Property wrappers", async () => {
       const result = await readProperties("user1");
-      expect(result).toBeDefined();
+      expect(result.user_name).toBe("Jane Doe");
+      expect(result.age).toBe(32);
+    });
+
+    it("resolves {} on the backend's 204 for a user with no properties", async () => {
+      // TanStack Query v5 fails a query that resolves undefined, so the raw
+      // empty body rendered the page's error state.
+      server.use(
+        http.get("*/propertiesstore/properties/:userId", () => new HttpResponse(null, { status: 204 })),
+      );
+      await expect(readProperties("nobody")).resolves.toEqual({});
     });
 
     it("handles API error", async () => {
@@ -29,13 +39,7 @@ describe("properties API", () => {
   describe("mergeProperties", () => {
     it("merges properties for a user", async () => {
       await expect(
-        mergeProperties("user1", {
-          lang: {
-            name: "lang",
-            scope: "conversation",
-            valueString: "en",
-          },
-        })
+        mergeProperties("user1", { lang: "en" })
       ).resolves.toBeUndefined();
     });
   });

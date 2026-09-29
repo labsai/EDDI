@@ -33,6 +33,16 @@ class SecretValueScrubberTest {
     }
 
     @Test
+    @DisplayName("token mode replaces a short plaintext only where it stands alone")
+    void wholeTokens() {
+        Object cleaned = SecretValueScrubber.scrubDeepTokens(
+                Map.of("reply", List.of("Your PIN 123 is set.", "order 41234", "123", "a123b")), List.of("123"), MARK);
+
+        assertEquals(Map.of("reply", List.of("Your PIN <x> is set.", "order 41234", MARK, "a123b")), cleaned);
+        assertNull(SecretValueScrubber.scrubDeepTokens("order 41234", List.of("123"), MARK));
+    }
+
+    @Test
     @DisplayName("null when nothing carries the plaintext, and for types it cannot walk")
     void nothingToDo() {
         assertNull(SecretValueScrubber.scrubValue(Map.of("a", List.of("b")), SECRET, MARK));

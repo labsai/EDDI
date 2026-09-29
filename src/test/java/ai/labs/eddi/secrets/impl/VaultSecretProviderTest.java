@@ -13,6 +13,7 @@ import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -53,6 +54,9 @@ class VaultSecretProviderTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         meterRegistry = new SimpleMeterRegistry();
+        // The checksum key must be durably stored before a keyed checksum is written;
+        // a bare mock keeps no metadata, so accept the insert and hand the value back.
+        lenient().when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
     }
 
     // ─── Helper methods ───
@@ -486,5 +490,29 @@ class VaultSecretProviderTest {
         SecretProviderException ex = assertThrows(SecretProviderException.class,
                 () -> provider.rotateKek("old-key", "new-key"));
         assertTrue(ex.getMessage().contains("not available"));
+    }
+
+    // ─── Finding #5: master-key strength gate + allow-weak opt-out ───
+    // LaunchMode.current() is NORMAL in a plain unit test, so onStartup takes the
+    // production branch here.
+
+    @Test
+    @DisplayName("a weak master key fails startup in production without the opt-out")
+    void weakMasterKey_prodWithoutFlag_failsStartup() {
+        VaultSecretProvider weak = new VaultSecretProvider(Optional.of("changeme"), persistence, saltManager, meterRegistry);
+        weak.initMetrics();
+        assertThrows(IllegalStateException.class, () -> weak.onStartup(mock(StartupEvent.class)));
+        assertFalse(weak.isAvailable(), "a refused weak key must not leave the vault available");
+    }
+
+    @Test
+    @DisplayName("eddi.vault.allow-weak-master-key downgrades the production failure to warn-and-boot")
+    void weakMasterKey_prodWithFlag_bootsWithWarn() {
+        when(saltManager.getSalt()).thenReturn(FIXED_SALT);
+        VaultSecretProvider weak = new VaultSecretProvider(Optional.of("changeme"), persistence, saltManager, meterRegistry);
+        weak.initMetrics();
+        weak.allowWeakMasterKey = true;
+        assertDoesNotThrow(() -> weak.onStartup(mock(StartupEvent.class)));
+        assertTrue(weak.isAvailable(), "with the opt-out set, a weak key boots so the operator can rotate to a strong one");
     }
 }

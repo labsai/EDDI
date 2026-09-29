@@ -260,6 +260,7 @@
     "deployAndChat": "部署并聊天",
     "openExternalChat": "在新标签页中打开",
     "liveIn": "在 {{environment}} 中运行",
+    "liveInVersion": "在 {{environment}} 中以版本 {{version}} 运行",
     "chatIn": "在 {{environment}} 中聊天",
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
@@ -2692,7 +2693,6 @@
     "contextWindowEntries": "完整保留的最近条目",
     "contextWindowSummarize": "为移出窗口的内容生成摘要",
     "contextWindowTruncateNote": "较早的条目将改为替换成简单的“已省略 N 条早前条目”标记。",
-    "retroConfigHint": "允许复盘阶段将经验写入团队记忆，并带入后续讨论。",
     "retroPerRun": "每次运行",
     "retroStored": "存储上限",
     "artifactConfigHint": "允许成员共同撰写文档，并在写入的那一轮结束后继续保留。",
@@ -2887,7 +2887,24 @@
     },
     "stateRejected": "已否决",
     "inputDisabledRejected": "该建议已被否决",
-    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。"
+    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。",
+    "retroCustomLimits": "自定义复盘经验上限",
+    "retroCustomHint": "复盘阶段会把经验写入团队记忆，并带入后续讨论。这些上限限制写入的数量。",
+    "retroDefaultHint": "复盘阶段仍会按默认上限写入经验（每次运行 {{perRun}} 条，最多保存 {{stored}} 条）。如需停止，请删除 RETRO 阶段。",
+    "voteOptionsTooFew": "明确的选票至少需要两个选项。",
+    "saveProblem": {
+      "title": "此小组暂时无法创建：",
+      "debateRoles": "辩论至少需要一名角色为 PRO 的成员和一名角色为 CON 的成员。",
+      "devilAdvocateRole": "“魔鬼代言人”小组需要一名角色为 DEVIL_ADVOCATE 的成员。",
+      "humanInTaskForce": "人类成员不能加入任务组（规划、执行和验证阶段）。",
+      "humanWithPeerPhases": "人类成员不能加入各阶段依次针对每位同伴的小组，例如同行评审。",
+      "memberUnassigned_one": "{{count}} 名成员未分配代理。",
+      "memberUnassigned_other": "{{count}} 名成员未分配代理。",
+      "humanNeedsName_one": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
+      "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
+    }
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2951,7 +2968,7 @@
     "value": "值",
     "deleteAll": "全部删除",
     "deleteAllTitle": "删除所有属性",
-    "deleteAllDesc": "将永久删除该用户的所有属性。",
+    "deleteAllDesc": "这将永久删除该用户的所有全局属性：包括代理保存的每一条全局用户记忆条目，而不仅是此处列出的行。",
     "deleted": "属性已删除",
     "noResults": "未找到属性",
     "showingCount": "{{count}} 个属性"
@@ -3052,6 +3069,8 @@
     "title": "智能体同步",
     "subtitle": "在 EDDI 实例之间同步智能体",
     "connection": "源实例",
+    "loadingLocalAgents": "正在加载所有本地代理后再进行匹配…",
+    "localAgentsError": "无法完整加载本地代理列表，因此无法按名称匹配代理。现在同步会创建重复项。",
     "sourceUrl": "源 EDDI 实例 URL",
     "authToken": "授权 Token",
     "authHint": "可选，将作为 X-Source-Authorization 请求头发送。",
@@ -3744,7 +3763,19 @@
       "toggleConfig": "切换详情面板",
       "unpin": "取消置顶回复",
       "untitled": "无标题",
-      "viewSessions": "查看历史会话"
+      "viewSessions": "查看历史会话",
+      "alreadyEnded": "讨论已经结束。",
+      "stopRaced": "停止时讨论状态已发生变化，讨论仍在进行。请再次尝试停止。",
+      "stopUnconfirmed": "无法确认讨论已停止。请检查其状态并再次尝试停止。",
+      "stopFailed": "无法停止讨论：{{error}}",
+      "stopping": "正在停止…",
+      "startOver": "重新开始",
+      "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。",
+      "confirmNewTitle": "停止正在进行的讨论？",
+      "confirmNewDescription": "仍有讨论在进行中。开始新的讨论会先将其停止——所有进行中的工作都将被放弃。",
+      "confirmNewButton": "停止并开始新的讨论",
+      "keepRunning": "继续运行",
+      "questionRequired": "请为你的任务组添加一个问题——文件会在讨论开始时共享给它。"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
@@ -3773,7 +3804,8 @@
       "stop": "停止生成",
       "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。",
       "newConversation": "新建对话",
-      "newConversationFailed": "无法开始新对话"
+      "newConversationFailed": "无法开始新对话",
+      "initFailed": "无法打开此对话。"
     },
     "chat": {
       "agentDetails": "智能体详情",
@@ -4945,5 +4977,12 @@
     "headerMismatch": "此连接以“{{expected}}”发送其凭据，因此标头必须使用该名称——否则配置显示一个名称而请求携带另一个。",
     "refusedInRequest": "${connection:…} 在路径、查询参数或请求体中会被拒绝——URL 中的凭据会进入每个代理日志，请求体中的凭据不会被读取。请改为在标头中引用连接。",
     "refusedInModel": "语言模型、嵌入和向量存储不接受 ${connection:…}：连接会解析为完整标头，而它们需要裸凭据。请在此使用 ${vault:…}。"
+  },
+  "cascadeSave": {
+    "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
+    "agentChanged": "智能体 {{agentId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
+    "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
+    "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
+    "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
   }
 }

@@ -65,10 +65,10 @@ import java.util.concurrent.TimeoutException;
  * {@code @Inject}-field-injected on the facade and is not yet populated when
  * the facade's own constructor runs, so this class must read its current value
  * at call time rather than capture it once eagerly. {@code
- * operationsInProgress} and {@code activeTokens} are shared by reference, not
- * owned — they are mutable coordination state that must stay the SAME instance
- * across every per-call wrapper, exactly like the facade's other collaborators
- * share {@code activeTokens}.
+ * operationsInProgress} and {@code discussionControls} are shared by reference,
+ * not owned — they are mutable coordination state that must stay the SAME
+ * instance across every per-call wrapper, exactly like the facade's other
+ * collaborators share {@code discussionControls}.
  * <p>
  * Holds a back-reference to the concrete {@link GroupConversationService} for
  * calls that stay on the facade: {@code executeDiscussion}, {@code
@@ -104,7 +104,7 @@ public class GroupLifecycleOps {
     private final IDeploymentStore deploymentStore;
     private final ISharedArtifactStore sharedArtifactStore;
     private final Set<String> operationsInProgress;
-    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens;
+    private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls;
     private final GroupConversationService groupConversationService;
     private final Counter counterGroupFollowUp;
     private final Counter counterGroupContinue;
@@ -114,7 +114,7 @@ public class GroupLifecycleOps {
     public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, ISharedArtifactStore sharedArtifactStore, Set<String> operationsInProgress,
-            ConcurrentHashMap<String, DiscussionControlToken> activeTokens,
+            ConcurrentHashMap<String, DiscussionControlToken> discussionControls,
             GroupConversationService groupConversationService, Counter counterGroupFollowUp,
             Counter counterGroupContinue, Counter counterGroupClose, Counter counterGroupFailure) {
         this.conversationStore = conversationStore;
@@ -125,7 +125,7 @@ public class GroupLifecycleOps {
         this.deploymentStore = deploymentStore;
         this.sharedArtifactStore = sharedArtifactStore;
         this.operationsInProgress = operationsInProgress;
-        this.activeTokens = activeTokens;
+        this.discussionControls = discussionControls;
         this.groupConversationService = groupConversationService;
         this.counterGroupFollowUp = counterGroupFollowUp;
         this.counterGroupContinue = counterGroupContinue;
@@ -435,7 +435,7 @@ public class GroupLifecycleOps {
             // registration takes the signal path (stops at the top-of-phase check)
             // rather than the DB branch, which would CAS to CANCELLED and then be
             // overwritten by this leg (mirrors startAndDiscussAsync / resumeDiscussion).
-            activeTokens.put(groupConversationId, new DiscussionControlToken());
+            discussionControls.put(groupConversationId, new DiscussionControlToken());
 
             // Load the group config and re-execute — wrapped in try-catch so that
             // failures before executeDiscussion() (which has its own failConversation
@@ -462,7 +462,7 @@ public class GroupLifecycleOps {
                 // errors from config loading / phase resolution above. If it was never
                 // reached, its finally never removed the pre-registered token — drop it
                 // here (idempotent: a no-op if executeDiscussion already removed it).
-                activeTokens.remove(groupConversationId);
+                discussionControls.remove(groupConversationId);
                 if (gc.getState() == GroupConversationState.IN_PROGRESS) {
                     failConversation(gc);
                 }
@@ -683,8 +683,9 @@ public class GroupLifecycleOps {
 
     public void failConversation(GroupConversation gc) {
         // Never write unconditionally: conversationStore.update() is a whole-document
-        // UPSERT, so it would RE-CREATE a conversation another pod deleted and would
-        // clobber a terminal state (e.g. a cross-pod CANCELLED) with FAILED.
+        // replace, so it would clobber a terminal state (e.g. a cross-pod CANCELLED)
+        // with FAILED. (It no longer re-creates a deleted conversation — it throws
+        // GroupConversationGoneException — but the terminal-state race remains.)
         //
         // The CAS expectation must come from the PERSISTED state, not the in-memory
         // one:

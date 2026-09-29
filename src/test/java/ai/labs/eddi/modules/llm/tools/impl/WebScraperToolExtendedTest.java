@@ -13,10 +13,12 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -34,12 +36,9 @@ class WebScraperToolExtendedTest {
         webScraperTool = new WebScraperTool(mockHttpClient, new HtmlToMarkdownConverter());
     }
 
-    @SuppressWarnings("unchecked")
     private void mockResponse(int statusCode, String body) throws IOException, InterruptedException {
-        HttpResponse<String> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(statusCode);
-        when(response.body()).thenReturn(body);
-        when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+        when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+                .thenReturn(new SafeHttpClient.BoundedResponse(statusCode, body.getBytes(StandardCharsets.UTF_8), false));
     }
 
     // ==================== extractWebPageText ====================
@@ -179,7 +178,7 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException from HTTP client")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Connection refused"));
 
             String result = webScraperTool.extractWebPageText("https://example.com");
@@ -424,12 +423,84 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException during metadata fetch")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Network error"));
 
             String result = webScraperTool.extractMetadata("https://example.com");
 
             assertTrue(result.contains("Error"));
+        }
+    }
+
+    // ==================== truncated responses ====================
+
+    @Nested
+    @DisplayName("truncated responses are flagged, not passed off as the whole page")
+    class TruncatedResponseTests {
+
+        private static final char EURO = (char) 0x20AC;
+        private static final char REPLACEMENT_CHAR = (char) 0xFFFD;
+
+        private void mockTruncated(byte[] body) throws IOException, InterruptedException {
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+                    .thenReturn(new SafeHttpClient.BoundedResponse(200, body, true));
+        }
+
+        @Test
+        @DisplayName("extractWebPageText appends a truncation note when the body was cut")
+        void pageTextCarriesTruncationNote() throws Exception {
+            mockTruncated("<html><body><p>Partial page</p>".getBytes(StandardCharsets.UTF_8));
+
+            String result = webScraperTool.extractWebPageText("https://example.com");
+
+            assertTrue(result.contains("Partial page"), result);
+            assertTrue(result.contains("[Note: the page response was truncated"), result);
+        }
+
+        @Test
+        @DisplayName("extractLinks, extractWithSelector and extractMetadata carry the note too")
+        void otherToolsCarryTruncationNote() throws Exception {
+            mockTruncated("<html><head><title>T</title></head><body><a href=\"https://a.example\">a</a><p>x</p>"
+                    .getBytes(StandardCharsets.UTF_8));
+
+            assertTrue(webScraperTool.extractLinks("https://example.com", 5).contains("response was truncated"));
+            assertTrue(webScraperTool.extractWithSelector("https://example.com", "p").contains("response was truncated"));
+            assertTrue(webScraperTool.extractMetadata("https://example.com").contains("response was truncated"));
+        }
+
+        @Test
+        @DisplayName("a complete response carries no truncation note")
+        void completeResponseHasNoNote() throws Exception {
+            mockResponse(200, "<html><body><p>Whole page</p></body></html>");
+
+            assertFalse(webScraperTool.extractWebPageText("https://example.com").contains("response was truncated"));
+        }
+
+        @Test
+        @DisplayName("a multi-byte character split by the cut is dropped, not decoded to U+FFFD")
+        void splitMultiByteCharacterIsDropped() throws Exception {
+            byte[] euro = String.valueOf(EURO).getBytes(StandardCharsets.UTF_8); // 3 bytes
+            byte[] prefix = "<html><body><p>Price 5".getBytes(StandardCharsets.UTF_8);
+            byte[] body = new byte[prefix.length + 2];
+            System.arraycopy(prefix, 0, body, 0, prefix.length);
+            System.arraycopy(euro, 0, body, prefix.length, 2); // cut mid-character
+            mockTruncated(body);
+
+            String result = webScraperTool.extractWebPageText("https://example.com");
+
+            assertTrue(result.contains("Price 5"), result);
+            assertFalse(result.indexOf(REPLACEMENT_CHAR) >= 0, "replacement character leaked: " + result);
+        }
+
+        @Test
+        @DisplayName("completeUtf8Length trims only an incomplete trailing sequence")
+        void completeUtf8Length() {
+            byte[] euro = ("a" + EURO).getBytes(StandardCharsets.UTF_8); // 1 + 3 bytes
+            assertEquals(4, WebScraperTool.completeUtf8Length(euro));
+            assertEquals(1, WebScraperTool.completeUtf8Length(Arrays.copyOf(euro, 3)));
+            assertEquals(1, WebScraperTool.completeUtf8Length(Arrays.copyOf(euro, 2)));
+            assertEquals(1, WebScraperTool.completeUtf8Length(Arrays.copyOf(euro, 1)));
+            assertEquals(0, WebScraperTool.completeUtf8Length(new byte[0]));
         }
     }
 }
