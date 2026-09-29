@@ -171,6 +171,16 @@ fixed the same thing, main's implementation is kept and this branch's is dropped
   E6) had no counterpart on main and is unchanged; `createPropertiesHandler` calls
   in the turn builders take main's `isMemoryToolsEnabled()` argument.
 
+### Review follow-up (2026-09-29)
+
+- **E6: the deployment dedupe can no longer delete every row for a key.** It
+  deleted the rows it dropped by id alone. Two nodes deduplicating at the same time,
+  with a deploy landing between them, could each keep a different row and delete
+  the other's. Each delete now applies only while the row still holds the
+  `lastModified` and `deploymentStatus` the dedupe observed, so a rewritten row
+  survives. A group whose kept row changed after it was observed is left for the
+  next pass. No transaction is used, so a standalone server keeps working.
+
 ```decision-log
 | 2026-09-26 | A queued turn whose snapshot was superseded is rebuilt over a reloaded memory (revision probe first) | H13a/E1: queued turns ran on request-time memory | Always reloading (doubles every turn's load); refreshing the memory in place (the Conversation's longTerm baseline would stay stale) |
 | 2026-09-26 | Persistent schedules may roll over (opt-in, idle only, conversation properties carried) at a step limit instead of trimming | 16 MB document limit | Trimming steps (destroys history, violates "full data is never deleted by optimization"); on by default (silently resets a stateful agent's history) |

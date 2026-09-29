@@ -18,6 +18,8 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.result.DeleteResult;
+import org.bson.BsonDocument;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +29,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.OngoingStubbing;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 
@@ -366,8 +370,11 @@ class MongoDeploymentStorageTest {
                 .thenThrow(mock(MongoCommandException.class))
                 .thenReturn("environment_1_agentId_1_agentVersion_1");
 
-        Document duplicateGroup = new Document("duplicateIds", List.of("id-old", "id-new")).append("duplicateCount", 2);
+        // The pipeline pushes each row's observed state beside its id; the delete is
+        // conditioned on it.
+        Document duplicateGroup = duplicateGroup(row("id-old", new Date(1_000L), "deployed"), row("id-new", new Date(2_000L), "deployed"));
         stubAggregate(duplicated, List.of(duplicateGroup));
+        when(duplicated.countDocuments(any(Bson.class))).thenReturn(1L);
         DeleteResult deleteResult = mock(DeleteResult.class);
         when(deleteResult.getDeletedCount()).thenReturn(1L);
         when(duplicated.deleteMany(any(Bson.class))).thenReturn(deleteResult);
@@ -492,6 +499,8 @@ class MongoDeploymentStorageTest {
         DeleteResult deleteResult = mock(DeleteResult.class);
         when(deleteResult.getDeletedCount()).thenReturn(1L);
         when(duplicated.deleteMany(any(Bson.class))).thenReturn(deleteResult);
+        // The survivor still holds the state the aggregation observed.
+        when(duplicated.countDocuments(any(Bson.class))).thenReturn(1L);
         return duplicated;
     }
 
@@ -562,6 +571,153 @@ class MongoDeploymentStorageTest {
         assertTrue(filter.contains("id-a"), "the older write goes, got: " + filter);
         assertFalse(filter.contains("id-b"), "the newest write survives, got: " + filter);
         verify(duplicated, never()).find(any(Document.class));
+    }
+
+    // ==================== dedupe interleaving ====================
+
+    /**
+     * Two dedupes (two nodes in a rolling restart) and one deploy between them.
+     * Node 1 observes A (older) and B (newer), keeps B and queues A. Before its
+     * delete lands, a deploy rewrites A with a newer stamp, and node 2 — observing
+     * the new state — keeps A and deletes B. Node 1's queued delete of A by id
+     * alone then removed the last row for the key: the agent's deployment record
+     * was gone. Conditioned on what node 1 observed, the delete misses the
+     * rewritten A.
+     */
+    @Test
+    @DisplayName("two interleaved dedupes and a deploy between them cannot delete every row for a key")
+    void interleavedDedupesNeverDeleteTheWholeGroup() {
+        List<Document> rows = new ArrayList<>();
+        rows.add(new Document("_id", "id-a").append("environment", "production").append("agentId", "agent-1").append("agentVersion", 1)
+                .append("deploymentStatus", "undeployed").append("lastModified", new Date(1_000L)));
+        rows.add(new Document("_id", "id-b").append("environment", "production").append("agentId", "agent-1").append("agentVersion", 1)
+                .append("deploymentStatus", "deployed").append("lastModified", new Date(2_000L)));
+
+        Runnable concurrently = () -> {
+            // A deploy lands on A (replaceOne rewrites the row it finds first) ...
+            rows.get(0).append("deploymentStatus", "deployed").append("lastModified", new Date(3_000L));
+            // ... and a second node runs its own dedupe over the new state.
+            MongoDatabase node2 = mock(MongoDatabase.class);
+            MongoCollection<Document> node2Collection = fakeCollection(rows, null);
+            when(node2.getCollection("deployments")).thenReturn(node2Collection);
+            new MongoDeploymentStorage(node2, documentBuilder);
+        };
+        MongoDatabase node1 = mock(MongoDatabase.class);
+        MongoCollection<Document> node1Collection = fakeCollection(rows, concurrently);
+        when(node1.getCollection("deployments")).thenReturn(node1Collection);
+
+        new MongoDeploymentStorage(node1, documentBuilder);
+
+        assertEquals(List.of("id-a"), rows.stream().map(row -> row.get("_id")).toList(),
+                "the most recently written row must survive both dedupes");
+    }
+
+    @Test
+    @DisplayName("the dedupe deletes nothing when the row it keeps changed after it was observed")
+    void aChangedSurvivorLeavesTheGroupAlone() {
+        List<Document> rows = new ArrayList<>();
+        rows.add(new Document("_id", "id-a").append("environment", "production").append("agentId", "agent-1").append("agentVersion", 1)
+                .append("deploymentStatus", "undeployed").append("lastModified", new Date(1_000L)));
+        rows.add(new Document("_id", "id-b").append("environment", "production").append("agentId", "agent-1").append("agentVersion", 1)
+                .append("deploymentStatus", "deployed").append("lastModified", new Date(2_000L)));
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> collection = fakeCollection(rows, null);
+        when(database.getCollection("deployments")).thenReturn(collection);
+        // The survivor B is rewritten between the aggregation and the delete.
+        when(collection.countDocuments(any(Bson.class))).thenAnswer(inv -> {
+            rows.get(1).append("lastModified", new Date(4_000L));
+            return matching(rows, inv.getArgument(0)).size();
+        });
+
+        new MongoDeploymentStorage(database, documentBuilder);
+
+        assertEquals(2, rows.size(), "a choice made on a state that no longer exists must not delete anything");
+        verify(collection, never()).deleteMany(any(Bson.class));
+    }
+
+    /**
+     * A deployments collection over {@code rows}: the unique index fails while the
+     * key has duplicates, the dedupe aggregation groups the current rows the way
+     * the real pipeline does ($sort lastModified asc, _id desc), and counts and
+     * deletes evaluate their filters against the rows. {@code beforeDelete} runs
+     * just before the first delete is applied — the window another node's work
+     * lands in.
+     */
+    private static MongoCollection<Document> fakeCollection(List<Document> rows, Runnable beforeDelete) {
+        MongoCollection<Document> fake = mock(MongoCollection.class);
+        when(fake.createIndex(any(Bson.class), any(IndexOptions.class))).thenAnswer(inv -> {
+            if (rows.size() > 1) {
+                throw mock(MongoCommandException.class);
+            }
+            return "environment_1_agentId_1_agentVersion_1";
+        });
+        when(fake.aggregate(anyList())).thenAnswer(inv -> {
+            List<Document> sorted = new ArrayList<>(rows);
+            sorted.sort(Comparator.<Document, Long>comparing(row -> row.getDate("lastModified") == null
+                    ? Long.MIN_VALUE
+                    : row.getDate("lastModified").getTime()).thenComparing(row -> row.getString("_id"), Comparator.reverseOrder()));
+            List<Document> snapshot = sorted.stream()
+                    .map(row -> new Document("_id", row.get("_id")).append("lastModified", row.get("lastModified"))
+                            .append("deploymentStatus", row.get("deploymentStatus")))
+                    .toList();
+            List<Document> groups = snapshot.size() > 1 ? List.of(duplicateGroup(snapshot.toArray(Document[]::new))) : List.of();
+            AggregateIterable<Document> iterable = mock(AggregateIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            doReturn(cursor).when(iterable).iterator();
+            var iterator = groups.iterator();
+            when(cursor.hasNext()).thenAnswer(ignored -> iterator.hasNext());
+            when(cursor.next()).thenAnswer(ignored -> iterator.next());
+            return iterable;
+        });
+        when(fake.countDocuments(any(Bson.class))).thenAnswer(inv -> (long) matching(rows, inv.getArgument(0)).size());
+        boolean[] interleaved = {false};
+        when(fake.deleteMany(any(Bson.class))).thenAnswer(inv -> {
+            if (beforeDelete != null && !interleaved[0]) {
+                interleaved[0] = true;
+                beforeDelete.run();
+            }
+            List<Document> doomed = matching(rows, inv.getArgument(0));
+            rows.removeAll(doomed);
+            DeleteResult result = mock(DeleteResult.class);
+            when(result.getDeletedCount()).thenReturn((long) doomed.size());
+            return result;
+        });
+        return fake;
+    }
+
+    private static List<Document> matching(List<Document> rows, Bson filter) {
+        BsonDocument query = filter.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        return rows.stream().filter(row -> matches(row.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()), query))
+                .toList();
+    }
+
+    /**
+     * Just enough of MongoDB's query language for the dedupe: $and, $or, $in and
+     * equality.
+     */
+    private static boolean matches(BsonDocument row, BsonDocument query) {
+        for (var clause : query.entrySet()) {
+            String field = clause.getKey();
+            BsonValue condition = clause.getValue();
+            boolean ok = switch (field) {
+                case "$and" -> condition.asArray().stream().allMatch(sub -> matches(row, sub.asDocument()));
+                case "$or" -> condition.asArray().stream().anyMatch(sub -> matches(row, sub.asDocument()));
+                default -> {
+                    BsonValue actual = row.get(field);
+                    if (condition.isDocument() && condition.asDocument().containsKey("$in")) {
+                        yield condition.asDocument().getArray("$in").contains(actual);
+                    }
+                    if (condition.isDocument() && condition.asDocument().containsKey("$eq")) {
+                        condition = condition.asDocument().get("$eq");
+                    }
+                    yield condition.isNull() ? actual == null || actual.isNull() : condition.equals(actual);
+                }
+            };
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static int indexOfStage(List<Document> stages, String stageName) {

@@ -32,7 +32,7 @@ import java.util.Map;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
-import static com.mongodb.client.model.Filters.in;
+import static com.mongodb.client.model.Filters.or;
 
 /**
  * MongoDB implementation of {@link IDeploymentStorage}.
@@ -385,27 +385,72 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
                         .append(FIELD_DUPLICATE_COUNT, new Document("$sum", 1))),
                 new Document("$match", new Document(FIELD_DUPLICATE_COUNT, new Document("$gt", 1))));
 
-        List<Object> doomed = new ArrayList<>();
+        int removed = 0;
         for (Document group : deploymentsCollection.aggregate(pipeline)) {
             List<Object> ids = group.getList(FIELD_DUPLICATE_IDS, Object.class);
-            if (ids == null || ids.size() < 2) {
+            List<Document> rows = group.getList(FIELD_DUPLICATE_ROWS, Document.class);
+            if (ids == null || ids.size() < 2 || rows == null || rows.size() != ids.size()) {
+                // Without the observed state of every row the delete below cannot be
+                // made conditional on it, so nothing is deleted.
                 continue;
             }
-            Object survivor = survivorOf(group, ids);
+            Object survivor = survivorOf(group, ids, rows);
             if (survivor == null) {
                 continue;
             }
-            for (Object id : ids) {
-                if (!id.equals(survivor)) {
-                    doomed.add(id);
-                }
+            removed += removeLosers(group.get("_id", Document.class), survivor, rows);
+        }
+        return removed;
+    }
+
+    /**
+     * Deletes the rows of one group other than {@code survivor} — each only while
+     * it still holds exactly the state the aggregation observed.
+     * <p>
+     * An id-only delete let two dedupes (two nodes in a rolling restart) and one
+     * {@link #setDeploymentInfo} between them delete EVERY row for a key: the first
+     * dedupe observes A and B, keeps B and queues A; the write then lands on A with
+     * a newer {@value #FIELD_LAST_MODIFIED}; the second dedupe keeps A and deletes
+     * B; the first one's queued delete then removes A. Conditioned on the observed
+     * {@value #FIELD_LAST_MODIFIED} and {@value #FIELD_DEPLOYMENT_STATUS}, the
+     * first delete misses A, because A is no longer the row it chose to drop. Every
+     * write stamps a newer {@value #FIELD_LAST_MODIFIED}, and a dedupe that
+     * observes the newly written row keeps it (a strictly newest stamp wins), so
+     * the most recent write always survives.
+     * <p>
+     * The group is also left alone when the survivor itself has changed or gone
+     * since it was observed: the choice was made on a state that no longer exists,
+     * and the next dedupe decides again on the current one. No transaction — the
+     * deployments collection must keep working on a standalone server.
+     */
+    private int removeLosers(Document key, Object survivor, List<Document> rows) {
+        Document survivorRow = null;
+        List<Bson> losers = new ArrayList<>();
+        for (Document row : rows) {
+            if (survivor.equals(row.get("_id"))) {
+                survivorRow = row;
+            } else {
+                losers.add(asObserved(row));
             }
         }
-
-        if (doomed.isEmpty()) {
+        if (survivorRow == null || losers.isEmpty()) {
             return 0;
         }
-        return (int) deploymentsCollection.deleteMany(in("_id", doomed)).getDeletedCount();
+        if (deploymentsCollection.countDocuments(asObserved(survivorRow)) == 0) {
+            LOGGER.warnf("The deployment row kept for %s changed while its duplicates were being removed — "
+                    + "leaving them for the next pass", key);
+            return 0;
+        }
+        return (int) deploymentsCollection.deleteMany(or(losers)).getDeletedCount();
+    }
+
+    /**
+     * Matches the row only in the state the aggregation saw. A field the row did
+     * not carry matches only while it is still absent (or null).
+     */
+    private static Bson asObserved(Document row) {
+        return and(eq("_id", row.get("_id")), eq(FIELD_LAST_MODIFIED, row.get(FIELD_LAST_MODIFIED)),
+                eq(FIELD_DEPLOYMENT_STATUS, row.get(FIELD_DEPLOYMENT_STATUS)));
     }
 
     /**
@@ -424,12 +469,8 @@ public class MongoDeploymentStorage implements IDeploymentStorage {
      * group is left alone and the unique index stays unbuilt (reported at ERROR)
      * rather than guessing.
      */
-    private Object survivorOf(Document group, List<Object> ids) {
+    private Object survivorOf(Document group, List<Object> ids, List<Document> rows) {
         Object sortedLast = ids.get(ids.size() - 1);
-        List<Document> rows = group.getList(FIELD_DUPLICATE_ROWS, Document.class);
-        if (rows == null || rows.size() != ids.size()) {
-            return sortedLast;
-        }
         long statuses = rows.stream().map(row -> row.get(FIELD_DEPLOYMENT_STATUS)).distinct().count();
         if (statuses <= 1) {
             return sortedLast;
