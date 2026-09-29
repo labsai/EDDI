@@ -81,14 +81,24 @@ public class WebSearchTool {
             return results;
 
         } catch (Exception e) {
-            LOGGER.error("Web search error for query '" + query + "': " + e.getMessage(), e);
-            return "Error: Could not perform web search - " + e.getMessage();
+            // The message can name the request URI, and Google's carries the API key.
+            String error = redactApiKey(String.valueOf(e.getMessage()));
+            LOGGER.error("Web search error for query '" + query + "': " + error);
+            return "Error: Could not perform web search - " + error;
         }
+    }
+
+    /**
+     * Replaces the value of every {@code key=} query parameter in {@code message}.
+     */
+    static String redactApiKey(String message) {
+        return message.replaceAll("(?i)(key=)[^&\\s]+", "$1[REDACTED]");
     }
 
     private String searchWithGoogle(String query, int maxResults) throws IOException, InterruptedException {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d", googleApiKey.get(), googleCx.get(),
+        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d",
+                URLEncoder.encode(googleApiKey.get(), StandardCharsets.UTF_8), URLEncoder.encode(googleCx.get(), StandardCharsets.UTF_8),
                 encodedQuery, maxResults);
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();

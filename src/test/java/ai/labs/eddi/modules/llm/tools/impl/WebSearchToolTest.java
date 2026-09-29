@@ -664,4 +664,49 @@ class WebSearchToolTest {
             assertTrue(result.contains("Network error"));
         }
     }
+
+    // ==================== Google credentials ====================
+
+    @Nested
+    class GoogleCredentials {
+
+        private WebSearchTool googleTool;
+        private SafeHttpClient mockedClient;
+
+        @BeforeEach
+        void setUpGoogle() throws Exception {
+            mockedClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            googleTool = new WebSearchTool(mockedClient, new ObjectMapper());
+            set("searchProvider", "google");
+            set("googleApiKey", Optional.of("SECRET&key 1"));
+            set("googleCx", Optional.of("cx id"));
+        }
+
+        private void set(String field, Object value) throws Exception {
+            var f = WebSearchTool.class.getDeclaredField(field);
+            f.setAccessible(true);
+            f.set(googleTool, value);
+        }
+
+        @Test
+        void keyAndCxAreEncodedIntoTheRequest() throws Exception {
+            answer(mockedClient, 200, "{\"items\":[]}");
+            googleTool.searchWeb("q", 3);
+            var request = org.mockito.ArgumentCaptor.forClass(HttpRequest.class);
+            verify(mockedClient).sendBounded(request.capture(), anyLong());
+            String uri = request.getValue().uri().toString();
+            assertTrue(uri.contains("key=SECRET%26key+1&"), uri);
+            assertTrue(uri.contains("cx=cx+id&"), uri);
+        }
+
+        @Test
+        void aFailureNamingTheUriDoesNotLeakTheKey() throws Exception {
+            org.mockito.Mockito.doThrow(new java.io.IOException(
+                    "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
+                    .when(mockedClient).sendBounded(any(HttpRequest.class), anyLong());
+            String result = googleTool.searchWeb("q", 3);
+            assertFalse(result.contains("SECRETKEY"), result);
+            assertTrue(result.contains("key=[REDACTED]"), result);
+        }
+    }
 }

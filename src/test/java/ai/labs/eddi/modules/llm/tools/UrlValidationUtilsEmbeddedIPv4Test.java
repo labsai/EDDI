@@ -82,6 +82,21 @@ class UrlValidationUtilsEmbeddedIPv4Test {
     }
 
     @Test
+    @DisplayName("the metadata refusal decodes every RFC 6052 layout inside 64:ff9b:1::/48, not only the trailing 32 bits")
+    void metadataRefusalDecodesNat64LocalUseLayouts() {
+        // 169.254.169.254 behind a /48, /56 and /64 translator prefix
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlValidationUtils.rejectCloudMetadataTarget("http://[64:ff9b:1:a9fe:a9:fe00::]/latest/meta-data/"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlValidationUtils.rejectCloudMetadataTarget("http://[64:ff9b:1:a9:fea9:fe00::]/latest/meta-data/"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlValidationUtils.rejectCloudMetadataTarget("http://[64:ff9b:1:0:a9:fea9:fe00:0]/latest/meta-data/"));
+        // A public address in the same /48 layout is not a metadata target: this
+        // refusal also runs where SSRF protection is off, so it must not block it.
+        assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("http://[64:ff9b:1:808:8:800::]/"));
+    }
+
+    @Test
     @DisplayName("embeddedIPv4Addresses extracts from each form and from nothing else")
     void embeddedIPv4() throws Exception {
         byte[] loopback = {127, 0, 0, 1};

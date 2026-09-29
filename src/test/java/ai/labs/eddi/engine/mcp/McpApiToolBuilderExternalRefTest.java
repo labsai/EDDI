@@ -113,12 +113,9 @@ class McpApiToolBuilderExternalRefTest {
         server.start();
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/openapi.json";
-            String rendered;
-            try {
-                rendered = Yaml.pretty(McpApiToolBuilder.parseSpec(url));
-            } catch (IllegalArgumentException refused) {
-                rendered = refused.getMessage();
-            }
+            // Must parse: a refusal for any other reason would pass a "does not
+            // contain" check without ever exercising the file reference.
+            String rendered = Yaml.pretty(McpApiToolBuilder.parseSpec(url));
             assertFalse(rendered.contains("SERVER-FILE-CONTENT"), rendered);
         } finally {
             server.stop(0);

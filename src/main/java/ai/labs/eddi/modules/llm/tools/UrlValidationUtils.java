@@ -248,7 +248,30 @@ public final class UrlValidationUtils {
                 return true;
             }
         }
+        // The private-address policy blocks 64:ff9b:1::/48 whole, but this refusal
+        // also runs where SSRF protection is off, so it must not. Decode every RFC
+        // 6052 layout a translator inside the /48 may use instead.
+        if (isNat64LocalUse(bytes)) {
+            for (byte[] embedded : nat64LocalUseCandidates(bytes)) {
+                if (isMetadataIPv4(embedded)) {
+                    return true;
+                }
+            }
+        }
         return false;
+    }
+
+    /**
+     * The IPv4 address a {@code 64:ff9b:1::/48} address carries under each RFC 6052
+     * prefix length a network can use inside the /48 — /48, /56, /64 and /96. Bits
+     * 64-71 (byte 8) are the reserved {@code u} octet and never carry IPv4 bits.
+     */
+    static List<byte[]> nat64LocalUseCandidates(byte[] bytes) {
+        return List.of(
+                new byte[]{bytes[6], bytes[7], bytes[9], bytes[10]},
+                new byte[]{bytes[7], bytes[9], bytes[10], bytes[11]},
+                new byte[]{bytes[9], bytes[10], bytes[11], bytes[12]},
+                Arrays.copyOfRange(bytes, 12, 16));
     }
 
     /**

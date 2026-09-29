@@ -30,6 +30,11 @@ Main landed an independent fix for most of the same findings while this branch w
 - `UrlValidationUtils` is main's. It adds Teredo unwrapping, and makes two decisions that override this branch's: `198.18.0.0/15` **is** blocked, and of `240.0.0.0/4` only `255.255.255.255` is. This branch had left 198.18/15 open for fake-IP DNS proxies (Clash, Surge) and had blocked all of 240/4.
 - The startup validation this branch added for the size limits is dropped with it: main falls back to the default for a non-positive value.
 
+**Review round (2026-09-29):**
+
+- The always-on metadata refusal, which also runs where SSRF protection is off, now decodes every RFC 6052 layout inside `64:ff9b:1::/48`: /48, /56, /64 and /96. A translated `169.254.169.254` is refused wherever the translator puts it. The /48 as a whole stays blocked only by the private-address policy, so a public target behind a local translator still passes when SSRF protection is off.
+- `WebSearchTool` URL-encodes the Google API key and `cx`. A failure message that names the request URI has its `key=` value redacted before it is logged or returned to the model, and the throwable is no longer logged.
+
 **Files:** `SafeHttpClient.java`, `WebSearchTool.java`, `WeatherTool.java`, `UrlValidationUtils.java`, `docs/security.md`. Tests: `SafeHttpClientBodyBoundsTest`, `UrlValidationUtilsEmbeddedIPv4Test`, `McpApiToolBuilderExternalRefTest`, plus cases in `WebSearchToolTest` and `WeatherToolExtendedTest`.
 
 ```decision-log
