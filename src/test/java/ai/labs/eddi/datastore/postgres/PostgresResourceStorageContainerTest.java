@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.IResourceFilter;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.*;
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -219,6 +222,57 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         }
     }
 
+    // ─── Delete vs. update (M-P5) and in-place history writes (M-P1) ───
+
+    @Nested
+    @DisplayName("Version-checked delete")
+    class VersionCheckedDelete {
+
+        @Test
+        @DisplayName("a delete that read v1 after an update committed v2 is refused, and v2 survives")
+        void deleteRacingAnUpdateKeepsTheNewVersion() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // the update wins: v1 archived (not deleted), v2 current
+            storage.storeHistoryAndUpdate(storage.newHistoryResourceFor(v1, false), storage.newResource(id, 2, Map.of("v", 2)), 1);
+
+            // the delete read v1 before that and now arrives
+            assertThrows(IResourceStore.ResourceModifiedException.class,
+                    () -> storage.storeHistoryAndRemove(storage.newHistoryResourceFor(v1, true), id, 1));
+
+            assertEquals(2, storage.getCurrentVersion(id), "the committed update must not be erased");
+            assertFalse(storage.readHistory(id, 1).isDeleted(), "v1 is ordinary history of a live resource");
+        }
+
+        @Test
+        @DisplayName("a delete of the current version removes it and leaves the tombstone")
+        void deleteOfTheCurrentVersion() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // a non-deleted history row of v1 already exists, as after an interrupted
+            // update
+            storage.store(storage.newHistoryResourceFor(v1, false));
+
+            storage.storeHistoryAndRemove(storage.newHistoryResourceFor(v1, true), id, 1);
+
+            assertEquals(-1, storage.getCurrentVersion(id));
+            assertTrue(storage.readHistory(id, 1).isDeleted(), "the tombstone must win over an existing row");
+        }
+
+        @Test
+        @DisplayName("replaceHistory rewrites an existing history row and reports a missing one")
+        void replaceHistory() throws Exception {
+            var id = UUID.randomUUID().toString();
+            storage.store(storage.newHistoryResourceFor(storage.newResource(id, 1, Map.of("v", "old")), false));
+
+            assertTrue(storage.replaceHistory(storage.newHistoryResourceFor(storage.newResource(id, 1, Map.of("v", "new")), false)));
+            assertEquals("new", storage.readHistory(id, 1).getData().get("v"));
+            assertFalse(storage.replaceHistory(storage.newHistoryResourceFor(storage.newResource(id, 7, Map.of("v", "x")), false)));
+        }
+    }
+
     // ─── Version ────────────────────────────────────────────────
 
     @Nested
@@ -245,6 +299,26 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         void invalidUuid() {
             // MongoDB ObjectId format should be treated as not found
             assertEquals(-1, storage.getCurrentVersion("507f1f77bcf86cd799439011"));
+        }
+    }
+
+    // ─── findResources ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("findResources exact match")
+    class FindResourcesExact {
+
+        @Test
+        @DisplayName("an exact filter selects the value itself, not the value followed by a newline")
+        void exactFilterIgnoresATrailingNewlineVariant() throws IOException {
+            var plain = storage.newResource(Map.of("originId", "name"));
+            storage.store(plain);
+            storage.store(storage.newResource(Map.of("originId", "name\n")));
+
+            var found = storage.findResources(new IResourceFilter.QueryFilters[]{
+                    new IResourceFilter.QueryFilters(List.of(IResourceFilter.QueryFilter.exact("originId", "name")))}, null, 0, 10);
+
+            assertEquals(List.of(plain.getId()), found.stream().map(IResourceStore.IResourceId::getId).toList());
         }
     }
 }

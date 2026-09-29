@@ -46,8 +46,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RagWorkflowExtensionIT {
 
     /**
-     * Step types EDDI documents in AGENTS.md §5.5 and {@code docs/rag.md}. Add a
-     * row here whenever a new workflow step type ships.
+     * Step types EDDI documents in docs/agent-config-authoring.md and
+     * {@code docs/rag.md}. Add a row here whenever a new workflow step type ships.
      */
     private static final List<String> DOCUMENTED_STEP_TYPES = List.of(
             "ai.labs.parser",

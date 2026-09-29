@@ -22,10 +22,12 @@ import java.util.stream.Collectors;
 /**
  * HMAC-SHA256 integrity signing for audit entries.
  * <p>
- * Derives the signing key from the same vault master key
- * ({@code eddi.vault.master-key} / {@code EDDI_VAULT_MASTER_KEY}) using PBKDF2
- * with a distinct salt, so the audit HMAC key is cryptographically independent
- * from the vault's KEK.
+ * Signing keys are derived with PBKDF2 under a salt distinct from the vault's
+ * KEK derivation, so an audit key never doubles as a KEK. Which secret they are
+ * derived from, and which keys verify old entries, is {@link AuditKeyring}'s
+ * business: every entry written since v5 names the key that signed it, so a
+ * rotated key reads as "signed with a key this deployment does not hold" rather
+ * than as tampering.
  * <p>
  * The HMAC is computed over a canonical string representation of all audit
  * entry fields (excluding the HMAC itself). If any field is tampered with after
@@ -93,6 +95,29 @@ public final class AuditHmac {
     static final String V4_PREFIX = "v4:";
 
     /**
+     * Marker for the <strong>v5</strong> form — the one
+     * {@link #computeHmac(AuditEntry, SigningKey)} writes today:
+     * {@code v5:<keyId>:<hex digest>}. v5 differs from v4 in two places.
+     * <ul>
+     * <li><b>The signing key is named.</b> Earlier versions carried no key
+     * identity, so an entry signed under a key the deployment no longer uses —
+     * after the vault master key was rotated, for instance — was reported exactly
+     * like a forged one, and a whole historic ledger read as tampered after a
+     * routine rotation. The id is a truncated HMAC of a fixed label under the key:
+     * it identifies the key without revealing anything about it.</li>
+     * <li><b>The identity token is keyed.</b> v3/v4 sign
+     * {@code gdpr-erased:<sha256(userId)>}, and GDPR erasure stores exactly that
+     * string in place of the user id — an unsalted hash, so anyone holding a list
+     * of candidate ids can tell whose rows were erased. v5 signs, and erasure
+     * stores, {@code gdpr-erased:k1:<HMAC(pseudonymKey, userId)>}, which cannot be
+     * recomputed without the key.</li>
+     * </ul>
+     *
+     * @see #buildCanonicalStringV5
+     */
+    static final String V5_PREFIX = "v5:";
+
+    /**
      * The storage floor every supported backend can represent: PostgreSQL keeps
      * microseconds, MongoDB milliseconds, so a signed timestamp must be truncated
      * to the coarser of the two before it is signed.
@@ -105,6 +130,86 @@ public final class AuditHmac {
      * is that it recognises the exact string erasure writes.
      */
     public static final String GDPR_PSEUDONYM_PREFIX = "gdpr-erased:";
+
+    /**
+     * Prefix of a <em>keyed</em> GDPR pseudonym — see {@link #V5_PREFIX}. Begins
+     * with {@link #GDPR_PSEUDONYM_PREFIX}, so every check for "already
+     * pseudonymised" recognises both forms.
+     */
+    public static final String KEYED_PSEUDONYM_PREFIX = GDPR_PSEUDONYM_PREFIX + "k1:";
+
+    private static final String KEY_ID_LABEL = "eddi-audit-key-id|v1";
+    private static final String PSEUDONYM_KEY_LABEL = "eddi-audit-pseudonym|v1";
+
+    /**
+     * Hex characters of the key id: 64 bits, plenty to tell a handful of keys
+     * apart.
+     */
+    private static final int KEY_ID_LENGTH = 16;
+
+    /**
+     * An audit signing key, with the two values derived from it: its public id and
+     * the key its v5 pseudonyms are computed under.
+     * <p>
+     * Everything is derived from {@code hmacKey}, so a key identified only by its
+     * bytes — a retired key an operator lists for verification — reproduces its id
+     * and pseudonyms exactly.
+     */
+    public record SigningKey(String id, byte[] hmacKey, byte[] pseudonymKey) {
+        @Override
+        public String toString() {
+            return "SigningKey[" + id + "]";
+        }
+    }
+
+    /**
+     * The {@link SigningKey} for raw HMAC key bytes.
+     */
+    public static SigningKey signingKey(byte[] hmacKey) {
+        if (hmacKey == null) {
+            throw new IllegalArgumentException("hmacKey must not be null");
+        }
+        String id = hmacSha256(KEY_ID_LABEL, hmacKey).substring(0, KEY_ID_LENGTH);
+        byte[] pseudonymKey = HexFormat.of().parseHex(hmacSha256(PSEUDONYM_KEY_LABEL, hmacKey));
+        return new SigningKey(id, hmacKey.clone(), pseudonymKey);
+    }
+
+    /**
+     * The keyed pseudonym v5 signs and GDPR erasure stores in a v5 row:
+     * {@value #KEYED_PSEUDONYM_PREFIX} followed by the hex HMAC of the identifier
+     * under the signing key's pseudonym key.
+     */
+    public static String keyedPseudonymFor(String userId, byte[] pseudonymKey) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null when deriving a GDPR pseudonym");
+        }
+        return KEYED_PSEUDONYM_PREFIX + hmacSha256(userId, pseudonymKey);
+    }
+
+    /**
+     * The value v5 signs in place of the raw {@code userId}: its keyed pseudonym,
+     * or the identifier verbatim when it already is a pseudonym. Same
+     * signature-preserving property as {@link #identityToken}, with a keyed
+     * pseudonym in place of the bare hash.
+     */
+    static String identityTokenV5(String userId, byte[] pseudonymKey) {
+        if (userId == null || userId.isEmpty()) {
+            return "";
+        }
+        return userId.startsWith(GDPR_PSEUDONYM_PREFIX) ? userId : keyedPseudonymFor(userId, pseudonymKey);
+    }
+
+    /**
+     * The key id a stored v5 HMAC names, or null for any earlier form, which named
+     * none.
+     */
+    public static String keyIdOf(String storedHmac) {
+        if (storedHmac == null || !storedHmac.startsWith(V5_PREFIX)) {
+            return null;
+        }
+        int separator = storedHmac.indexOf(':', V5_PREFIX.length());
+        return separator > V5_PREFIX.length() ? storedHmac.substring(V5_PREFIX.length(), separator) : null;
+    }
 
     private AuditHmac() {
         // Utility class
@@ -227,6 +332,16 @@ public final class AuditHmac {
     }
 
     /**
+     * Compute the <strong>v5</strong> HMAC — the form entries are signed with
+     * today: {@code v5:<keyId>:<64 hex chars>}. As with
+     * {@link #computeHmac(AuditEntry, byte[])}, pass the entry through
+     * {@link #withStorablePrecision} first.
+     */
+    public static String computeHmac(AuditEntry entry, SigningKey key) {
+        return V5_PREFIX + key.id() + ":" + hmacSha256(buildCanonicalStringV5(entry, key.pseudonymKey()), key.hmacKey());
+    }
+
+    /**
      * The canonical-form version a stored HMAC names: {@code "v4"}, {@code "v3"},
      * {@code "v2"}, {@code "v1"} for a bare pre-tag digest, or {@code null} for an
      * unsigned value.
@@ -243,6 +358,9 @@ public final class AuditHmac {
     public static String versionOf(String storedHmac) {
         if (storedHmac == null || storedHmac.isBlank()) {
             return null;
+        }
+        if (storedHmac.startsWith(V5_PREFIX)) {
+            return "v5";
         }
         if (storedHmac.startsWith(V4_PREFIX)) {
             return "v4";
@@ -274,7 +392,8 @@ public final class AuditHmac {
      * @return true if the HMAC verifies, false if it does not
      */
     public static boolean verifyHmac(AuditEntry entry, byte[] hmacKey) {
-        return verify(entry, hmacKey, false) != VerificationOutcome.MISMATCH;
+        VerificationOutcome outcome = verify(entry, hmacKey, false);
+        return outcome == VerificationOutcome.MATCH || outcome == VerificationOutcome.MATCH_RECOVERED;
     }
 
     /**
@@ -293,7 +412,16 @@ public final class AuditHmac {
         MATCH_RECOVERED,
 
         /** No recomputation matched. The entry was altered, or signed elsewhere. */
-        MISMATCH
+        MISMATCH,
+
+        /**
+         * A v5 entry naming a key none of the supplied keys is. Nothing about its
+         * integrity is known. The id is text in the row and can be written by anyone
+         * who can edit it, so callers must not read this as benign on its own —
+         * {@link AuditKeyring#isRecordedKeyId} says whether the deployment ever signed
+         * with that key.
+         */
+        UNKNOWN_KEY
     }
 
     /**
@@ -352,6 +480,9 @@ public final class AuditHmac {
         String stored = entry.hmac();
         if (stored == null)
             return VerificationOutcome.MISMATCH;
+        if (stored.startsWith(V5_PREFIX)) {
+            return verify(entry, List.of(signingKey(hmacKey)), recoveryBudget);
+        }
 
         String expectedDigest;
         String storedDigest;
@@ -386,6 +517,61 @@ public final class AuditHmac {
         return MessageDigest.isEqual(decodeHexOrNull(expectedDigest), storedBytes)
                 ? VerificationOutcome.MATCH
                 : VerificationOutcome.MISMATCH;
+    }
+
+    /**
+     * Verify an entry against every key a deployment holds.
+     * <p>
+     * A v5 entry names its key, so exactly that key is used — and a key that is not
+     * in {@code keys} is reported as {@link VerificationOutcome#UNKNOWN_KEY}, not
+     * as a mismatch. Earlier forms name none, so each key is tried in turn: first a
+     * direct check with every key, and only then, spending one unit of
+     * {@code recoveryBudget} for the row rather than one per key, the v3
+     * timestamp-completion search.
+     *
+     * @param keys
+     *            the verification keys, the current signing key first
+     */
+    public static VerificationOutcome verify(AuditEntry entry, List<SigningKey> keys, AuditRecoveryBudget recoveryBudget) {
+        String stored = entry.hmac();
+        if (stored == null || keys == null || keys.isEmpty()) {
+            return VerificationOutcome.MISMATCH;
+        }
+        if (stored.startsWith(V5_PREFIX)) {
+            String keyId = keyIdOf(stored);
+            if (keyId == null) {
+                return VerificationOutcome.MISMATCH;
+            }
+            byte[] storedDigest = decodeHexOrNull(stored.substring(V5_PREFIX.length() + keyId.length() + 1));
+            if (storedDigest == null) {
+                return VerificationOutcome.MISMATCH;
+            }
+            for (SigningKey key : keys) {
+                if (key.id().equals(keyId)) {
+                    String expected = hmacSha256(buildCanonicalStringV5(entry, key.pseudonymKey()), key.hmacKey());
+                    return MessageDigest.isEqual(decodeHexOrNull(expected), storedDigest)
+                            ? VerificationOutcome.MATCH
+                            : VerificationOutcome.MISMATCH;
+                }
+            }
+            return VerificationOutcome.UNKNOWN_KEY;
+        }
+        for (SigningKey key : keys) {
+            if (verify(entry, key.hmacKey(), AuditRecoveryBudget.none()) == VerificationOutcome.MATCH) {
+                return VerificationOutcome.MATCH;
+            }
+        }
+        if (stored.startsWith(V3_PREFIX) && recoveryBudget != null) {
+            byte[] storedV3 = decodeHexOrNull(stored.substring(V3_PREFIX.length()));
+            if (storedV3 != null && recoveryBudget.tryConsume()) {
+                for (SigningKey key : keys) {
+                    if (recoverV3Timestamp(entry, key.hmacKey(), storedV3)) {
+                        return VerificationOutcome.MATCH_RECOVERED;
+                    }
+                }
+            }
+        }
+        return VerificationOutcome.MISMATCH;
     }
 
     /**
@@ -471,8 +657,44 @@ public final class AuditHmac {
     }
 
     /**
-     * Build the <strong>v4</strong> canonical string — the form new entries are
+     * Build the <strong>v5</strong> canonical string — the form new entries are
      * signed with.
+     * <p>
+     * Byte-for-byte v4 apart from the version tag and {@code uid}, which is the
+     * keyed identity token ({@link #identityTokenV5}) rather than the bare-hash
+     * one. See {@link #V5_PREFIX}.
+     * <p>
+     * <strong>Frozen once written.</strong> Same rule as every earlier version:
+     * changing a byte here makes every v5 row read as tampered. Add a v6 instead.
+     */
+    static String buildCanonicalStringV5(AuditEntry entry, byte[] pseudonymKey) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("v5");
+        sb.append("|id=").append(escape(entry.id()));
+        sb.append("|cid=").append(escape(entry.conversationId()));
+        sb.append("|bid=").append(escape(entry.agentId()));
+        sb.append("|bv=").append(entry.agentVersion());
+        sb.append("|uid=").append(escape(identityTokenV5(entry.userId(), pseudonymKey)));
+        sb.append("|env=").append(escape(entry.environment()));
+        sb.append("|si=").append(entry.stepIndex());
+        sb.append("|tid=").append(escape(entry.taskId()));
+        sb.append("|tt=").append(escape(entry.taskType()));
+        sb.append("|ti=").append(entry.taskIndex());
+        sb.append("|seq=").append(entry.sequence());
+        sb.append("|dur=").append(entry.durationMs());
+        sb.append("|in=").append(canonicalValueV2(entry.input()));
+        sb.append("|out=").append(canonicalValueV2(entry.output()));
+        sb.append("|llm=").append(canonicalValueV2(entry.llmDetail()));
+        sb.append("|tools=").append(canonicalValueV2(entry.toolCalls()));
+        sb.append("|actions=").append(canonicalValueV2(entry.actions()));
+        sb.append("|cost=").append(entry.cost());
+        sb.append("|ts=").append(signedTimestamp(entry.timestamp()));
+        return sb.toString();
+    }
+
+    /**
+     * Build the <strong>v4</strong> canonical string — superseded by v5, still
+     * selected by {@link #verify} for rows written while v4 was current.
      * <p>
      * Byte-for-byte v3 apart from the version tag and {@code ts}, which is the
      * millisecond epoch value of the timestamp rather than its

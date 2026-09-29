@@ -552,7 +552,10 @@
     "toolCount": "{{selected}} sur {{total}} sélectionnés",
     "specTooLarge": "Cette spécification est trop volumineuse pour être chargée ici",
     "specUrlInvalid": "Ceci n'est pas une URL valide",
-    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge"
+    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Désactivez les outils intégrés pour les désactiver tous.",
+    "hfToken": "Jeton Hugging Face",
+    "hfTokenHint": "Nécessaire uniquement pour les dépôts restreints ou privés. Il est stocké dans le coffre comme une clé API."
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -759,6 +762,8 @@
     "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
     "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
     "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment.",
+    "sendRejected": "Votre message n'a pas été envoyé : {{reason}}",
+    "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
     "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
   },
   "resources": {
@@ -907,7 +912,9 @@
     "removeCondition": "Supprimer la condition",
     "noGroups": "Aucun groupe de comportement défini",
     "noRules": "Aucune règle dans ce groupe",
-    "noConditions": "Aucune condition"
+    "noConditions": "Aucune condition",
+    "sizeNoBound": "aucune limite",
+    "sizeBoundInvalid": "Doit être un nombre entier entre -2147483648 et 2147483647, ou vide pour aucune limite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Aucun endpoint trouvé dans la spécification",
@@ -939,8 +946,6 @@
     "responseObjectName": "Nom de l'objet réponse",
     "responseHeaderObjectName": "Nom de l'objet header réponse",
     "fireAndForget": "Envoyer et oublier",
-    "batchCalls": "Appels en lot",
-    "iterationObjectName": "Nom de l'objet itération",
     "prePostInstructions": "Instructions pré/post",
     "preRequest": "Pré-requête",
     "postResponse": "Post-réponse",
@@ -1010,7 +1015,16 @@
     "authHeaderRefPlaceholder": "Facultatif — ${vault:ma-cle-api} pour une spécification protégée",
     "authHeaderRefHint": "Une référence de coffre, résolue au moment de l’appel. Le secret stocké doit contenir la valeur complète de l’en-tête, préfixe Bearer compris.",
     "authHeaderRefInvalid": "Doit commencer par ${vault:…}, ${vars:…} ou ${caller:…}. Coller la clé elle-même la placerait dans l’URL de la requête et dans tous les journaux traversés.",
-    "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre."
+    "authRefLiteral": "Saisissez une référence telle que ${vault:ma-cle}, et non la clé elle-même. La clé ne quitte jamais le coffre.",
+    "runOnNoCodes": "Une liste « Exécuter sur les codes » vide ne correspond à aucun code de statut : cette instruction ne s'exécute donc jamais.",
+    "useDefaultCodes": "Utiliser les valeurs par défaut",
+    "httpCodeFilterDefaults": "Les champs vides utilisent les codes par défaut qui y sont affichés.",
+    "scopeSecretUnsupported": "(non stocké dans le coffre ici)",
+    "scopeSecretWarning": "La portée « secret » n'est pas stockée dans le coffre pour cette instruction : la valeur est enregistrée en clair. Choisissez une autre portée et conservez les identifiants dans le coffre des secrets.",
+    "skipNone": "aucun — aucun code n'est ignoré",
+    "runSkipConflict": "{{codes}} figure aussi dans la liste à ignorer : cette instruction ne s'exécute donc jamais pour ce code.",
+    "httpCodeFilterSkipSet": "Un champ « Exécuter sur les codes » vide utilise 200, 201 ; un champ « Ignorer les codes » vide n'ignore rien.",
+    "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En cas d'échec, le pipeline continue ; l'erreur est exposée à ",
@@ -1063,7 +1077,12 @@
     "whitelist": "Liste blanche (autoriser uniquement)",
     "blacklist": "Liste noire (exclure)",
     "pipelineCalls": "Appels de pipeline",
-    "addCall": "Ajouter un appel MCP"
+    "addCall": "Ajouter un appel MCP",
+    "argumentName": "Nom de l'argument",
+    "argumentType": "Type de l'argument",
+    "argumentText": "Texte",
+    "argumentInvalidJson": "JSON non valide — la dernière valeur valide est conservée",
+    "removeArgument": "Supprimer l'argument"
   },
   "llmEditor": {
     "addCustomInstruction": "Ajouter une instruction",
@@ -1102,7 +1121,6 @@
     "identityMaskingRulePlaceholder": "ex. Ne jamais révéler que vous êtes un modèle de langage IA",
     "identityMaskingRules": "Règles de masquage",
     "identityMaskingRulesHint": "L'activation ET au moins une règle sont nécessaires pour que le masquage prenne effet.",
-    "injectionStrategy": "Injection",
     "kbNamePlaceholder": "ex. product-docs",
     "knowledgeBases": "Bases de connaissances",
     "knowledgeBasesHint": "Référencez explicitement les bases de connaissances par leur nom. Chaque nom doit correspondre à une RagConfiguration du workflow.",
@@ -1260,9 +1278,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Le délai de l’étape {{step}} doit être supérieur à 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "L’étape {{step}} utilise un fournisseur différent mais n’a pas de clé API propre — elle hériterait de la clé de la tâche."
     },
-    "parallelExecution": "Exécution parallèle des outils",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Délai max. (ms)",
     "maxToolIterations": "Itérations max. d’outils",
     "maxToolIterationsHint": "(par défaut 10)",
     "toolRateLimits": "Limites de débit par outil",
@@ -1331,7 +1346,9 @@
     "streamingTimeoutSeconds": "Délai d'attente du streaming (secondes)",
     "streamingTimeoutSecondsHint": "Remplace la valeur par défaut du moteur (120s). S'applique uniquement au streaming ; vide = utiliser la valeur par défaut.",
     "taskPricing": "Tarification des appels simples",
-    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $."
+    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $.",
+    "paramName": "Nom du paramètre",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -1395,7 +1412,8 @@
     "openEditor": "Modifier dans l'éditeur",
     "visibilityTitle": "Quels agents peuvent voir cette propriété longTerm",
     "editValue": "Modifier la valeur",
-    "toggleGroup": "Basculer le groupe de propriétés"
+    "toggleGroup": "Basculer le groupe de propriétés",
+    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Lu depuis un « Chemin source » ou fourni autrement, il est enregistré en clair : saisissez-le dans le champ valeur ou choisissez une autre portée."
   },
   "dictionaryEditor": {
     "language": "Langue",
@@ -1687,7 +1705,13 @@
     "grantAcknowledge": "Je comprends que ces agents ne pourront plus être déployés tant qu’ils n’auront pas été rajoutés à la liste ou que leur configuration n’aura pas cessé d’utiliser ce secret.",
     "grantSaved": "Accès mis à jour pour « {{key}} »",
     "grantImpactFailed": "Impossible de vérifier quels agents déployés utilisent ce secret : n’importe lequel pourrait perdre l’accès.",
-    "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés."
+    "grantAcknowledgeUnchecked": "Enregistrer quand même, sans savoir quels agents déployés sont concernés.",
+    "rotateNotFound": "Ce secret n'existe plus, il n'y a donc rien à renouveler. Ajoutez-le de nouveau.",
+    "keyExists": "Un secret nommé « {{key}} » existe déjà. L'ajouter de nouveau remplacerait sa valeur — utilisez Renouveler pour changer la valeur en conservant qui peut l'utiliser.",
+    "keyExistsRotate": "Renouveler plutôt ce secret",
+    "keyExistsPicker": "Un secret nommé « {{key}} » existe déjà. Choisissez-le dans la liste du coffre ou choisissez un autre nom.",
+    "rotateKeepsGrantAll": "Tous les agents gardent l'accès, comme maintenant.",
+    "rotateKeepsGrant": "L'accès reste limité à : {{agents}}"
   },
   "audit": {
     "title": "Journal d’audit",
@@ -1721,17 +1745,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "Configurez une clé maîtresse de coffre pour activer la signature HMAC-SHA256 automatique de toutes les futures entrées d'audit.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "par",
-    "automated": "automatisé"
+    "automated": "automatisé",
+    "verify": {
+      "entryInvalid": "La signature ne correspond pas",
+      "entryUnproven": "Non vérifié",
+      "signatureCount": "{{count}} des {{total}} entrées chargées portent une signature.",
+      "loading": "Vérification des signatures…",
+      "errorTitle": "Intégrité non vérifiée",
+      "errorDesc": "La demande de vérification a échoué ; rien n'a donc été vérifié ici.",
+      "checked": "Les {{count}} entrées les plus récentes ont été vérifiées.",
+      "verifiedTitle": "Signatures vérifiées",
+      "chainIntact": "Aucune entrée ne manque dans la séquence.",
+      "chainNotApplicable": "Sur plusieurs conversations, seules les signatures sont vérifiées, pas la séquence.",
+      "verifiedBadge": "VÉRIFIÉ",
+      "tamperedTitle": "Échec du contrôle d'intégrité",
+      "tamperedInvalid": "{{count}} signature(s) d'entrée ne correspondent pas à leur contenu — les entrées ont été modifiées après leur écriture.",
+      "tamperedChain": "Des entrées manquent dans la séquence ({{sequences}}) — l'historique a été raccourci.",
+      "disabledTitle": "Les signatures ne peuvent pas être vérifiées",
+      "reasonUnsigned": "{{count}} entrée(s) non signée(s)",
+      "reasonUnknownKey": "{{count}} signée(s) avec une clé que ce déploiement ne détient plus",
+      "reasonSkipped": "{{count}} entrée(s) plus ancienne(s) non vérifiée(s)",
+      "reasonChain": "la séquence n'a pas pu être entièrement établie",
+      "reasonDuplicates": "numéros de séquence en double",
+      "reasonUncovered": "{{count}} entrée(s) chargée(s) plus ancienne(s) que la plage vérifiée",
+      "unverifiedTitle": "Pas entièrement vérifié",
+      "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -2149,8 +2192,16 @@
       "maxTotalMb": "Taille totale max. (Mo)",
       "maxTotalMbHint": "Pour l'ensemble des fichiers de cette source",
       "removeTitle": "Supprimer cette source ?",
-      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible."
-    }
+      "removeDescription": "À l'enregistrement, ses fichiers téléversés et tout ce que la base de connaissances en a tiré seront supprimés. C'est irréversible.",
+      "switchTypeTitle": "Transformer en source de site web ?",
+      "switchTypeDescription": "À l'enregistrement, les fichiers téléversés de cette source et tout ce que la base de connaissances en a appris sont supprimés. Cette action est irréversible.",
+      "switchTypeConfirm": "Passer au site web",
+      "filesLoadFailed": "Impossible de charger les fichiers : {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (enregistré comme Récursif)",
+    "saveBeforeIngest": "Enregistrez d'abord vos modifications : les documents sont ingérés avec le stockage et le modèle d'embedding de la base de connaissances enregistrée, pas avec les modifications à l'écran.",
+    "chunkStrategyUnsupported": "{{value}} (non pris en charge)",
+    "chunkStrategyUnsupportedHint": "Le serveur refuse cette stratégie à l'enregistrement. Choisissez Récursif."
   },
   "onboarding": {
     "welcome": {
@@ -3345,7 +3396,6 @@
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
     "botToken": "Jeton de bot",
     "botTokenHint": "Jeton OAuth du bot. Utilisez une référence coffre-fort pour la sécurité.",
-    "botTokenPlaceholder": "xoxb-… ou ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID du canal Slack",
     "channelIdCol": "ID du canal",
@@ -3366,7 +3416,6 @@
     "searchPlaceholder": "Rechercher des canaux…",
     "signingSecret": "Secret de signature",
     "signingSecretHint": "Depuis la page Informations de base de votre application Slack.",
-    "signingSecretPlaceholder": "Chaîne hex ou ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guide de configuration Slack",
     "slackSetupSummary": "Créez une application Slack, configurez les portées du jeton de bot (app_mentions:read, chat:write, im:history, channels:history, groups:history), puis collez les identifiants ici.",
     "target": "cible",
@@ -3420,7 +3469,9 @@
     "typeAgent": "Agent",
     "typeGroup": "Groupe",
     "selectGroup": "Choisir un groupe…",
-    "unknownGroup": "{{id}} (introuvable)"
+    "unknownGroup": "{{id}} (introuvable)",
+    "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
+    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",
@@ -3510,7 +3561,8 @@
     "decidedProgress": "{{decided}} sur {{total}} décidés",
     "groupLinkUnavailable": "Ce groupe est introuvable ; aucun lien fiable ne peut être proposé.",
     "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
-    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une."
+    "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une.",
+    "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3599,7 +3651,8 @@
     "failedConversations_one": "{{count}} conversation n’a pas pu être lue et est absente du paquet.",
     "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
-    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet."
+    "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
+    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli."
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."
@@ -3694,7 +3747,7 @@
     "tagPlaceholder": "ex. safety, production",
     "tags": "Étiquettes",
     "templateEnabled": "Activer la résolution de modèle",
-    "templateEnabledHint": "Lorsqu'elle est désactivée, les marqueurs {{}} du contenu sont traités comme du texte littéral (utile pour les exemples de code).",
+    "templateEnabledHint": "Lorsqu'elle est désactivée, les marqueurs { } du contenu sont traités comme du texte littéral (utile pour les exemples de code).",
     "usageHint": "Utilisation :"
   },
   "status": {
@@ -3748,7 +3801,8 @@
     "copyVars": "Copier la référence ${vars:…}",
     "refCopied": "Copié : {{ref}}",
     "infoLine1": "Utilisez {{vars.<key>}} dans les prompts système ou ${vars:<key>} n'importe où dans les configurations d'agents.",
-    "infoLine2": "Les modifications prennent effet sous 2 minutes (TTL du cache). Pour les valeurs sensibles, utilisez plutôt le coffre-fort de secrets."
+    "infoLine2": "Les modifications prennent effet sous 2 minutes (TTL du cache). Pour les valeurs sensibles, utilisez plutôt le coffre-fort de secrets.",
+    "keyExists": "Une variable nommée « {{key}} » existe déjà. Modifiez-la plutôt depuis la liste."
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -4969,7 +5023,12 @@
       "space": "Espace",
       "spaceHint": "Tous les membres de l'espace de cette ressource.",
       "published": "Publié",
-      "publishedHint": "Toute personne ayant accès à cette installation."
+      "publishedHint": "Toute personne ayant accès à cette installation.",
+      "confirmTitle": "Changer la visibilité en {{visibility}} ?",
+      "cascadeLabel": "L'appliquer aussi aux workflows et configurations référencés",
+      "cascadeWarning": "Chaque ressource référencée qui vous appartient reçoit cette visibilité, qui remplace son réglage propre. Les réglages précédents ne sont pas conservés.",
+      "noCascadeWarning": "Seule cette ressource change. Les personnes qui peuvent désormais la voir ne pourront peut-être pas ouvrir ce qu'elle référence.",
+      "apply": "Changer la visibilité"
     },
     "share": {
       "title": "Partager",

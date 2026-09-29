@@ -58,7 +58,7 @@ class AuditLedgerErasedUserTest {
         ledger.submit(entryFor("someone-else", "other"));
 
         var stored = flushed();
-        assertEquals(AuditHmac.pseudonymFor("erased-user"), stored.get(0).userId());
+        assertKeyedPseudonym(stored.get(0).userId());
         assertEquals("someone-else", stored.get(1).userId());
     }
 
@@ -68,7 +68,7 @@ class AuditLedgerErasedUserTest {
 
         ledger.markUserErased("erased-user");
 
-        assertEquals(AuditHmac.pseudonymFor("erased-user"), flushed().getFirst().userId());
+        assertKeyedPseudonym(flushed().getFirst().userId());
     }
 
     /**
@@ -84,6 +84,15 @@ class AuditLedgerErasedUserTest {
         var stored = flushed().getFirst();
 
         assertNotNull(stored.hmac());
-        assertEquals(stored.hmac(), AuditHmac.computeHmac(stored, ledger.getHmacKey()));
+        assertEquals(AuditVerificationStatus.VALID, ledger.verifyEntry(stored));
+    }
+
+    /**
+     * The ledger signs, so the late entry carries the keyed pseudonym the stores
+     * write into v5 rows — never the raw id, never the unkeyed hash.
+     */
+    private static void assertKeyedPseudonym(String userId) {
+        assertTrue(userId.startsWith(AuditHmac.KEYED_PSEUDONYM_PREFIX), userId);
+        assertNotEquals(AuditHmac.pseudonymFor("erased-user"), userId);
     }
 }

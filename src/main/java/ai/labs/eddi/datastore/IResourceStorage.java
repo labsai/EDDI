@@ -154,6 +154,24 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * As {@link #storeIfFieldEquals(IResource, String, String)}, but the write also
+     * lands when the stored document has <em>no</em> value for {@code fieldName}
+     * (the field is absent or JSON {@code null}). For stamping a guard field onto a
+     * document written before that field existed: the stored value is still
+     * compared inside the one atomic write, so of two writers that both read the
+     * field-less document only the first lands — its write stamps the field, and
+     * the second then matches neither branch and gets
+     * {@link IResourceStore.ResourceModifiedException}. Same zero-match and
+     * no-fallback contract as the plain overload.
+     */
+    default void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEqualsOrMissing is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
      * As {@link #storeIfFieldEquals(IResource, String, String)}, but comparing a
      * JSON <em>number</em> field. A separate overload because the two backends
      * disagree about text-comparing numbers: PostgreSQL's {@code data ->> field}
@@ -200,22 +218,55 @@ public interface IResourceStorage<T> {
     }
 
     /**
-     * Archive {@code history} (flagged deleted) and remove the current row as ONE
-     * unit of work.
+     * Archive {@code history} (flagged deleted) and remove the current row - but
+     * only while the current row is still at {@code expectedCurrentVersion} - as
+     * ONE unit of work.
      * <p>
      * Non-atomically, a crash between the two writes leaves an archived-as-deleted
      * row while the live row is still present — the resource looks deleted in
-     * history and alive in the current collection at the same time. Backends that
-     * have transactions must override this.
+     * history and alive in the current collection at the same time.
+     * <p>
+     * The version predicate is what makes a delete safe against an update racing
+     * it. Removing by id alone, a delete that read version N erased the version N+1
+     * an update had just committed — never archived, so gone for good — and its
+     * tombstone for N lost the insert race to the update's non-deleted history row
+     * of N, so the resource then looked neither live nor deleted.
+     * <p>
+     * There is no default: a conditional delete must never silently degrade to an
+     * unconditional one.
      *
      * @param history
      *            the archived, deleted-flagged version
      * @param id
      *            the resource id to remove from the current collection
+     * @param expectedCurrentVersion
+     *            the version the caller read and means to delete
+     * @throws IResourceStore.ResourceModifiedException
+     *             if the resource is live at another version; nothing is deleted
+     *             and the tombstone is not left behind. A resource that is already
+     *             gone is not an error — it is deleted, as asked.
      */
-    default void storeHistoryAndRemove(IHistoryResource<T> history, String id) {
-        store(history);
-        remove(id);
+    default void storeHistoryAndRemove(IHistoryResource<T> history, String id, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        throw new UnsupportedOperationException(
+                "storeHistoryAndRemove is not implemented by " + getClass().getName()
+                        + " — a version-checked delete must never silently degrade to an unconditional one");
+    }
+
+    /**
+     * Rewrite an existing history row — the version {@code history} names — in
+     * place.
+     * <p>
+     * {@link #store(IHistoryResource)} is insert-if-absent, which is right for
+     * archiving and made every in-place edit of a historized version a silent
+     * no-op.
+     *
+     * @return {@code false} when there is no such history row, so nothing was
+     *         written
+     */
+    default boolean replaceHistory(IHistoryResource<T> history) {
+        throw new UnsupportedOperationException(
+                "replaceHistory is not implemented by " + getClass().getName());
     }
 
     /**
@@ -261,7 +312,8 @@ public interface IResourceStorage<T> {
      *
      * @param filters
      *            the filter criteria (field/value pairs, strings are treated as
-     *            regex)
+     *            regex unless built with
+     *            {@link IResourceFilter.QueryFilter#exact(String, String)})
      * @param sortField
      *            field to sort by (descending)
      * @param skip
