@@ -111,6 +111,11 @@ export function auditVerdict(report: AuditVerificationReport, loadedCount = 0): 
  * loaded rows and anything past it — older pages, or rows that arrived after
  * the report — was never looked at. A verdict over the window must not be
  * shown as a verdict over everything on screen.
+ *
+ * This counts rows only. A refreshed newest page can swap in newer rows while
+ * the count stays put, so it cannot see those; the audit page handles them by
+ * timing instead (`reportStale` in `pages/audit.tsx`: no verified verdict for a
+ * report requested before the newest page was read).
  */
 export function uncoveredCount(report: AuditVerificationReport, loadedCount: number): number {
   return Math.max(0, loadedCount - report.entriesChecked);

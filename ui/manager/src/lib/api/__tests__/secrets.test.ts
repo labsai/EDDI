@@ -132,7 +132,8 @@ describe("storeSecret", () => {
 
 describe("deleteSecret", () => {
   it("deletes a secret without error", async () => {
-    await expect(deleteSecret("default", "test-key")).resolves.not.toThrow();
+    // A key the mock vault holds: deleting an absent one is a 404, as on the backend.
+    await expect(deleteSecret("default", "openai-api-key")).resolves.not.toThrow();
   });
 
   it("throws on 503 with vault not configured message", async () => {

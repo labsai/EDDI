@@ -1,5 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { verifyAgentAudit, verifyConversationAudit } from "@/lib/api/audit-verify";
+import {
+  verifyAgentAudit,
+  verifyConversationAudit,
+  type AuditVerificationReport,
+} from "@/lib/api/audit-verify";
+
+/** A report plus when it was requested (epoch ms, taken before the request is sent). */
+export type TimedAuditVerificationReport = AuditVerificationReport & { requestedAt: number };
 
 /**
  * Ask the backend to verify the audit trail the screen is showing.
@@ -10,19 +17,28 @@ import { verifyAgentAudit, verifyConversationAudit } from "@/lib/api/audit-verif
  * pages the screen has loaded — the report says how many it checked, and the
  * screen stops showing a verified verdict once it has loaded more rows than
  * that (`uncoveredCount`).
+ *
+ * No timer of its own: a report only means something relative to the rows on
+ * screen, so the page decides when to re-verify — after the trail has refreshed
+ * — and compares `requestedAt` with when those rows arrived. A report requested
+ * before the newest rows were read never looked at them.
  */
 export function useAuditVerification(args: {
   mode: "conversation" | "agent";
   id: string;
   agentVersion?: number;
-  refetchInterval?: number | false;
+  enabled?: boolean;
 }) {
-  const { mode, id, agentVersion, refetchInterval = false } = args;
+  const { mode, id, agentVersion, enabled = true } = args;
   return useQuery({
     queryKey: ["audit", "verify", mode, id, mode === "agent" ? (agentVersion ?? null) : null],
-    queryFn: () =>
-      mode === "conversation" ? verifyConversationAudit(id) : verifyAgentAudit(id, agentVersion),
-    enabled: !!id,
-    refetchInterval,
+    queryFn: async (): Promise<TimedAuditVerificationReport> => {
+      const requestedAt = Date.now();
+      const report = await (mode === "conversation"
+        ? verifyConversationAudit(id)
+        : verifyAgentAudit(id, agentVersion));
+      return { ...report, requestedAt };
+    },
+    enabled: !!id && enabled,
   });
 }

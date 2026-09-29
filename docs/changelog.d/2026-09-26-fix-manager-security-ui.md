@@ -55,6 +55,12 @@ more than was checked. Every change has a regression test that fails without it.
   written, then taken off this branch because its endpoint exists only in the unmerged #836; on `main` it
   could only answer "not supported". It is kept on the local branch `feat/manager-adopt-master-key` for
   after #836 merges.
+- **Review follow-ups (CodeRabbit).** The audit verification no longer runs on its own timer beside the
+  trail's: it is requested once the newest page has arrived and again after each refresh of that page,
+  and a report requested before the newest rows were read is shown as "Verifying…", never VERIFIED — a
+  refreshed page of 100 swaps in newer rows without moving the count `uncoveredCount` compares. The
+  secret mock handlers (list, metadata GET, store, grant, delete) now share one store reset after every
+  test, so a key created in a test is found by the next lookup and a deleted one is gone.
 
 ### Refuted / partial
 

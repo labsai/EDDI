@@ -578,6 +578,12 @@ export function AuditPage() {
   // flattened union so paging *appends* rather than replacing earlier rows.
   const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
 
+  // When the newest page (skip 0) last arrived. Only that page can bring rows
+  // newer than a verification report; older pages are covered (or not) by
+  // `uncoveredCount`.
+  const [headFetchedAt, setHeadFetchedAt] = useState(0);
+  const trailUpdatedAt = mode === "conversation" ? convQuery.dataUpdatedAt : agentQuery.dataUpdatedAt;
+
   // Reset the accumulator whenever the search context changes. `skip` is reset
   // by whatever changes the context (the search handlers *and* the mode
   // toggles) so that it lands in the SAME render batch as the context change.
@@ -586,6 +592,7 @@ export function AuditPage() {
   // accumulator this effect just cleared.
   useEffect(() => {
     setPages({});
+    setHeadFetchedAt(0);
   }, [mode, searchValue, activeAgentId, activeAgentVersion]);
 
   // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace
@@ -596,7 +603,8 @@ export function AuditPage() {
       if (prev[skip] === pageEntries) return prev;
       return { ...prev, [skip]: pageEntries };
     });
-  }, [pageEntries, skip]);
+    if (skip === 0) setHeadFetchedAt(trailUpdatedAt);
+  }, [pageEntries, skip, trailUpdatedAt]);
 
   const entries = useMemo(
     () =>
@@ -685,12 +693,26 @@ export function AuditPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
 
   // Integrity: asked of the backend, never inferred from `hmac` being present.
+  // The report follows the trail rather than running on a timer of its own: it
+  // is first requested once the newest page has arrived, and requested again
+  // whenever that page is refreshed (auto-refresh, window focus). A report
+  // requested before the newest rows were read never checked them, so until its
+  // successor lands it may not be shown as verified (`reportStale`).
   const verification = useAuditVerification({
     mode,
     id: mode === "conversation" ? searchValue : activeAgentId,
     agentVersion: activeAgentVersion,
-    refetchInterval: autoRefresh ? 10_000 : false,
+    enabled: headFetchedAt > 0,
   });
+  const reportStale = !!verification.data && verification.data.requestedAt < headFetchedAt;
+  const { refetch: refetchVerification, isFetching: isVerifying } = verification;
+  // Once per head refresh, so a failing verify endpoint is not retried in a loop.
+  const verifyRequestedForHead = useRef(0);
+  useEffect(() => {
+    if (!reportStale || isVerifying || verifyRequestedForHead.current === headFetchedAt) return;
+    verifyRequestedForHead.current = headFetchedAt;
+    void refetchVerification();
+  }, [reportStale, isVerifying, headFetchedAt, refetchVerification]);
   const problemsById = useMemo(() => {
     const map = new Map<string, AuditEntryStatus>();
     for (const problem of verification.data?.problems ?? []) map.set(problem.entryId, problem.status);
@@ -702,6 +724,7 @@ export function AuditPage() {
 
   useEffect(() => {
     if (!autoRefresh || !hasSearched) return;
+    // Refreshes the trail only; the verification follows once it has landed.
     const id = setInterval(() => {
       if (autoRefreshRef.current) activeQueryFn();
     }, 10_000);
@@ -925,6 +948,7 @@ export function AuditPage() {
           report={verification.data}
           isLoading={verification.isLoading}
           isError={verification.isError}
+          stale={reportStale}
           onRetry={() => void verification.refetch()}
           signed={stats.signed}
           total={stats.count}
@@ -1038,6 +1062,7 @@ function IntegrityBanner({
   isLoading,
   isError,
   onRetry,
+  stale,
   signed,
   total,
 }: {
@@ -1045,6 +1070,8 @@ function IntegrityBanner({
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+  /** The trail on screen was read after this report was requested. */
+  stale: boolean;
   signed: number;
   total: number;
 }) {
@@ -1055,14 +1082,14 @@ function IntegrityBanner({
     defaultValue: "{{count}} of {{total}} loaded entries carry a signature.",
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-testid="integrity-banner" data-verdict="loading">
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{t("audit.verify.loading", "Verifying signatures…")}</p>
-      </div>
-    );
-  }
+  const verifying = (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3" data-testid="integrity-banner" data-verdict="loading">
+      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">{t("audit.verify.loading", "Verifying signatures…")}</p>
+    </div>
+  );
+
+  if (isLoading) return verifying;
 
   if (isError || !report) {
     return (
@@ -1094,6 +1121,11 @@ function IntegrityBanner({
     count: report.entriesChecked,
     defaultValue: "Checked the {{count}} most recent entries.",
   });
+
+  // A clean report over rows it never saw proves nothing about them: wait for
+  // the re-verification the page has already requested. (A disproven signature
+  // stays disproven however many rows arrive after it, so other verdicts show.)
+  if (verdict === "verified" && stale) return verifying;
 
   if (verdict === "verified") {
     return (

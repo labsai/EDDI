@@ -88,7 +88,8 @@ describe("useDeleteSecret", () => {
       wrapper: createWrapper(),
     });
     await act(async () => {
-      result.current.mutate({ tenantId: "default", keyName: "api-key" });
+      // A key the mock vault holds: deleting an absent one is a 404, as on the backend.
+      result.current.mutate({ tenantId: "default", keyName: "openai-api-key" });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });

@@ -168,6 +168,82 @@ describe("audit integrity banner", () => {
     expect(banner).toHaveTextContent(/Checked the 150 most recent entries/);
   });
 
+  it("does not show VERIFIED over trail rows read after the report was requested", async () => {
+    // The trail refreshes on its own (auto-refresh tick, window focus). A fresh
+    // newest page replaces the old one row for row, so the loaded count — and
+    // with it `uncoveredCount` — does not move; only the timing says the report
+    // never saw the new rows. Refetching the trail alone reproduces the gap the
+    // separate verification timer used to leave open.
+    const entry = (id: string): AuditEntry => ({
+      id,
+      conversationId: "conv1",
+      agentId: "agent1",
+      agentVersion: 1,
+      userId: null,
+      environment: null,
+      stepIndex: 0,
+      taskId: `task-${id}`,
+      taskType: "behavior",
+      taskIndex: 0,
+      durationMs: 1,
+      input: null,
+      output: null,
+      llmDetail: null,
+      toolCalls: null,
+      actions: null,
+      cost: 0,
+      timestamp: "2026-09-26T10:00:00Z",
+      hmac: "h",
+      agentSignature: null,
+    });
+    let trailReads = 0;
+    server.use(
+      http.get("*/auditstore/:conversationId", ({ request }) => {
+        if (new URL(request.url).pathname.endsWith("/count")) return;
+        trailReads += 1;
+        // The second read has one newer entry on top; the page stays 100 rows.
+        const newest = trailReads > 1 ? [entry("e-new")] : [];
+        const rest = Array.from({ length: 100 - newest.length }, (_, i) => entry(`e-${i}`));
+        return HttpResponse.json([...newest, ...rest]);
+      }),
+    );
+    const verifyCalls: string[] = [];
+    let releaseSecondReport: () => void = () => {};
+    const secondReportGate = new Promise<void>((resolve) => {
+      releaseSecondReport = resolve;
+    });
+    server.use(
+      http.get("*/auditstore/verify/:conversationId", async ({ request }) => {
+        verifyCalls.push(request.url);
+        if (verifyCalls.length > 1) await secondReportGate;
+        return HttpResponse.json(report({ entriesChecked: 1000, valid: 100 }));
+      }),
+    );
+
+    const { queryClient } = renderWithProviders(<AuditPage />, { initialRoute: "/manage/audit" });
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("mode-conversation"));
+    await user.type(screen.getByTestId("conversation-input"), "conv1");
+    await user.click(screen.getByTestId("search-button"));
+    await screen.findByTestId("audit-timeline");
+    expect((await verdictShown()).dataset.verdict).toBe("verified");
+    expect(verifyCalls).toHaveLength(1);
+
+    // Only the trail refreshes, as the page's own timer does.
+    await queryClient.refetchQueries({ queryKey: ["audit", "trail"] });
+    await screen.findByTestId("audit-entry-e-new");
+
+    // The report predates the row on top: no green until one that saw it lands,
+    // and that one is requested because the trail moved.
+    const banner = screen.getByTestId("integrity-banner");
+    expect(banner.dataset.verdict).toBe("loading");
+    expect(within(banner).queryByText("VERIFIED")).not.toBeInTheDocument();
+    await waitFor(() => expect(verifyCalls).toHaveLength(2));
+
+    releaseSecondReport();
+    await waitFor(() => expect(screen.getByTestId("integrity-banner").dataset.verdict).toBe("verified"));
+  });
+
   it("says what could not be checked when nothing is disproven", async () => {
     serveVerification(report({ valid: 3, unsigned: 1 }));
     await searchConversation();
