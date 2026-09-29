@@ -39,6 +39,10 @@ class UrlValidationUtilsEmbeddedIPv4Test {
             "64:ff9b::a00:1", // 10.0.0.1
             "64:ff9b::c0a8:101", // 192.168.1.1
             "64:ff9b::a9fe:a9fe", // 169.254.169.254
+            // NAT64 local-use prefix (RFC 8215) — blocked whole: with a /48
+            // translator the IPv4 address sits in bits 48-63 and 72-87, so the
+            // trailing 8.8.8.8 says nothing about where this goes.
+            "64:ff9b:1::808:808", "64:ff9b:1:7f00:0:100:808:808",
             // 6to4 (RFC 3056) around private IPv4
             "2002:7f00:1::1", // 127.0.0.1
             "2002:a00:1::", // 10.0.0.1
