@@ -160,6 +160,14 @@ class MongoSecretPersistenceTest extends MongoTestBase {
             persistence.setMetaValue("key", "v2");
             assertEquals("v2", persistence.getMetaValue("key"));
         }
+
+        @Test
+        @DisplayName("set-if-absent — first value wins, a later one never replaces it")
+        void setIfAbsentKeepsFirst() {
+            assertEquals("first", persistence.setMetaValueIfAbsent("once.key", "first"));
+            assertEquals("first", persistence.setMetaValueIfAbsent("once.key", "second"));
+            assertEquals("first", persistence.getMetaValue("once.key"));
+        }
     }
 
     // ─── Helpers ────────────────────────────────────────────────

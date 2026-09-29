@@ -10,14 +10,12 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
@@ -33,13 +31,28 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class PdfReaderTool {
     private static final Logger LOGGER = Logger.getLogger(PdfReaderTool.class);
+
+    /**
+     * Backstop PDF-download cap used when no configuration is supplied (25 MiB).
+     */
+    static final long DEFAULT_MAX_PDF_BYTES = 25L * 1024 * 1024;
+
     private final SafeHttpClient httpClient;
     private final AttachmentTextExtractor textExtractor;
+    private final long maxPdfBytes;
 
     @Inject
-    public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor) {
+    public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor,
+            @ConfigProperty(name = "eddi.tools.pdf-reader.max-download-bytes",
+                            defaultValue = "26214400") long maxPdfBytes) {
         this.httpClient = httpClient;
         this.textExtractor = textExtractor;
+        this.maxPdfBytes = maxPdfBytes > 0 ? maxPdfBytes : DEFAULT_MAX_PDF_BYTES;
+    }
+
+    /** Convenience constructor for tests and callers with no configured cap. */
+    public PdfReaderTool(SafeHttpClient httpClient, AttachmentTextExtractor textExtractor) {
+        this(httpClient, textExtractor, DEFAULT_MAX_PDF_BYTES);
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
@@ -113,37 +126,24 @@ public class PdfReaderTool {
     }
 
     private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
-        Path tempFile = null;
-        try {
-            tempFile = downloadPdf(url);
-            return Files.readAllBytes(tempFile);
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException e) {
-                    LOGGER.warn("Could not delete temp file: " + tempFile);
-                }
-            }
-        }
-    }
-
-    private Path downloadPdf(String url) throws IOException, InterruptedException {
         LOGGER.debug("Downloading PDF from URL: " + url);
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
-        Path tempFile = Files.createTempFile("eddi-pdf-", ".pdf");
-
-        HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(tempFile));
+        // Bounded read in place of ofFile()+readAllBytes(): an LLM-chosen URL could
+        // otherwise stream an unbounded file onto disk and then into the heap. The
+        // body is capped as it arrives; a body that hits the cap is rejected rather
+        // than truncated, because a partial PDF is not something to hand PDFBox.
+        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, maxPdfBytes);
 
         if (response.statusCode() != 200) {
-            Files.deleteIfExists(tempFile);
             throw new IOException("HTTP " + response.statusCode() + " when downloading PDF");
         }
+        if (response.truncated()) {
+            throw new IOException("PDF exceeds the maximum download size of " + maxPdfBytes + " bytes");
+        }
 
-        LOGGER.debug("PDF downloaded to temp file: " + tempFile);
-        return tempFile;
+        return response.body();
     }
 }

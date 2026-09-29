@@ -148,6 +148,65 @@ class ZipArchiveTest {
     }
 
     @Test
+    void unzip_tooManyEntries_throwsIOException(@TempDir Path tempDir) throws IOException {
+        // A ZipArchive that allows at most 3 entries; the archive has 4.
+        ZipArchive limited = new ZipArchive(3, 100L * 1024 * 1024, 500L * 1024 * 1024);
+        Path zipFile = tempDir.resolve("many.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile.toFile()))) {
+            for (int i = 0; i < 4; i++) {
+                zos.putNextEntry(new ZipEntry("file" + i + ".txt"));
+                zos.write("x".getBytes());
+                zos.closeEntry();
+            }
+        }
+
+        File targetDir = tempDir.resolve("extracted").toFile();
+        try (InputStream is = new FileInputStream(zipFile.toFile())) {
+            IOException e = assertThrows(IOException.class, () -> limited.unzip(is, targetDir));
+            assertTrue(e.getMessage().contains("too many entries"), e.getMessage());
+        }
+    }
+
+    @Test
+    void unzip_entryExceedsInflatedCap_throwsIOException(@TempDir Path tempDir) throws IOException {
+        // Cap a single entry at 1 KiB; the entry inflates to 64 KiB of highly
+        // compressible zeros (a tiny archive on disk), so it is aborted mid-stream.
+        ZipArchive limited = new ZipArchive(10_000, 1024, 500L * 1024 * 1024);
+        Path zipFile = tempDir.resolve("bomb.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile.toFile()))) {
+            zos.putNextEntry(new ZipEntry("big.bin"));
+            zos.write(new byte[64 * 1024]);
+            zos.closeEntry();
+        }
+
+        File targetDir = tempDir.resolve("extracted").toFile();
+        try (InputStream is = new FileInputStream(zipFile.toFile())) {
+            IOException e = assertThrows(IOException.class, () -> limited.unzip(is, targetDir));
+            assertTrue(e.getMessage().contains("maximum inflated size"), e.getMessage());
+        }
+    }
+
+    @Test
+    void unzip_totalInflatedExceedsCap_throwsIOException(@TempDir Path tempDir) throws IOException {
+        // Per-entry cap generous, total cap 4 KiB; three 2 KiB entries add up past it.
+        ZipArchive limited = new ZipArchive(10_000, 1024L * 1024, 4096);
+        Path zipFile = tempDir.resolve("total.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile.toFile()))) {
+            for (int i = 0; i < 3; i++) {
+                zos.putNextEntry(new ZipEntry("f" + i + ".bin"));
+                zos.write(new byte[2048]);
+                zos.closeEntry();
+            }
+        }
+
+        File targetDir = tempDir.resolve("extracted").toFile();
+        try (InputStream is = new FileInputStream(zipFile.toFile())) {
+            IOException e = assertThrows(IOException.class, () -> limited.unzip(is, targetDir));
+            assertTrue(e.getMessage().contains("total inflated size"), e.getMessage());
+        }
+    }
+
+    @Test
     void unzip_withDirectories_createsStructure(@TempDir Path tempDir) throws IOException {
         Path zipFile = tempDir.resolve("test.zip");
         try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile.toFile()))) {
@@ -258,9 +317,9 @@ class ZipArchiveTest {
 
     @Test
     void defaultLimitsAreTheDocumentedOnes() {
-        assertEquals(10_000, ZipArchive.DEFAULT_MAX_ENTRIES);
-        assertEquals(32L * 1024 * 1024, ZipArchive.DEFAULT_MAX_ENTRY_BYTES);
-        assertEquals(256L * 1024 * 1024, ZipArchive.DEFAULT_MAX_TOTAL_BYTES);
+        assertEquals(10_000, ZipArchive.MAX_ENTRIES);
+        assertEquals(32L * 1024 * 1024, ZipArchive.MAX_ENTRY_INFLATED_BYTES);
+        assertEquals(256L * 1024 * 1024, ZipArchive.MAX_TOTAL_INFLATED_BYTES);
     }
 
     /** {@code entries} files of {@code entryBytes} zeros each. */

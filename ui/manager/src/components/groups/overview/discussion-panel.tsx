@@ -65,7 +65,22 @@ export function DiscussionPanel({
   // `undefined` means "the newest", so a discussion that gains a round while
   // this is open follows it instead of pinning the reader to the round that was
   // newest when they arrived. Picking one explicitly opts out of that.
-  const [selectedRound, setSelectedRound] = useState<number | undefined>(undefined);
+  //
+  // The pick belongs to ONE discussion. Every surface keeps this panel mounted
+  // while the reader moves between discussions, and a round picked on one used
+  // to carry over: open round 1 of a three-round discussion, switch to another,
+  // and it opened on ITS round 1 rather than its newest — or, with fewer
+  // rounds, on whatever the clamp made of the stale number.
+  const discussionKey = conversation?.id ?? streamState?.conversationId ?? null;
+  const [roundPick, setRoundPick] = useState<{ key: string | null; round: number | undefined }>({
+    key: discussionKey,
+    round: undefined,
+  });
+  const selectedRound = roundPick.key === discussionKey ? roundPick.round : undefined;
+  const setSelectedRound = useCallback(
+    (round: number | undefined) => setRoundPick({ key: discussionKey, round }),
+    [discussionKey],
+  );
 
   const handleChange = useCallback(
     (next: DiscussionViewMode) => {

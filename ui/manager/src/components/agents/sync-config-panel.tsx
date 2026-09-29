@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Globe, Loader2, CheckCircle, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Globe, Loader2, AlertCircle, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { useListRemoteAgents } from "@/hooks/use-backup";
 import type { DocumentDescriptor } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,22 @@ export function SyncConfigPanel({
 
   const listMutation = useListRemoteAgents();
 
+  // A connect request belongs to the URL and credentials it was sent with.
+  // Editing either used to leave it running, and a late reply still called
+  // onConnected — repopulating the agent list the parent had just cleared,
+  // for the OLD source, ready to preview and sync. Each edit starts a new
+  // generation; replies from an older one are dropped.
+  const generation = useRef(0);
+
+  function invalidateConnection() {
+    generation.current += 1;
+    if (listMutation.isPending) listMutation.reset();
+    if (connectionStatus !== "idle") setConnectionStatus("idle");
+  }
+
   function handleConnect() {
     if (!url.trim()) return;
+    const requestGeneration = ++generation.current;
     setConnectionStatus("connecting");
     setConnectionError(null);
 
@@ -39,11 +53,13 @@ export function SyncConfigPanel({
       { sourceUrl: url.trim(), sourceAuth: auth.trim() },
       {
         onSuccess: (agents) => {
+          if (generation.current !== requestGeneration) return;
           setConnectionStatus("connected");
           setAgentCount(agents.length);
           onConnected(agents);
         },
         onError: (err) => {
+          if (generation.current !== requestGeneration) return;
           setConnectionStatus("error");
           setConnectionError(err.message);
         },
@@ -68,8 +84,8 @@ export function SyncConfigPanel({
           type="url"
           value={url}
           onChange={(e) => {
+            invalidateConnection();
             onUrlChange(e.target.value);
-            if (connectionStatus !== "idle") setConnectionStatus("idle");
           }}
           placeholder="https://staging.eddi.example.com"
           className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -85,7 +101,10 @@ export function SyncConfigPanel({
           <input
             type={showAuth ? "text" : "password"}
             value={auth}
-            onChange={(e) => onAuthChange(e.target.value)}
+            onChange={(e) => {
+              invalidateConnection();
+              onAuthChange(e.target.value);
+            }}
             placeholder="Bearer eyJhb..."
             className="w-full rounded-lg border border-input bg-background px-3 py-2 pe-10 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             data-testid="sync-auth-input"
@@ -120,7 +139,7 @@ export function SyncConfigPanel({
         {/* Status badge */}
         {connectionStatus === "connected" && (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <CheckCircle className="h-4 w-4" />
+            <CheckCircle2 className="h-4 w-4" />
             {t("syncPage.connected", "Connected")} — {agentCount}{" "}
             {t("syncPage.agentsFound", "agents")}
           </span>

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { UsersRound, MessageSquareText, TrendingUp, Cog } from "lucide-react";
+import { MessageSquareText, TrendingUp, Users, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ export function QuickActions({ className }: QuickActionsProps) {
 
   const actions: QuickAction[] = [
     {
-      icon: UsersRound,
+      icon: Users,
       label: t("quickActions.assembleTaskForce", "Assemble Task Force"),
       description: t(
         "quickActions.assembleTaskForceDesc",
@@ -50,7 +50,7 @@ export function QuickActions({ className }: QuickActionsProps) {
       to: "/workforce/analytics",
     },
     {
-      icon: Cog,
+      icon: Settings,
       label: t("quickActions.manageWorkforce", "Manage Workforce"),
       description: t(
         "quickActions.manageWorkforceDesc",
