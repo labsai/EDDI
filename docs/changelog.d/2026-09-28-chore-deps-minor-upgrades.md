@@ -20,7 +20,7 @@ packages, within the same minor). Majors are deliberately left to follow-up bran
 | jnats | 2.26.2 → **2.26.3** | |
 | surefire / failsafe | 3.5.6 → **3.6.0** | GA (3.6.0-M1 was skipped last time) |
 | Maven (wrapper + `mise.toml`) | 3.9.12 → **3.9.16** | New `distributionSha256Sum`, computed from the zip after checking it against Maven Central's published SHA-512 |
-| Node (`node.version` + `mise.toml`) | 22.23.2 → **22.23.3** | |
+| Node (`node.version`, `mise.toml`, `ci.yml` `NODE_VERSION` + `NODE_SHA256_LINUX_X64`) | 22.23.2 → **22.23.3** | The checksum is the linux-x64 `.tar.gz` line of nodejs.org's `SHASUMS256.txt` for v22.23.3 |
 
 **Rule for anything Quarkus manages or integrates with: take the version Quarkus has, not a newer one.** The versions report offered Jackson 2.22.3, but the Quarkus 3.39.5 BOM manages the Jackson family at 2.22.2, so Jackson stays at 2.22.2. Everything else above is either not in the Quarkus BOM (bcprov-lts8on, classgraph, swagger, jnats, the Maven plugins and wrapper) or matches it (`reactor-core` 3.8.7). Mockito and Caffeine are Quarkus-BOM-managed and move with the platform.
 

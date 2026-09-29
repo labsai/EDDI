@@ -8,8 +8,12 @@ import {
   rotateDek,
   rotateKek,
   resetTenant,
+  findSecret,
   updateSecretGrant,
   grantsAllAgents,
+  SecretsError,
+  SECRET_EXISTS,
+  SECRET_NOT_FOUND,
 } from "@/lib/api/secrets";
 
 /* ─── Query Keys ─── */
@@ -38,25 +42,46 @@ export function useSecrets(tenantId: string) {
   });
 }
 
-/** Store (create or update) a secret. Invalidates list on success. */
+/**
+ * Store a secret. Invalidates list on success.
+ *
+ * `createOnly` is for every "Add Secret" form: the store endpoint is an upsert,
+ * so without the check a name that already exists silently replaces a live
+ * credential (and, on a backend before the vault-key-safety fix, resets its
+ * grant to every agent). The key is looked up in a fresh read of the tenant,
+ * not the cached list, and an existing one is refused with `SECRET_EXISTS`.
+ * The backend has no create-only precondition, so a second writer in the same
+ * instant can still win; closing that needs one server-side.
+ */
 export function useStoreSecret() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
+    mutationFn: async (args: {
       tenantId: string;
       keyName: string;
       value: string;
       description?: string;
       allowedAgents?: string[];
-    }) =>
-      storeSecret(
+      createOnly?: boolean;
+    }) => {
+      if (args.createOnly && (await findSecret(args.tenantId, args.keyName))) {
+        throw new SecretsError(
+          `A secret named "${args.keyName}" already exists`,
+          SECRET_EXISTS,
+          409,
+        );
+      }
+      return storeSecret(
         args.tenantId,
         args.keyName,
         args.value,
         args.description,
         args.allowedAgents,
-      ),
-    onSuccess: (_data, vars) => {
+      );
+    },
+    onSettled: (_data, _err, vars) => {
+      // Settled, not success: a SECRET_EXISTS refusal means the cached list was
+      // missing a key, and the operator is about to look at it again.
       qc.invalidateQueries({
         queryKey: secretKeys.list(vars.tenantId),
       });
@@ -145,23 +170,33 @@ export function useVaultHealth() {
   });
 }
 
-/** Rotate a secret — store a new value via the rotation endpoint. */
+/**
+ * Replace a secret's value, keeping its grant and description.
+ *
+ * The grant is re-read here, immediately before the write, rather than taken
+ * from the row the operator clicked: that row can be minutes old, and sending a
+ * stale list would undo a grant edit made in between. A key that has vanished
+ * is refused with `SECRET_NOT_FOUND` instead of being re-created.
+ */
 export function useRotateSecret() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: {
+    mutationFn: async (args: {
       tenantId: string;
       keyName: string;
       newValue: string;
-      description?: string;
-    }) =>
-      rotateSecret(
-        args.tenantId,
-        args.keyName,
-        args.newValue,
-        args.description,
-      ),
-    onSuccess: (_data, vars) => {
+    }) => {
+      const current = await findSecret(args.tenantId, args.keyName);
+      if (!current) {
+        throw new SecretsError(
+          `Secret "${args.keyName}" no longer exists`,
+          SECRET_NOT_FOUND,
+          404,
+        );
+      }
+      return rotateSecret(args.tenantId, args.keyName, args.newValue, current);
+    },
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({
         queryKey: secretKeys.list(vars.tenantId),
       });

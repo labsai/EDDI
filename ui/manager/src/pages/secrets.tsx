@@ -34,7 +34,13 @@ import {
   useRotateKek,
   useResetTenant,
 } from "@/hooks/use-secrets";
-import { grantsAllAgents, type SecretMetadata } from "@/lib/api/secrets";
+import {
+  grantsAllAgents,
+  SecretsError,
+  SECRET_EXISTS,
+  SECRET_NOT_FOUND,
+  type SecretMetadata,
+} from "@/lib/api/secrets";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@/lib/api-client";
@@ -48,7 +54,11 @@ export function SecretsPage() {
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("secrets"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   /* ─── Namespace state ─── */
-  const [tenantId, setTenantId] = useState(DEFAULT_TENANT);
+  /* What the operator typed, and the tenant it names. Trimmed once here: the
+   * raw text addressed a different tenant ("default " is not "default") and
+   * made it into every URL and every copied `${vault:…}` reference. */
+  const [tenantInput, setTenantInput] = useState(DEFAULT_TENANT);
+  const tenantId = tenantInput.trim();
 
   /* ─── Dialog state ─── */
   const [showCreate, setShowCreate] = useState(false);
@@ -66,6 +76,9 @@ export function SecretsPage() {
   const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
   const [newAgentInput, setNewAgentInput] = useState("");
+  /* The existing key an "Add Secret" was refused for, so the dialog can say so
+   * in place and offer the rotation that was probably meant. */
+  const [existingKeyConflict, setExistingKeyConflict] = useState<string | null>(null);
 
   /* ─── Key-lifecycle (danger zone) state ─── */
   const [showRotateDek, setShowRotateDek] = useState(false);
@@ -107,8 +120,27 @@ export function SecretsPage() {
   /* Drop any pending (un-committed) allowed-agent text once the create dialog
    * closes so it doesn't reappear the next time the dialog is opened. */
   useEffect(() => {
-    if (!showCreate) setNewAgentInput("");
+    if (!showCreate) {
+      setNewAgentInput("");
+      setExistingKeyConflict(null);
+    }
   }, [showCreate]);
+
+  /** A vault error in the operator's language where the API raised a code for it. */
+  const secretsErrorMessage = useCallback(
+    (err: unknown): string => {
+      if (err instanceof SecretsError) {
+        if (err.code === SECRET_NOT_FOUND) {
+          return t(
+            "secrets.rotateNotFound",
+            "This secret no longer exists, so there is nothing to rotate. Add it again instead.",
+          );
+        }
+      }
+      return getErrorMessage(err);
+    },
+    [t],
+  );
 
   /* ─── Copy vault reference ─── */
   const copyRef = useCallback(
@@ -131,7 +163,12 @@ export function SecretsPage() {
 
   /* ─── Handlers ─── */
   const handleCreate = useCallback(() => {
+    // The value is checked for content but sent as typed: a secret is compared
+    // byte for byte by whatever consumes it, and silently trimming it stored a
+    // different credential from the one pasted.
     if (!newKeyName.trim() || !newValue.trim()) return;
+    const keyName = newKeyName.trim();
+    setExistingKeyConflict(null);
     // Flush any typed-but-not-Entered agent so it isn't silently dropped
     // (which would leave the secret unrestricted / available to ALL agents).
     const pendingAgent = newAgentInput.trim().replace(/,$/, "");
@@ -142,18 +179,21 @@ export function SecretsPage() {
     storeMut.mutate(
       {
         tenantId,
-        keyName: newKeyName.trim(),
-        value: newValue.trim(),
+        keyName,
+        value: newValue,
         description: newDescription.trim() || undefined,
         allowedAgents:
           finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
+        // "Add" never overwrites. Replacing a value is Rotate, which keeps the
+        // grant; an upsert from here reset it.
+        createOnly: true,
       },
       {
         onSuccess: () => {
           toast.success(
             t("secrets.storeSuccess", {
-              key: newKeyName,
-              defaultValue: `Secret "${newKeyName}" stored`,
+              key: keyName,
+              defaultValue: `Secret "${keyName}" stored`,
             }),
           );
           setShowCreate(false);
@@ -164,11 +204,48 @@ export function SecretsPage() {
           setNewAllowedAgents([]);
           setNewAgentInput("");
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : String(err)),
+        onError: (err) => {
+          if (err instanceof SecretsError && err.code === SECRET_EXISTS) {
+            setExistingKeyConflict(keyName);
+            return;
+          }
+          toast.error(secretsErrorMessage(err));
+        },
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t, secretsErrorMessage]);
+
+  /** Open the rotate dialog for one row, with no leftover state from the last. */
+  const openRotate = useCallback(
+    (target: SecretMetadata) => {
+      // A previous rotation's error or pending flag must not show against this
+      // key — the mutation object is shared by every row.
+      rotateMut.reset();
+      setRotateTarget(target);
+      setRotateValue("");
+      setRotateVisible(false);
+    },
+    [rotateMut],
+  );
+
+  const handleRotate = useCallback(() => {
+    const target = rotateTarget;
+    if (!target || !rotateValue.trim()) return;
+    rotateMut.mutate(
+      // The row's own tenant, not the tenant field: the operator may have
+      // edited that since the row was listed.
+      { tenantId: target.tenantId, keyName: target.keyName, newValue: rotateValue },
+      {
+        onSuccess: () => {
+          toast.success(t("secrets.rotateSuccess", { key: target.keyName, defaultValue: `Secret "${target.keyName}" rotated` }));
+          // Only close the dialog this rotation belongs to.
+          setRotateTarget((open) => (open === target ? null : open));
+          setRotateValue("");
+        },
+        onError: (err) => toast.error(secretsErrorMessage(err)),
+      },
+    );
+  }, [rotateTarget, rotateValue, rotateMut, t, secretsErrorMessage]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
@@ -295,7 +372,10 @@ export function SecretsPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => {
+              storeMut.reset();
+              setShowCreate(true);
+            }}
             disabled={vaultDown}
             title={
               vaultDown
@@ -380,8 +460,8 @@ export function SecretsPage() {
           <input
             id="secrets-tenant-input"
             type="text"
-            value={tenantId}
-            onChange={(e) => setTenantId(e.target.value)}
+            value={tenantInput}
+            onChange={(e) => setTenantInput(e.target.value)}
             placeholder="default"
             className="h-9 w-48 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
             data-testid="tenant-input"
@@ -540,7 +620,7 @@ export function SecretsPage() {
                           {t("secrets.access", "Access")}
                         </button>
                         <button
-                          onClick={() => { setRotateTarget(s); setRotateValue(""); setRotateVisible(false); }}
+                          onClick={() => openRotate(s)}
                           className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10"
                           data-testid={`rotate-${s.keyName}`}
                           aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
@@ -739,6 +819,7 @@ export function SecretsPage() {
                 {t("secrets.resetTenantAction", "Reset vault")}
               </button>
             </div>
+
           </div>
         </div>
       )}
@@ -1002,7 +1083,10 @@ export function SecretsPage() {
                   id="new-key-name"
                   type="text"
                   value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
+                  onChange={(e) => {
+                    setNewKeyName(e.target.value);
+                    setExistingKeyConflict(null);
+                  }}
                   placeholder={t(
                     "secrets.keyNamePlaceholder",
                     "e.g. openaiKey, dbPassword",
@@ -1010,6 +1094,8 @@ export function SecretsPage() {
                   className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                   data-testid="new-key-input"
                   autoComplete="off"
+                  aria-invalid={existingKeyConflict !== null}
+                  aria-describedby={existingKeyConflict !== null ? "new-key-exists" : undefined}
                   autoFocus
                 />
                 {newKeyName.trim() && (
@@ -1019,6 +1105,42 @@ export function SecretsPage() {
                       {refString(newKeyName.trim())}
                     </code>
                   </p>
+                )}
+                {existingKeyConflict !== null && (
+                  <div
+                    id="new-key-exists"
+                    role="alert"
+                    className="mt-2 space-y-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
+                    data-testid="secret-exists-error"
+                  >
+                    <p className="text-xs text-destructive">
+                      {t("secrets.keyExists", {
+                        key: existingKeyConflict,
+                        defaultValue: `A secret named "${existingKeyConflict}" already exists. Adding it again would replace its value — use Rotate to change the value and keep who may use it.`,
+                      })}
+                    </p>
+                    {(() => {
+                      const existing = secrets?.find((s) => s.keyName === existingKeyConflict);
+                      return existing ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreate(false);
+                            setNewKeyName("");
+                            setNewValue("");
+                            setNewDescription("");
+                            setValueVisible(false);
+                            setNewAllowedAgents([]);
+                            openRotate(existing);
+                          }}
+                          className="text-xs font-medium text-primary hover:underline"
+                          data-testid="secret-exists-rotate"
+                        >
+                          {t("secrets.keyExistsRotate", "Rotate this secret instead")}
+                        </button>
+                      ) : null;
+                    })()}
+                  </div>
                 )}
               </div>
               <div>
@@ -1243,9 +1365,11 @@ export function SecretsPage() {
       {rotateTarget && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setRotateTarget(null)}
+          onClick={() => {
+            if (!rotateMut.isPending) setRotateTarget(null);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setRotateTarget(null);
+            if (e.key === "Escape" && !rotateMut.isPending) setRotateTarget(null);
           }}
         >
           <div
@@ -1285,28 +1409,24 @@ export function SecretsPage() {
                 {rotateVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               </button>
             </div>
+            <p className="mt-3 text-xs text-muted-foreground" data-testid="rotate-keeps-grant">
+              {grantsAllAgents(rotateTarget.allowedAgents)
+                ? t("secrets.rotateKeepsGrantAll", "Every agent keeps access, as now.")
+                : t("secrets.rotateKeepsGrant", {
+                    agents: rotateTarget.allowedAgents.join(", "),
+                    defaultValue: `Access stays limited to: ${rotateTarget.allowedAgents.join(", ")}`,
+                  })}
+            </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
                 onClick={() => setRotateTarget(null)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
+                disabled={rotateMut.isPending}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
                 {t("common.cancel", "Cancel")}
               </button>
               <button
-                onClick={() => {
-                  if (!rotateValue.trim()) return;
-                  rotateMut.mutate(
-                    { tenantId, keyName: rotateTarget.keyName, newValue: rotateValue.trim() },
-                    {
-                      onSuccess: () => {
-                        toast.success(t("secrets.rotateSuccess", { key: rotateTarget.keyName, defaultValue: `Secret "${rotateTarget.keyName}" rotated` }));
-                        setRotateTarget(null);
-                        setRotateValue("");
-                      },
-                      onError: (err) => toast.error(err.message),
-                    },
-                  );
-                }}
+                onClick={handleRotate}
                 disabled={!rotateValue.trim() || rotateMut.isPending}
                 className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
                 data-testid="confirm-rotate-button"

@@ -62,7 +62,7 @@ Every task in every Wave MUST satisfy these rules. Reviewers should reject PRs t
 
 ### 2.1 Template syntax
 
-EDDI v6 uses **Qute** (see [`AGENTS.md` §5.1](../AGENTS.md)). In every config example in this plan and in test fixtures:
+EDDI v6 uses **Qute** (see [Agent Config Authoring](../docs/agent-config-authoring.md#template-syntax)). In every config example in this plan and in test fixtures:
 
 - Use **single braces**: `{properties.x}`, not `{{properties.x}}`.
 - `properties.*` returns **raw values**. Never use `.valueString`, `.valueObject`, etc.

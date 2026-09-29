@@ -115,8 +115,12 @@ supplied request — `POST /agents/{agentId}/start`, `POST /agents/{conversation
 the conversation sees it. The request still succeeds; only the reserved entries are
 removed, so `{context.groupId}` in a template renders empty for a client-started turn.
 Group members, delegated sub-agent conversations and schedules still receive the values
-EDDI sets. Matching is exact and case-sensitive: `screenGroupId` or `GroupId` are
-ordinary keys.
+EDDI sets. Matching is case-sensitive and anchored at the start of the name:
+`screenGroupId` or `GroupId` are ordinary keys, but a key that **starts with** a
+reserved name — `groupIdSuffix`, `delegationDepthMax`, `dynamicAgentConfigV2` — is
+dropped as well, so pick context key names that do not begin with a reserved one. (The
+engine reads its own keys by exact name; dropping the extensions keeps a reader that
+ever matched by prefix from mistaking a client's key for the engine's.)
 
 Once a conversation has been governed by a group's `dynamicAgentConfig`, later turns in
 it keep that policy even when they carry no group context — for example a turn the
@@ -129,8 +133,9 @@ again — EDDI logs a warning at startup when it does:
 eddi.conversation.client-context.permitted-reserved-keys=groupId
 ```
 
-Only the keys in the table can be listed; anything else is ignored. The default permits
-none.
+Only the keys in the table can be listed; anything else is ignored. Listing a key also
+permits the keys that start with it (`groupIdLabel` once `groupId` is listed). The default
+permits none.
 
 ### How Context is Used
 

@@ -48,6 +48,9 @@ export function useRunIngestionSource(kbId: string | undefined, version: number)
     onSuccess: (_result, sourceId) => {
       // The run is asynchronous, so refetch the history to pick up the new row.
       queryClient.invalidateQueries({ queryKey: ingestionKeys.runs(kbId ?? "", sourceId, version) });
+      // A run changes what each stored file's index state is. The files panel
+      // also refetches when the run finishes (see IngestionFilesPanel).
+      queryClient.invalidateQueries({ queryKey: ingestionKeys.files(kbId ?? "", sourceId, version) });
     },
   });
 }
@@ -64,6 +67,9 @@ export function usePurgeIngestionSource(kbId: string | undefined, version: numbe
     mutationFn: (sourceId: string) => purgeSource(kbId as string, sourceId, version),
     onSuccess: (_result, sourceId) => {
       queryClient.invalidateQueries({ queryKey: ingestionKeys.runs(kbId ?? "", sourceId, version) });
+      // Purging forgets what was indexed, so every file reads as not indexed
+      // again — the list said "indexed" until the page was reloaded.
+      queryClient.invalidateQueries({ queryKey: ingestionKeys.files(kbId ?? "", sourceId, version) });
     },
   });
 }
@@ -71,8 +77,8 @@ export function usePurgeIngestionSource(kbId: string | undefined, version: numbe
 /**
  * The files an upload source holds.
  *
- * Not polled: files change only when somebody in this browser uploads or
- * deletes one, and both of those invalidate this query themselves.
+ * Not polled. What changes it — an upload, a delete, a run starting or
+ * finishing, a purge — invalidates it or refetches it explicitly.
  */
 export function useSourceFiles(
   kbId: string | undefined,

@@ -23,6 +23,7 @@ import java.util.Map;
 import static ai.labs.eddi.configs.migration.LegacyDocumentMigrations.FIELD_NAME_CONVERSATION_PROPERTIES;
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.VERSION_FIELD;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static com.mongodb.client.model.Filters.eq;
 import static java.lang.String.format;
 
@@ -104,22 +105,50 @@ public class MigrationManager implements IMigrationManager {
         this.backupBeforeWrite = backupBeforeWrite;
     }
 
+    /**
+     * Runs the legacy document migration once, and records it as done only when
+     * every document was migrated.
+     * <p>
+     * The confirmation used to be written unconditionally, so a migration that
+     * failed half-way - one malformed document was enough, because it aborted the
+     * rest of its collection - was recorded as complete and never retried: the
+     * documents after it stayed in the old format for good. The sweep is idempotent
+     * (a document already in the new format migrates to {@code null} and is
+     * skipped), so running it again on the next start is safe.
+     * <p>
+     * Completion is also recorded <b>per collection</b>. A document that keeps
+     * failing therefore re-sweeps only its own collection on the next start, not
+     * every collection (conversation memories are the bulk of the data), and the
+     * sweep runs before agents deploy. The overall confirmation is written once
+     * every collection has its own.
+     */
     @Override
     public synchronized void startMigrationIfFirstTimeRun(IMigrationFinished migrationFinished) {
         if (!this.isCurrentlyRunning) {
             this.isCurrentlyRunning = true;
-            if (isMigrationNeeded()) {
-                startPropertyMigration();
-                startApiCallsMigration();
-                startOutputMigration();
-                if (!skipConversationMemories) {
-                    startConversationMemoryMigration();
-                }
+            try {
+                if (isMigrationNeeded()) {
+                    boolean complete = runCollection(COLLECTION_PROPERTYSETTER, migratePropertySetter(), propertySetterCollection,
+                            propertySetterCollectionHistory);
+                    complete &= runCollection(COLLECTION_HTTPCALLS, migrateApiCalls(), httpCallsCollection, httpCallsCollectionHistory);
+                    complete &= runCollection(COLLECTION_OUTPUTS, migrateOutput(), outputCollection, outputCollectionHistory);
+                    if (!skipConversationMemories) {
+                        complete &= runCollection(COLLECTION_CONVERSATION_MEMORY, migrateConversationMemory(),
+                                conversationMemoryCollection, null);
+                    }
 
-                migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
+                    if (complete) {
+                        migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
+                    } else {
+                        LOGGER.error("The legacy document migration did not complete - see the errors above. The collections "
+                                + "that failed are NOT recorded as done and are swept again on the next start; documents that "
+                                + "could not be migrated stay in the old format until then.");
+                    }
+                }
+            } finally {
+                migrationFinished.onComplete();
+                this.isCurrentlyRunning = false;
             }
-            migrationFinished.onComplete();
-            this.isCurrentlyRunning = false;
         }
     }
 
@@ -128,96 +157,106 @@ public class MigrationManager implements IMigrationManager {
         return migrationLog == null;
     }
 
-    private void startPropertyMigration() {
-        try {
-            IDocumentMigration migration = migratePropertySetter();
-            boolean migrationHasExecuted = iterateMigration(COLLECTION_PROPERTYSETTER, migration, propertySetterCollection,
-                    propertySetterCollectionHistory);
+    /** The migration-log entry recording that one collection is fully migrated. */
+    static String collectionConfirmation(String documentType) {
+        return "migrated collection " + documentType + ".";
+    }
 
-            if (migrationHasExecuted) {
-                LOGGER.info("Migration of propertysetter documents has finished!");
-            } else {
-                LOGGER.info("No migration of propertysetter documents was needed!");
+    /**
+     * Sweeps one collection (and its history) unless an earlier start already
+     * completed it, and records it as done when no document failed.
+     *
+     * @return whether the collection is now fully migrated
+     */
+    private boolean runCollection(String documentType, IDocumentMigration migration, MongoCollection<Document> collection,
+                                  MongoCollection<Document> collectionHistory) {
+        String confirmation = collectionConfirmation(documentType);
+        try {
+            if (migrationLogStore.readMigrationLog(confirmation) != null) {
+                return true;
             }
+            SweepResult sweep = iterateMigration(documentType, migration, collection, collectionHistory);
+
+            if (sweep.executed()) {
+                LOGGER.infof("Migration of %s documents has finished!", documentType);
+            } else {
+                LOGGER.infof("No migration of %s documents was needed!", documentType);
+            }
+            if (sweep.complete()) {
+                migrationLogStore.createMigrationLog(new MigrationLog(confirmation));
+            }
+            return sweep.complete();
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
+            return false;
         }
     }
 
-    private void startApiCallsMigration() {
-        try {
-            IDocumentMigration migration = migrateApiCalls();
-            boolean migrationHasExecuted = iterateMigration(COLLECTION_HTTPCALLS, migration, httpCallsCollection, httpCallsCollectionHistory);
+    /**
+     * What one collection sweep did: whether anything was rewritten, and how many
+     * documents could not be.
+     */
+    record SweepResult(boolean executed, int failed) {
+        SweepResult plus(SweepResult other) {
+            return new SweepResult(executed || other.executed, failed + other.failed);
+        }
 
-            if (migrationHasExecuted) {
-                LOGGER.info("Migration of httpcalls documents has finished!");
-            } else {
-                LOGGER.info("No migration of httpcalls documents was needed!");
-            }
-        } catch (Exception e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
+        boolean complete() {
+            return failed == 0;
         }
     }
 
-    private void startOutputMigration() {
-        try {
-            IDocumentMigration migration = migrateOutput();
-            boolean migrationHasExecuted = iterateMigration(COLLECTION_OUTPUTS, migration, outputCollection, outputCollectionHistory);
+    private SweepResult iterateMigration(String documentType, IDocumentMigration migration, MongoCollection<Document> collection,
+                                         MongoCollection<Document> collectionHistory) {
 
-            if (migrationHasExecuted) {
-                LOGGER.info("Migration of output documents has finished!");
-            } else {
-                LOGGER.info("No migration of output documents was needed!");
-            }
-        } catch (Exception e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-        }
-    }
-
-    private void startConversationMemoryMigration() {
-        try {
-            IDocumentMigration migration = migrateConversationMemory();
-            boolean migrationHasExecuted = iterateMigration(COLLECTION_CONVERSATION_MEMORY, migration, conversationMemoryCollection, null);
-
-            if (migrationHasExecuted) {
-                LOGGER.info("Migration of conversation memory documents has finished!");
-            } else {
-                LOGGER.info("No migration of conversation memory documents was needed!");
-            }
-        } catch (Exception e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-        }
-    }
-
-    private boolean iterateMigration(String documentType, IDocumentMigration migration, MongoCollection<Document> collection,
-                                     MongoCollection<Document> collectionHistory) {
-
-        var migrationHasExecuted = migrateDocuments(documentType, collection.find(), migration, collection, false);
+        var result = migrateDocuments(documentType, collection.find(), migration, collection, false);
 
         if (collectionHistory != null) {
-            migrationHasExecuted = migrateDocuments(documentType, collectionHistory.find(), migration, collectionHistory, true)
-                    || migrationHasExecuted;
+            result = result.plus(migrateDocuments(documentType, collectionHistory.find(), migration, collectionHistory, true));
         }
-        return migrationHasExecuted;
+        return result;
     }
 
-    private boolean migrateDocuments(String documentType, Iterable<Document> documents, IDocumentMigration migration,
-                                     MongoCollection<Document> collection, boolean isHistory) {
+    /**
+     * Migrates every document of one collection, one at a time.
+     * <p>
+     * A document that cannot be migrated is logged and counted, and the sweep goes
+     * on: one malformed document used to throw out of the loop and leave every
+     * document after it unmigrated, while the caller recorded the whole migration
+     * as done.
+     */
+    private SweepResult migrateDocuments(String documentType, Iterable<Document> documents, IDocumentMigration migration,
+                                         MongoCollection<Document> collection, boolean isHistory) {
 
         boolean migrationHasExecuted = false;
+        int failed = 0;
         var backupCollection = resolveBackupCollection(documentType, isHistory);
         int backedUp = 0;
         for (var document : documents) {
-            // snapshot before the migration mutates the document in place — a rewrite
-            // that turns out to be wrong must stay recoverable
-            var originalDocument = backupCollection != null ? backupProjection(documentType, document) : null;
-            var migratedDocument = migration.migrate(document);
-            if (migratedDocument != null) {
-                if (backupDocument(backupCollection, originalDocument)) {
-                    backedUp++;
+            try {
+                // snapshot before the migration mutates the document in place — a rewrite
+                // that turns out to be wrong must stay recoverable
+                var originalDocument = backupCollection != null ? backupProjection(documentType, document) : null;
+                var migratedDocument = migration.migrate(document);
+                if (migratedDocument != null) {
+                    if (backupDocument(backupCollection, originalDocument)) {
+                        backedUp++;
+                    }
+                    saveToPersistence(documentType, migratedDocument, isHistory, collection);
+                    migrationHasExecuted = true;
                 }
-                saveToPersistence(documentType, migratedDocument, isHistory, collection);
-                migrationHasExecuted = true;
+            } catch (RuntimeException e) {
+                failed++;
+                String where = documentType + (isHistory ? ".history" : "");
+                String documentId = sanitize(String.valueOf(document.get(ID_FIELD)));
+                if (failed == 1) {
+                    LOGGER.errorf(e, "Could not migrate %s document %s — it is left unchanged and retried on the next start",
+                            where, documentId);
+                } else {
+                    // One stack trace per sweep is diagnosis; one per document is noise.
+                    LOGGER.errorf("Could not migrate %s document %s either: %s", where, documentId, sanitize(e.getMessage()));
+                    LOGGER.debugf(e, "Migration failure of %s document %s", where, documentId);
+                }
             }
         }
 
@@ -229,7 +268,7 @@ public class MigrationManager implements IMigrationManager {
                     + "the pre-migration backup entirely.", backedUp, backupCollectionName(documentType, isHistory));
         }
 
-        return migrationHasExecuted;
+        return new SweepResult(migrationHasExecuted, failed);
     }
 
     private MongoCollection<Document> resolveBackupCollection(String documentType, boolean isHistory) {

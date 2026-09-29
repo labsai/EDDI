@@ -7,6 +7,8 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.backup.IZipArchive;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.io.*;
 import java.nio.file.Path;
@@ -23,30 +25,41 @@ import java.util.zip.ZipOutputStream;
 public class ZipArchive implements IZipArchive {
     private static final int BUFFER_SIZE = 4096;
 
+    static final String MAX_ENTRIES_PROPERTY = "eddi.backup.import.max-entries";
+    static final String MAX_ENTRY_BYTES_PROPERTY = "eddi.backup.import.max-entry-bytes";
+    static final String MAX_TOTAL_BYTES_PROPERTY = "eddi.backup.import.max-uncompressed-bytes";
+
     /**
-     * Decompression-bomb ceilings for {@link #unzip}. An agent-config ZIP is a
-     * modest set of JSON documents, so these are generous headroom rather than
-     * expected sizes; a well under 25 MB upload that inflates past them is a bomb,
-     * not a backup. Counted as bytes are actually read, never trusting
-     * {@link ZipEntry#getSize()} (which the archive author controls and can lie
-     * about or leave as -1).
+     * Decompression-bomb ceilings for {@link #unzip}, overridable per deployment
+     * through the three properties above. An agent-config ZIP is a few hundred
+     * small JSON documents, so these sit far above anything an export writes and
+     * far below what a bomb needs: without them a 2 MB upload that inflates to
+     * gigabytes filled the disk and inodes under {@code tmp/import}. The per-entry
+     * ceiling also bounds the heap, because the importer reads each file whole.
+     * Counted as bytes are actually read, never trusting {@link ZipEntry#getSize()}
+     * (which the archive author controls and can lie about or leave as -1).
      */
     static final int MAX_ENTRIES = 10_000;
-    static final long MAX_ENTRY_INFLATED_BYTES = 100L * 1024 * 1024;
-    static final long MAX_TOTAL_INFLATED_BYTES = 500L * 1024 * 1024;
+    static final long MAX_ENTRY_INFLATED_BYTES = 32L * 1024 * 1024;
+    static final long MAX_TOTAL_INFLATED_BYTES = 256L * 1024 * 1024;
 
     private final int maxEntries;
     private final long maxEntryInflatedBytes;
     private final long maxTotalInflatedBytes;
 
+    /** The shipped limits — for callers outside CDI. */
     public ZipArchive() {
         this(MAX_ENTRIES, MAX_ENTRY_INFLATED_BYTES, MAX_TOTAL_INFLATED_BYTES);
     }
 
     /**
-     * Test seam: lets a test drive the bomb ceilings without inflating gigabytes.
+     * The configured limits; also the test seam that drives the ceilings without
+     * inflating gigabytes.
      */
-    ZipArchive(int maxEntries, long maxEntryInflatedBytes, long maxTotalInflatedBytes) {
+    @Inject
+    public ZipArchive(@ConfigProperty(name = MAX_ENTRIES_PROPERTY, defaultValue = "10000") int maxEntries,
+            @ConfigProperty(name = MAX_ENTRY_BYTES_PROPERTY, defaultValue = "33554432") long maxEntryInflatedBytes,
+            @ConfigProperty(name = MAX_TOTAL_BYTES_PROPERTY, defaultValue = "268435456") long maxTotalInflatedBytes) {
         this.maxEntries = maxEntries;
         this.maxEntryInflatedBytes = maxEntryInflatedBytes;
         this.maxTotalInflatedBytes = maxTotalInflatedBytes;
@@ -122,6 +135,13 @@ public class ZipArchive implements IZipArchive {
         return new ZipEntry(entryName);
     }
 
+    /**
+     * @throws ZipLimitExceededException
+     *             when the archive holds more entries, or inflates to more bytes,
+     *             than this deployment accepts. Whatever was written before the
+     *             limit tripped is left in {@code targetDir}; every caller unpacks
+     *             into a scratch directory it removes in a {@code finally}.
+     */
     @Override
     public void unzip(InputStream zipFile, File targetDir) throws IOException {
         if (!targetDir.exists()) {
@@ -139,7 +159,8 @@ public class ZipArchive implements IZipArchive {
             long[] totalInflated = {0L};
             while ((entry = zipIn.getNextEntry()) != null) {
                 if (++entryCount > maxEntries) {
-                    throw new IOException("Zip archive has too many entries (limit " + maxEntries + ")");
+                    throw new ZipLimitExceededException("Zip archive has too many entries (limit " + maxEntries + ", "
+                            + MAX_ENTRIES_PROPERTY + ")");
                 }
                 File destFile = new File(targetDir, entry.getName());
                 String destFilePath = destFile.getCanonicalPath();
@@ -176,15 +197,25 @@ public class ZipArchive implements IZipArchive {
                 // Measured as it inflates, so a highly-compressed entry is aborted
                 // mid-stream rather than after 25 GB has hit the disk.
                 if (entryInflated > maxEntryInflatedBytes) {
-                    throw new IOException("Zip entry '" + entryName + "' exceeds the maximum inflated size of "
-                            + maxEntryInflatedBytes + " bytes");
+                    throw new ZipLimitExceededException("Zip entry '" + entryName + "' exceeds the maximum inflated size of "
+                            + maxEntryInflatedBytes + " bytes (" + MAX_ENTRY_BYTES_PROPERTY + ")");
                 }
                 if (totalInflated[0] > maxTotalInflatedBytes) {
-                    throw new IOException("Zip archive exceeds the maximum total inflated size of "
-                            + maxTotalInflatedBytes + " bytes");
+                    throw new ZipLimitExceededException("Zip archive exceeds the maximum total inflated size of "
+                            + maxTotalInflatedBytes + " bytes (" + MAX_TOTAL_BYTES_PROPERTY + ")");
                 }
                 bos.write(bytesIn, 0, read);
             }
+        }
+    }
+
+    /**
+     * An archive this deployment refuses to unpack because of its size, not its
+     * shape — so a caller can answer 413 rather than 500.
+     */
+    public static class ZipLimitExceededException extends IOException {
+        public ZipLimitExceededException(String message) {
+            super(message);
         }
     }
 }

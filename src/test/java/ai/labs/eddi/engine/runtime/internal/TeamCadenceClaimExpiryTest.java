@@ -84,7 +84,7 @@ class TeamCadenceClaimExpiryTest {
         gc.setGroupId(GROUP_ID);
         gc.setState(state);
         when(conversationStore.read(GC_ID)).thenReturn(gc);
-        when(workspaceStore.casRunningDiscussion(any(), eq(GC_ID))).thenReturn(true);
+        when(workspaceStore.casRunningDiscussion(any())).thenReturn(true);
     }
 
     @Test

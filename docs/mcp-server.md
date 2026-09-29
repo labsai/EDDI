@@ -131,7 +131,7 @@ Read EDDI's own documentation over MCP **tools** — the counterpart to the `edd
 
 ### HITL Tools (10)
 
-Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | PAUSE_CHANGED | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`; `PAUSE_CHANGED` when a `pauseId` names a pause that is no longer current).
 
 | Tool                              | Description                                                                                                                    |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -142,7 +142,7 @@ Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the RES
 | `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
-| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; returns the resumed discussion |
 | `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 
