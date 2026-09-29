@@ -1444,6 +1444,10 @@ public class AuditLedgerService {
      * {@code AuditHmac.identityToken}, which maps an id and its pseudonym to the
      * same value, and the agent signature signs the HMAC.
      * <p>
+     * The pseudonym is the <em>keyed</em> one whenever the ledger signs, as the
+     * stores write into v5 rows — new entries are signed v5 — so a late entry does
+     * not carry the unkeyed hash an offline guess could be tested against.
+     * <p>
      * Node-local: an entry produced on another replica after the erasure is not
      * covered (documented residual, like the rest of the in-flight handling).
      */
@@ -1465,8 +1469,10 @@ public class AuditLedgerService {
         if (until == null || until.isBefore(Instant.now())) {
             return entry;
         }
-        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(),
-                AuditHmac.pseudonymFor(userId), entry.environment(), entry.stepIndex(), entry.taskId(), entry.taskType(),
+        AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+        String pseudonym = signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), pseudonym, entry.environment(),
+                entry.stepIndex(), entry.taskId(), entry.taskType(),
                 entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(), entry.toolCalls(),
                 entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
     }
