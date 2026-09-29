@@ -325,6 +325,22 @@ class ResourceSharingServiceTest {
     }
 
     @Test
+    @DisplayName("an administrator's move still needs a well-formed space id")
+    void malformedSpaceRefusedEvenForAdmins() throws Exception {
+        // Admins skip the membership check, so this is the only thing standing
+        // between a typo'd prefix and a cascade filed under a space nobody holds.
+        when(accessGuard.isAdmin()).thenReturn(true);
+
+        for (String bad : List.of("group:engineering", "team:", "engineering", "team:/engineering/", "user:")) {
+            assertThrows(IllegalArgumentException.class, () -> service.moveToSpace(AGENT, bad, true, false), bad);
+        }
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+
+        assertTrue(ResourceSharingService.isCanonicalSpace(Subjects.teamSpace("engineering/backend")));
+        assertTrue(ResourceSharingService.isCanonicalSpace(Subjects.personalSpace("alice@example.com")));
+    }
+
+    @Test
     @DisplayName("only the owner may move a resource")
     void onlyOwnerMoves() {
         when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));

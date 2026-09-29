@@ -147,6 +147,10 @@ From CodeRabbit's review of the PR:
   incomplete.
 - In the notification bell, a failure to mark a request read after a successful
   grant no longer reports the grant as failed.
+- A move into a space is refused unless the target is a well-formed space id
+  (`user:<principal>` or `team:<group>`). Administrators skip the membership
+  check, so a malformed id used to file the whole cascade under a space nobody
+  could hold.
 
 Deliberately not changed, and documented instead:
 
@@ -164,8 +168,8 @@ The merge with `main` (PRs 859 to 865) was resolved by hand in:
 
 - `RestGlobalVariableStore`: both restrictions kept.
 - `GdprDeletionResult` / `UserDataExport` / `GdprComplianceService` / `McpGdprTools`:
-  `connectionGrants` and the participant maps both kept; the constructor duplicate the
-  auto-merge created is removed.
+  `connectionGrants` and the participant maps both kept. The duplicate constructor
+  introduced by the auto-merge was removed.
 - `RestConversationStore`: main's strict delete and EDIT gates, plus the review reads.
 - `ResourceSharingService`: main's `SharingChangedEvent`, never fired on a dry run,
   plus moves and notifications.

@@ -337,6 +337,13 @@ public class ResourceSharingService {
             throw new IllegalArgumentException("A target space is required");
         }
         String target = spaceId.trim();
+        if (!isCanonicalSpace(target)) {
+            // Administrators skip the membership check below, so without this a typo'd
+            // prefix or an unnormalised group path filed the whole cascade under a space
+            // id nobody can ever hold — invisible to every team.
+            throw new IllegalArgumentException("Not a space id: '" + sanitize(target) + "'. Use user:<principal> or team:<group>, as "
+                    + "GET /workspaces lists them.");
+        }
         if (!accessGuard.isAdmin() && !accessGuard.callerSpaces().spaces().contains(target)) {
             // Filing into a space you are not in would let anybody plant resources in a
             // team's workspace, and hand its members edit access to your work.
@@ -439,6 +446,21 @@ public class ResourceSharingService {
         } catch (Exception e) {
             LOGGER.warnf("Could not announce the share of %s: %s", sanitize(resourceId), e.getMessage());
         }
+    }
+
+    /**
+     * Whether {@code spaceId} is a space id in the one form the access index uses —
+     * {@code user:<principal>} or {@code team:<normalised group>}, encoded. A form
+     * that re-encodes differently would match no member's spaces.
+     */
+    static boolean isCanonicalSpace(String spaceId) {
+        if (spaceId.startsWith(Subjects.USER_PREFIX) && spaceId.length() > Subjects.USER_PREFIX.length()) {
+            return spaceId.equals(Subjects.personalSpace(Subjects.decode(spaceId.substring(Subjects.USER_PREFIX.length()))));
+        }
+        if (spaceId.startsWith(Subjects.TEAM_PREFIX) && spaceId.length() > Subjects.TEAM_PREFIX.length()) {
+            return spaceId.equals(Subjects.teamSpace(Subjects.decode(spaceId.substring(Subjects.TEAM_PREFIX.length()))));
+        }
+        return false;
     }
 
     private Set<String> targets(String resourceId, boolean cascade) {
