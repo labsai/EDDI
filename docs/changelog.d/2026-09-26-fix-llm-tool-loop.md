@@ -112,6 +112,9 @@ boundary stays put, so the turns past it keep reaching the model verbatim — th
 failed summarizer call. The WARN names the `maxCharsPerUpdate` that would let updates resume. Lowering
 `maxSummaryTokens` does not release the state, since the stored summary is not rewritten while updates
 are skipped; it only keeps the summaries written afterwards small.
+Both limits survive the copy `LlmTask.resolveEffectiveSummaryConfig` makes when the summary config
+inherits the task's provider or model — the common case — so the values a designer sets are the ones
+the summarizer runs with.
 
 ### M-L4 — `convertToObject` failed the turn on `[` or on malformed JSON
 

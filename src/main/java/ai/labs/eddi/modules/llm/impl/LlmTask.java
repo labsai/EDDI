@@ -1378,6 +1378,8 @@ public class LlmTask implements ILifecycleTask {
         effective.setExcludePropertiesFromSummary(configured.isExcludePropertiesFromSummary());
         effective.setRecentWindowSteps(configured.getRecentWindowSteps());
         effective.setMaxRecallTurns(configured.getMaxRecallTurns());
+        effective.setMaxTurnsPerUpdate(configured.getMaxTurnsPerUpdate());
+        effective.setMaxCharsPerUpdate(configured.getMaxCharsPerUpdate());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
         return effective;
     }
