@@ -15,10 +15,8 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
@@ -456,33 +454,20 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     @Override
-    public String putMetaValueIfAbsent(String key, String value) {
-        var filter = eq("key", key);
-        var update = Updates.combine(Updates.setOnInsert("key", key), Updates.setOnInsert("value", value));
+    public String setMetaValueIfAbsent(String key, String value) {
         try {
-            // $setOnInsert on an upsert, handing back the document as it stands after:
-            // the winner's value whether this call inserted it or found it there.
-            var doc = metaCollection.findOneAndUpdate(filter, update,
-                    new FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER));
-            return doc != null ? doc.getString("value") : getMetaValue(key);
-        } catch (MongoCommandException | MongoWriteException e) {
-            // Two concurrent upserts can both miss the filter and race to insert; the
-            // unique index on key refuses the second one. That loser simply reads what
-            // the winner wrote.
-            if (isDuplicateKey(e)) {
-                return getMetaValue(key);
+            // $setOnInsert writes only when the upsert inserts, so an existing value is
+            // never touched. The unique idx_meta_key index arbitrates two concurrent
+            // inserts: the loser gets a duplicate-key error and reads the winner's value.
+            metaCollection.updateOne(eq("key", key), Updates.setOnInsert("value", value), new UpdateOptions().upsert(true));
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw new PersistenceException("Failed to write meta value: " + key, e);
             }
-            throw new PersistenceException("Failed to write meta value: " + key, e);
         } catch (MongoException e) {
             throw new PersistenceException("Failed to write meta value: " + key, e);
         }
-    }
-
-    private static boolean isDuplicateKey(MongoException e) {
-        if (e instanceof MongoWriteException writeException) {
-            return writeException.getError().getCategory() == ErrorCategory.DUPLICATE_KEY;
-        }
-        return ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY;
+        return getMetaValue(key);
     }
 
     @Override

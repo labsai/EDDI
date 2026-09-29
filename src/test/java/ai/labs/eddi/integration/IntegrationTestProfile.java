@@ -15,6 +15,12 @@ import java.util.Map;
  * profile overrides the custom mongodb.connectionString to point to the
  * DevServices-managed MongoDB (mapped to port 27017 via
  * quarkus.mongodb.devservices.port=27017 in application.properties).
+ * <p>
+ * On a machine where 27017 is taken — a locally installed MongoDB, most often —
+ * DevServices cannot bind it and every test fails at startup. Pass
+ * {@code -Dquarkus.mongodb.devservices.port=27018} to move DevServices, and
+ * this profile follows it. Pointing the tests at the local server instead would
+ * have them write into a real database.
  */
 public class IntegrationTestProfile implements QuarkusTestProfile {
 
@@ -30,6 +36,7 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
                 // Enable vault for AuditAndSecurityIT vault CRUD tests
                 Map.entry("eddi.vault.master-key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
                 Map.entry("mongodb.connectionString",
-                        "mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"));
+                        "mongodb://localhost:" + System.getProperty("quarkus.mongodb.devservices.port", "27017")
+                                + "/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"));
     }
 }

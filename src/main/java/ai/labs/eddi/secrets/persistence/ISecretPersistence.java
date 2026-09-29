@@ -279,33 +279,34 @@ public interface ISecretPersistence {
     }
 
     /**
-     * Writes a metadata value only if the key holds none yet, and returns whatever
-     * the key holds afterwards — this call's value when it won, the value somebody
-     * else wrote first when it did not.
+     * Store {@code value} under {@code key} only if no value is stored there yet,
+     * and return the value that is stored afterwards — the caller's own on a first
+     * write, the existing one otherwise. Unlike
+     * {@link #setMetaValue(String, String)} this never overwrites, so concurrent
+     * creators of a one-time value (the vault's checksum key) converge on a single
+     * winner instead of the last writer silently replacing a value others have
+     * already used.
      * <p>
-     * This is how key material that every replica must agree on is created. An
-     * unconditional {@link #setMetaValue} lets two replicas booting at once each
-     * write their own random salt, and the one that loses the race keeps deriving
-     * its KEK from a salt nobody will ever read again: every DEK it wrapped becomes
-     * unreadable at its next restart. Returning the stored value, rather than a
-     * boolean, is what lets the loser adopt the winner's value in the same call.
-     * <p>
-     * The default is a read-write-read for stores with no conditional write; both
-     * shipped stores override it with an atomic one.
+     * The default is a non-atomic read-then-write, adequate only for a store
+     * without concurrent writers; the database-backed implementations override it
+     * with an atomic insert-if-absent.
      *
-     * @return the value stored under {@code key} once the call returns, or null
-     *         only for a store with no metadata support at all
+     * @param key
+     *            the metadata key
+     * @param value
+     *            the value to store if none exists
+     * @return the value stored under {@code key} after the call, or null if the
+     *         store keeps no metadata
      * @throws PersistenceException
      *             if the read or write fails
      */
-    default String putMetaValueIfAbsent(String key, String value) {
+    default String setMetaValueIfAbsent(String key, String value) {
         String existing = getMetaValue(key);
         if (existing != null) {
             return existing;
         }
         setMetaValue(key, value);
-        String stored = getMetaValue(key);
-        return stored != null ? stored : value;
+        return getMetaValue(key);
     }
 
     /**

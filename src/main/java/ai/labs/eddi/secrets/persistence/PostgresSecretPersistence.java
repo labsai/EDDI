@@ -502,17 +502,19 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
-    public String putMetaValueIfAbsent(String key, String value) {
+    public String setMetaValueIfAbsent(String key, String value) {
         ensureSchema();
-        // DO NOTHING, then read back: the loser of a concurrent insert gets zero rows
-        // and a live connection, and the read returns whichever value won.
-        String sql = "INSERT INTO secret_vault_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        // DO NOTHING on conflict: an existing value is never replaced, and the primary
+        // key makes the insert atomic, so concurrent creators converge on one winner.
+        String sql = """
+                INSERT INTO secret_vault_meta (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, key);
             ps.setString(2, value);
-            if (ps.executeUpdate() == 1) {
-                return value;
-            }
+            ps.executeUpdate();
         } catch (SQLException e) {
             throw new PersistenceException("Failed to write meta value: " + key, e);
         }

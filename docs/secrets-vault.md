@@ -60,7 +60,8 @@ ${vault:tenantId/keyName}
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
-names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`).
+names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding
+`${vault:<agentId>.u<userHash>.<nonce>.apiKey}`).
 The same
 applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
 conversation data — user input, a model reply, an API response, client context — refuses the call
@@ -72,14 +73,40 @@ reference, so a `${vars:…}` the configuration wrote still resolves through to 
 that arrived through conversation data refuses the call — the check runs again after variable
 expansion, against the configured template expanded the same way.
 
+Because agent-secret grants are checked at **deploy** time, a global variable that resolves to a
+secret can be used to redirect a deployed agent's credentials past that check by editing the
+variable after deployment. To close that, **only an `eddi-admin` may store a global variable whose
+value contains a `${vault:…}`, `${eddivault:…}` or `${connection:…}` reference** — a non-admin
+editor writing such a value is refused with `403`. Plain-literal variables are unaffected, and
+callers on a deployment with authentication disabled are out of scope (there is no editor/admin
+distinction to enforce).
+
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
 string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
-present. On top of it the reference must still name this agent and the property the template reads,
-**under this conversation's own tenant**.
+present. On top of it the reference must still name this agent, this user and the property the
+template reads, **under this conversation's own tenant**.
+
+Every auto-vaulted write gets **its own slot**, `<agentId>.u<userHash>.<nonce>.<property>` — the
+user hash is a truncated SHA-256 of the user id (the id itself never enters the vault), the nonce
+makes each write unique. The slot used to be `<agentId>.<property>`, one per agent, so every user and
+conversation of the agent shared it and the last writer's secret was what everyone's reference
+resolved to. Because slots are no longer overwritten they are deleted explicitly: when their
+conversation is permanently deleted, and on GDPR erasure (which reports `autoVaultedSecretsDeleted`).
+Overwriting the property keeps the previous slot, because undo restores the previous reference;
+conversation deletion sweeps every slot the conversation's undo history and redo cache still point
+to. If the vault cannot delete them, the conversation is **not** deleted (the request fails, the
+retention sweep retries on its next run), and a GDPR erasure keeps the user's conversations and
+reports both steps failed — the snapshots are the only record of a custom tenant the slots live
+in, so a retry needs them. A legacy `<agentId>.<property>` reference in an older conversation is
+still accepted, and never deleted by this cleanup — it may back other users' conversations.
+
+The slot shape is **reserved**: the GDPR sweep recognises a user's slots by name, so
+`PUT /secretstore/secrets/{tenant}/{key}` and agent setup's `vaultKeyName` reject a key name in the
+form `<agentId>.u<16 hex>.<12 hex>.<name>` with `400`.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing
@@ -229,15 +256,13 @@ and ciphertext therefore has to say which key sealed it. A value written before
 generations existed carries no generation and reads as generation 1.
 
 **Ciphertexts are bound to their rows.** A secret is sealed with AES-GCM associated
-data naming its tenant and key name, and a wrapped DEK with associated data naming
-its tenant and generation, so a ciphertext copied into another row by someone with
-write access to the database fails authentication instead of decrypting as that
-row's value. Bound values carry an `a1:` prefix; values written before this carry
-none and keep decrypting without associated data, so nothing has to be migrated.
-A DEK rotation re-seals a tenant's secrets in the bound form, and a KEK rotation
-re-wraps DEKs in it. System values (such as the pinned audit key) are bound to
-their name the same way. OAuth connection grants, sealed through `seal()`, are not
-bound yet.
+data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
+with write access to the database fails authentication instead of decrypting as that
+row's value. Rows written before this keep decrypting through a no-AAD fallback, so
+nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
+form. System values (such as the pinned audit key) are bound to their name and have
+no unbound form. Wrapped DEKs and OAuth connection grants, sealed through `seal()`,
+are not bound.
 
 **The per-deployment salt is created once, by whichever replica gets there first.**
 It is written with an insert-if-absent and every other replica adopts the winner, so
@@ -324,8 +349,24 @@ When the **client flags input as secret** (via the `secretInput` context key):
 
 1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
 2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
-3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
-4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+3. The actual plaintext still flows through lifecycle data for the whole turn, so tasks — the parser, `PropertySetterTask` — can use or vault it
+4. When the turn ends (completed, stopped, paused or failed), `Conversation.scrubSecretClientInput()`:
+   - replaces `input:initial` and `input:normalized` with `<secret input>`;
+   - clears the parsed expressions and intents derived from the input;
+   - re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn);
+   - removes the raw and normalized text from every other datum and output of the step, and from the pending tool-call batch of a tool-call pause — the transcript the model saw, the gated call's arguments and the redacted arguments an approver is shown. A form of 4+ characters is removed wherever it occurs; a shorter one (a 3-digit PIN) only where it stands as a **whole token** — no letter or digit directly before or after it — so "PIN 739 saved" loses the PIN while "order 17391" keeps its digits. The whole-token pass changes values only, **never map keys**: a short secret is often also a field name (`id`, `to`), and renaming it would corrupt the turn's stored API responses and output items.
+
+   This runs in the turn's `finally`, before the audit flush. The audit ledger records the placeholder as the user input and redacts both forms (4+ characters) from every entry of the turn.
+5. So, for turns run on this version, the stored step, the pending approval, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**.
+6. **Turns stored before this version** still hold the raw `input:initial` and the parser's normalized copy in the database. They are masked **on read**: every secret turn carries `context.secretInput == "true"`, and conversation reads (REST, MCP, the `done` frame) replace `input`, `input:initial`, `input:normalized` and `expressions:parsed` for such a turn, clear its other parser results, and remove the raw and normalized text (4+ characters) from every other step result and output value they return for it — an output item that echoed the input included. A `returnDetailed` read additionally drops internal keys (`audit:*`, `*:trace:*`, `*Error`), runs every value through the secret redaction filter and masks everything under a credential-named key (`apiKey`, `token`, `secret`, `password`, `authorization`), for every turn, secret or not. Conversation properties are not masked as part of a secret turn (see **Not scrubbed** below); in a `returnDetailed` read only that credential-name masking applies to them. The stored document itself is not rewritten, and the audit entries of those old turns are unchanged.
+
+**Why four characters.** Where a form *is* the input (`input:initial`, `input:normalized`, the displayed `input`) it is replaced whatever its length. Elsewhere it has to be found by searching. From four characters every occurrence is replaced — inside longer words too, and in map keys as well as values of the turn. A 4-digit PIN or a short password is what a password field carries, so the substring search starts there; below that, replacing every "ok" or "7" inside other words and numbers would shred the turn's reply and rename the fields of its stored API responses and output items. A shorter form is therefore searched for only as a whole token and only in values, which removes a PIN echoed into the reply without touching "17391" or a field named `id`. The audit ledger and the read-time masking of older turns use the 4-character substring search only. Secret *context* values keep their own 8-character floor ([Secret Context Values](passing-context-information.md#secret-context-values)).
+
+**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern), and its `properties:*` step mirror — neither at turn end nor on read. Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead.
+
+**HITL resume sees the placeholder.** Everything after a pause of a secret turn — a RULE pause (`PAUSE_CONVERSATION`) or a tool-call pause — runs after the scrub. A tool approved on resume executes with `<secret input>` where the secret was, and a property setter that runs after the resume reads `<secret input>` from `{memory.current.input}`. `PropertySetterTask` does not store or vault that placeholder: it logs a warning and leaves the property unset. Capture a secret input **before** any rule that pauses the turn.
+
+**A resume cannot search for the secret.** The resume is a later request, and the plaintext is not kept past the pause — not in the conversation document, not in the resume bookmark, not as a hash (a hash of a PIN or short password stored beside the conversation is reversed offline in seconds, and a hash cannot be searched for inside a longer text anyway). The resumed turn's audit entries record the placeholder as the input, because the step was scrubbed at the pause. What a resumed task *reintroduces* is not redacted — from the ledger or from the stored step: a value copied out of a conversation property that captured the input (the designer's choice above), or a tool or API result that happens to contain it. Give a property that must never reappear the `secret` scope.
 
 When the **client sends a credential as context** — for example the caller's token for a
 downstream API — it marks that context entry `"secret": true`. The value works for that one
@@ -414,7 +455,7 @@ One provider key usually serves many agents, so setup avoids storing it many tim
 | `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
 | `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
 
-Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+Plaintext reuse is matched on the keyed checksum the vault stores per entry — nothing is decrypted to make the decision, and the match is performed by the vault provider (which holds the checksum key) rather than by recomputing a digest in the setup code — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
@@ -479,7 +520,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -511,11 +552,12 @@ It returns the vault reference:
     "tenantId": "default",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
-    "lastAccessedAt": "2026-03-16T14:00:00Z",
-    "checksum": "a1b2c3d4..."
+    "lastAccessedAt": "2026-03-16T14:00:00Z"
   }
 ]
 ```
+
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
 
 **`GET /health`** — returns vault provider status:
 
@@ -635,26 +677,35 @@ generation for every future rotation as well.
   rotation. Until then, the other replicas cannot open the re-wrapped DEKs and refuse
   to create new ones (see below) rather than wrap them under the retired key.
 
-It cannot be made atomic, so it is ordered to be **re-run with the same two keys**
-wherever it stops:
+A new master key the production startup gate would reject is refused before anything
+is written (`eddi.vault.allow-weak-master-key` lets a deployment *boot* on a weak key
+to rotate off it, never rotate onto one). The rotation cannot be made atomic, so it
+rolls back what it can and is ordered so that whatever it cannot roll back, a
+**re-run with the same two keys** completes:
 
 1. **New salt first.** A deployment still on the legacy salt migrates to a random one
    during the rotation, and that salt is persisted as *pending* before anything is
    wrapped under it. It used to exist only in memory until the end, so a failure
    half-way left DEKs wrapped under a KEK nobody could derive again.
-2. **Verify** — every DEK must open with the old KEK *or the new one*; the second is
-   what an interrupted run leaves behind. A DEK that opens with neither stops the
-   rotation before anything is written.
+2. **Verify** — every DEK, and the keyed-checksum key, must open with the old KEK *or
+   the new one*; the second is what an interrupted run leaves behind. Anything that
+   opens with neither stops the rotation before anything is written.
 3. **Announce** — the vault's KEK check value is switched to the new KEK *before* any
    DEK is re-wrapped. A replica still on the old master key checks it before wrapping
    a new DEK and refuses, so no new tenant's key is wrapped under a KEK that is on its
    way out.
 4. **Re-wrap** each DEK, guarded on the wrapping it was read with, then sweep again
-   for a DEK another replica created in the meantime.
+   for a DEK another replica created in the meantime, then re-wrap the checksum key
+   (so every stored keyed checksum keeps verifying).
 5. **Promote** the pending salt.
 
-A failure after step 2 answers with how many DEKs are already on the new key and a
-statement that re-running completes the rotation. A replica restarted part-way
+A failure in step 3 or 4 rolls every DEK this run re-wrapped back to the old KEK and
+restores the check value, so the vault is still readable under the master key it is
+configured with, and the answer says the rotation can simply be retried. Only if that
+rollback cannot finish either (the store is down) does the announcement stay: every
+DEK then opens with one of the two keys, and the answer says re-running completes
+the rotation. A failure in step 5 leaves every DEK on the new key and the pending
+salt persisted; a re-run only promotes it. A replica restarted part-way
 through with the new master key opens DEKs under either KEK and wraps new ones under
 the new one. A DEK it cannot open — one the rotation did not reach, still under the
 previous key — fails with a message saying to re-run the rotation, and does **not**
@@ -686,12 +737,14 @@ automatically.
 When the previous master key is **gone for good**:
 
 1. Start EDDI with the new `EDDI_VAULT_MASTER_KEY`.
-2. `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`. This does three
-   things:
+2. `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`. This does the
+   following:
    - re-announces the check value with the configured key;
    - if the reserved `__eddi-system` tenant's DEKs no longer open, discards them and
      every sealed system value (the audit ledger pins a new key — see
-     [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation));
+     [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation)), and likewise the
+     keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
+     created on the next store);
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
 3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
    secrets again.
@@ -770,7 +823,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 ### Features
 
 - **Namespace filtering** — select tenant ID to scope the view
-- **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
+- **Secrets table** — displays `keyName`, `createdAt`, and `lastAccessedAt` (the checksum is internal and not returned over the API)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
 - **Vault Health** — live status badge showing vault online/offline state

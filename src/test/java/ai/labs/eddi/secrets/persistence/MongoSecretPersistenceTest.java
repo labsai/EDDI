@@ -16,9 +16,7 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
-import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
@@ -536,50 +534,37 @@ class MongoSecretPersistenceTest {
         verify(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
     }
 
-    // ==================== putMetaValueIfAbsent / deleteMetaValue (H6a)
-    // ====================
+    // ==================== setMetaValueIfAbsent ====================
 
     @Test
-    @DisplayName("putMetaValueIfAbsent — $setOnInsert only, returning the stored document's value")
-    void putMetaValueIfAbsentNeverOverwrites() {
-        when(metaCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class)))
-                .thenReturn(new Document("key", "salt").append("value", "winner"));
-
-        assertEquals("winner", persistence.putMetaValueIfAbsent("salt", "mine"),
-                "a replica that lost the race must be handed the winner's value, not keep its own");
-
-        var update = ArgumentCaptor.forClass(Bson.class);
-        var options = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
-        verify(metaCollection).findOneAndUpdate(any(Bson.class), update.capture(), options.capture());
-        BsonDocument rendered = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
-        // An unconditional $set is exactly the race that stranded a replica's DEKs.
-        assertEquals(Set.of("$setOnInsert"), rendered.keySet(), rendered.toJson());
-        assertTrue(options.getValue().isUpsert());
-        assertEquals(ReturnDocument.AFTER, options.getValue().getReturnDocument());
-        verify(metaCollection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
-    }
-
-    @Test
-    @DisplayName("putMetaValueIfAbsent — losing a concurrent upsert to the unique index reads back the winner")
-    @SuppressWarnings("unchecked")
-    void putMetaValueIfAbsentDuplicateKeyReadsBack() {
-        when(metaCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class)))
-                .thenThrow(commandFailure(11000, "E11000 duplicate key error"));
+    @DisplayName("setMetaValueIfAbsent — writes with $setOnInsert only, never $set")
+    void setMetaValueIfAbsentNeverOverwrites() {
+        when(metaCollection.updateOne(any(Bson.class), any(Bson.class), any())).thenReturn(mock(UpdateResult.class));
         FindIterable<Document> iterable = mock(FindIterable.class);
-        when(iterable.first()).thenReturn(new Document("key", "salt").append("value", "winner"));
         when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "existing"));
 
-        assertEquals("winner", persistence.putMetaValueIfAbsent("salt", "mine"));
+        assertEquals("existing", persistence.setMetaValueIfAbsent("k", "mine"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(metaCollection).updateOne(any(Bson.class), update.capture(), any());
+        BsonDocument rendered = update.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), rendered.keySet(), "an existing value must never be replaced: " + rendered);
     }
 
     @Test
-    @DisplayName("putMetaValueIfAbsent — any other failure is a PersistenceException")
-    void putMetaValueIfAbsentOtherFailure() {
-        when(metaCollection.findOneAndUpdate(any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class)))
-                .thenThrow(new MongoException("down"));
+    @DisplayName("setMetaValueIfAbsent — a lost insert race returns the winner's value")
+    void setMetaValueIfAbsentDuplicateKeyReturnsWinner() {
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress(), Set.of()))
+                .when(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "winner"));
 
-        assertThrows(PersistenceException.class, () -> persistence.putMetaValueIfAbsent("salt", "mine"));
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
     }
+
+    // ==================== deleteMetaValue (H6a) ====================
 
     @Test
     @DisplayName("deleteMetaValue — deletes the one key")

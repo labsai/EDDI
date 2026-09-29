@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.SealedDataRotationParticipant;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
@@ -364,26 +365,10 @@ class VaultKeySafetyTest {
 
             EncryptedSecret admin = persistence.secrets.get("acme/admin-key");
             EncryptedSecret victim = persistence.secrets.get("acme/public-key");
-            assertTrue(EnvelopeCrypto.isBound(admin.getEncryptedValue()));
             victim.setEncryptedValue(admin.getEncryptedValue());
             victim.setIv(admin.getIv());
 
             assertThrows(SecretProviderException.class, () -> provider.resolve(ref("acme", "public-key")));
-        }
-
-        @Test
-        @DisplayName("a DEK wrapping copied onto another tenant's row does not open")
-        void swappedDekIsRefused() throws Exception {
-            var provider = provider(MASTER);
-            provider.store(ref("t1", "key"), "one", null, null);
-            provider.store(ref("t2", "key"), "two", null, null);
-
-            EncryptedDek t1 = persistence.deks.get("t1/1");
-            EncryptedDek t2 = persistence.deks.get("t2/1");
-            t2.setEncryptedDek(t1.getEncryptedDek());
-            t2.setIv(t1.getIv());
-
-            assertThrows(SecretProviderException.class, () -> provider.resolve(ref("t2", "key")));
         }
 
         @Test
@@ -393,7 +378,7 @@ class VaultKeySafetyTest {
             provider.store(ref("acme", "bound"), "bound-value", null, null);
             byte[] kek = EnvelopeCrypto.deriveKeyFromString(MASTER, persistedSalt());
             EncryptedDek dek = persistence.deks.get("acme/1");
-            byte[] rawDek = EnvelopeCrypto.decryptDek(dek.getEncryptedDek(), dek.getIv(), kek, VaultSecretProvider.dekAad("acme", 1));
+            byte[] rawDek = EnvelopeCrypto.decryptDek(dek.getEncryptedDek(), dek.getIv(), kek);
             var legacy = EnvelopeCrypto.encrypt("legacy-value", rawDek);
             persistence.secrets.put("acme/legacy", new EncryptedSecret(UUID.randomUUID().toString(), "acme", "legacy", legacy.ciphertext(),
                     legacy.iv(), dek.dekId(), null, null, List.of("*"), Instant.now(), null, null));
@@ -402,7 +387,13 @@ class VaultKeySafetyTest {
 
             provider.rotateDek("acme");
 
-            assertTrue(EnvelopeCrypto.isBound(persistence.secrets.get("acme/legacy").getEncryptedValue()));
+            // Re-sealed with its row identity as associated data: it no longer opens
+            // without it, which is what binds it.
+            EncryptedSecret migrated = persistence.secrets.get("acme/legacy");
+            EncryptedDek second = persistence.deks.get("acme/2");
+            byte[] secondDek = EnvelopeCrypto.decryptDek(second.getEncryptedDek(), second.getIv(), kek);
+            assertThrows(EnvelopeCrypto.CryptoException.class,
+                    () -> EnvelopeCrypto.decrypt(migrated.getEncryptedValue(), migrated.getIv(), secondDek));
             assertEquals("legacy-value", provider.resolve(ref("acme", "legacy")));
         }
     }
@@ -503,6 +494,9 @@ class VaultKeySafetyTest {
 
             assertEquals(List.of("t1"), adoption.tenantsNeedingReset());
             assertTrue(adoption.systemValuesReset());
+            // The checksum key was wrapped under the lost key: without discarding it every
+            // store() below would fail on it for good.
+            assertTrue(adoption.checksumKeyReset());
             after.store(ref("t2", "key"), "two", null, null);
             assertEquals("two", after.resolve(ref("t2", "key")));
             after.resetTenant("t1");
@@ -571,7 +565,7 @@ class VaultKeySafetyTest {
             seedLegacyTenant("t1", "one");
             seedLegacyTenant("t2", "two");
             var provider = provider(MASTER);
-            persistence.failNextPutIfAbsentFor = "vault-kek-salt";
+            persistence.failNextSetIfAbsentFor = "vault-kek-salt";
             assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
 
             var restarted = provider(NEW_MASTER);
@@ -703,6 +697,80 @@ class VaultKeySafetyTest {
         assertFalse(failure.getMessage().contains("/reset"), failure.getMessage());
     }
 
+    // ─── reconciled with main: rollback, checksum key ───
+
+    @Nested
+    @DisplayName("KEK rotation on main's rollback")
+    class RollbackAndChecksumKey {
+
+        private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
+        @Test
+        @DisplayName("a transient commit failure rolls every DEK back, restores the check value and discards a fresh pending salt")
+        void transientFailureIsRolledBackCompletely() throws Exception {
+            seedLegacyTenant("t1", "one");
+            seedLegacyTenant("t2", "two");
+            var provider = provider(MASTER);
+            String checkBefore = persistence.meta.get(VaultSecretProvider.KEK_CHECK_META_KEY);
+            String t1Before = persistence.deks.get("t1/1").getEncryptedDek();
+            String t2Before = persistence.deks.get("t2/1").getEncryptedDek();
+
+            // The first re-wrap succeeds, the second fails once; the rollback's own write
+            // then succeeds.
+            persistence.beforeNextDekRewrap = () -> persistence.beforeNextDekRewrap = () -> persistence.failNextDekRewrap = new PersistenceException(
+                    "transient");
+            var failure = assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+
+            assertTrue(failure.getMessage().contains("rolled back"), failure.getMessage());
+            assertEquals(t1Before, persistence.deks.get("t1/1").getEncryptedDek(), "the DEK re-wrapped first is restored");
+            assertEquals(t2Before, persistence.deks.get("t2/1").getEncryptedDek());
+            assertEquals(checkBefore, persistence.meta.get(VaultSecretProvider.KEK_CHECK_META_KEY), "the announcement is taken back");
+            assertNull(persistence.meta.get("vault-kek-salt-pending"), "nothing is wrapped under the reserved salt any more");
+            assertEquals("one", provider(MASTER).resolve(ref("t1", "key")));
+            assertEquals("two", provider(MASTER).resolve(ref("t2", "key")));
+
+            assertEquals(2, provider.rotateKek(MASTER, NEW_MASTER));
+            assertEquals("one", provider(NEW_MASTER).resolve(ref("t1", "key")));
+        }
+
+        @Test
+        @DisplayName("a checksum key another replica created during the rotation is re-wrapped too")
+        void checksumKeyCreatedMidRotationIsCaughtUp() throws Exception {
+            var provider = provider(MASTER);
+            provider.store(ref("t1", "key"), "one", null, null);
+            persistence.meta.remove(CHECKSUM_KEY_META);
+            byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(MASTER, persistedSalt());
+            byte[] raw = EnvelopeCrypto.generateDek();
+
+            persistence.beforeNextDekRewrap = () -> {
+                var wrapped = EnvelopeCrypto.encryptDek(raw, oldKek);
+                persistence.meta.put(CHECKSUM_KEY_META, wrapped.iv() + "|" + wrapped.ciphertext());
+            };
+            provider.rotateKek(MASTER, NEW_MASTER);
+
+            String checksum = VaultChecksum.compute(raw, "t1", "one");
+            assertTrue(provider(NEW_MASTER).matchesChecksum("t1", checksum, "one"), "the key must open under the new master key");
+        }
+
+        @Test
+        @DisplayName("a node whose KEK is no longer the vault's does not create the checksum key")
+        void staleNodeDoesNotCreateTheChecksumKey() throws Exception {
+            provider(MASTER).store(ref("t1", "key"), "one", null, null);
+            persistence.meta.remove(CHECKSUM_KEY_META);
+            // A node that has not loaded the key yet.
+            var provider = provider(MASTER);
+            // A rotation elsewhere announced another KEK; this node's DEK is still
+            // readable.
+            byte[] otherKek = EnvelopeCrypto.deriveKeyFromString(NEW_MASTER, persistedSalt());
+            var announced = EnvelopeCrypto.encrypt("eddi-vault-kek-check", otherKek, "eddi-kek-check|v1".getBytes(StandardCharsets.UTF_8));
+            persistence.meta.put(VaultSecretProvider.KEK_CHECK_META_KEY, announced.iv() + ":" + announced.ciphertext());
+
+            assertThrows(SecretProviderException.class, () -> provider.store(ref("t1", "other"), "two", null, null));
+
+            assertNull(persistence.meta.get(CHECKSUM_KEY_META), "nothing may be wrapped under the retired KEK");
+        }
+    }
+
     // ─── helpers ───
 
     /**
@@ -722,14 +790,15 @@ class VaultKeySafetyTest {
     }
 
     /**
-     * A tenant whose DEK is wrapped under {@code kek}, in the current bound form.
+     * A tenant whose DEK is wrapped under {@code kek}; its secret is sealed in the
+     * unbound form, which still resolves.
      */
     private void seedTenant(String tenant, String value, byte[] kek) {
         byte[] dek = EnvelopeCrypto.generateDek();
-        var wrapped = EnvelopeCrypto.encryptDek(dek, kek, VaultSecretProvider.dekAad(tenant, 1));
+        var wrapped = EnvelopeCrypto.encryptDek(dek, kek);
         persistence.deks.put(tenant + "/1", new EncryptedDek(UUID.randomUUID().toString(), tenant, 1, wrapped.ciphertext(), wrapped.iv(),
                 Instant.now()));
-        var sealed = EnvelopeCrypto.encrypt(value, dek, VaultSecretProvider.secretAad(tenant, "key"));
+        var sealed = EnvelopeCrypto.encrypt(value, dek);
         persistence.secrets.put(tenant + "/key", new EncryptedSecret(UUID.randomUUID().toString(), tenant, "key", sealed.ciphertext(), sealed.iv(),
                 EncryptedDek.dekId(tenant, 1), null, null, List.of("*"), Instant.now(), null, null));
     }

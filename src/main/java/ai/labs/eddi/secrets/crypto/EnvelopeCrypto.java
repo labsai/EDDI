@@ -9,7 +9,6 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -47,18 +46,6 @@ public final class EnvelopeCrypto {
     }
 
     /**
-     * Prefix of a ciphertext sealed with associated data (AAD).
-     * <p>
-     * Base64 never contains a colon, so the marker cannot collide with the
-     * unprefixed form every ciphertext written before AAD existed still uses — and
-     * that form keeps decrypting, without AAD, so no stored row has to be migrated
-     * for this to ship. Stripping the marker does not downgrade a bound ciphertext
-     * either: its tag was computed over the AAD, so opening it without the AAD
-     * fails authentication.
-     */
-    static final String AAD_PREFIX = "a1:";
-
-    /**
      * Encrypt plaintext using AES-256-GCM with the given key.
      *
      * @param plaintext
@@ -72,20 +59,25 @@ public final class EnvelopeCrypto {
     }
 
     /**
-     * Encrypt plaintext using AES-256-GCM, binding the ciphertext to
-     * {@code associatedData}.
+     * Encrypt plaintext using AES-256-GCM, binding {@code aad} into the
+     * authentication tag as Additional Authenticated Data.
      * <p>
-     * The associated data is not stored, only authenticated: the same value must be
-     * supplied to {@link #decrypt(String, String, byte[], String)}. Callers pass
-     * the identity of the row the ciphertext is stored in, so that a ciphertext
-     * copied into another row by someone with write access to the database fails
-     * authentication instead of decrypting as that row's value.
+     * The AAD is authenticated but not encrypted: it is not stored with the
+     * ciphertext and must be reconstructed identically at decryption time. Passing
+     * a value such as {@code tenantId|keyName|dekId} binds the ciphertext to the
+     * row it belongs to, so an attacker with database write access cannot swap a
+     * ciphertext (and its IV) from one key onto another — the tag no longer
+     * verifies. A {@code null} AAD produces a plain (legacy-compatible) ciphertext.
      *
-     * @param associatedData
-     *            what the ciphertext is bound to, or {@code null} for the unbound
-     *            legacy form
+     * @param plaintext
+     *            the data to encrypt
+     * @param key
+     *            the 32-byte AES-256 key
+     * @param aad
+     *            additional authenticated data to bind, or {@code null} for none
+     * @return encrypted result containing Base64-encoded ciphertext and IV
      */
-    public static EncryptionResult encrypt(String plaintext, byte[] key, String associatedData) {
+    public static EncryptionResult encrypt(String plaintext, byte[] key, byte[] aad) {
         validateKey(key);
         try {
             byte[] iv = generateIv();
@@ -93,14 +85,13 @@ public final class EnvelopeCrypto {
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
             SecretKeySpec keySpec = new SecretKeySpec(key, ALGORITHM);
             cipher.init(Cipher.ENCRYPT_MODE, keySpec, parameterSpec);
-            if (associatedData != null) {
-                cipher.updateAAD(associatedData.getBytes(StandardCharsets.UTF_8));
+            if (aad != null) {
+                cipher.updateAAD(aad);
             }
 
-            byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
+            byte[] ciphertext = cipher.doFinal(plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
-            String encoded = Base64.getEncoder().encodeToString(ciphertext);
-            return new EncryptionResult(associatedData != null ? AAD_PREFIX + encoded : encoded, Base64.getEncoder().encodeToString(iv));
+            return new EncryptionResult(Base64.getEncoder().encodeToString(ciphertext), Base64.getEncoder().encodeToString(iv));
         } catch (Exception e) {
             throw new CryptoException("Encryption failed", e);
         }
@@ -122,51 +113,40 @@ public final class EnvelopeCrypto {
     }
 
     /**
-     * Decrypt AES-256-GCM ciphertext, authenticating the associated data it was
-     * bound to.
-     * <p>
-     * A ciphertext carrying the {@value #AAD_PREFIX} marker is opened with
-     * {@code associatedData} and fails unless that is the value it was sealed with
-     * — including when none is supplied at all. An unmarked ciphertext predates AAD
-     * and is opened without it, whatever is passed, which is what keeps every row
-     * written before this change readable.
+     * Decrypt AES-256-GCM ciphertext, verifying {@code aad} as the Additional
+     * Authenticated Data it was encrypted with. The AAD must be byte-identical to
+     * what {@link #encrypt(String, byte[], byte[])} was given, or the tag fails and
+     * this throws.
      *
-     * @param associatedData
-     *            what the ciphertext must be bound to
+     * @param encryptedValue
+     *            Base64-encoded ciphertext (includes auth tag)
+     * @param ivBase64
+     *            Base64-encoded 12-byte IV
+     * @param key
+     *            the 32-byte AES-256 key
+     * @param aad
+     *            the additional authenticated data to verify, or {@code null}
+     * @return the decrypted plaintext
      */
-    public static String decrypt(String encryptedValue, String ivBase64, byte[] key, String associatedData) {
+    public static String decrypt(String encryptedValue, String ivBase64, byte[] key, byte[] aad) {
         validateKey(key);
         try {
-            boolean bound = isBound(encryptedValue);
-            if (bound && associatedData == null) {
-                throw new CryptoException("Ciphertext is bound to associated data, but none was supplied");
-            }
-            byte[] ciphertext = Base64.getDecoder().decode(bound ? encryptedValue.substring(AAD_PREFIX.length()) : encryptedValue);
+            byte[] ciphertext = Base64.getDecoder().decode(encryptedValue);
             byte[] iv = Base64.getDecoder().decode(ivBase64);
 
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
             SecretKeySpec keySpec = new SecretKeySpec(key, ALGORITHM);
             cipher.init(Cipher.DECRYPT_MODE, keySpec, parameterSpec);
-            if (bound) {
-                cipher.updateAAD(associatedData.getBytes(StandardCharsets.UTF_8));
+            if (aad != null) {
+                cipher.updateAAD(aad);
             }
 
             byte[] decrypted = cipher.doFinal(ciphertext);
-            return new String(decrypted, StandardCharsets.UTF_8);
-        } catch (CryptoException e) {
-            throw e;
+            return new String(decrypted, java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new CryptoException("Decryption failed", e);
         }
-    }
-
-    /**
-     * Whether a stored ciphertext is bound to associated data — false for every
-     * value written before AAD existed.
-     */
-    public static boolean isBound(String encryptedValue) {
-        return encryptedValue != null && encryptedValue.startsWith(AAD_PREFIX);
     }
 
     /**
@@ -195,15 +175,7 @@ public final class EnvelopeCrypto {
      * @return encrypted result
      */
     public static EncryptionResult encryptDek(byte[] dek, byte[] kek) {
-        return encryptDek(dek, kek, null);
-    }
-
-    /**
-     * Encrypt a DEK using the KEK, bound to {@code associatedData} — see
-     * {@link #encrypt(String, byte[], String)}.
-     */
-    public static EncryptionResult encryptDek(byte[] dek, byte[] kek, String associatedData) {
-        return encrypt(Base64.getEncoder().encodeToString(dek), kek, associatedData);
+        return encrypt(Base64.getEncoder().encodeToString(dek), kek);
     }
 
     /**
@@ -218,16 +190,7 @@ public final class EnvelopeCrypto {
      * @return the raw DEK bytes
      */
     public static byte[] decryptDek(String encryptedDek, String ivBase64, byte[] kek) {
-        return decryptDek(encryptedDek, ivBase64, kek, null);
-    }
-
-    /**
-     * Decrypt a DEK using the KEK, authenticating {@code associatedData} when the
-     * wrapped DEK was bound to it — see
-     * {@link #decrypt(String, String, byte[], String)}.
-     */
-    public static byte[] decryptDek(String encryptedDek, String ivBase64, byte[] kek, String associatedData) {
-        String dekBase64 = decrypt(encryptedDek, ivBase64, kek, associatedData);
+        String dekBase64 = decrypt(encryptedDek, ivBase64, kek);
         return Base64.getDecoder().decode(dekBase64);
     }
 
@@ -238,7 +201,7 @@ public final class EnvelopeCrypto {
     public static String sha256Hex(String plaintext) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(plaintext.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder hexString = new StringBuilder(2 * hash.length);
             for (byte b : hash) {
                 String hex = Integer.toHexString(0xff & b);
@@ -280,7 +243,7 @@ public final class EnvelopeCrypto {
      * Fixed, legacy salt — used for backward compatibility with pre-6.0.2
      * deployments.
      */
-    private static final byte[] LEGACY_SALT = "eddi-vault-kek-v1".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] LEGACY_SALT = "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
     /**
      * Derive a 32-byte key using the <b>legacy fixed salt</b>. New deployments

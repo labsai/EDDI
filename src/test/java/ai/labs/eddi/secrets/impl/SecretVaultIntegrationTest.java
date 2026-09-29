@@ -10,6 +10,7 @@ import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -65,15 +66,17 @@ class SecretVaultIntegrationTest {
     @BeforeEach
     void setUp() {
         persistence = mock(ISecretPersistence.class);
+        // The checksum key must be durably stored before a keyed checksum is written;
+        // a bare mock keeps no metadata, so accept the insert and hand the value back.
+        lenient().when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         meterRegistry = new SimpleMeterRegistry();
         dekStore.clear();
         secretStore.clear();
 
         // Create provider with real crypto, mocked persistence
         var saltManager = new VaultSaltManager(persistence);
-        // No salt and no DEKs yet: a fresh deployment, whose salt is created with an
-        // insert-if-absent that hands back what it stored.
-        lenient().when(persistence.putMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
+        // No salt and no DEKs yet: a fresh deployment, whose salt is created with the
+        // same insert-if-absent stubbed above.
         saltManager.initialize();
         provider = new VaultSecretProvider(Optional.of(MASTER_KEY), persistence, saltManager, meterRegistry);
         provider.initMetrics();
@@ -407,7 +410,21 @@ class SecretVaultIntegrationTest {
 
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
 
-            assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.rotateKek("wrong-old-key", "new-key"));
+            clearInvocations(persistence); // only the rotation's own writes count below
+
+            // A STRONG replacement key, so the new-key strength gate cannot be what fails:
+            // the failure asserted here must come from the wrong old key not unwrapping
+            // the DEK (a CryptoException in the verification phase).
+            var thrown = assertThrows(ISecretProvider.SecretProviderException.class,
+                    () -> provider.rotateKek("wrong-old-key", "replacement-master-key-Xq7vR2mK9pL4"));
+            // The refusal names the DEK and says nothing was changed; the cause is still
+            // the
+            // failed unwrap under the wrong old key.
+            assertTrue(thrown.getMessage().startsWith("KEK rotation failed"), thrown.getMessage());
+            assertInstanceOf(EnvelopeCrypto.CryptoException.class, thrown.getCause(), "the wrong old key must fail to unwrap the DEK");
+            verify(persistence, never()).upsertDek(any());
+            verify(persistence, never()).updateDekWrapping(any(), any());
+            verify(persistence, never()).setMetaValue(anyString(), anyString());
         }
     }
 

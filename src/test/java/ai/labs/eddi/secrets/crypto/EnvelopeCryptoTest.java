@@ -100,49 +100,49 @@ class EnvelopeCryptoTest {
         assertEquals(plaintext, decrypted);
     }
 
-    // ─── L-S1: associated data binds a ciphertext to its row ───
-
-    private static final byte[] AAD_KEY = new byte[32];
+    // ─── Finding #6: GCM Additional Authenticated Data (AAD) binding ───
 
     @Test
-    void boundCiphertext_opensOnlyWithTheSameAssociatedData() {
-        var result = EnvelopeCrypto.encrypt("sk-secret", AAD_KEY, "row-a");
+    void aad_roundtrip() {
+        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        byte[] aad = "default|apiKey|default#g1".getBytes();
+        String plaintext = "sk-secret-value";
 
-        assertTrue(EnvelopeCrypto.isBound(result.ciphertext()));
-        assertEquals("sk-secret", EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, "row-a"));
-        // Copied into another row: authentication fails instead of decrypting as that
-        // row's value — the swap AES-GCM without AAD allowed.
-        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, "row-b"));
-        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY, null));
-        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), AAD_KEY));
+        var result = EnvelopeCrypto.encrypt(plaintext, key, aad);
+        assertEquals(plaintext, EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key, aad));
     }
 
     @Test
-    void boundCiphertext_strippingTheMarkerDoesNotDowngradeIt() {
-        var result = EnvelopeCrypto.encrypt("sk-secret", AAD_KEY, "row-a");
-        String stripped = result.ciphertext().substring(EnvelopeCrypto.AAD_PREFIX.length());
+    void aad_wrongAadFailsToDecrypt() {
+        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        var result = EnvelopeCrypto.encrypt("sk-secret-value", key, "default|apiKey|default#g1".getBytes());
 
-        // The tag covers the associated data, so the unbound path cannot open it.
-        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(stripped, result.iv(), AAD_KEY, "row-a"));
-    }
-
-    @Test
-    void legacyCiphertext_keepsDecryptingWhateverAssociatedDataIsPassed() {
-        // Every row written before AAD existed: no marker, no associated data. Passing
-        // the row's binding when reading it must not break it.
-        var legacy = EnvelopeCrypto.encrypt("sk-legacy", AAD_KEY);
-
-        assertFalse(EnvelopeCrypto.isBound(legacy.ciphertext()));
-        assertEquals("sk-legacy", EnvelopeCrypto.decrypt(legacy.ciphertext(), legacy.iv(), AAD_KEY, "row-a"));
-    }
-
-    @Test
-    void boundDek_roundTripsAndRefusesAnotherBinding() {
-        byte[] dek = EnvelopeCrypto.generateDek();
-        var wrapped = EnvelopeCrypto.encryptDek(dek, AAD_KEY, "tenant-a|1");
-
-        assertArrayEquals(dek, EnvelopeCrypto.decryptDek(wrapped.ciphertext(), wrapped.iv(), AAD_KEY, "tenant-a|1"));
+        // A ciphertext bound to one row cannot be authenticated under another row's AAD
+        // — this is what stops a DB-write attacker swapping ciphertext between keys.
         assertThrows(EnvelopeCrypto.CryptoException.class,
-                () -> EnvelopeCrypto.decryptDek(wrapped.ciphertext(), wrapped.iv(), AAD_KEY, "tenant-b|1"));
+                () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key, "default|otherKey|default#g1".getBytes()));
+        // And a value written WITH aad cannot be read without it.
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key));
+    }
+
+    @Test
+    void aad_legacyNoAadValueCannotBeReadWithAad() {
+        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        // A legacy row (encrypted without AAD) authenticates only without AAD — which
+        // is
+        // why the provider tries the AAD form first and falls back to no-AAD.
+        var legacy = EnvelopeCrypto.encrypt("legacy-value", key);
+        assertEquals("legacy-value", EnvelopeCrypto.decrypt(legacy.ciphertext(), legacy.iv(), key));
+        assertThrows(EnvelopeCrypto.CryptoException.class,
+                () -> EnvelopeCrypto.decrypt(legacy.ciphertext(), legacy.iv(), key, "some|aad|here".getBytes()));
+    }
+
+    @Test
+    void aad_nullAadEqualsNoAadOverload() {
+        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        var result = EnvelopeCrypto.encrypt("v", key, null);
+        // null AAD is the legacy form: readable by both the no-AAD and null-AAD paths.
+        assertEquals("v", EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key));
+        assertEquals("v", EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key, null));
     }
 }

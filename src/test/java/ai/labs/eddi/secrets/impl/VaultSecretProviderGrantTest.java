@@ -7,18 +7,24 @@ import ai.labs.eddi.secrets.ISecretProvider.GrantConflictException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
+import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -28,7 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -352,7 +360,199 @@ class VaultSecretProviderGrantTest {
         assertDoesNotThrow(() -> {
             storeSecret(List.of("agent-one"));
             assertEquals(PLAINTEXT, provider.resolve(REF));
-            assertEquals(EnvelopeCrypto.sha256Hex(PLAINTEXT), provider.getMetadata(REF).checksum());
+            // Checksum is now a keyed HMAC (finding #2), not a plain SHA-256 — verify it
+            // through the provider, which holds the checksum key, and confirm it is the
+            // keyed form rather than the brute-forceable digest.
+            String checksum = provider.getMetadata(REF).checksum();
+            assertTrue(checksum.startsWith("h1:"), checksum);
+            assertTrue(provider.matchesChecksum(REF.tenantId(), checksum, PLAINTEXT));
         });
+    }
+
+    @Test
+    @DisplayName("finding #2: a keyed checksum still verifies after KEK rotation + restart (checksum key survives)")
+    void checksumSurvivesKekRotation() throws Exception {
+        // Store a secret; its h1: checksum is written with the deployment checksum key,
+        // which is itself persisted SEALED under a tenant DEK.
+        storeSecret(List.of("*"));
+        String checksumBefore = provider.getMetadata(REF).checksum();
+        assertTrue(checksumBefore.startsWith("h1:"), checksumBefore);
+        assertTrue(provider.matchesChecksum(TENANT_ID, checksumBefore, PLAINTEXT));
+
+        // Rotate the KEK — re-wraps every DEK, including the one the checksum key is
+        // sealed under, but does not change any DEK's plaintext.
+        String newMasterKey = "rotated-master-key-98765432109876";
+        provider.rotateKek(MASTER_KEY, newMasterKey);
+
+        // A fresh provider on the NEW master key (the post-rotation restart), sharing
+        // the
+        // same persistence, must unseal the SAME checksum key and still verify the
+        // pre-rotation checksum. A KEK-derived checksum key would change here and turn
+        // a
+        // legitimate same-value re-setup into a spurious "value does not match"
+        // failure.
+        VaultSaltManager saltManager2 = mock(VaultSaltManager.class);
+        when(saltManager2.getSalt()).thenReturn(FIXED_SALT);
+        when(saltManager2.isUsingLegacySalt()).thenReturn(false);
+        VaultSecretProvider provider2 = new VaultSecretProvider(Optional.of(newMasterKey), persistence, saltManager2, new SimpleMeterRegistry());
+        provider2.initMetrics();
+        provider2.onStartup(mock(StartupEvent.class));
+
+        String checksumAfter = provider2.getMetadata(REF).checksum();
+        assertEquals(checksumBefore, checksumAfter, "the stored checksum bytes are unchanged by KEK rotation");
+        assertTrue(provider2.matchesChecksum(TENANT_ID, checksumAfter, PLAINTEXT),
+                "the same value must still match its checksum after KEK rotation + restart — proving the checksum key is stable");
+    }
+
+    // ─── The checksum key is created only when truly absent ───
+
+    private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
+    /** A second node (or a restart) on the same store. */
+    private VaultSecretProvider newProvider(String masterKey) {
+        VaultSaltManager saltManager = mock(VaultSaltManager.class);
+        when(saltManager.getSalt()).thenReturn(FIXED_SALT);
+        when(saltManager.isUsingLegacySalt()).thenReturn(false);
+        VaultSecretProvider p = new VaultSecretProvider(Optional.of(masterKey), persistence, saltManager, new SimpleMeterRegistry());
+        p.initMetrics();
+        p.onStartup(mock(StartupEvent.class));
+        return p;
+    }
+
+    @Test
+    @DisplayName("a failed READ of the checksum key never replaces the stored key, and nothing is cached from the failure")
+    void checksumKeyNotReplacedAfterReadFailure() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        assertNotNull(storedKey);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        VaultSecretProvider restarted = newProvider(MASTER_KEY);
+        persistence.metaReadFailure = new PersistenceException("transient read failure");
+        assertThrows(SecretProviderException.class,
+                () -> restarted.store(new SecretReference(TENANT_ID, "other-key"), "other-value", null, List.of("*")));
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META),
+                "a transient read error must not be taken for 'no key yet' — replacing it strands every h1: checksum");
+
+        persistence.metaReadFailure = null;
+        assertTrue(restarted.matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "once the store recovers the same node uses the stored key — no fallback key was cached");
+    }
+
+    @Test
+    @DisplayName("a checksum key that cannot be UNWRAPPED (KEK mismatch) is never replaced")
+    void checksumKeyNotReplacedAfterUnwrapFailure() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        VaultSecretProvider wrongKek = newProvider("a-different-master-key-9876543210");
+        assertThrows(RuntimeException.class, () -> wrongKek.matchesChecksum(TENANT_ID, checksum, PLAINTEXT));
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META),
+                "a node on the wrong KEK must not overwrite the key every existing checksum was written with");
+
+        assertTrue(newProvider(MASTER_KEY).matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "the original key is intact, so a correctly configured node still verifies");
+    }
+
+    @Test
+    @DisplayName("a creator that raced another node's first write adopts the winner's key instead of overwriting it")
+    void racingCreatorAdoptsTheStoredKey() throws Exception {
+        storeSecret(List.of("*"));
+        String storedKey = persistence.meta.get(CHECKSUM_KEY_META);
+        String checksum = provider.getMetadata(REF).checksum();
+
+        // Node B read "absent" just before node A's key landed.
+        persistence.hideMetaOnceFor = CHECKSUM_KEY_META;
+        VaultSecretProvider nodeB = newProvider(MASTER_KEY);
+
+        assertTrue(nodeB.matchesChecksum(TENANT_ID, checksum, PLAINTEXT),
+                "node B must end on node A's key, or checksums written by A are unverifiable on B");
+        assertEquals(storedKey, persistence.meta.get(CHECKSUM_KEY_META), "the create is insert-if-absent, never an overwrite");
+    }
+
+    @Test
+    @DisplayName("a store without metadata refuses a keyed checksum instead of using a key that dies with the process")
+    void metadataLessStoreRefusesKeyedChecksum() {
+        persistence.noMetadata = true;
+
+        assertThrows(SecretProviderException.class, () -> storeSecret(List.of("*")),
+                "a process-local checksum key would make every h1: checksum unverifiable after a restart");
+        assertTrue(provider.matchesChecksum(TENANT_ID, VaultChecksum.legacy(PLAINTEXT), PLAINTEXT),
+                "a legacy checksum needs no key, so it still verifies without metadata");
+    }
+
+    // ─── KEK rotation: nothing half-committed ───
+
+    /** tenant/generation → the DEK's current wrapped ciphertext. */
+    private Map<String, String> dekSnapshot() {
+        Map<String, String> snapshot = new LinkedHashMap<>();
+        for (EncryptedDek dek : persistence.listAllDeks()) {
+            snapshot.put(dek.getTenantId() + "/" + dek.getGeneration(), dek.getEncryptedDek() + "|" + dek.getIv());
+        }
+        return snapshot;
+    }
+
+    @Test
+    @DisplayName("KEK rotation to a weak master key is refused in production before anything is written")
+    void rotateToWeakMasterKeyRefusedInProduction() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        VaultSecretProvider production = spy(provider);
+        doReturn(LaunchMode.NORMAL).when(production).getLaunchMode();
+
+        assertThrows(SecretProviderException.class, () -> production.rotateKek(MASTER_KEY, "changeme"));
+
+        assertEquals(before, dekSnapshot(), "a refused rotation must leave every DEK on the old KEK");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF));
+    }
+
+    @Test
+    @DisplayName("an unwrappable checksum key aborts KEK rotation before any DEK is re-wrapped")
+    void malformedChecksumKeyAbortsRotationBeforeAnyWrite() throws Exception {
+        storeSecret(List.of("*"));
+        persistence.meta.put(CHECKSUM_KEY_META, "not-a-wrapped-key");
+        Map<String, String> before = dekSnapshot();
+
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+
+        assertEquals(before, dekSnapshot(), "the checksum key is verified in phase 1, so no DEK may have moved to the new KEK");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
+    }
+
+    @Test
+    @DisplayName("a failed checksum-key write during KEK rotation rolls every DEK back to the old KEK")
+    void failedChecksumKeyWriteRollsBackDeks() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        persistence.metaWriteFailure = new PersistenceException("meta write failed");
+        // Only the checksum key's write: the rotation's earlier KEK-check announcement
+        // must succeed, or nothing would be re-wrapped for the rollback to undo.
+        persistence.metaWriteFailureKey = CHECKSUM_KEY_META;
+
+        assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+
+        persistence.metaWriteFailure = null;
+        assertEquals(before, dekSnapshot(), "DEKs written before the failure must be restored to their old wrapping");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
+    }
+
+    @Test
+    @DisplayName("an UNCHECKED failure of the checksum-key write also rolls the DEKs back and surfaces as SecretProviderException")
+    void uncheckedChecksumKeyWriteFailureRollsBackDeks() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        // Not a PersistenceException — e.g. a driver/pool error the store does not
+        // wrap.
+        persistence.metaWriteFailure = new IllegalStateException("connection pool closed");
+        persistence.metaWriteFailureKey = CHECKSUM_KEY_META;
+
+        SecretProviderException thrown = assertThrows(SecretProviderException.class,
+                () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+        assertTrue(thrown.getCause() instanceof IllegalStateException, "the original failure is kept as the cause");
+
+        persistence.metaWriteFailure = null;
+        assertEquals(before, dekSnapshot(), "DEKs written before the failure must be restored to their old wrapping");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
     }
 }

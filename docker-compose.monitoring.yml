@@ -29,22 +29,27 @@ services:
   prometheus:
     image: prom/prometheus:v3.4.0
     container_name: eddi-prometheus
+    # Loopback-only: Prometheus has no auth and its API can read every metric.
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./docs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
-      - "--web.enable-lifecycle"
+      # --web.enable-lifecycle is deliberately NOT set: it exposes unauthenticated
+      # POST /-/reload and POST /-/quit, letting anyone who can reach the port
+      # reload the config or shut the server down. Reload the config with a SIGHUP
+      # (`docker compose kill -s HUP prometheus`) if you need one.
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana:11.6.0
     container_name: eddi-grafana
+    # Loopback-only host binding — see the credentials note below.
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:
       - ./docs/monitoring/eddi-grafana-dashboard.json:/var/lib/grafana/dashboards/eddi.json:ro
       # The provider globs this directory, so a second dashboard needs no
@@ -59,18 +64,23 @@ services:
       - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      # DEV DEFAULT ONLY. admin/admin is fine for a loopback-bound local dashboard
+      # (the port is published on 127.0.0.1 above), but must NOT survive if Grafana
+      # is ever exposed. Override both for anything reachable off-box:
+      #   GRAFANA_ADMIN_USER=... GRAFANA_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     restart: unless-stopped
 
   jaeger:
     image: jaegertracing/jaeger:2.7.0
     container_name: eddi-jaeger
+    # Loopback-only: the Jaeger UI and OTLP ingest ports carry no auth.
     ports:
-      - "${JAEGER_PORT:-16686}:16686"
-      - "${OTLP_GRPC_PORT:-4317}:4317"
-      - "${OTLP_HTTP_PORT:-4318}:4318"
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     restart: unless-stopped

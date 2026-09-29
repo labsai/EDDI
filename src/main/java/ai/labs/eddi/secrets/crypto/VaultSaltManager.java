@@ -142,7 +142,7 @@ public class VaultSaltManager {
                 // Fresh deployment — generate a random salt, but keep whichever salt the
                 // first replica managed to store.
                 String candidate = Base64.getEncoder().encodeToString(randomSalt());
-                String stored = persistence.putMetaValueIfAbsent(SALT_META_KEY, candidate);
+                String stored = persistence.setMetaValueIfAbsent(SALT_META_KEY, candidate);
                 if (stored == null) {
                     throw new IllegalStateException("[VAULT] The secret persistence layer has no metadata store, so a per-deployment salt "
                             + "cannot be kept. Refusing to derive a KEK from a salt that would be lost at the next restart.");
@@ -215,7 +215,7 @@ public class VaultSaltManager {
      *             at that point, so the rotation can simply be refused
      */
     public byte[] reservePendingSalt() {
-        String stored = persistence.putMetaValueIfAbsent(PENDING_SALT_META_KEY, Base64.getEncoder().encodeToString(randomSalt()));
+        String stored = persistence.setMetaValueIfAbsent(PENDING_SALT_META_KEY, Base64.getEncoder().encodeToString(randomSalt()));
         if (stored == null) {
             throw new PersistenceException("The secret persistence layer has no metadata store; a salt migration cannot be made safe.");
         }
@@ -261,7 +261,7 @@ public class VaultSaltManager {
             throw new IllegalArgumentException("Salt must be at least 8 bytes");
         }
         String encoded = Base64.getEncoder().encodeToString(newSalt);
-        String stored = persistence.putMetaValueIfAbsent(SALT_META_KEY, encoded);
+        String stored = persistence.setMetaValueIfAbsent(SALT_META_KEY, encoded);
         if (stored != null && !stored.equals(encoded)) {
             throw new IllegalStateException("[VAULT] A different per-deployment salt was persisted while this KEK rotation was running. "
                     + "Another rotation finished first; restart every replica and verify the vault before rotating again.");

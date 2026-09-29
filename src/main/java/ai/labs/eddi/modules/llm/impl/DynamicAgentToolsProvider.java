@@ -418,12 +418,75 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * inversion both guards exist to prevent.
      */
     static boolean hasGroupPolicy(IConversationMemory memory) {
+        return groupPolicyContext(memory) != null;
+    }
+
+    /**
+     * The group policy context entry governing this turn, or {@code null} for a
+     * standalone conversation.
+     * <p>
+     * The current step is consulted first — that is where
+     * {@code MemberTurnExecutor} puts the policy on every member turn. Earlier
+     * steps are the fallback: a member conversation belongs to the user who started
+     * the discussion, so that user can also send a turn into it directly, and such
+     * a turn carries no group context at all. Reading the current step alone
+     * resolved that turn to "standalone" and handed it the permissive default — a
+     * group's disabled policy disappeared exactly when the group was not the one
+     * driving the turn. Once a conversation has been governed by a group, the most
+     * recent policy it received keeps governing it. (A client cannot supply this
+     * key itself — see {@code ClientContextGuard}.)
+     */
+    private static Context groupPolicyContext(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return false;
+        if (currentStep != null) {
+            Context current = policyEntry(currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+            if (current != null) {
+                return current;
+            }
         }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        return contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null;
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> entries = allSteps.getAllLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            if (entries != null) {
+                // Oldest step first — walk backwards for the most recent policy.
+                for (int i = entries.size() - 1; i >= 0; i--) {
+                    Context found = policyEntry(entries.get(i));
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * One step's policy entry, read for PRESENCE: {@code null} only when the step
+     * holds nothing under the key (no entry, no result, or a {@link Context} with
+     * no value). Anything else is a policy that is present — and a result that is
+     * not a {@link Context} at all is present but malformed, so it comes back as a
+     * {@link MalformedPolicy} marker that {@link #resolveDynamicAgentConfig}
+     * resolves to the disabled config. Skipping it instead would fall back to an
+     * older (possibly more permissive) policy or to the permissive standalone
+     * default — failing open on exactly the entry we could not read.
+     */
+    private static Context policyEntry(IData<?> entry) {
+        if (entry == null || entry.getResult() == null) {
+            return null;
+        }
+        if (entry.getResult() instanceof Context ctx) {
+            return ctx.getValue() != null ? ctx : null;
+        }
+        return new Context(Context.ContextType.object, new MalformedPolicy(entry.getResult().getClass().getName()));
+    }
+
+    /**
+     * Marks a group-policy entry that was present but not a {@link Context}.
+     *
+     * @param type
+     *            the class that was found under the key, for the log line
+     */
+    private record MalformedPolicy(String type) {
     }
 
     /**
@@ -464,18 +527,19 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      *         standalone default only when none is present at all
      */
     static DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return createDefaultDynamicConfig();
-        }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        if (contextData == null || !(contextData.getResult() instanceof Context ctx) || ctx.getValue() == null) {
-            // No group context — a standalone agent whose operator whitelisted these
-            // tools deliberately.
+        Context ctx = groupPolicyContext(memory);
+        if (ctx == null) {
+            // No group context on this or any earlier turn — a standalone agent whose
+            // operator whitelisted these tools deliberately.
             return createDefaultDynamicConfig();
         }
 
         Object value = ctx.getValue();
+        if (value instanceof MalformedPolicy malformed) {
+            LOGGER.warnf("[DYNAMIC] The group DynamicAgentConfig entry for agent='%s' held a %s instead of a context entry — "
+                    + "disabling dynamic agent capabilities for this turn", sanitize(memory.getAgentId()), sanitize(malformed.type()));
+            return disabledDynamicConfig();
+        }
         if (value instanceof DynamicAgentConfig groupConfig) {
             LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
             return groupConfig;

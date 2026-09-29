@@ -260,6 +260,7 @@
     "openExternalChat": "In neuem Tab öffnen",
     "emptyDescription": "Erstellen Sie mit dem Wizard in wenigen Minuten einen fertig konfigurierten Agent.",
     "liveIn": "Aktiv in {{environment}}",
+    "liveInVersion": "Aktiv in {{environment}} mit Version {{version}}",
     "chatIn": "In {{environment}} chatten",
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
@@ -747,7 +748,8 @@
     "errorConversationEnded": "Dieses Gespräch ist beendet.",
     "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
     "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
-    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut."
+    "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut.",
+    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation."
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -2036,6 +2038,7 @@
     "ingestion": "Dokumenten-Aufnahme",
     "dropFiles": "Dokumente hierhin ziehen zum Aufnehmen",
     "dropHint": "Text, Markdown oder beliebige Textdateien",
+    "replaceSameName": "Zuvor aufgenommenes Dokument mit gleichem Dateinamen ersetzen",
     "browse": "Durchsuchen",
     "pasteText": "Oder Textinhalt einfügen",
     "pastePlaceholder": "Dokumententext hier einfügen...",
@@ -2067,6 +2070,8 @@
       "includeSubdomains": "Subdomains einbeziehen",
       "excludePatterns": "Ausschlussmuster",
       "excludePatternsHint": "Globs für den URL-Pfad, kommagetrennt — * bleibt in einem Segment, ** überschreitet sie",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap-URLs zur Seitenermittlung, kommagetrennt. Nur nötig, wenn robots.txt sie nicht aufführt; Sitemap-Indizes werden verfolgt",
       "saveFirst": "Speichern Sie die Wissensdatenbank, um diese Quelle auszuführen, zu testen oder ihren Verlauf zu sehen.",
       "run": "Jetzt ausführen",
       "runFailed": "Ausführung konnte nicht gestartet werden. Möglicherweise läuft bereits eine.",
@@ -2692,7 +2697,6 @@
     "contextWindowEntries": "Vollständig behaltene aktuelle Einträge",
     "contextWindowSummarize": "Zusammenfassen, was aus dem Fenster fällt",
     "contextWindowTruncateNote": "Ältere Einträge werden stattdessen durch den Hinweis „N frühere Einträge ausgelassen“ ersetzt.",
-    "retroConfigHint": "Erlaubt einer Retro-Phase, Erkenntnisse ins Teamgedächtnis zu schreiben, die in spätere Diskussionen einfließen.",
     "retroPerRun": "Pro Lauf",
     "retroStored": "Max. gespeichert",
     "artifactConfigHint": "Ermöglicht Mitgliedern, gemeinsam Dokumente zu verfassen, die über den Zug hinaus bestehen bleiben.",
@@ -2887,7 +2891,24 @@
     },
     "stateRejected": "Abgelehnt",
     "inputDisabledRejected": "Diese Empfehlung wurde abgelehnt",
-    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen."
+    "debateVerdictNote": "Antwortet mit einem bewerteten Urteil (Sieger und Punkte) statt mit Fließtext: {{phases}}. Die Mitglieder haben zwei oder mehr Rollen und Argumente gehen voraus, daher wird der eigene Synthese-Prompt des Moderators nicht verwendet. Für Fließtext eine Eingabevorlage für die Phase setzen.",
+    "retroCustomLimits": "Eigene Grenzen für Retro-Lektionen",
+    "retroCustomHint": "Eine Retro-Phase schreibt Lektionen in das Gedächtnis des Teams, die in spätere Diskussionen einfließen. Diese Grenzen bestimmen, wie viele.",
+    "retroDefaultHint": "Eine Retro-Phase schreibt weiterhin Lektionen, mit den Standardgrenzen ({{perRun}} pro Lauf, {{stored}} gespeichert). Um das zu verhindern, entferne die RETRO-Phase.",
+    "voteOptionsTooFew": "Ein expliziter Stimmzettel braucht mindestens zwei Optionen.",
+    "saveProblem": {
+      "title": "Diese Gruppe kann noch nicht erstellt werden:",
+      "debateRoles": "Eine Debatte braucht mindestens ein Mitglied mit der Rolle PRO und eines mit der Rolle CON.",
+      "devilAdvocateRole": "Eine Advocatus-Diaboli-Gruppe braucht ein Mitglied mit der Rolle DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Menschliche Mitglieder können keiner Taskforce-Gruppe beitreten (Planungs-, Ausführungs- und Prüfphasen).",
+      "humanWithPeerPhases": "Menschliche Mitglieder können keiner Gruppe beitreten, deren Phasen sich nacheinander an jedes Mitglied richten, etwa ein Peer-Review.",
+      "memberUnassigned_one": "{{count}} Mitglied ist kein Agent zugewiesen.",
+      "memberUnassigned_other": "{{count}} Mitgliedern ist kein Agent zugewiesen.",
+      "humanNeedsName_one": "{{count}} menschliches Mitglied braucht einen Anzeigenamen.",
+      "humanNeedsName_other": "{{count}} menschliche Mitglieder brauchen einen Anzeigenamen.",
+      "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
+      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
+    }
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3117,7 +3138,7 @@
     "value": "Wert",
     "deleteAll": "Alle löschen",
     "deleteAllTitle": "Alle Eigenschaften löschen",
-    "deleteAllDesc": "Alle Eigenschaften dieses Nutzers werden unwiderruflich gelöscht.",
+    "deleteAllDesc": "Dadurch werden ALLE globalen Eigenschaften dieses Nutzers unwiderruflich gelöscht: jeder globale Eintrag im Nutzergedächtnis, auch die von Agenten gespeicherten, nicht nur die hier aufgeführten Zeilen.",
     "deleted": "Eigenschaften gelöscht",
     "noResults": "Keine Eigenschaften gefunden",
     "showingCount": "{{count}} Eigenschaften"
@@ -3218,6 +3239,8 @@
     "title": "Agenten-Synchronisierung",
     "subtitle": "Agenten zwischen EDDI-Instanzen synchronisieren",
     "connection": "Quell-Instanz",
+    "loadingLocalAgents": "Alle lokalen Agenten werden vor dem Zuordnen geladen…",
+    "localAgentsError": "Die lokale Agentenliste konnte nicht vollständig geladen werden, daher können Agenten nicht nach Namen zugeordnet werden. Eine Synchronisierung würde jetzt Duplikate erzeugen.",
     "sourceUrl": "URL der Quell-EDDI-Instanz",
     "authToken": "Autorisierungstoken",
     "authHint": "Optional. Wird als X-Source-Authorization-Header gesendet.",
@@ -3744,7 +3767,19 @@
       "toggleConfig": "Detailbereich umschalten",
       "unpin": "Antwort lösen",
       "untitled": "Ohne Titel",
-      "viewSessions": "Frühere Sitzungen ansehen"
+      "viewSessions": "Frühere Sitzungen ansehen",
+      "alreadyEnded": "Die Diskussion war bereits beendet.",
+      "stopRaced": "Die Diskussion hat beim Stoppen ihren Zustand geändert und läuft weiter. Bitte erneut stoppen.",
+      "stopUnconfirmed": "Es konnte nicht bestätigt werden, dass die Diskussion gestoppt wurde. Prüfen Sie ihren Status und stoppen Sie erneut.",
+      "stopFailed": "Die Diskussion konnte nicht gestoppt werden: {{error}}",
+      "stopping": "Wird gestoppt…",
+      "startOver": "Neu beginnen",
+      "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft.",
+      "confirmNewTitle": "Laufende Diskussion stoppen?",
+      "confirmNewDescription": "Eine Diskussion läuft noch. Eine neue zu beginnen stoppt sie zuerst – laufende Arbeit wird verworfen.",
+      "confirmNewButton": "Stoppen und neu beginnen",
+      "keepRunning": "Weiterlaufen lassen",
+      "questionRequired": "Füge eine Frage für deine Taskforce hinzu – die Dateien werden beim Start der Diskussion geteilt."
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
@@ -3773,7 +3808,8 @@
       "stop": "Erzeugung stoppen",
       "streamEnded": "Die Verbindung endete, bevor die Antwort fertig war. Was angekommen ist, steht oben — zum erneuten Versuch noch einmal senden.",
       "newConversation": "Neue Konversation",
-      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden"
+      "newConversationFailed": "Neue Konversation konnte nicht gestartet werden",
+      "initFailed": "Diese Unterhaltung konnte nicht geöffnet werden."
     },
     "chat": {
       "agentDetails": "Agenten-Details",
@@ -4945,5 +4981,12 @@
     "headerMismatch": "Diese Verbindung sendet ihre Zugangsdaten als „{{expected}}“, also muss der Header so heißen – sonst zeigt die Konfiguration einen Namen und die Anfrage trägt einen anderen.",
     "refusedInRequest": "${connection:…} wird in Pfad, Query-Parameter oder Body abgelehnt – Zugangsdaten in einer URL landen in jedem Proxy-Log, und im Body werden sie nicht gelesen. Verweisen Sie stattdessen aus einem Header auf die Verbindung.",
     "refusedInModel": "Sprachmodelle, Embeddings und Vektorspeicher akzeptieren kein ${connection:…}: Eine Verbindung wird in einen ganzen Header aufgelöst, diese brauchen aber ein nacktes Geheimnis. Verwenden Sie hier ${vault:…}."
+  },
+  "cascadeSave": {
+    "workflowChanged": "Workflow {{workflowId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
+    "agentChanged": "Agent {{agentId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
+    "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
+    "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
   }
 }

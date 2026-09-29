@@ -38,6 +38,30 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     int findDekCalls;
 
     /**
+     * When set, every {@link #getMetaValue} throws it — a transient store error.
+     */
+    RuntimeException metaReadFailure;
+
+    /**
+     * When set, the next {@link #getMetaValue} of this key reports "absent" even
+     * though a value is stored — the read-then-create window another node's first
+     * write lands in, made deterministic.
+     */
+    String hideMetaOnceFor;
+
+    /**
+     * When set, every {@link #setMetaValue} of {@link #metaWriteFailureKey} (of
+     * every key, if that is null) throws it — a failed metadata write.
+     */
+    RuntimeException metaWriteFailure;
+
+    /** The key {@link #metaWriteFailure} applies to; null = every key. */
+    String metaWriteFailureKey;
+
+    /** When true, the double behaves like a store that keeps no metadata at all. */
+    boolean noMetadata;
+
+    /**
      * Runs once, immediately after the next {@link #findSecret} has taken its copy
      * — i.e. between a reader's read and whatever that reader writes next. That is
      * the window a concurrent writer lands in, made deterministic.
@@ -252,22 +276,41 @@ final class InMemorySecretPersistence implements ISecretPersistence {
 
     @Override
     public String getMetaValue(String key) {
-        return meta.get(key);
+        if (metaReadFailure != null) {
+            throw metaReadFailure;
+        }
+        if (key.equals(hideMetaOnceFor)) {
+            hideMetaOnceFor = null;
+            return null;
+        }
+        return noMetadata ? null : meta.get(key);
     }
 
     @Override
     public void setMetaValue(String key, String value) {
-        meta.put(key, value);
+        if (metaWriteFailure != null && (metaWriteFailureKey == null || metaWriteFailureKey.equals(key))) {
+            throw metaWriteFailure;
+        }
+        if (!noMetadata) {
+            meta.put(key, value);
+        }
     }
 
-    /** When set, the next {@link #putMetaValueIfAbsent} for this key throws. */
-    String failNextPutIfAbsentFor;
+    /** When set, the next {@link #setMetaValueIfAbsent} for this key throws. */
+    String failNextSetIfAbsentFor;
 
+    /**
+     * Atomic, as both production stores are: {@link #hideMetaOnceFor} only fools a
+     * plain {@link #getMetaValue}, never the insert-if-absent itself.
+     */
     @Override
-    public String putMetaValueIfAbsent(String key, String value) {
-        if (key.equals(failNextPutIfAbsentFor)) {
-            failNextPutIfAbsentFor = null;
+    public String setMetaValueIfAbsent(String key, String value) {
+        if (key.equals(failNextSetIfAbsentFor)) {
+            failNextSetIfAbsentFor = null;
             throw new PersistenceException("simulated failure writing " + key);
+        }
+        if (noMetadata) {
+            return null;
         }
         meta.putIfAbsent(key, value);
         return meta.get(key);

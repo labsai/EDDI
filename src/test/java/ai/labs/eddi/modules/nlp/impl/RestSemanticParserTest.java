@@ -3,10 +3,13 @@
  */
 package ai.labs.eddi.modules.nlp.impl;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import ai.labs.eddi.modules.nlp.IInputParser;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
@@ -47,6 +50,9 @@ class RestSemanticParserTest {
     @Mock
     private AsyncResponse asyncResponse;
 
+    @Mock
+    private ResourceAccessGuard resourceAccessGuard;
+
     private RestSemanticParser restSemanticParser;
 
     @BeforeEach
@@ -56,7 +62,7 @@ class RestSemanticParserTest {
         Map<String, Provider<ILifecycleTask>> lifecycleTasks = new HashMap<>();
         lifecycleTasks.put("ai.labs.parser", parserProvider);
 
-        restSemanticParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks);
+        restSemanticParser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, resourceAccessGuard);
     }
 
     @SuppressWarnings("unchecked")
@@ -88,6 +94,18 @@ class RestSemanticParserTest {
             restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse);
 
             verify(runtime).submitCallable(any(Callable.class), isNull());
+        }
+
+        @Test
+        @DisplayName("enforces VIEW on the parser config, on the request thread, before any work is submitted")
+        void enforcesViewAccessBeforeSubmitting() {
+            doThrow(new ForbiddenException("no view"))
+                    .when(resourceAccessGuard).requireAccess(eq("aabbccdd11223344eeff5566"), eq(AccessLevel.VIEW), any());
+
+            assertThrows(ForbiddenException.class,
+                    () -> restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse));
+
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
         }
 
         @Test

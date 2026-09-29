@@ -39,7 +39,7 @@ class VaultSaltManagerTest {
         persistence = mock(ISecretPersistence.class);
         saltManager = new VaultSaltManager(persistence);
         // An insert-if-absent into an empty store: the caller's value wins.
-        lenient().when(persistence.putMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
+        lenient().when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
     }
 
     @Nested
@@ -69,7 +69,7 @@ class VaultSaltManagerTest {
             byte[] salt = saltManager.getSalt();
             assertEquals(16, salt.length);
             assertFalse(saltManager.isUsingLegacySalt());
-            verify(persistence).putMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString());
+            verify(persistence).setMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString());
             verify(persistence, never()).setMetaValue(anyString(), anyString());
         }
 
@@ -83,7 +83,7 @@ class VaultSaltManagerTest {
         void raceLoserAdoptsTheWinnersSalt() {
             when(persistence.getMetaValue(VaultSaltManager.SALT_META_KEY)).thenReturn(null);
             when(persistence.listAllDeks()).thenReturn(List.of());
-            when(persistence.putMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString()))
+            when(persistence.setMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString()))
                     .thenReturn(Base64.getEncoder().encodeToString(OTHER_SALT));
 
             saltManager.initialize();
@@ -143,7 +143,7 @@ class VaultSaltManagerTest {
         void noMetadataStore() {
             when(persistence.getMetaValue(VaultSaltManager.SALT_META_KEY)).thenReturn(null);
             when(persistence.listAllDeks()).thenReturn(List.of());
-            when(persistence.putMetaValueIfAbsent(anyString(), anyString())).thenReturn(null);
+            when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenReturn(null);
 
             assertThrows(IllegalStateException.class, () -> saltManager.initialize());
         }
@@ -185,7 +185,7 @@ class VaultSaltManagerTest {
         @Test
         @DisplayName("reservePendingSalt reuses a pending salt an interrupted rotation persisted")
         void reusesExistingPendingSalt() {
-            when(persistence.putMetaValueIfAbsent(eq(VaultSaltManager.PENDING_SALT_META_KEY), anyString()))
+            when(persistence.setMetaValueIfAbsent(eq(VaultSaltManager.PENDING_SALT_META_KEY), anyString()))
                     .thenReturn(Base64.getEncoder().encodeToString(OTHER_SALT));
 
             assertArrayEquals(OTHER_SALT, saltManager.reservePendingSalt());
@@ -197,7 +197,7 @@ class VaultSaltManagerTest {
             byte[] reserved = saltManager.reservePendingSalt();
 
             assertEquals(16, reserved.length);
-            verify(persistence).putMetaValueIfAbsent(eq(VaultSaltManager.PENDING_SALT_META_KEY), eq(Base64.getEncoder().encodeToString(reserved)));
+            verify(persistence).setMetaValueIfAbsent(eq(VaultSaltManager.PENDING_SALT_META_KEY), eq(Base64.getEncoder().encodeToString(reserved)));
         }
 
         @Test
@@ -226,14 +226,14 @@ class VaultSaltManagerTest {
 
             assertArrayEquals(newSalt, saltManager.getSalt());
             assertFalse(saltManager.isUsingLegacySalt());
-            verify(persistence).putMetaValueIfAbsent(VaultSaltManager.SALT_META_KEY, Base64.getEncoder().encodeToString(newSalt));
+            verify(persistence).setMetaValueIfAbsent(VaultSaltManager.SALT_META_KEY, Base64.getEncoder().encodeToString(newSalt));
             verify(persistence).deleteMetaValue(VaultSaltManager.PENDING_SALT_META_KEY);
         }
 
         @Test
         @DisplayName("refuses when a different salt was persisted meanwhile, and keeps the pending marker")
         void refusesADifferentPersistedSalt() {
-            when(persistence.putMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString()))
+            when(persistence.setMetaValueIfAbsent(eq(VaultSaltManager.SALT_META_KEY), anyString()))
                     .thenReturn(Base64.getEncoder().encodeToString(OTHER_SALT));
 
             assertThrows(IllegalStateException.class,

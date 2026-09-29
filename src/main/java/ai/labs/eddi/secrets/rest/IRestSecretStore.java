@@ -191,14 +191,15 @@ public interface IRestSecretStore {
      * a tenant after a rotation — and which, after a lost key, refused every new
      * secret everywhere. This is the explicit decision that ends that: the check is
      * re-announced with this node's key, the system tenant is reset if its DEKs no
-     * longer open, and the tenants that still hold unreadable DEKs are listed for
-     * {@link #resetTenant}. Refused without {@code confirm=true}.
+     * longer open, so is the keyed-checksum key if it no longer unwraps, and the
+     * tenants that still hold unreadable DEKs are listed for {@link #resetTenant}.
+     * Refused without {@code confirm=true}.
      *
      * @param confirm
      *            must be {@code true}; the call is destructive to anything sealed
      *            under the lost key
-     * @return 200 with {@code tenantsNeedingReset} and {@code systemValuesReset},
-     *         400 without confirmation
+     * @return 200 with {@code tenantsNeedingReset}, {@code systemValuesReset} and
+     *         {@code checksumKeyReset}, 400 without confirmation
      */
     @POST
     @Path("/admin/adopt-master-key")

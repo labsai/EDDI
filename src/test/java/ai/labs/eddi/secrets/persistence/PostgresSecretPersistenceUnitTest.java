@@ -460,32 +460,7 @@ class PostgresSecretPersistenceUnitTest {
         assertThrows(PersistenceException.class, () -> persistence.getMetaValue("k"));
     }
 
-    // ─── putMetaValueIfAbsent / deleteMetaValue (H6a) ───
-
-    @Test
-    void putMetaValueIfAbsent_insertWins_returnsOwnValue() throws Exception {
-        when(preparedStatement.executeUpdate()).thenReturn(1);
-
-        assertEquals("mine", persistence.putMetaValueIfAbsent("salt", "mine"));
-
-        var sql = ArgumentCaptor.forClass(String.class);
-        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
-        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("ON CONFLICT (key) DO NOTHING")), sql.getAllValues().toString());
-        assertTrue(sql.getAllValues().stream().noneMatch(s -> s.contains("DO UPDATE")), "an overwrite is the race this exists to prevent");
-    }
-
-    @Test
-    void putMetaValueIfAbsent_conflict_readsBackTheWinner() throws Exception {
-        when(preparedStatement.executeUpdate()).thenReturn(0);
-        when(preparedStatement.executeQuery()).thenReturn(resultSet);
-        when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("value")).thenReturn("winner");
-
-        assertEquals("winner", persistence.putMetaValueIfAbsent("salt", "mine"));
-        // The read-back goes through getMetaValue, whose try-with-resources closes the
-        // ResultSet, the statement and the connection on every path.
-        verify(resultSet).close();
-    }
+    // ─── deleteMetaValue (H6a) ───
 
     @Test
     void deleteMetaValue_deletesTheKey() throws Exception {
@@ -580,6 +555,24 @@ class PostgresSecretPersistenceUnitTest {
     void setMetaValue_sqlException_throwsPersistenceException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
         assertThrows(PersistenceException.class, () -> persistence.setMetaValue("k", "v"));
+    }
+
+    // ─── setMetaValueIfAbsent ───
+
+    @Test
+    void setMetaValueIfAbsent_insertsWithDoNothing_andReturnsStoredValue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("value")).thenReturn("winner");
+
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+        verify(resultSet).close();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("ON CONFLICT (key) DO NOTHING")), sql.getAllValues().toString());
+        assertTrue(sql.getAllValues().stream().noneMatch(s -> s.contains("DO UPDATE")), "an existing value must never be replaced");
     }
 
     // ─── ensureSchema idempotency ───
