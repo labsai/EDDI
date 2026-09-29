@@ -107,3 +107,9 @@ Main fixed the shared auto-vault slot (C2) while this branch was open, with per-
   - Anything else is vaulted, so a literal such as `Bearer test-token${` no longer reaches the httpcalls in plaintext.
 - **Post-response output cannot render a token its own instructions vaulted.** `PrePostUtils.runPostResponse` scrubs the vaulted plaintexts from the template data before it builds the output and quick replies. `{tokenResponse.access_token}` in an output template no longer reaches the conversation output.
 - **An oversize JSON body is redacted before it is cut.** `ApiCallExecutor` parses and scrubs the whole application/json body first, then serializes and truncates it. Cutting first made the body invalid JSON, and the text fallback that followed misses secrets under 8 characters. A body that is genuinely invalid JSON still falls back to text redaction.
+
+### CodeRabbit review of `cd0515dc1`
+
+- **Non-string secret values from a response are refused.** In an httpcall, MCP or LLM instruction with `scope: "secret"`, a `fromObjectPath` value that is a native object, array, number or boolean now fails the turn. It used to be replaced by an empty string, which the secret branch then skipped, so the secret was dropped silently.
+- **Vault references survive the template-data scrub.** The scrub after a post-response instruction now leaves `${vault:…}` / `${eddivault:…}` references intact and never renames map keys: `SecretValueScrubber.scrubDeepKeepingReferences`. Otherwise a plaintext that occurs inside the property name broke two things: the property's own reference, because the slot name ends in the name, and its key in `properties`.
+- **Setup errors no longer carry the vault provider's message.** The detail is logged on the server; the caller gets the guidance only.

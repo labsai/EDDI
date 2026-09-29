@@ -195,4 +195,18 @@ class SecretValueScrubberTest {
         assertNull(SecretValueScrubber.scrubDeepExact("{not json 4711}", List.of("4711"), "<p>"));
         assertNull(SecretValueScrubber.scrubDeepExact("{\"note\":\"order 14711\"}", List.of("4711"), "<p>"));
     }
+
+    @Test
+    @DisplayName("keeping references: a vault reference survives even when the plaintext occurs in it; keys are never renamed")
+    void keepingReferences() {
+        Object cleaned = SecretValueScrubber.scrubDeepKeepingReferences(Map.of("cessTokenKey", "${vault:agent.u1.n1.accessToken}",
+                "echo", "sent cessToken and ${eddivault:x.accessToken} then cessToken"), List.of("cessToken"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals(Set.of("cessTokenKey", "echo"), map.keySet());
+        assertEquals("${vault:agent.u1.n1.accessToken}", map.get("cessTokenKey"));
+        assertEquals("sent <p> and ${eddivault:x.accessToken} then <p>", map.get("echo"));
+        assertNull(SecretValueScrubber.scrubDeepKeepingReferences("${vault:a.cessToken}", List.of("cessToken"), "<p>"));
+    }
 }

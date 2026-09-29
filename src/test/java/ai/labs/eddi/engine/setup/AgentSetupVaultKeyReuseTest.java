@@ -702,6 +702,7 @@ class AgentSetupVaultKeyReuseTest {
 
             assertFalse(e.getMessage().contains(KEY), "the failure must not echo the key: " + e.getMessage());
             assertTrue(e.getMessage().contains("Refusing to store it in plaintext"), e.getMessage());
+            assertFalse(e.getMessage().contains("mongo down"), "the provider's detail stays in the server log: " + e.getMessage());
         }
 
         @Test
@@ -786,6 +787,8 @@ class AgentSetupVaultKeyReuseTest {
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer " + KEY));
 
             assertFalse(e.getMessage().contains(KEY), e.getMessage());
+            assertTrue(e.getMessage().contains("in plaintext"), e.getMessage());
+            assertFalse(e.getMessage().contains("mongo down"), "the provider's detail stays in the server log: " + e.getMessage());
         }
     }
 

@@ -159,4 +159,49 @@ class PrePostUtilsSecretScopeTest {
         assertFalse(text.contains(TOKEN), text);
         assertFalse(String.valueOf(templateData.get("tokenResponse")).contains(TOKEN), "template data after the call: " + templateData);
     }
+
+    @Test
+    @DisplayName("a native object, array, number or boolean reached through fromObjectPath is refused, not silently dropped")
+    void nativeNonStringRefused() throws Exception {
+        templateData.put("tokenResponse", Map.of("claims", Map.of("sub", "u"), "scopes", List.of("a", "b"), "expires_in", 3600, "active", true));
+
+        for (String path : List.of("claims", "scopes", "expires_in", "active")) {
+            var failure = assertThrows(SecretPropertyVault.SecretPropertyException.class, () -> prePostUtils
+                    .executePropertyInstructions(List.of(secret(path, "tokenResponse." + path)), 200, false, memory, templateData));
+            assertTrue(failure.getMessage().contains("only string values can be vaulted"), failure.getMessage());
+            assertNull(memory.getConversationProperties().get(path));
+        }
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+    }
+
+    @Test
+    @DisplayName("without scope secret a native non-string value keeps its old behaviour")
+    void nativeNonStringWithoutSecretUnchanged() throws Exception {
+        templateData.put("tokenResponse", Map.of("expires_in", 3600));
+        var instruction = secret("expiresIn", "tokenResponse.expires_in");
+        instruction.setScope(Scope.conversation);
+
+        prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData);
+
+        assertEquals("", memory.getConversationProperties().get("expiresIn").getValueString());
+    }
+
+    @Test
+    @DisplayName("the template-data scrub leaves the property's own vault reference intact when the plaintext occurs inside the name")
+    void vaultReferenceSurvivesTemplateDataScrub() throws Exception {
+        // 9 characters, and a substring of the property name the slot name ends with.
+        String plaintext = "cessToken";
+        templateData.put("tokenResponse", Map.of("access_token", plaintext, "echo", "got " + plaintext));
+        var postResponse = new PostResponse();
+        postResponse.setPropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")));
+
+        prePostUtils.runPostResponse(memory, postResponse, templateData, 200, false);
+
+        String reference = memory.getConversationProperties().get("accessToken").getValueString();
+        assertTrue(reference.startsWith("${vault:") && reference.contains(plaintext), reference);
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) templateData.get("properties");
+        assertEquals(reference, properties.get("accessToken"), "the reference later calls template must still resolve");
+        assertFalse(String.valueOf(templateData.get("tokenResponse")).contains(plaintext), "template data: " + templateData.get("tokenResponse"));
+    }
 }

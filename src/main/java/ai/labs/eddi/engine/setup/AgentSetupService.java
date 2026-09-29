@@ -1334,9 +1334,11 @@ public class AgentSetupService {
             // wrote the key into the LLM document of an instance whose operator had
             // explicitly asked for encrypted storage. A disabled vault is the one case
             // that still passes the key through, and it says so above.
-            LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage());
-            throw new AgentSetupException("The API key could not be stored in the secrets vault (" + e.getMessage()
-                    + "). Refusing to store it in plaintext on an instance with the vault enabled — retry, or pass vaultKeyName.", e);
+            // The provider's detail stays in the server log: it can name internal
+            // infrastructure, and the caller needs only what to do next.
+            LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
+            throw new AgentSetupException("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
+                    + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
         }
     }
 
@@ -1390,10 +1392,10 @@ public class AgentSetupService {
             return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), value, agentName, rollbackRegistry,
                     VAULTED_API_AUTH_KEY);
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage());
-            throw new AgentSetupException("apiAuth could not be stored in the secrets vault (" + e.getMessage()
-                    + "). Refusing to write it into the generated httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} "
-                    + "reference.", e);
+            // As for the API key: the provider's detail stays in the server log.
+            LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
+            throw new AgentSetupException("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
+                    + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
         }
     }
 

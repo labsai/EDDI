@@ -157,6 +157,15 @@ public class PrePostUtils {
                                 propertyValue = value;
                             }
                         } else {
+                            if (scope == Property.Scope.secret && propertyValue != null && !(propertyValue instanceof String)) {
+                                // A native object, array, number or boolean reached through
+                                // fromObjectPath. It used to be replaced by "" below, which the
+                                // secret branch then skipped: the secret was silently dropped,
+                                // neither vaulted nor refused. Only a string can be vaulted.
+                                throw new SecretPropertyVault.SecretPropertyException("Cannot store property '" + propertyName
+                                        + "' with scope 'secret': only string values can be vaulted, but the instruction produced a "
+                                        + propertyValue.getClass().getSimpleName() + ". Refusing to persist it in plaintext.", null);
+                            }
                             propertyValue = "";
                         }
 
@@ -276,7 +285,10 @@ public class PrePostUtils {
             return;
         }
         templateDataObjects.replaceAll((key, value) -> {
-            Object cleaned = SecretValueScrubber.scrubDeep(value, vaulted, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+            // The properties just vaulted are in here too, as references whose slot name
+            // ends in the property name — a plaintext occurring in that name must not
+            // break them.
+            Object cleaned = SecretValueScrubber.scrubDeepKeepingReferences(value, vaulted, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
             return cleaned != null ? cleaned : value;
         });
     }

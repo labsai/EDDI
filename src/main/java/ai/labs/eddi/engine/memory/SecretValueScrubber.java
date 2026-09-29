@@ -130,6 +130,22 @@ public final class SecretValueScrubber {
     }
 
     /**
+     * Like {@link #scrubDeep}, but a {@code ${vault:…}} / {@code ${eddivault:…}}
+     * reference is left exactly as it is, and map keys are never renamed. For data
+     * that holds the reference a plaintext was just vaulted under next to copies of
+     * that plaintext — the template data after a post-response instruction: the
+     * slot name ends in the property name, so a plaintext that occurs inside the
+     * name would otherwise break the reference, and the property's key with it.
+     *
+     * @return the scrubbed copy, or {@code null} when {@code value} carries none of
+     *         the plaintexts outside a reference
+     */
+    public static Object scrubDeepKeepingReferences(Object value, Collection<String> plaintexts, String placeholder) {
+        List<String> sorted = longestFirst(plaintexts);
+        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true, Match.OUTSIDE_REFERENCES);
+    }
+
+    /**
      * Like {@link #scrubDeep}, but a string or number is replaced only where it IS
      * one of {@code exactValues} — never where it merely contains one. For short
      * secret context values: a four-digit PIN copied whole into a property, a datum
@@ -223,7 +239,9 @@ public final class SecretValueScrubber {
             if (match == Match.EXACT) {
                 return plaintexts.contains(text) ? placeholder : scrubEmbeddedJson(text, plaintexts, placeholder);
             }
-            String cleaned = replaceAll(text, plaintexts, placeholder, match == Match.WHOLE_TOKEN);
+            String cleaned = match == Match.OUTSIDE_REFERENCES
+                    ? replaceOutsideReferences(text, plaintexts, placeholder)
+                    : replaceAll(text, plaintexts, placeholder, match == Match.WHOLE_TOKEN);
             return cleaned.equals(text) ? null : cleaned;
         }
         if (value instanceof Number number) {
@@ -255,9 +273,9 @@ public final class SecretValueScrubber {
             boolean changed = false;
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                // Token and exact mode never rename a key: a short secret ("id", "to") is
-                // also a common field name, and renaming it would corrupt every stored API
-                // response and output item of the turn.
+                // Only substring mode renames a key. A short secret ("id", "to") is also a
+                // common field name, and renaming it would corrupt every stored API response
+                // and output item of the turn; a property name must keep addressing its value.
                 String cleanedKey = match != Match.SUBSTRING ? key : replaceAll(key, plaintexts, placeholder, false);
                 Object cleaned = scrubSorted(entry.getValue(), plaintexts, placeholder, deep, match);
                 copy.put(cleanedKey, cleaned != null ? cleaned : entry.getValue());
@@ -318,7 +336,23 @@ public final class SecretValueScrubber {
         /** Where it stands as a whole token, in values only. */
         WHOLE_TOKEN,
         /** Where a value is exactly the plaintext, in values only. */
-        EXACT
+        EXACT,
+        /** Every occurrence outside a vault reference, in values only. */
+        OUTSIDE_REFERENCES
+    }
+
+    /** A vault reference, in either spelling — left intact by that mode. */
+    private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
+
+    private static String replaceOutsideReferences(String text, List<String> plaintexts, String placeholder) {
+        Matcher reference = VAULT_REFERENCE.matcher(text);
+        var cleaned = new StringBuilder(text.length());
+        int from = 0;
+        while (reference.find()) {
+            cleaned.append(replaceAll(text.substring(from, reference.start()), plaintexts, placeholder, false)).append(reference.group());
+            from = reference.end();
+        }
+        return cleaned.append(replaceAll(text.substring(from), plaintexts, placeholder, false)).toString();
     }
 
     private static String replaceAll(String text, List<String> plaintexts, String placeholder, boolean wholeToken) {
