@@ -231,6 +231,26 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET last_run_id = ?, missed_runs = 0, tombstoned = FALSE, etag = ?, last_modified = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, runId);
+            statement.setString(2, etag);
+            statement.setString(3, lastModified);
+            statement.setString(4, sourceId);
+            statement.setString(5, documentId);
+            statement.setString(6, runId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a seen document", e);
+        }
+    }
+
+    @Override
     public void recordUnreachable(String sourceId, String documentId, String runId) {
         // Only the run marker — see the interface. The miss counter and the
         // tombstone flag stay as they are.
@@ -308,6 +328,21 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.executeBatch();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to tombstone documents", e);
+        }
+    }
+
+    @Override
+    public void invalidateContent(String sourceId) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET content_hash = NULL, etag = NULL, last_modified = NULL
+                 WHERE source_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to invalidate a source's content", e);
         }
     }
 
@@ -437,7 +472,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     @Override
     public List<IngestionRun> listRuns(String sourceId, int limit) {
         List<IngestionRun> history = new ArrayList<>();
-        String sql = "SELECT * FROM rag_ingestion_runs WHERE source_id = ? ORDER BY started_at DESC LIMIT ?";
+        // Maintenance claims are rows, never runs — see IIngestionStateStore#listRuns.
+        String sql = "SELECT * FROM rag_ingestion_runs WHERE source_id = ? AND status <> 'MAINTENANCE' "
+                + "ORDER BY started_at DESC LIMIT ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, sourceId);
             statement.setInt(2, Math.max(1, limit));
@@ -564,7 +601,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         return new IngestionRun(
                 resultSet.getString("run_id"),
                 resultSet.getString("source_id"),
-                IngestionRun.Status.valueOf(resultSet.getString("status")),
+                IngestionRun.Status.parse(resultSet.getString("status")),
                 toInstant(resultSet.getTimestamp("started_at")),
                 toInstant(resultSet.getTimestamp("finished_at")),
                 resultSet.getInt("documents_seen"),

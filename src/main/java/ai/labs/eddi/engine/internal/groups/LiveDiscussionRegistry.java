@@ -117,6 +117,18 @@ public class LiveDiscussionRegistry {
     }
 
     /**
+     * Whether {@code conversationId} is a member of the running discussion
+     * {@code groupConversationId} and that discussion belongs to {@code groupId} —
+     * the check {@code ConversationGroups} applies before it trusts a
+     * {@code groupId} found only on an earlier step of a conversation.
+     */
+    public boolean isLiveMember(String groupConversationId, String conversationId, String groupId) {
+        return groupId != null && getForMember(groupConversationId, conversationId)
+                .filter(gc -> groupId.equals(gc.getGroupId()))
+                .isPresent();
+    }
+
+    /**
      * The live instance for a running discussion, or empty if it is not currently
      * running (paused, finished, or never started on this node — group control is
      * per-node, like {@code discussionControls}). Callers must turn an empty result
