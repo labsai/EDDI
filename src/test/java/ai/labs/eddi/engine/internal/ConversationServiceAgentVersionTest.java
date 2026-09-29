@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -14,8 +15,10 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -57,6 +60,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -277,6 +281,105 @@ class ConversationServiceAgentVersionTest {
             conversationService.recordAgentVersionMove(memory, 1);
 
             assertEquals(1.0, switches(), "the move happened; only the descriptor is stale");
+            assertEquals(1, memory.getStaleDescriptorAgentVersion(), "the version the descriptor still names");
+        }
+
+        /**
+         * The next turn is already on the new version, so it sees no move. Without the
+         * remembered stale version it would never try again and the listings would name
+         * the old version for good.
+         */
+        @Test
+        @DisplayName("a later turn retries a failed descriptor update, without counting another move")
+        void failedDescriptorUpdateIsRetried() throws Exception {
+            var memory = memoryOn(1, 2);
+            memory.switchAgentVersion(3);
+            doThrow(new IResourceStore.ResourceStoreException("down")).doNothing().when(conversationSetup)
+                    .updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
+            conversationService.recordAgentVersionMove(memory, 1);
+
+            // The memory is stored and reloaded: the stale version survives it.
+            var reloaded = ConversationMemoryUtilities.convertConversationMemorySnapshot(
+                    ConversationMemoryUtilities.convertConversationMemory(memory));
+            assertEquals(1, reloaded.getStaleDescriptorAgentVersion());
+
+            conversationService.recordAgentVersionMove(reloaded, 3);
+
+            verify(conversationSetup, times(2)).updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
+            assertNull(reloaded.getStaleDescriptorAgentVersion(), "the descriptor is current again");
+            assertEquals(1.0, switches(), "one move, however many attempts");
+        }
+
+        @Test
+        @DisplayName("a turn that moved back to the version the stale descriptor names clears it without an update")
+        void movedBackToStaleVersion() throws Exception {
+            var memory = memoryOn(3, 2);
+            memory.setStaleDescriptorAgentVersion(1);
+            memory.switchAgentVersion(1);
+
+            conversationService.recordAgentVersionMove(memory, 3);
+
+            verify(conversationSetup, never()).updateConversationAgentVersion(anyString(), anyString(), anyInt());
+            assertNull(memory.getStaleDescriptorAgentVersion());
+        }
+    }
+
+    /**
+     * Undo and redo persist long-term properties by the memory policy of the
+     * version that ran the step — compatible versions may default differently.
+     */
+    @Nested
+    @DisplayName("the memory policy of an undone or redone step")
+    class UndoMemoryPolicy {
+
+        private final AgentConfiguration.UserMemoryConfig v1Policy = new AgentConfiguration.UserMemoryConfig();
+        private final AgentConfiguration.UserMemoryConfig v3Policy = new AgentConfiguration.UserMemoryConfig();
+
+        @Test
+        @DisplayName("comes from the version recorded on the step, not the one the conversation is on now")
+        void stepVersionGoverns() throws Exception {
+            var memory = memoryOn(1, 2);
+            memory.getCurrentStep().set(MemoryKeys.AGENT_VERSION, 1);
+            memory.switchAgentVersion(3);
+            IAgent v1 = agent(1, 2);
+            when(v1.getUserMemoryConfig()).thenReturn(v1Policy);
+            IAgent v3 = agent(3, 2);
+            when(v3.getUserMemoryConfig()).thenReturn(v3Policy);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(v1);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 3)).thenReturn(v3);
+
+            conversationService.applyAgentMemoryConfig(ENV, memory, memory.getCurrentStep());
+
+            assertSame(v1Policy, memory.getUserMemoryConfig());
+        }
+
+        @Test
+        @DisplayName("stays unset when that version is gone, rather than borrowing another version's")
+        void undeployedStepVersionBorrowsNothing() throws Exception {
+            var memory = memoryOn(1, 2);
+            memory.getCurrentStep().set(MemoryKeys.AGENT_VERSION, 1);
+            memory.switchAgentVersion(3);
+            IAgent v3 = agent(3, 2);
+            when(v3.getUserMemoryConfig()).thenReturn(v3Policy);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 3)).thenReturn(v3);
+            when(agentFactory.getLatestReadyAgentOfGeneration(ENV, AGENT_ID, 2)).thenReturn(v3);
+
+            conversationService.applyAgentMemoryConfig(ENV, memory, memory.getCurrentStep());
+
+            assertNull(memory.getUserMemoryConfig(), "the sync falls back to never widening a scope");
+        }
+
+        @Test
+        @DisplayName("a step from before versions were recorded uses the conversation's version")
+        void unrecordedStepUsesConversationVersion() throws Exception {
+            var memory = memoryOn(3, 2);
+            IAgent v3 = agent(3, 2);
+            when(v3.getUserMemoryConfig()).thenReturn(v3Policy);
+            when(agentFactory.getAgent(ENV, AGENT_ID, 3)).thenReturn(v3);
+
+            conversationService.applyAgentMemoryConfig(ENV, memory, memory.getCurrentStep());
+
+            assertSame(v3Policy, memory.getUserMemoryConfig());
         }
     }
 

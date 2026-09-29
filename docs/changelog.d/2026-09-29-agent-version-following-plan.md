@@ -14,6 +14,18 @@ paths around them.
 - **The move was recorded before the turn was admitted.** The descriptor update and the switch
   counter ran when the version was resolved, before the quota check, so a refused turn left the
   descriptor naming a version the conversation never ran on. Both now run when the turn completes.
+- **A failed descriptor update was never retried.** The next turn is already on the new version,
+  so it saw no move and the listings named the old version for good. The memory now keeps
+  `staleDescriptorAgentVersion` (persisted, absent otherwise) and every turn retries until the
+  descriptor is current; the switch counter still counts the move once.
+- **Undo and redo persisted properties by the wrong version's memory policy.** They read
+  `userMemoryConfig` from the conversation's current version, and fell back to any version of its
+  generation when that was gone. Compatible versions may default visibility differently, so they
+  now read the version recorded on the step (`agent:version`); when it is not deployed the config
+  stays unset and the sync falls back to never widening a scope, as it always did.
+- **A failed merge import's rollback stays breaking**, deliberately: reusing the original
+  generation would leave the latest version below the aborted import's, and the next breaking save
+  would share a generation with that aborted version. Commented in `RestImportService`.
 - **Docs**: [`docs/deployment-management-of-agents.md`](../deployment-management-of-agents.md#running-conversations-and-new-agent-versions)
   has the full model; `hitl.md`, `architecture.md`, `scheduling.md`, `slack-integration.md`,
   `mcp-server.md` and `metrics.md` link to it, and the full-metrics dashboard charts

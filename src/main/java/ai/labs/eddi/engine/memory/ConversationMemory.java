@@ -57,6 +57,7 @@ public class ConversationMemory implements IConversationMemory {
      */
     private Integer agentVersion;
     private Integer compatibilityGeneration;
+    private Integer staleDescriptorAgentVersion;
     /** See {@link #takePreviousAgentVersion()}. Transient — never persisted. */
     private transient Integer previousAgentVersion;
     private String userId;
@@ -374,6 +375,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setCompatibilityGeneration(Integer compatibilityGeneration) {
         this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    @Override
+    public Integer getStaleDescriptorAgentVersion() {
+        return staleDescriptorAgentVersion;
+    }
+
+    @Override
+    public void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        this.staleDescriptorAgentVersion = staleDescriptorAgentVersion;
     }
 
     @Override

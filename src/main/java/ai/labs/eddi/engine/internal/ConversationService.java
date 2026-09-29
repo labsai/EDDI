@@ -40,6 +40,8 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -1103,8 +1105,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                     return false;
                 }
                 // The undone step is now on top of the redo cache.
-                applyAgentMemoryConfig(environment, conversationMemory);
-                syncLongTermChanges(conversationMemory, conversationMemory.getRedoCache().peek(), true);
+                var undone = conversationMemory.getRedoCache().peek();
+                applyAgentMemoryConfig(environment, conversationMemory, undone);
+                syncLongTermChanges(conversationMemory, undone, true);
                 return true;
             } else {
                 return false;
@@ -1151,7 +1154,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversationId, loadedStateForRedo);
                     return false;
                 }
-                applyAgentMemoryConfig(environment, conversationMemory);
+                applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
                 syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
                 return true;
             } else {
@@ -1506,20 +1509,22 @@ public class ConversationService implements IConversationService, UserErasurePar
     /**
      * Undo and redo run outside a turn, so the loaded memory has no
      * {@code userMemoryConfig} (it is applied per turn and never persisted). Reads
-     * it from the deployed agent so {@link #syncLongTermChanges} can persist the
-     * way the turn did. Without a deployed agent it stays unset and the sync falls
-     * back to never widening a scope.
+     * it from the agent version that ran {@code step} — recorded on the step, since
+     * a conversation can move between compatible versions whose defaults differ —
+     * so {@link #syncLongTermChanges} persists the way that turn did. A step from
+     * before versions were recorded uses the conversation's version. When that
+     * version is not deployed it stays unset and the sync falls back to never
+     * widening a scope: another version's policy is not the one that governed the
+     * step.
      */
-    private void applyAgentMemoryConfig(Environment environment, IConversationMemory memory) {
+    void applyAgentMemoryConfig(Environment environment, IConversationMemory memory, IConversationMemory.IConversationStep step) {
+        Integer version = memory.getAgentVersion();
+        IData<Integer> ranOn = step == null ? null : step.getLatestData(MemoryKeys.AGENT_VERSION);
+        if (ranOn != null && ranOn.getResult() != null) {
+            version = ranOn.getResult();
+        }
         try {
-            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
-            if (agent == null && memory.getCompatibilityGeneration() != null) {
-                // Its version may have been undeployed since the last turn; any version it
-                // may follow is equally its configuration. Read-only: undo is not a turn,
-                // so the conversation does not move here.
-                agent = agentFactory.getLatestReadyAgentOfGeneration(environment, memory.getAgentId(),
-                        memory.getCompatibilityGeneration());
-            }
+            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), version);
             if (agent != null) {
                 memory.setUserMemoryConfig(agent.getUserMemoryConfig());
             }
@@ -1706,21 +1711,35 @@ public class ConversationService implements IConversationService, UserErasurePar
      * <p>
      * After the turn rather than when the version is resolved: a turn refused
      * between the two (quota, a queued turn skipped) must not leave the descriptor
-     * naming a version the conversation never ran on. Best-effort: a descriptor
-     * that cannot be updated stays stale until the next move, and the conversation
+     * naming a version the conversation never ran on.
+     * <p>
+     * A failed descriptor update is remembered on the memory, which this turn
+     * persists after this runs, and retried by later turns until it succeeds —
+     * otherwise every later turn, already on the new version, would see nothing to
+     * do and the listings would name the old version for good. The conversation
      * runs on the right version either way.
      */
     void recordAgentVersionMove(IConversationMemory memory, Integer storedVersion) {
         Integer ranOn = memory.getAgentVersion();
-        if (ranOn == null || Objects.equals(ranOn, storedVersion)) {
+        if (ranOn == null) {
             return;
         }
-        counterAgentVersionSwitch.increment();
+        if (!Objects.equals(ranOn, storedVersion)) {
+            counterAgentVersionSwitch.increment();
+        }
+        Integer stale = memory.getStaleDescriptorAgentVersion();
+        Integer named = stale != null ? stale : storedVersion;
+        if (Objects.equals(ranOn, named)) {
+            memory.setStaleDescriptorAgentVersion(null);
+            return;
+        }
         try {
             conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), ranOn);
+            memory.setStaleDescriptorAgentVersion(null);
         } catch (Exception e) {
-            LOGGER.warnf("Conversation %s moved to version %s of agent %s, but its descriptor still names the old version: %s",
-                    sanitize(memory.getConversationId()), ranOn, sanitize(memory.getAgentId()), e.getMessage());
+            memory.setStaleDescriptorAgentVersion(named);
+            LOGGER.warnf("Conversation %s runs on version %s of agent %s, but its descriptor still names version %s; the next turn retries: %s",
+                    sanitize(memory.getConversationId()), ranOn, sanitize(memory.getAgentId()), named, e.getMessage());
         }
     }
 

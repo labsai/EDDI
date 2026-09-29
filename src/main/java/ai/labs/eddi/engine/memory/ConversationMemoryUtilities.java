@@ -100,6 +100,7 @@ public class ConversationMemoryUtilities {
         snapshot.setAgentId(conversationMemory.getAgentId());
         snapshot.setAgentVersion(conversationMemory.getAgentVersion());
         snapshot.setCompatibilityGeneration(conversationMemory.getCompatibilityGeneration());
+        snapshot.setStaleDescriptorAgentVersion(conversationMemory.getStaleDescriptorAgentVersion());
         snapshot.setConversationState(conversationMemory.getConversationState());
         snapshot.setHitlPausedWorkflowId(conversationMemory.getHitlPausedWorkflowId());
         snapshot.setHitlPausedAbsoluteTaskIndex(conversationMemory.getHitlPausedAbsoluteTaskIndex());
@@ -158,6 +159,7 @@ public class ConversationMemoryUtilities {
 
         conversationMemory.setConversationState(snapshot.getConversationState());
         conversationMemory.setCompatibilityGeneration(snapshot.getCompatibilityGeneration());
+        conversationMemory.setStaleDescriptorAgentVersion(snapshot.getStaleDescriptorAgentVersion());
         // The revision this memory is a view of. Every write derived from this memory
         // carries it, so the store can tell "built on the current document" from
         // "built on a document someone else has since replaced".

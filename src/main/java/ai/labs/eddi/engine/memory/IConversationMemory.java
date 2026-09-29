@@ -335,6 +335,27 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The agent version the conversation's descriptor still names after updating it
+     * to a version the conversation moved to failed; {@code null} when the
+     * descriptor names {@link #getAgentVersion()}. Persisted, so a later turn — on
+     * any node — retries the update.
+     *
+     * @since 6.5.0
+     */
+    default Integer getStaleDescriptorAgentVersion() {
+        return null;
+    }
+
+    /**
+     * See {@link #getStaleDescriptorAgentVersion()}.
+     *
+     * @since 6.5.0
+     */
+    default void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        // no-op by default
+    }
+
+    /**
      * Moves the conversation to {@code agentVersion}, another deployed version of
      * its agent with the same compatibility generation, before a turn runs. The
      * version it left is remembered until the turn records the change — see

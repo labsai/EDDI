@@ -978,7 +978,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
                 // Never compatible: an imported configuration comes from elsewhere, and
-                // nobody has judged it against the conversations running here.
+                // nobody has judged it against the conversations running here. A failed
+                // merge's rollback writes through this too, so the restored version is a
+                // new generation as well: conversations on the original stay pinned to it,
+                // as after any breaking save. Reusing the original generation would give the
+                // latest version a lower generation than the aborted import's, and the next
+                // breaking save would then share a generation with that aborted version.
                 URI updated = updateTracked(IAgentStore.class, IRestAgentStore.resourceURI, localResId.getId(),
                         localResId.getVersion(), agentConfiguration,
                         (id, version, config) -> restAgentStore.updateAgent(id, version, config, false), transaction);

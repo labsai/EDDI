@@ -113,6 +113,11 @@ public class ConversationMemorySnapshot {
      * conversations stay on their version.
      */
     private Integer compatibilityGeneration;
+    /**
+     * See {@code IConversationMemory#getStaleDescriptorAgentVersion()}. Written
+     * only while the descriptor lags the conversation's version.
+     */
+    private Integer staleDescriptorAgentVersion;
     private String userId;
     /**
      * How {@link #userId} came to be, fixed at creation. Absent in documents
@@ -529,6 +534,14 @@ public class ConversationMemorySnapshot {
 
     public void setCompatibilityGeneration(Integer compatibilityGeneration) {
         this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    public Integer getStaleDescriptorAgentVersion() {
+        return staleDescriptorAgentVersion;
+    }
+
+    public void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        this.staleDescriptorAgentVersion = staleDescriptorAgentVersion;
     }
 
     public String getUserId() {
