@@ -6,8 +6,8 @@ import {
   Plus,
   Trash2,
   X,
-  Settings,
   Maximize2,
+  Tags,
 } from "lucide-react";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
@@ -347,7 +347,7 @@ export function PropertySetterEditor({ data, onChange, readOnly }: PropertySette
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <Settings className="h-4 w-4 text-primary" />
+            <Tags className="h-4 w-4 text-primary" />
             {t("propertySetterEditor.setters", "Property Setters")}
           </h3>
           {!readOnly && (

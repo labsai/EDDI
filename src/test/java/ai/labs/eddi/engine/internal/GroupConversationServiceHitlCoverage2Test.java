@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -515,6 +516,13 @@ class GroupConversationServiceHitlCoverage2Test {
         var dyn = new AgentGroupConfiguration.DynamicAgentConfig();
         dyn.setLifecyclePolicy(LifecyclePolicy.EPHEMERAL);
         config.setDynamicAgents(dyn);
+        // Cleanup deletes only an agent whose dynamicOrigin names this discussion.
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(agentStore.getCurrentResourceId("eph-2")).thenReturn(current);
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setDynamicOrigin(new AgentConfiguration.DynamicOrigin("parent", "member-conv", "gc-clean-eph", "user"));
+        when(agentStore.read("eph-2", 1)).thenReturn(agentConfig);
 
         invoke(cleanupEphemeralMethod(), gc, config);
 

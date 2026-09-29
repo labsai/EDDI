@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -107,9 +108,9 @@ public class SummarizationService {
      * Enabling {@code conversationSummary} without global-variable-backed
      * credentials therefore threw, the exception was swallowed as a WARN, and the
      * rolling summary silently never materialised. Pass the parent task's resolved
-     * parameters here and only {@code modelName} is overridden — the same
-     * inheritance {@link ToolResponseTruncator} already performs for its
-     * summarizer.
+     * parameters here and only the model is overridden (under the provider's own
+     * key, see {@link ModelParameterKeys#withModel}) — the same inheritance
+     * {@link ToolResponseTruncator} already performs for its summarizer.
      * <p>
      * <strong>Caller contract:</strong> the map handed in must belong to
      * {@code llmProvider}. This service cannot tell whose credentials it was given,
@@ -149,6 +150,28 @@ public class SummarizationService {
     }
 
     /**
+     * The parameter key under which {@code provider}'s builder reads the model.
+     * <p>
+     * The model used to be written as {@code modelName} for every provider — but
+     * the Ollama builder reads {@code model}, Bedrock, HuggingFace and Vertex read
+     * {@code modelId}, and Azure reads {@code deploymentName}. A Dream cycle on
+     * Ollama therefore failed on every run with {@code "model is required"}, and a
+     * rolling summary with its own {@code llmModel} silently ran on the parent's
+     * model instead. Mirrors the keys {@code AgentSetupService} writes.
+     */
+    static String modelParameterKey(String provider) {
+        if (provider == null) {
+            return "modelName";
+        }
+        return switch (provider) {
+            case LlmModule.LLM_TYPE_OLLAMA -> "model";
+            case LlmModule.LLM_TYPE_BEDROCK, LlmModule.LLM_TYPE_HUGGING_FACE, LlmModule.LLM_TYPE_GEMINI_VERTEX -> "modelId";
+            case LlmModule.LLM_TYPE_AZURE_OPENAI -> "deploymentName";
+            default -> "modelName";
+        };
+    }
+
+    /**
      * As {@link #summarizeWithUsage(String, String, String, String)}, but
      * inheriting the calling task's model parameters so the summarizer can actually
      * authenticate (finding F13).
@@ -156,18 +179,24 @@ public class SummarizationService {
      * @param inheritedParameters
      *            the calling task's resolved parameters, which must belong to
      *            {@code llmProvider} (see
-     *            {@link #summarize(String, String, String, String, Map)});
-     *            {@code modelName} is overridden with {@code llmModel} and
-     *            {@code responseFormat} is stripped (a summary is plain text, never
-     *            JSON)
+     *            {@link #summarize(String, String, String, String, Map)}); the
+     *            provider's model key (see {@link #modelParameterKey}) is
+     *            overridden with {@code llmModel} when one is given — together with
+     *            any other model key the inherited parameters carry, see
+     *            {@link ModelParameterKeys#withModel} — and {@code responseFormat}
+     *            is stripped (a summary is plain text, never JSON)
      */
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
                                                   Map<String, String> inheritedParameters) {
         long start = System.nanoTime();
         try {
-            Map<String, String> params = inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
-            params.put("modelName", llmModel);
+            // An inherited model is kept when no summarizer model is given; otherwise
+            // the model is written under the provider's key and over any model key
+            // the inherited parameters carry (M-L2), so the parent's model cannot win.
+            Map<String, String> params = llmModel != null && !llmModel.isBlank()
+                    ? ModelParameterKeys.withModel(inheritedParameters, llmProvider, llmModel)
+                    : inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
             params.remove("responseFormat");
 
             var model = chatModelRegistry.getOrCreate(llmProvider, params);

@@ -80,87 +80,38 @@ const EXEMPT: Record<string, string> = {
 };
 
 /**
- * Endpoints registered by more than one handler, frozen as they were found.
+ * Endpoints registered by more than one handler.
  *
- * MSW resolves in registration order, so for each of these the *later* handler
- * — usually the more detailed one — is unreachable. `backupSyncHandlers`'
- * versions of the backup endpoints, for instance, never run: `handlers` claims
- * those paths first.
+ * MSW resolves in registration order, so a later handler for the same route is
+ * unreachable unless the earlier one deliberately falls through (returns
+ * `undefined`). Keyed by the NORMALISED path, because that is what MSW matches
+ * on: path-to-regexp ignores parameter names, so `/ratelimit/:tool` and
+ * `/ratelimit/:toolName` are one route to it and two strings to us.
  *
- * Keyed by the NORMALISED path, because that is what MSW matches on.
- * path-to-regexp ignores parameter names, so `/ratelimit/:tool` and
- * `/ratelimit/:toolName` are one route to it and two strings to us — keying on
- * the raw pattern counted 52 duplicates and missed 6, including that pair
- * (handlers.ts:4166 and :4363, whose 60s and 45s reset windows differ and only
- * the first of which ever runs). Two people naming the same id differently is
- * the most likely way a duplicate gets introduced, and it was the one way this
- * ratchet could not see.
+ * This list froze 58 duplicates when it was introduced, and the dead copies
+ * were not harmless: the backup preview that ran answered with a pre-6.x shape
+ * while the correct one sat unreachable below it, and three sets of schedule,
+ * audit and tool-metrics mocks disagreed with one another with only the first
+ * ever running. Those copies are gone. What remains is the ONE deliberate
+ * layering: each resource store's dedicated `:id` handler in `handlers` falls
+ * through for `/descriptors`, `/jsonSchema` and `includePreviousVersions`, and
+ * the `createResourceHandlers` copy of the same route answers what it lets past.
  *
- * Frozen rather than fixed here for the reason `check-i18n.mjs` freezes its
- * COLLIDING set: the list can shrink but never grow, so the debt is visible and
- * bounded while untangling 58 shadowed handlers stays a separate change with
- * its own test run. A NEW duplicate fails immediately — including one that
- * merely swaps for a removed entry, since the set is compared and not counted.
+ * The list can shrink but never grow. A NEW duplicate fails immediately —
+ * including one that merely swaps for a removed entry, since the set is
+ * compared and not counted.
  */
 const KNOWN_DUPLICATE_ROUTES: readonly string[] = [
-  "DELETE */administration/coordinator/dead-letters",
-  "DELETE */administration/coordinator/dead-letters/{}",
-  "DELETE */schedulestore/schedules/{}",
-  "GET */administration/coordinator/dead-letters",
-  "GET */administration/coordinator/status",
-  "GET */administration/quotas/{}",
-  "GET */administration/quotas/{}/usage",
-  "GET */agents/{}",
-  "GET */apicallstore/apicalls/descriptors",
   "GET */apicallstore/apicalls/{}",
-  "GET */auditstore/agent/{}",
-  "GET */auditstore/{}",
-  "GET */auditstore/{}/count",
-  "GET */backup/export/{}",
-  "GET */dictionarystore/dictionaries/descriptors",
   "GET */dictionarystore/dictionaries/{}",
-  "GET */groups/{}/conversations",
-  "GET */llm/tools/cache/stats",
-  "GET */llm/tools/costs",
-  "GET */llm/tools/costs/conversation/{}",
-  "GET */llm/tools/history/{}",
-  "GET */llm/tools/ratelimit/{}",
-  "GET */llmstore/llms/descriptors",
   "GET */llmstore/llms/{}",
-  "GET */mcpcallsstore/mcpcalls/descriptors",
   "GET */mcpcallsstore/mcpcalls/{}",
-  "GET */outputstore/outputsets/descriptors",
   "GET */outputstore/outputsets/{}",
-  "GET */parserstore/parsers/descriptors",
   "GET */parserstore/parsers/{}",
-  "GET */propertysetterstore/propertysetters/descriptors",
   "GET */propertysetterstore/propertysetters/{}",
-  "GET */ragstore/rags/descriptors",
   "GET */ragstore/rags/{}",
-  "GET */rulestore/rulesets/descriptors",
   "GET */rulestore/rulesets/{}",
-  "GET */schedulestore/schedules",
-  "GET */schedulestore/schedules/admin/failed",
-  "GET */schedulestore/schedules/{}",
-  "GET */schedulestore/schedules/{}/fires",
-  "GET */secretstore/secrets/health",
-  "GET */snippetstore/snippets/descriptors",
   "GET */snippetstore/snippets/{}",
-  "POST */administration/agents/setup",
-  "POST */administration/coordinator/dead-letters/{}/replay",
-  "POST */administration/quotas/{}/usage/reset",
-  "POST */backup/export/{}",
-  "POST */backup/import",
-  "POST */backup/import/preview",
-  "POST */groups/{}/conversations",
-  "POST */schedulestore/schedules",
-  "POST */schedulestore/schedules/{}/disable",
-  "POST */schedulestore/schedules/{}/dismiss",
-  "POST */schedulestore/schedules/{}/enable",
-  "POST */schedulestore/schedules/{}/fire",
-  "POST */schedulestore/schedules/{}/retry",
-  "PUT */administration/quotas/{}",
-  "PUT */schedulestore/schedules/{}",
 ];
 
 /**

@@ -104,10 +104,18 @@ public class ScheduleConfiguration {
     // -- Security --
     private double maxCostPerFire = -1.0; // -1 = unlimited
     private boolean allowSelfScheduling;
+    // Whether a deserialized body carried allowSelfScheduling at all. A primitive
+    // cannot say "absent", and a PUT from a client that does not know the field
+    // (the Manager's schedule editor) must keep the stored value rather than reset
+    // it to false. No bean accessor, so it never reaches JSON or storage.
+    private transient boolean allowSelfSchedulingProvided;
     private String createdBy;
 
     // -- Metadata --
     private Map<String, Object> metadata;
+    // Same idea as allowSelfSchedulingProvided: tells an explicit "metadata": null
+    // (clear it) apart from a body that never named the field (keep it).
+    private transient boolean metadataProvided;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -331,6 +339,15 @@ public class ScheduleConfiguration {
 
     public void setAllowSelfScheduling(boolean allowSelfScheduling) {
         this.allowSelfScheduling = allowSelfScheduling;
+        this.allowSelfSchedulingProvided = true;
+    }
+
+    /**
+     * True once {@link #setAllowSelfScheduling} has been called — for a request
+     * body, when the JSON named the field. Deliberately not a bean getter.
+     */
+    public boolean hasAllowSelfScheduling() {
+        return allowSelfSchedulingProvided;
     }
 
     public String getCreatedBy() {
@@ -347,6 +364,16 @@ public class ScheduleConfiguration {
 
     public void setMetadata(Map<String, Object> metadata) {
         this.metadata = metadata;
+        this.metadataProvided = true;
+    }
+
+    /**
+     * True once {@link #setMetadata} has been called, with any value including null
+     * — for a request body, when the JSON named the field. Deliberately not a bean
+     * getter.
+     */
+    public boolean hasMetadata() {
+        return metadataProvided;
     }
 
     public Instant getCreatedAt() {

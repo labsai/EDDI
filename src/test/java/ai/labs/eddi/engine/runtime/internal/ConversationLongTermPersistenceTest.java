@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.LinkedHashMap;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -117,6 +120,120 @@ class ConversationLongTermPersistenceTest {
         nextTurn().say("thanks", new LinkedHashMap<>());
 
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
+    }
+
+    // =================================================================
+    // Visibility at the persistence boundary
+    // =================================================================
+
+    private UserMemoryEntry persistedAfterTurn(Property property, Map<String, Context> context) throws Exception {
+        // One no-op workflow: a turn's context is written into the step as it enters
+        // each workflow, and a real turn always has at least one.
+        Conversation conversation = turnWith(workflowThat(() -> {
+        }));
+        memory.getConversationProperties().put(property.getName(), property);
+        conversation.say("turn", context);
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        return entry.getValue();
+    }
+
+    @Test
+    @DisplayName("a group-visible longTerm property carries the conversation's group id — without it no reader can ever match it")
+    void groupPropertyCarriesTheGroupId() throws Exception {
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+        var context = new LinkedHashMap<String, Context>();
+        context.put("groupId", new Context(Context.ContextType.string, "team-1"));
+
+        UserMemoryEntry stored = persistedAfterTurn(property, context);
+
+        assertEquals(Visibility.group, stored.visibility());
+        assertEquals(List.of("team-1"), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("a group-visible property outside any group is stored as self — reachable by its owner, never wider")
+    void groupPropertyWithoutAGroupFallsBackToSelf() throws Exception {
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility());
+        assertEquals(List.of(), stored.groupIds());
+    }
+
+    /** An earlier step on which the group orchestrator put the member's group. */
+    private void earlierStepInGroup(String groupId, String groupConversationId) {
+        memory.getCurrentStep().storeData(new Data<Object>("context:groupId", new Context(Context.ContextType.string, groupId)));
+        memory.getCurrentStep()
+                .storeData(new Data<Object>("context:groupConversationId", new Context(Context.ContextType.string, groupConversationId)));
+        memory.startNextStep();
+    }
+
+    @Test
+    @DisplayName("an earlier step's groupId scopes a group property when the running discussion confirms the membership")
+    void earlierStepGroupIdIsUsedWhenVerified() throws Exception {
+        earlierStepInGroup("team-1", "gc-1");
+        when(propertiesHandler.getGroupMembershipCheck())
+                .thenReturn((discussion, conversation, group) -> "gc-1".equals(discussion) && memory.getConversationId().equals(conversation)
+                        && "team-1".equals(group));
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.group, stored.visibility());
+        assertEquals(List.of("team-1"), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("an unverified earlier-step groupId (e.g. forged before ClientContextGuard) does not scope a group property")
+    void earlierStepGroupIdIsIgnoredWhenUnverified() throws Exception {
+        earlierStepInGroup("another-team", "gc-gone");
+        when(propertiesHandler.getGroupMembershipCheck()).thenReturn((discussion, conversation, group) -> false);
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility());
+        assertEquals(List.of(), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("defaultVisibility applies to a property that sets none, with the memory tools OFF")
+    void defaultVisibilityAppliesWithoutMemoryTools() throws Exception {
+        var config = new AgentConfiguration.UserMemoryConfig();
+        config.setDefaultVisibility("self");
+        when(propertiesHandler.getUserMemoryConfig()).thenReturn(config);
+        when(propertiesHandler.isMemoryToolsEnabled()).thenReturn(false);
+
+        UserMemoryEntry stored = persistedAfterTurn(new Property("internal_note", "x", Scope.longTerm), new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility(), "an agent's defaultVisibility must not require the LLM memory tool");
+    }
+
+    /**
+     * H9c: a property setter naming a {@code _gdpr_} key must not reach the store
+     * (which refuses it, failing the turn) and must not stop the turn's other
+     * longTerm writes from landing.
+     */
+    @Test
+    @DisplayName("H9c — a reserved _gdpr_ longTerm property is never written back; the others still are")
+    void reservedLongTermPropertyIsNotWritten() throws Exception {
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("_gdpr_processing_restricted",
+                new Property("_gdpr_processing_restricted", "false", Scope.longTerm));
+        memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
+
+        assertDoesNotThrow(() -> conversation.say("I am vegan", new LinkedHashMap<>()));
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+        verify(userMemoryStore, never()).upsertReserved(any());
     }
 
     /** A workflow whose lifecycle does {@code action} and nothing else. */
@@ -322,6 +439,39 @@ class ConversationLongTermPersistenceTest {
         assertTrue(memory.getConversationProperties().containsKey("keep"));
     }
 
+    /**
+     * A key visible twice — the shared global row and this agent's own self row —
+     * lands in one property slot. The last one listed used to win, which for a
+     * recall ordered by update time was the older global value.
+     */
+    @Test
+    @DisplayName("a self entry wins over a global entry with the same key, whatever the recall order")
+    void mostSpecificScopeWinsAtLoad() {
+        Instant now = Instant.now();
+        var self = new UserMemoryEntry("s", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now);
+        var global = new UserMemoryEntry("g", "user-1", "lang", "en", "fact", Visibility.global, null, List.of(), null, false, 0,
+                now.minusSeconds(3600), now.minusSeconds(3600));
+        var other = new UserMemoryEntry("o", "user-1", "color", "teal", "fact", Visibility.global, null, List.of(), null, false, 0, now, now);
+
+        var chosen = Conversation.mostSpecificPerKey(List.of(self, global, other));
+
+        assertEquals(List.of("s", "o"), chosen.stream().map(UserMemoryEntry::id).toList());
+        assertEquals(List.of("s", "o"), Conversation.mostSpecificPerKey(List.of(global, self, other)).stream().map(UserMemoryEntry::id).toList());
+    }
+
+    @Test
+    @DisplayName("within one scope, the newest entry wins")
+    void newestWinsWithinAScope() {
+        Instant now = Instant.now();
+        var older = new UserMemoryEntry("old", "user-1", "lang", "en", "fact", Visibility.group, "agent-1", List.of("g"), null, false, 0, now,
+                now.minusSeconds(60));
+        var newer = new UserMemoryEntry("new", "user-1", "lang", "de", "fact", Visibility.group, "agent-2", List.of("g"), null, false, 0, now,
+                now);
+
+        assertEquals("new", Conversation.mostSpecificPerKey(List.of(older, newer)).getFirst().id());
+        assertEquals("new", Conversation.mostSpecificPerKey(List.of(newer, older)).getFirst().id());
+    }
+
     @Test
     @DisplayName("a step-scoped property is dropped even when the turn ERRORs")
     void stepScopedPropertyIsDroppedWhenTheTurnFails() throws Exception {
@@ -358,118 +508,5 @@ class ConversationLongTermPersistenceTest {
         turnWith(pausing).resume(approved());
 
         assertFalse(memory.getConversationProperties().containsKey("temp"));
-    }
-
-    @Test
-    @DisplayName("M-E2: a group-visible property is written with the groups of the turn it was set in")
-    void groupVisiblePropertyCarriesTheTurnsGroup() throws Exception {
-        IExecutableWorkflow workflow = workflowThat(() -> {
-            Property shared = new Property("team_goal", "ship it", Scope.longTerm);
-            shared.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", shared);
-        });
-        Map<String, Context> context = new LinkedHashMap<>();
-        context.put("groupId", new Context(Context.ContextType.string, "group-7"));
-
-        turnWith(workflow).say("remember our goal", context);
-
-        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore).upsert(entry.capture());
-        assertEquals(Property.Visibility.group, entry.getValue().visibility());
-        assertEquals(List.of("group-7"), entry.getValue().groupIds(),
-                "recall matches on groupIds — an entry written with none can never be recalled by the group");
-    }
-
-    @Test
-    @DisplayName("M-E2: an earlier step's context:groupId is not trusted as the group of a new memory")
-    void earlierStepGroupContextIsNotTrusted() throws Exception {
-        // An earlier step may carry a client-set groupId (written before reserved
-        // context keys were enforced). This turn names no group.
-        memory.getCurrentStep().storeData(new Data<>("context:groupId", new Context(Context.ContextType.string, "forged")));
-        IExecutableWorkflow workflow = workflowThat(() -> {
-            Property shared = new Property("team_goal", "ship it", Scope.longTerm);
-            shared.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", shared);
-        });
-
-        turnWith(workflow).say("remember our goal", new LinkedHashMap<>());
-
-        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore).upsert(entry.capture());
-        assertEquals(List.of(), entry.getValue().groupIds());
-    }
-
-    @Test
-    @DisplayName("M-E2: rewriting a recalled group-visible property keeps the groups it was shared with")
-    void rewritingARecalledGroupPropertyKeepsItsGroups() throws Exception {
-        Property recalled = new Property("team_goal", "ship it", Scope.longTerm);
-        recalled.setVisibility(Property.Visibility.group);
-        recalled.setGroupIds(List.of("group-7", "group-9"));
-        memory.getConversationProperties().put("team_goal", recalled);
-        memory.setConversationState(ConversationState.READY);
-
-        IExecutableWorkflow workflow = workflowThat(() -> {
-            // A property instruction builds a NEW Property, without the recalled groups.
-            Property updated = new Property("team_goal", "ship it twice", Scope.longTerm);
-            updated.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", updated);
-        });
-
-        // Outside any group: nothing in the turn names one.
-        turnWith(workflow).say("new goal", new LinkedHashMap<>());
-
-        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore).upsert(entry.capture());
-        assertEquals("ship it twice", entry.getValue().value());
-        assertEquals(List.of("group-7", "group-9"), entry.getValue().groupIds(),
-                "writing the property back must not wipe the groups it is shared with");
-    }
-
-    @Test
-    @DisplayName("M-E2: re-setting a recalled group property to the same value is not a write")
-    void resettingARecalledGroupPropertyToTheSameValueWritesNothing() throws Exception {
-        Property recalled = new Property("team_goal", "ship it", Scope.longTerm);
-        recalled.setVisibility(Property.Visibility.group);
-        recalled.setGroupIds(List.of("group-7"));
-        memory.getConversationProperties().put("team_goal", recalled);
-        memory.setConversationState(ConversationState.READY);
-
-        IExecutableWorkflow workflow = workflowThat(() -> {
-            // Same value and visibility, but a NEW Property without the recalled groups.
-            Property same = new Property("team_goal", "ship it", Scope.longTerm);
-            same.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", same);
-        });
-
-        turnWith(workflow).say("same goal", new LinkedHashMap<>());
-
-        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
-    }
-
-    @Test
-    @DisplayName("M-E2: the groups outlive the rewrite — a later rewrite without group context keeps them")
-    void groupsSurviveASecondRewriteWithoutGroupContext() throws Exception {
-        Property recalled = new Property("team_goal", "ship it", Scope.longTerm);
-        recalled.setVisibility(Property.Visibility.group);
-        recalled.setGroupIds(List.of("group-7"));
-        memory.getConversationProperties().put("team_goal", recalled);
-        memory.setConversationState(ConversationState.READY);
-
-        turnWith(workflowThat(() -> {
-            Property updated = new Property("team_goal", "ship it twice", Scope.longTerm);
-            updated.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", updated);
-        })).say("new goal", new LinkedHashMap<>());
-        turnWith(workflowThat(() -> {
-            Property updated = new Property("team_goal", "ship it thrice", Scope.longTerm);
-            updated.setVisibility(Property.Visibility.group);
-            memory.getConversationProperties().put("team_goal", updated);
-        })).say("newer goal", new LinkedHashMap<>());
-
-        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(userMemoryStore, times(2)).upsert(entry.capture());
-        assertEquals("ship it thrice", entry.getAllValues().get(1).value());
-        assertEquals(List.of("group-7"), entry.getAllValues().get(1).groupIds(),
-                "the replaced property became the baseline — it must still carry the groups");
     }
 }

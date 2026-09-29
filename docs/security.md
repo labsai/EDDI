@@ -14,14 +14,16 @@ EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) 
 
 ### Architecture
 
-EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The Manager SPA and Chat UI handle login via `keycloak-js`, then send Bearer tokens to the backend for validation.
+EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
+
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` handshake from an allow-listed parent origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
 
 ```
-Browser (EDDI Manager / Chat UI)
-    │
-    ├── keycloak-js → Keycloak login → JWT access token
-    │
-    ├── Authorization: Bearer <token> → EDDI backend
+Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
+    │                                        │
+    ├── keycloak-js → login → JWT            ├── token from host (config / postMessage)
+    │                                        │
+    ├── Authorization: Bearer <token> ───────┴──→ EDDI backend
     │                                      │
     │                                      ├── Quarkus OIDC validates token via JWKS
     │                                      ├── SecurityIdentity populated
@@ -136,7 +138,7 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | --- | --- |
 | `/q/health/*` | **Permit** (GET only) — required for k8s probes |
 | `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
-| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
+| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
 | `/.well-known/agent.json`, `/a2a/agents/*/agent.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
@@ -150,19 +152,21 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 ### RestAgentManagement Gate
 
-`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):
 
 ```java
 if (checkForUserAuthentication &&
-        !production.equals(userConversation.getEnvironment()) &&
+        !production.equals(environment) &&
         identity.isAnonymous()) {
     throw new UnauthorizedException();
 }
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`test`) must be authenticated; `production` conversations are exempt from this particular gate (the legacy `unrestricted`/`restricted` names are read as `production`)
 - Requests to `/production/` environments always pass regardless of auth status
+
+**The check runs before any side effect.** The managed `GET` and `POST /agents/managed/{intent}/{userId}` create the user's conversation when none exists and replace it when it has ended. The environment checked is the one the request acts on: a live conversation's stored environment, or — for a conversation about to be created or to replace an ended one — the environment of the trigger deployment it will be started with, which is picked *before* the check and then used for the start. So a `401` from these endpoints means nothing was created, deleted or replaced. The `POST` hands the `UnauthorizedException` to the JAX-RS exception mappers, so it answers `401` like the `GET` does (it used to answer an opaque `500`).
 
 ### Local Development Keycloak
 
@@ -399,11 +403,15 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `100.64.0.0/10`  | CGNAT (RFC 6598)              |
 | `224.0.0.0/4`    | IPv4 multicast                |
 | `0.0.0.0/8`      | Unspecified / "this network"  |
+| `255.255.255.255` | Limited broadcast (the rest of `240.0.0.0/4` stays reachable) |
+| `192.0.0.0/24`   | IETF protocol assignments (RFC 6890) |
+| `198.18.0.0/15`  | Benchmarking (RFC 2544)       |
 | `fc00::/7`       | IPv6 unique-local (RFC 4193 — covers `fc00::/8` and `fd00::/8`) |
 | `fe80::/10`      | IPv6 link-local               |
 | `::1`            | IPv6 loopback                 |
+| `64:ff9b:1::/48` | NAT64 local-use prefix (RFC 8215) — blocked whole, since where the IPv4 address sits inside it depends on the prefix length the network chose |
 
-IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) are unwrapped and re-checked against every IPv4 rule above.
+IPv6 addresses that carry an IPv4 address are unwrapped and the IPv4 address is re-checked against every IPv4 rule above: IPv4-mapped (`::ffff:x.x.x.x`), IPv4-compatible (`::x.x.x.x`), NAT64 well-known prefix (`64:ff9b::x.x.x.x`, RFC 6052), 6to4 (`2002:xxxx:xxxx::/48`, RFC 3056) and Teredo (`2001::/32`, server and client address). On a NAT64 network `64:ff9b::7f00:1` *is* 127.0.0.1 once the gateway translates it, so checking the IPv6 address alone let it through. The same unwrapping applies to the always-on cloud-metadata refusal.
 
 ### Cloud Metadata Endpoint Blocking
 
@@ -470,6 +478,40 @@ primary    → NUMBER | FUNCTION '(' args ')' | '(' expression ')' | CONSTANT
 
 ---
 
+## Runtime Template Engine
+
+**Applies to:** every Qute template EDDI renders at runtime — system prompts, output texts and quick replies, httpcall URLs/headers/bodies, property instructions, MCP tool arguments, group-discussion prompts and the template preview endpoint.
+
+### Templates are author text; data is never a template
+
+A template string comes from agent configuration. Everything that reaches a template at render time — the user's message, conversation properties, context, API and MCP responses, model output — is **data**: it is substituted into the template and written out literally, whatever braces it contains. EDDI keeps that boundary in three places where it used to be crossed:
+
+- **Property instructions.** A value read through `fromObjectPath` (in `property.json`, and in the `postResponse.propertyInstructions` of httpcalls, LLM and MCP tasks) is stored exactly as found. Only `valueString` and the property `name` are rendered as templates. A configuration that relied on a navigated value being rendered a second time no longer gets that; write the template in `valueString` instead.
+- **Output supplied as data.** Output and quick replies sent as `context` on a turn, and those a `postResponse` builds (`outputBuildInstructions`, `qrBuildInstructions` — rendered once, the author's `outputValue` with the response substituted), are stored verbatim (`IData#isVerbatim`, persisted with the step so it survives a HITL resume). The templating task (`eddi://ai.labs.templating`) leaves them alone and marks everything it renders verbatim, so a second templating pass cannot re-evaluate substituted values; output authored in an output configuration is rendered once, as before.
+- **Generated agents.** The system prompt a model chooses for a sub-agent (`create_sub_agent`) is stored inside a Qute unparsed block, so the new agent receives exactly the text the model wrote. Parameter names from an OpenAPI specification (MCP API tools, the setup wizard) are reduced to plain identifiers (`[A-Za-z_][A-Za-z0-9_]*`, e.g. `pet-id` → `pet_id`) before they become `{...}` placeholders.
+
+### A restricted engine
+
+Runtime templates are **not** rendered by the Qute engine Quarkus injects — that engine is built for an application's own, build-time-checked templates. `RuntimeTemplateEngineFactory` builds a separate engine from it, through allow-lists:
+
+| Feature | Runtime templates |
+|---|---|
+| Namespaces | `vault`, `eddivault`, `connection`, `vars`, `caller` (pass-through references), `uuidUtils`, `json`, `encoder` (EDDI extensions), `str`, `time` (Qute helpers). **`config:`, `inject:` and `cdi:` resolve to nothing**, so they cannot read configuration, environment variables or beans |
+| Sections | `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}`, `{#when}`/`{#switch}`. No `{#include}`, `{#insert}`, `{#eval}`, `{#fragment}`, `{#cache}` or user tags; `str:eval` is removed |
+| Object access | Maps, lists and EDDI's string methods as before. On other objects only properties are read — record components, public no-argument getters (`getX`/`isX`/`hasX`) and public fields. Methods with arguments and non-getter methods are never invoked, and reflection-sensitive types (`Class`, class loaders, threads, `java.lang.reflect`, …) are never reachable |
+| Missing values | Always render as an empty string (never `NOT_FOUND`), independent of `quarkus.qute.property-not-found-strategy` |
+
+### Render limits
+
+| Property | Default | Bounds |
+|---|---|---|
+| `eddi.templating.max-output-chars` | `2000000` | Characters one render may produce, and the length of any single string an expression evaluates to while rendering |
+| `eddi.templating.max-iterations` | `100000` | Loop iterations per render, summed over all (nested) loops; an iterable larger than this is rejected before the loop starts |
+
+A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
+
+---
+
 ## Tool Execution Pipeline
 
 All tool invocations — both built-in and HTTP-call-based — are routed through `ToolExecutionService.executeToolWrapped()`. This ensures consistent security and operational controls:
@@ -495,6 +537,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
   - `g` for `global` scope
   - When `user` scope is in effect but no user id is available, the entry falls back to the narrower `c:` partition. If neither a user id nor a conversation id is available, **no tag can be derived and the cache is bypassed entirely** — nothing is read and nothing is stored. A placeholder is deliberately never substituted, because that would put every unattributable request back into one shared partition
 - **Configuration:** `enableToolCaching` (default `true`), `toolCacheScopes` (per-tool overrides, keyed on the dispatch name or the built-in slug — dispatch name wins, same vocabulary as `toolRateLimits` and `toolPricing`), `defaultToolCacheScope` (task-level default, effectively `user`)
+- **Side-effecting sources are opt-in:** HTTP-call, MCP and A2A tools are cached only when named in `toolCacheScopes` — a cache hit skips the call, and for a write that means the write never happens. Keys also carry the tool's source and the agent id, so same-named tools of different agents never share an entry
 - **Unparseable tokens fail safe:** a `toolCacheScopes` value that does not parse resolves to `user` and is logged at WARN — never to `defaultToolCacheScope`, so a typo in an override that was written to *narrow* one tool cannot promote it onto a `global` partition
 - **Behaviour:** A cached result is only ever served back inside its own partition. With the default `user` scope, one authenticated user's tool result is never returned to another. Set a tool to `global` only when its result depends purely on its arguments and never on who is asking — that is an explicit, per-tool opt-in to cross-user reuse
 - **Expiry:** Each entry expires on its own per-tool TTL, measured from the write (`weather` 300s, `websearch` 1800s, `news` 600s, `calculator` 7 days, 300s for tools with no table entry — see `GET /llm/tools/cache/ttl/{toolName}`). The TTL is matched against the dispatch name first and the slug second, so `searchNews` gets the `news` entry rather than its tool's `websearch` entry. Size-based eviction (`tool-results` holds 10 000 entries) is the secondary bound. A stale or poisoned result cannot outlive its TTL

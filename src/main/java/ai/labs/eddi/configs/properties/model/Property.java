@@ -18,14 +18,6 @@ public class Property {
     private Boolean valueBoolean;
     private Scope scope = Scope.conversation;
     private Visibility visibility; // null = self (backward compat)
-    /**
-     * The groups a {@code group}-visibility {@code longTerm} property is shared
-     * with, carried from the user-memory entry it was recalled from so that writing
-     * the property back does not wipe them (M-E2). {@code null} on every property
-     * that was not recalled — including every property stored before this field
-     * existed — and then the writer falls back to the groups of the turn.
-     */
-    private List<String> groupIds;
 
     /**
      * Provenance marker: {@code TRUE} on the value
@@ -219,14 +211,6 @@ public class Property {
         this.visibility = visibility;
     }
 
-    public List<String> getGroupIds() {
-        return groupIds;
-    }
-
-    public void setGroupIds(List<String> groupIds) {
-        this.groupIds = groupIds;
-    }
-
     /** Effective visibility — never null, defaults to {@link Visibility#self}. */
     public Visibility effectiveVisibility() {
         return visibility != null ? visibility : Visibility.self;
@@ -243,13 +227,11 @@ public class Property {
                 && Objects.equals(valueObject, that.valueObject) && Objects.equals(valueList, that.valueList)
                 && Objects.equals(valueInt, that.valueInt) && Objects.equals(valueFloat, that.valueFloat)
                 && Objects.equals(valueBoolean, that.valueBoolean) && Objects.equals(scope, that.scope)
-                && Objects.equals(visibility, that.visibility) && Objects.equals(autoVaulted, that.autoVaulted)
-                && Objects.equals(groupIds, that.groupIds);
+                && Objects.equals(visibility, that.visibility) && Objects.equals(autoVaulted, that.autoVaulted);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility, autoVaulted,
-                groupIds);
+        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility, autoVaulted);
     }
 }

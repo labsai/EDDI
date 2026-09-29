@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessFor } from "../access";
+import { accessFor, accessForDetail } from "../access";
 
 /**
  * Which controls are worth offering for one listed resource.
@@ -78,5 +78,49 @@ describe("accessFor", () => {
     // both permit everything, and only one of them is a real grant.
     expect(accessFor("OWN").known).toBe(true);
     expect(accessFor(undefined).known).toBe(false);
+  });
+});
+
+describe("accessForDetail", () => {
+  const uri = (id: string, level?: string) => ({
+    resource: `eddi://ai.labs.agent/agentstore/agents/${id}?version=1`,
+    ...(level ? { callerLevel: level } : {}),
+  });
+
+  it("offers nothing while the descriptors are still loading", () => {
+    // Unrestricted here would flash Delete at an EDIT grantee until the level
+    // arrived — long enough to click it.
+    expect(accessForDetail(undefined, "a1", false)).toMatchObject({
+      canUse: false,
+      canView: false,
+      canEdit: false,
+      canOwn: false,
+    });
+  });
+
+  it("reads the level of this resource, not of one whose id contains it", () => {
+    // `filter=` is a text match: `a1` also returns `a1b2`, which the caller may own.
+    const access = accessForDetail([uri("a1b2", "OWN"), uri("a1", "EDIT")], "a1", true);
+    expect(access.canEdit).toBe(true);
+    expect(access.canOwn).toBe(false);
+  });
+
+  it("treats this resource's descriptor without a level as unrestricted", () => {
+    expect(accessForDetail([uri("a1")], "a1", undefined).canOwn).toBe(true);
+  });
+
+  it("offers nothing when no descriptor matches and workspaces are enforced", () => {
+    // An empty or partial lookup is not the backend saying "unrestricted".
+    expect(accessForDetail([], "a1", true).canOwn).toBe(false);
+    expect(accessForDetail([uri("a1b2", "OWN")], "a1", true).canOwn).toBe(false);
+  });
+
+  it("offers nothing when no descriptor matches before /workspaces has answered", () => {
+    expect(accessForDetail([], "a1", undefined).canOwn).toBe(false);
+  });
+
+  it("keeps Delete when no descriptor matches on a deployment without workspaces", () => {
+    // Unmigrated data can return no descriptors; owners there had Delete before.
+    expect(accessForDetail([], "a1", false).canOwn).toBe(true);
   });
 });

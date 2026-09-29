@@ -33,32 +33,26 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     /**
      * Creates an entry from a {@link Property} with user memory metadata. Used when
      * flushing longTerm properties with non-null visibility to the usermemories
-     * collection. Equivalent to
-     * {@link #fromProperty(Property, String, String, String, Visibility, List)}
-     * with no fallback groups.
+     * collection.
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
                                                Visibility defaultVisibility) {
-        return fromProperty(property, userId, agentId, conversationId, defaultVisibility, List.of());
+        Visibility visibility = property.getVisibility() != null ? property.getVisibility() : defaultVisibility;
+        return fromProperty(property, userId, agentId, conversationId, visibility, List.of());
     }
 
     /**
-     * Creates an entry from a {@link Property}, carrying the groups a
-     * {@code group}-visibility entry is shared with.
+     * Creates an entry with an already RESOLVED visibility, for a conversation that
+     * belongs to {@code groupIds}. Unlike the overload above, the property's own
+     * visibility is not consulted again — the caller decided, possibly narrowing a
+     * {@code group} property to {@code self} because the conversation has no group.
      * <p>
-     * The groups used to be hard-coded to {@code []}, which broke group visibility
-     * both ways (M-E2): a property written with {@code visibility: group} could
-     * never be recalled, because recall matches on {@code groupIds}, and a
-     * group-visible memory recalled into a conversation lost its groups the moment
-     * the property was written back. Now: the property's own groups (set when it
-     * was recalled) win; otherwise {@code fallbackGroupIds} — the groups the turn
-     * runs in. Entries of any other visibility carry no groups, as before.
-     *
-     * @param fallbackGroupIds
-     *            groups to use when the property carries none; may be {@code null}
+     * A {@code group} entry is only reachable through an overlap with the reader's
+     * group ids, so one stored with none — which is what every {@code longTerm}
+     * property got — could be read by nobody, the writing agent included.
      */
-    public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
-                                               Visibility defaultVisibility, List<String> fallbackGroupIds) {
+    public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId, Visibility visibility,
+                                               List<String> groupIds) {
         Object value;
         if (property.getValueString() != null) {
             value = property.getValueString();
@@ -76,22 +70,11 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
             value = null;
         }
 
-        Visibility vis = property.getVisibility() != null ? property.getVisibility() : defaultVisibility;
-        if (vis == null) {
-            vis = Visibility.self;
-        }
+        Visibility vis = visibility != null ? visibility : Visibility.self;
 
-        List<String> groupIds = List.of();
-        if (vis == Visibility.group) {
-            if (property.getGroupIds() != null && !property.getGroupIds().isEmpty()) {
-                groupIds = List.copyOf(property.getGroupIds());
-            } else if (fallbackGroupIds != null) {
-                groupIds = List.copyOf(fallbackGroupIds);
-            }
-        }
-
-        return new UserMemoryEntry(null, userId, property.getName(), value, "fact", vis, agentId, groupIds, conversationId, false, 0, Instant.now(),
-                Instant.now());
+        List<String> entryGroupIds = vis == Visibility.group && groupIds != null ? List.copyOf(groupIds) : List.of();
+        return new UserMemoryEntry(null, userId, property.getName(), value, "fact", vis, agentId, entryGroupIds, conversationId, false, 0,
+                Instant.now(), Instant.now());
     }
 
     /**

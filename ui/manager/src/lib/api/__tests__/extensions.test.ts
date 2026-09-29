@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { describe, it, expect } from "vitest";
-import { Puzzle } from "lucide-react";
+import { RESOURCE_TYPE_ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "../../resource-type-icons";
 import { RESOURCE_TYPES } from "../resources";
 import {
   EXTENSION_TYPE_INFO,
@@ -9,6 +9,7 @@ import {
   getExtensionLabel,
   getExtensionIcon,
   getExtensionColor,
+  extensionTypeForTask,
   getExtensionTypeConfig,
   getExtensionSortOrder,
   sortExtensionTypes,
@@ -147,9 +148,9 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
 });
 
 describe("EXTENSION_TYPE_INFO — data integrity", () => {
-  const iconMapKeys = ["FileText", "GitBranch", "Globe", "Brain", "MessageSquareText", "Settings", "FileCode", "Plug"];
+  const sharedIcons = new Set<unknown>(Object.values(RESOURCE_TYPE_ICONS));
 
-  it("every entry has valid fields, unique order, eddi:// key, and known icon", () => {
+  it("every entry has valid fields, unique order, eddi:// key, and a shared icon", () => {
     const orders = new Set<number>();
     for (const [key, config] of Object.entries(EXTENSION_TYPE_INFO)) {
       expect(key).toMatch(/^eddi:\/\//);
@@ -160,7 +161,8 @@ describe("EXTENSION_TYPE_INFO — data integrity", () => {
       expect(orders).not.toContain(config.order);
       orders.add(config.order);
 
-      expect(iconMapKeys).toContain(config.icon);
+      // From the shared table, so a step looks the same on every surface.
+      expect(sharedIcons.has(config.icon), `${key} uses an icon outside RESOURCE_TYPE_ICONS`).toBe(true);
     }
   });
 });
@@ -182,11 +184,11 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
     expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls (legacy)");
   });
 
-  it("getExtensionIcon returns Puzzle for unknown, resolves for known", () => {
-    expect(getExtensionIcon("eddi://unknown")).toBe(Puzzle);
-    expect(getExtensionIcon(knownPrefixed)).not.toBe(Puzzle);
+  it("getExtensionIcon returns the unknown-type icon for unknown, resolves for known", () => {
+    expect(getExtensionIcon("eddi://unknown")).toBe(UNKNOWN_RESOURCE_TYPE_ICON);
+    expect(getExtensionIcon(knownPrefixed)).not.toBe(UNKNOWN_RESOURCE_TYPE_ICON);
     // bare prefix (without eddi://) is not found in EXTENSION_TYPE_INFO
-    expect(getExtensionIcon(knownBare)).toBe(Puzzle);
+    expect(getExtensionIcon(knownBare)).toBe(UNKNOWN_RESOURCE_TYPE_ICON);
   });
 
   it("getExtensionColor returns text-gray-400 for unknown, colored for known", () => {
@@ -196,9 +198,9 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
     expect(getExtensionColor(knownBare)).toBe("text-gray-400");
   });
 
-  it("getExtensionTypeConfig returns Puzzle + gray for unknown", () => {
+  it("getExtensionTypeConfig returns the unknown-type icon + gray for unknown", () => {
     const fb = getExtensionTypeConfig("eddi://unknown");
-    expect(fb.icon).toBe(Puzzle);
+    expect(fb.icon).toBe(UNKNOWN_RESOURCE_TYPE_ICON);
     expect(fb.color).toBe("text-gray-400");
   });
 
@@ -242,5 +244,38 @@ describe("EXTENSION_TO_RESOURCE_SLUG — cross-reference with EXTENSION_TYPE_INF
         `${ext} → ${slug} has no matching EXTENSION_TYPE_INFO entry (expected key "${ext}")`,
       ).toBeDefined();
     }
+  });
+});
+
+describe("extensionTypeForTask — what SSE task events and audit entries carry", () => {
+  // The literals LifecycleTask.getType() returns on the backend. SSE task_start /
+  // task_complete and audit entries carry these, never an eddi:// id; before the
+  // resolver every one of them missed EXTENSION_TYPE_INFO and drew as unknown.
+  const RUNTIME_TYPES: Record<string, string> = {
+    expressions: "eddi://ai.labs.parser",
+    behavior_rules: "eddi://ai.labs.rules",
+    properties: "eddi://ai.labs.property",
+    httpCalls: "eddi://ai.labs.apicalls",
+    mcpCalls: "eddi://ai.labs.mcpcalls",
+    rag: "eddi://ai.labs.rag",
+    langchain: "eddi://ai.labs.llm",
+    output: "eddi://ai.labs.output",
+  };
+
+  it.each(Object.entries(RUNTIME_TYPES))("resolves %s to %s and its icon", (taskType, ext) => {
+    expect(extensionTypeForTask(taskType)).toBe(ext);
+    expect(getExtensionIcon(extensionTypeForTask(taskType))).not.toBe(UNKNOWN_RESOURCE_TYPE_ICON);
+    expect(getExtensionColor(extensionTypeForTask(taskType))).not.toBe("text-gray-400");
+  });
+
+  it("resolves a task id (ai.labs.x) and leaves an extension type alone", () => {
+    expect(extensionTypeForTask("ai.labs.llm")).toBe("eddi://ai.labs.llm");
+    expect(extensionTypeForTask("eddi://ai.labs.rules")).toBe("eddi://ai.labs.rules");
+  });
+
+  it("passes an unknown type through, and does not resolve Object's own keys", () => {
+    expect(extensionTypeForTask("cascade")).toBe("cascade");
+    expect(extensionTypeForTask("constructor")).toBe("constructor");
+    expect(getExtensionIcon(extensionTypeForTask("cascade"))).toBe(UNKNOWN_RESOURCE_TYPE_ICON);
   });
 });

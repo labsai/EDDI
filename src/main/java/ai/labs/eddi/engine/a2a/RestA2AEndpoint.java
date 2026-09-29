@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.a2a.A2AModels.*;
 import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -216,10 +217,15 @@ public class RestA2AEndpoint {
      * authentication is enabled (quarkus.oidc.tenant-enabled=true). Agent Card
      * discovery stays public per the A2A protocol spec; the agent listing does not,
      * and neither does this.
+     * <p>
+     * Beyond authentication it now requires a real EDDI role: conversing with an
+     * agent is the same capability {@code /agents/{id}/start} gates, so a role-less
+     * realm user must not be able to drive any A2A agent merely by holding a valid
+     * token. EDDI has no dedicated peer role, so the standard user tier is reused.
      */
     @POST
     @Path("a2a/agents/{agentId}")
-    @Authenticated
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
     public Response handleJsonRpc(@PathParam("agentId") String agentId, JsonRpcRequest request) {
         if (!a2aEnabled) {
             return jsonRpcError(request.id(), A2AModels.ERROR_METHOD_NOT_FOUND, "A2A is disabled");

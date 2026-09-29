@@ -130,6 +130,26 @@ public interface IIngestionStateStore {
     void recordSeen(String sourceId, String documentId, String runId);
 
     /**
+     * {@link #recordSeen}, for a document whose body was downloaded again and
+     * turned out unchanged — and so also replaces its stored validators with the
+     * ones this response carried.
+     *
+     * <p>
+     * Without it the ETag and Last-Modified of the first ingest were kept for ever.
+     * A server that rotates its ETag without changing the text (a build id in the
+     * validator, markup outside the main content) answered every later conditional
+     * request with a full 200, because the validator sent back was one it no longer
+     * recognised — so an unchanged page never cost a 304 again. A response without
+     * validators clears them: sending back what the server stopped issuing buys
+     * nothing.
+     *
+     * <p>
+     * Fenced on {@code runId} and ignored for a document with no row, exactly like
+     * {@link #recordSeen}.
+     */
+    void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified);
+
+    /**
      * Records that this run could not find out whether a document still exists —
      * the server refused, failed, or asked us to come back later.
      *
@@ -193,6 +213,21 @@ public interface IIngestionStateStore {
      */
     void markTombstoned(String sourceId, List<String> documentIds);
 
+    /**
+     * Forgets what every document of a source was last embedded as — its content
+     * hash and its validators — so the next run embeds each one again. Nothing else
+     * changes: not ownership, not the miss counter, not the tombstone.
+     *
+     * <p>
+     * For a source whose rows may describe vectors that are not in the store the
+     * knowledge base now addresses, when {@link #purgeSource} cannot be used
+     * because another run holds the source. Deliberately not fenced, like
+     * {@link #markTombstoned}: the rows belong to that run. And not a tombstone,
+     * which would stop the owning run from ever removing vectors it did write,
+     * should the page later disappear.
+     */
+    void invalidateContent(String sourceId);
+
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
 
@@ -215,8 +250,24 @@ public interface IIngestionStateStore {
      * buys a fence the caller can enforce with the {@code runId} it already has,
      * which is the only shape both backends can apply in the same statement as the
      * document write.
+     *
+     * @param staleAfter
+     *            when this run counts as abandoned if it is still {@code RUNNING} —
+     *            fixed at the claim, from the time budget the run was started
+     *            under. {@link #reapStaleRuns} judges the run by this and nothing
+     *            else, so lowering the source's budget while it runs cannot have it
+     *            reaped, and its worker fenced, while it is still working.
+     *            {@code null} leaves the run to the start-time rule, as for runs
+     *            claimed before deadlines were recorded.
      */
-    Optional<String> startRun(String sourceId);
+    Optional<String> startRun(String sourceId, Instant staleAfter);
+
+    /**
+     * A claim with no recorded deadline — see {@link #startRun(String, Instant)}.
+     */
+    default Optional<String> startRun(String sourceId) {
+        return startRun(sourceId, null);
+    }
 
     /** Closes a run with its outcome and counters. */
     void finishRun(IngestionRun run);
@@ -224,7 +275,16 @@ public interface IIngestionStateStore {
     /** The run currently in flight for a source, if any. */
     Optional<IngestionRun> activeRun(String sourceId);
 
-    /** Most recent runs first. */
+    /**
+     * Most recent runs first — the runs, not the maintenance claims.
+     *
+     * <p>
+     * A claim closed as {@link IngestionRun.Status#MAINTENANCE} (deleting a file
+     * takes the run slot so no run can race it) is left out. It used to be closed
+     * as a {@code COMPLETED} run with zeroes in every counter, so after deleting
+     * one file the source's "last run" read as a successful run that saw nothing —
+     * and the real last run, with its errors, was pushed down the list.
+     */
     List<IngestionRun> listRuns(String sourceId, int limit);
 
     /**
@@ -243,6 +303,13 @@ public interface IIngestionStateStore {
      * When it reaps anything it also releases ownership of the source's document
      * rows, so the worker it just declared dead is fenced immediately rather than
      * only once a replacement run claims the source.
+     *
+     * <p>
+     * A run claimed with a deadline is reaped once that deadline has passed, and
+     * {@code startedBefore} does not apply to it: it is computed from the source's
+     * <em>current</em> settings, and a budget lowered mid-run would otherwise
+     * declare the live run dead. {@code startedBefore} decides only for runs with
+     * no recorded deadline — those claimed before deadlines were recorded.
      *
      * @return how many runs were reaped
      */
@@ -314,7 +381,32 @@ public interface IIngestionStateStore {
             String error) {
 
         public enum Status {
-            RUNNING, COMPLETED, FAILED, CANCELLED
+            RUNNING, COMPLETED, FAILED, CANCELLED,
+            /**
+             * The run slot was held for something other than a run — a file delete — and
+             * has been released. Kept as a row, never shown: the row carries the claim's
+             * generation, which the next claim must count past, or the document rows
+             * stamped by this claim would outrank the run that follows it and fence it out
+             * of every write. {@link #listRuns} skips it.
+             */
+            MAINTENANCE;
+
+            /**
+             * Reads a stored status, tolerating one this build does not know. A row written
+             * by a newer build — as {@code MAINTENANCE} was new to the build before it —
+             * reads as {@code FAILED} instead of failing the whole run history with an
+             * exception during a rolling upgrade or after a rollback.
+             */
+            public static Status parse(String stored) {
+                if (stored == null) {
+                    return FAILED;
+                }
+                try {
+                    return valueOf(stored);
+                } catch (IllegalArgumentException e) {
+                    return FAILED;
+                }
+            }
         }
 
         /**

@@ -496,3 +496,33 @@ describe("extractVaultKeyName", () => {
     expect(extractVaultKeyName("sk-actual-secret-value")).toBeNull();
   });
 });
+
+describe("OperatorActivation — stored provider the setup flow no longer offers", () => {
+  beforeEach(() => {
+    authState.method = "none";
+    server.use(
+      http.get("*/secretstore/secrets/health", () =>
+        HttpResponse.json({ status: "UP", provider: "local", available: true }),
+      ),
+      http.get("*/secretstore/secrets/default", () => HttpResponse.json([])),
+    );
+  });
+
+  // An operator configured on gemini-vertex before it was hidden rendered a
+  // select with no matching option: it showed one provider and held another.
+  it("falls back to an offered provider with its default model and no carried key", () => {
+    renderActivation({
+      initial: {
+        ...defaultOperatorConfig("Body text."),
+        provider: "gemini-vertex",
+        model: "gemini-2.5-flash",
+        credentialKey: "vertex-key",
+      },
+    });
+
+    const select = screen.getByTestId("operator-provider") as HTMLSelectElement;
+    expect(select.value).toBe("anthropic");
+    expect(screen.getByTestId("operator-model")).toHaveValue("claude-sonnet-5");
+    expect(screen.getByTestId("operator-api-key-input")).toHaveValue("");
+  });
+});
