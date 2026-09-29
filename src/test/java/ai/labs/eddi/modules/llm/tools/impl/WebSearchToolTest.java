@@ -10,7 +10,9 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 
@@ -19,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -656,7 +659,7 @@ class WebSearchToolTest {
         void searchWikipedia_ioException_returnsError() throws Exception {
             org.mockito.Mockito.when(mockedClient.sendBounded(
                     org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.anyLong())).thenThrow(new java.io.IOException("Network error"));
+                    org.mockito.ArgumentMatchers.anyLong())).thenThrow(new IOException("Network error"));
 
             String result = mockedTool.searchWikipedia("test");
 
@@ -692,7 +695,7 @@ class WebSearchToolTest {
         void keyAndCxAreEncodedIntoTheRequest() throws Exception {
             answer(mockedClient, 200, "{\"items\":[]}");
             googleTool.searchWeb("q", 3);
-            var request = org.mockito.ArgumentCaptor.forClass(HttpRequest.class);
+            var request = ArgumentCaptor.forClass(HttpRequest.class);
             verify(mockedClient).sendBounded(request.capture(), anyLong());
             String uri = request.getValue().uri().toString();
             assertTrue(uri.contains("key=SECRET%26key+1&"), uri);
@@ -701,7 +704,7 @@ class WebSearchToolTest {
 
         @Test
         void aFailureNamingTheUriDoesNotLeakTheKey() throws Exception {
-            org.mockito.Mockito.doThrow(new java.io.IOException(
+            doThrow(new IOException(
                     "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
                     .when(mockedClient).sendBounded(any(HttpRequest.class), anyLong());
             String result = googleTool.searchWeb("q", 3);
