@@ -313,9 +313,19 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** The run in flight for this source, if there is one. */
+    /**
+     * The run in flight for this source, if there is one — a dead one is reaped
+     * first.
+     * <p>
+     * Purge and file delete refuse with 409 while this returns a run. Reaping used
+     * to happen only when a new run was claimed, so a run whose process died kept
+     * refusing both for as long as nobody started another — for a source with no
+     * cron, indefinitely.
+     */
     public Optional<IIngestionStateStore.IngestionRun> activeRun(String ragConfigId, IngestionSource source) {
-        return stateStore.activeRun(IngestionPipeline.stateKey(ragConfigId, source));
+        String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+        reapAbandoned(sourceKey, source);
+        return stateStore.activeRun(sourceKey);
     }
 
     /**
@@ -366,9 +376,29 @@ public class RagSourceIngestionService {
         return capped;
     }
 
-    /** Run history for a source, newest first. */
+    /**
+     * Run history for a source, newest first — with any run that has outlived the
+     * stale threshold reaped, so a dead run reads as failed rather than as
+     * {@code RUNNING} until the source is next claimed.
+     */
     public List<IngestionRun> listRuns(String ragConfigId, IngestionSource source, int limit) {
-        return stateStore.listRuns(IngestionPipeline.stateKey(ragConfigId, source), limit);
+        String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+        reapAbandoned(sourceKey, source);
+        return stateStore.listRuns(sourceKey, limit);
+    }
+
+    /**
+     * The same reap a claim performs — same per-source threshold, same fencing — on
+     * a read. Best effort: a read must not fail because the repair it attempted
+     * did, and a run left RUNNING is what the caller saw before.
+     */
+    private void reapAbandoned(String sourceKey, IngestionSource source) {
+        try {
+            stateStore.reapStaleRuns(sourceKey, IngestionPipeline.staleBefore(source));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not reap abandoned ingestion runs of source '%s': %s",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+        }
     }
 
     /**

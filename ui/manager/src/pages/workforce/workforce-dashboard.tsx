@@ -7,11 +7,11 @@ import {
   RefreshCw,
   LayoutGrid,
   List,
-  UsersRound,
   Star,
   CheckSquare,
   Square,
   Trash2,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
@@ -485,7 +485,7 @@ function WorkforceDashboard() {
             <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
             <Button asChild variant="primary" size="sm" className="hidden sm:inline-flex">
               <Link to="/workforce/new">
-                <UsersRound className="h-4 w-4" />
+                <Users className="h-4 w-4" />
                 {t("Workforce.dashboard.assembleTaskForce", "Assemble Task Force")}
               </Link>
             </Button>

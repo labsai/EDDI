@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -220,11 +221,14 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public synchronized Optional<String> startRun(String sourceId) {
+    public synchronized Optional<String> startRun(String sourceId, Instant staleAfter) {
         if (activeRun(sourceId).isPresent()) {
             return Optional.empty();
         }
         String runId = UUID.randomUUID().toString();
+        if (staleAfter != null) {
+            staleAfters.put(runId, staleAfter);
+        }
         long generation = nextGeneration(sourceId);
         runs.put(runId, new IngestionRun(runId, sourceId, IngestionRun.Status.RUNNING, Instant.now(), null,
                 0, 0, 0, 0, 0, 0, 0.0, null));
@@ -271,6 +275,9 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
      * Without it a reaping test can only reap runs it started moments ago, which
      * the production threshold would never touch.
      */
+    /** Each run's recorded deadline, when it was claimed with one. */
+    private final Map<String, Instant> staleAfters = new HashMap<>();
+
     public synchronized void backdateRun(String runId, Instant startedAt) {
         IngestionRun run = runs.get(runId);
         if (run == null) {
@@ -286,8 +293,9 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         List<String> reaped = new ArrayList<>();
         for (Map.Entry<String, IngestionRun> entry : runs.entrySet()) {
             IngestionRun run = entry.getValue();
-            if (run.sourceId().equals(sourceId) && run.status() == IngestionRun.Status.RUNNING
-                    && run.startedAt().isBefore(startedBefore)) {
+            Instant deadline = staleAfters.get(run.runId());
+            boolean stale = deadline != null ? deadline.isBefore(Instant.now()) : run.startedAt().isBefore(startedBefore);
+            if (run.sourceId().equals(sourceId) && run.status() == IngestionRun.Status.RUNNING && stale) {
                 entry.setValue(new IngestionRun(run.runId(), run.sourceId(), IngestionRun.Status.FAILED,
                         run.startedAt(), Instant.now(), run.documentsSeen(), run.documentsIngested(),
                         run.documentsUnchanged(), run.documentsFailed(), run.documentsTombstoned(),

@@ -183,8 +183,8 @@ public class IngestionPipeline {
         // A run whose process died is still marked RUNNING and would block this
         // source indefinitely; nothing else calls this.
         String sourceKey = stateKey(ragConfigId, source);
-        stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
-        return stateStore.startRun(sourceKey);
+        stateStore.reapStaleRuns(sourceKey, staleBefore(source));
+        return stateStore.startRun(sourceKey, staleAfterClaim(source));
     }
 
     /**
@@ -235,8 +235,8 @@ public class IngestionPipeline {
             if (reservedRunId != null) {
                 runId = reservedRunId;
             } else {
-                stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
-                var claimed = stateStore.startRun(sourceKey);
+                stateStore.reapStaleRuns(sourceKey, staleBefore(source));
+                var claimed = stateStore.startRun(sourceKey, staleAfterClaim(source));
                 if (claimed.isEmpty()) {
                     // Not an error: an operator clicking "run now" while a scheduled run
                     // is in flight should be told, not start a second crawl into one
@@ -321,7 +321,8 @@ public class IngestionPipeline {
         if (!sourceRun.coveredWholeSource()) {
             collector.tombstoningSkipped = true;
             LOGGER.infof("Not reconciling deletions for source '%s': the run stopped at %s rather than covering "
-                    + "the source", LogSanitizer.sanitize(source.getName()), sourceRun.summary().stopReason());
+                    + "the source", LogSanitizer.sanitize(source.getName()),
+                    sourceRun.summary().discoveryIncomplete() ? "incomplete sitemap discovery" : sourceRun.summary().stopReason());
             return 0;
         }
         List<DocumentState> gone = stateStore.bumpAndFindMissing(
@@ -813,7 +814,7 @@ public class IngestionPipeline {
                 web.getUserAgent(),
                 web.isRespectRobots());
 
-        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness);
+        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness, web.getSitemapUrls());
     }
 
     private static String describe(Throwable t) {
@@ -833,6 +834,24 @@ public class IngestionPipeline {
      * How long a run may be in flight before it is treated as abandoned: its own
      * time budget plus a margin, so a slow but healthy run is never reaped.
      */
+    /**
+     * The start time before which a still-RUNNING run of this source counts as
+     * abandoned — for {@link IIngestionStateStore#reapStaleRuns}. Every caller
+     * reaps against this one cut-off, so a read that reaps cannot disagree with a
+     * claim about which runs are dead.
+     */
+    public static Instant staleBefore(IngestionSource source) {
+        return Instant.now().minus(staleRunThreshold(source));
+    }
+
+    /**
+     * The deadline recorded on a run claimed now: from the budget it runs under, so
+     * a later change to the source's settings cannot move it.
+     */
+    private static Instant staleAfterClaim(IngestionSource source) {
+        return Instant.now().plus(staleRunThreshold(source));
+    }
+
     private static Duration staleRunThreshold(IngestionSource source) {
         return Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()).plus(STALE_RUN_MARGIN);
     }

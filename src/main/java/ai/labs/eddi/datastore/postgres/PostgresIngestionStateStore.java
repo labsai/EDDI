@@ -102,7 +102,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     private static final String[] ADD_FENCING_COLUMNS = {
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_run_id VARCHAR(64)",
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_generation BIGINT",
-            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"};
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0",
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stale_after TIMESTAMP"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -365,15 +366,15 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public Optional<String> startRun(String sourceId) {
+    public Optional<String> startRun(String sourceId, Instant staleAfter) {
         String runId = UUID.randomUUID().toString();
         // The generation is derived in the statement that claims the run. Two
         // claimants racing under READ COMMITTED can still read the same MAX and
         // compute the same number, which is harmless: only one of them survives the
         // partial unique index, so only one of them ever stamps anything.
         String sql = """
-                INSERT INTO rag_ingestion_runs (run_id, source_id, status, generation, started_at)
-                SELECT ?, ?, 'RUNNING', COALESCE(MAX(generation), 0) + 1, ?
+                INSERT INTO rag_ingestion_runs (run_id, source_id, status, generation, started_at, stale_after)
+                SELECT ?, ?, 'RUNNING', COALESCE(MAX(generation), 0) + 1, ?, ?
                   FROM rag_ingestion_runs WHERE source_id = ?
                 ON CONFLICT DO NOTHING
                 RETURNING generation
@@ -384,7 +385,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 statement.setString(1, runId);
                 statement.setString(2, sourceId);
                 statement.setTimestamp(3, Timestamp.from(Instant.now()));
-                statement.setString(4, sourceId);
+                statement.setTimestamp(4, staleAfter == null ? null : Timestamp.from(staleAfter));
+                statement.setString(5, sourceId);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     // No row means the partial unique index rejected it: a run is
                     // already in flight for this source. Losing that race is expected,
@@ -478,7 +480,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 UPDATE rag_ingestion_runs
                    SET status = 'FAILED', finished_at = ?,
                        error = 'Run abandoned — no completion recorded before the stale threshold'
-                 WHERE source_id = ? AND status = 'RUNNING' AND started_at < ?
+                 WHERE source_id = ? AND status = 'RUNNING'
+                   AND ((stale_after IS NOT NULL AND stale_after < ?) OR (stale_after IS NULL AND started_at < ?))
                  RETURNING run_id
                 """;
         // Ownership is taken from the runs this call reaped, and from nobody else,
@@ -503,7 +506,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setTimestamp(1, Timestamp.from(Instant.now()));
                 statement.setString(2, sourceId);
-                statement.setTimestamp(3, Timestamp.from(startedBefore));
+                // A run's own deadline decides when it has one; the start-time cut-off
+                // only for runs claimed before deadlines were recorded.
+                statement.setTimestamp(3, Timestamp.from(Instant.now()));
+                statement.setTimestamp(4, Timestamp.from(startedBefore));
                 // RETURNING, so the ids come back from the same statement that failed
                 // the runs rather than from a read that could see a later claim.
                 try (ResultSet resultSet = statement.executeQuery()) {

@@ -235,8 +235,24 @@ public interface IIngestionStateStore {
      * buys a fence the caller can enforce with the {@code runId} it already has,
      * which is the only shape both backends can apply in the same statement as the
      * document write.
+     *
+     * @param staleAfter
+     *            when this run counts as abandoned if it is still {@code RUNNING} —
+     *            fixed at the claim, from the time budget the run was started
+     *            under. {@link #reapStaleRuns} judges the run by this and nothing
+     *            else, so lowering the source's budget while it runs cannot have it
+     *            reaped, and its worker fenced, while it is still working.
+     *            {@code null} leaves the run to the start-time rule, as for runs
+     *            claimed before deadlines were recorded.
      */
-    Optional<String> startRun(String sourceId);
+    Optional<String> startRun(String sourceId, Instant staleAfter);
+
+    /**
+     * A claim with no recorded deadline — see {@link #startRun(String, Instant)}.
+     */
+    default Optional<String> startRun(String sourceId) {
+        return startRun(sourceId, null);
+    }
 
     /** Closes a run with its outcome and counters. */
     void finishRun(IngestionRun run);
@@ -272,6 +288,13 @@ public interface IIngestionStateStore {
      * When it reaps anything it also releases ownership of the source's document
      * rows, so the worker it just declared dead is fenced immediately rather than
      * only once a replacement run claims the source.
+     *
+     * <p>
+     * A run claimed with a deadline is reaped once that deadline has passed, and
+     * {@code startedBefore} does not apply to it: it is computed from the source's
+     * <em>current</em> settings, and a budget lowered mid-run would otherwise
+     * declare the live run dead. {@code startedBefore} decides only for runs with
+     * no recorded deadline — those claimed before deadlines were recorded.
      *
      * @return how many runs were reaped
      */

@@ -27,6 +27,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 |-------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable strict write discipline — while this is `false`, `onFailure` has no effect |
 | `onFailure` | string | `"digest"` | What to do with failed task output |
+| `continueOnFailure` | boolean | `false` | Keep running the remaining workflow tasks after the failure is recorded, so a later task can answer **in the same turn** — see [Same-turn fallback](#same-turn-fallback). Off, the turn ends in `ERROR` at the failing task |
 
 ### Failure Modes
 
@@ -34,7 +35,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 |------|----------|
 | `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is injected so the LLM knows what failed and can adapt. **Recommended.** |
 | `exclude_all` | Failed task output is marked uncommitted. No error digest is injected. The LLM sees nothing about the failure. |
-| `keep_all` | Opt-in backwards-compatible mode — failed task output remains committed and visible to the LLM. |
+| `keep_all` | Opt-in backwards-compatible mode — failed task output remains committed and visible to the LLM. The `task_failed_<taskId>` action is still emitted. |
 
 ## How It Works
 
@@ -89,7 +90,66 @@ The error digest is stored as a special output type:
 }
 ```
 
+The digest is kept short on purpose: URLs are replaced with `[url]`, stack frames and fully-qualified
+exception class names are stripped, a provider's raw JSON error body is reduced to its `message`, and
+the result is capped at 200 characters. A failing model call reads, for example,
+`Task 'eddi://ai.labs.llm' failed: Chat model execution failed: model 'x' not found`.
+
 The UI can render error digests with distinct styling (warning icon, collapsible panel). The LLM receives the concise `text` summary rather than raw error noise.
+
+### A failed turn always tells the caller why
+
+The same `taskErrors` entry is written **without** strict write discipline too — so by default, not
+only in `digest` mode. Before, a turn whose task failed (a model provider rejecting the request, an
+unreachable API) came back as `conversationState: "ERROR"` with an output that was simply empty, on
+the plain and the streaming path alike: the client had no reply and no reason, and the reason was only
+in the server log.
+
+In that default mode the entry is for the **caller only**. Nothing reads `taskErrors` back into what
+the model sees, no data is stored and no `task_failed_*` action is emitted — those remain strict-write
+behaviour. With strict write enabled, the modes above decide as before, so `exclude_all` still
+reports nothing.
+
+The `text` names the task and the most specific reason in the failure's cause chain — for a provider
+rejection, the `message` from the provider's error body, e.g. `` Task 'eddi://ai.labs.llm' failed:
+Streaming chat failed: `temperature` is deprecated for this model. `` It is redacted with the same
+secret filter as the logs, URLs are removed, and it is capped at 200 characters. The streaming
+`task_failed` event carries the same unwrapped reason.
+
+The Manager's chat shows it in place of the empty reply. The Chat UI shows end users its own generic
+"Something went wrong" banner with **Try again** instead, and never the provider's text.
+
+## Same-turn fallback
+
+By default a failing task still ends the turn: the pipeline stops, the conversation is in `ERROR`, and
+the reply is empty. The digest and the `task_failed_<taskId>` action are then only visible to the
+**next** turn's behavior rules — and when the failing task is the LLM itself, the turn after the
+fallback runs it again.
+
+With `continueOnFailure: true` the remaining tasks keep running after the failure is recorded, so the
+turn can answer for itself:
+
+- an output set keyed on `task_failed_<taskId>` renders a fallback message in the same turn;
+- an LLM task placed after a failed HTTP call sees the digest and can explain what went wrong.
+
+```json
+{
+  "memoryPolicy": {
+    "strictWriteDiscipline": { "enabled": true, "onFailure": "digest", "continueOnFailure": true }
+  }
+}
+```
+
+```json
+{
+  "outputSet": [ {
+    "action": "task_failed_ai.labs.llm",
+    "outputs": [ { "valueAlternatives": [ { "type": "text", "text": "Sorry — I can't answer right now. Please try again." } ] } ]
+  } ]
+}
+```
+
+A graceful-shutdown interrupt is never continued past.
 
 ## Behavior Rule Integration
 

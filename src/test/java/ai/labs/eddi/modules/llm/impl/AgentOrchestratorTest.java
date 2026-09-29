@@ -461,6 +461,7 @@ class AgentOrchestratorTest {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         doReturn(config).when(memory).getUserMemoryConfig();
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
         doReturn(conversationProperties).when(memory).getConversationProperties();
         doReturn("user-1").when(memory).getUserId();
         doReturn("agent-1").when(memory).getAgentId();
@@ -534,6 +535,7 @@ class AgentOrchestratorTest {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         doReturn(config).when(memory).getUserMemoryConfig();
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
 
         List<Object> result = orchestratorNoStore.collectEnabledTools(task, memory);
 
@@ -548,6 +550,7 @@ class AgentOrchestratorTest {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         doReturn(config).when(memory).getUserMemoryConfig();
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
         doReturn(conversationProperties).when(memory).getConversationProperties();
         doReturn("user-1").when(memory).getUserId();
         doReturn("agent-1").when(memory).getAgentId();
@@ -570,6 +573,7 @@ class AgentOrchestratorTest {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         doReturn(config).when(memory).getUserMemoryConfig();
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
         doReturn(conversationProperties).when(memory).getConversationProperties();
         doReturn("user-1").when(memory).getUserId();
         doReturn("agent-1").when(memory).getAgentId();
@@ -927,6 +931,7 @@ class AgentOrchestratorTest {
 
         var config = new AgentConfiguration.UserMemoryConfig();
         doReturn(config).when(memory).getUserMemoryConfig();
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
         doReturn(null).when(memory).getConversationProperties();
         doReturn("user-1").when(memory).getUserId();
         doReturn("agent-1").when(memory).getAgentId();

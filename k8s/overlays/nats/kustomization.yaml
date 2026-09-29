@@ -32,6 +32,7 @@ kind: Component
 resources:
   - nats-statefulset.yaml
   - nats-service.yaml
+  - nats-networkpolicy.yaml
 
 # Patch EDDI to use NATS instead of in-memory messaging
 patches:

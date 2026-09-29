@@ -3,6 +3,8 @@
    ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up
    ────────────────────────────────────────────── */
 
+import { Brain } from "lucide-react";
+
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
   return (
@@ -49,9 +51,7 @@ export function ThinkingIndicator({ escalating = false }: { escalating?: boolean
       </div>
       <div className="indicator__bubble">
         <div className="indicator__thinking">
-          <span className="indicator__brain" aria-hidden="true">
-            🧠
-          </span>
+          <Brain className="indicator__brain" size="1em" />
           <span>{escalating ? "Taking a closer look…" : "Thinking…"}</span>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Hand, KeyRound, type LucideIcon } from "lucide-react";
+import { KeyRound, type LucideIcon, UserRoundKey } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { HeaderValueField } from "@/components/connections/header-value-field";
@@ -294,7 +294,7 @@ export function ConnectionCredentialFields({
 
 const BINDING_ICONS: Record<"SERVICE" | "CALLER_SUPPLIED", LucideIcon> = {
   SERVICE: KeyRound,
-  CALLER_SUPPLIED: Hand,
+  CALLER_SUPPLIED: UserRoundKey,
 };
 
 /**

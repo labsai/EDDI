@@ -30,6 +30,7 @@ public class Agent implements IAgent {
 
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
 
@@ -99,6 +100,15 @@ public class Agent implements IAgent {
 
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
         this.userMemoryConfig = userMemoryConfig;
+    }
+
+    @Override
+    public boolean isMemoryToolsEnabled() {
+        return memoryToolsEnabled;
+    }
+
+    public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        this.memoryToolsEnabled = memoryToolsEnabled;
     }
 
     public void setToolApprovalsConfig(ToolApprovalsConfig toolApprovalsConfig) {

@@ -657,6 +657,24 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a reservation records its deadline, so a budget lowered afterwards cannot reap it")
+        void reservationRecordsItsDeadline() {
+            var pipeline = pipelineFor(new FakeSite().page(SITE + "/", pageWith("x")));
+            var source = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(180);
+            source.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source);
+
+            pipeline.reserveRun(KB_RESOURCE_ID, source).orElseThrow();
+
+            // The cut-off a one-minute budget produces a moment later. Without a
+            // recorded deadline the live run is judged by it and reaped.
+            assertEquals(0, stateStore.reapStaleRuns(sourceKey, Instant.now().plusSeconds(60)));
+            assertTrue(stateStore.activeRun(sourceKey).isPresent());
+        }
+
+        @Test
         @DisplayName("a reservation is released when the run never starts")
         void reservationIsReleasedOnEarlyExit() {
             // A disabled source, an invalid one, or a worker thread that could not be

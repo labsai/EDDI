@@ -2696,7 +2696,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.1.0";
+        private static final String EXPECTED_CHART_VERSION = "2.2.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -2964,7 +2964,7 @@ class DeploymentManifestsTest {
     void docsDoNotAdvertiseMutableTag() throws IOException {
         for (Path doc : OPERATOR_DOCS) {
             assertFalse(read(doc).contains("labsai/eddi:latest"),
-                    doc + " advertises labsai/eddi:latest while k8s/base/eddi-deployment.yaml pins an "
+                    doc + " advertises labsai/eddi:latest while k8s/base/kustomization.yaml pins an "
                             + "immutable patch version under a comment forbidding exactly that");
         }
     }
