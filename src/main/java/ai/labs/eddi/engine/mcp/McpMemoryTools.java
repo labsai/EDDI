@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -17,6 +18,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -60,7 +62,7 @@ public class McpMemoryTools {
     @Tool(name = "list_user_memories", description = "List all persistent memory entries for a user. "
             + "Returns structured facts, preferences, and context that agents have remembered about the user.")
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
-                                   @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
+                                   @ToolArg(description = "Maximum number of entries to return (default: 50)", required = false) Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -88,9 +90,10 @@ public class McpMemoryTools {
             + "Returns the memories that would be injected into a conversation with this agent.")
     public String getVisibleMemories(@ToolArg(description = "User ID (required)") String userId,
                                      @ToolArg(description = "Agent ID to check visibility for (required)") String agentId,
-                                     @ToolArg(description = "Comma-separated group IDs (optional)") String groupIds,
-                                     @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
-                                     @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
+                                     @ToolArg(description = "Comma-separated group IDs (optional)", required = false) String groupIds,
+                                     @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)",
+                                              required = false) String order,
+                                     @ToolArg(description = "Maximum number of entries (default: 50)", required = false) Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -168,8 +171,12 @@ public class McpMemoryTools {
                                    @ToolArg(description = "Memory key/name (required)") String key,
                                    @ToolArg(description = "Memory value (required)") String value,
                                    @ToolArg(description = "Source agent ID (required)") String agentId,
-                                   @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)") String category,
-                                   @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)") String visibility) {
+                                   @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)",
+                                            required = false) String category,
+                                   @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)",
+                                            required = false) String visibility,
+                                   @ToolArg(description = "Comma-separated group IDs — required for 'group' visibility, which no one can read "
+                                           + "without one", required = false) String groupIds) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -182,9 +189,18 @@ public class McpMemoryTools {
         if (IUserMemoryStore.isReservedKey(key))
             return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage());
         try {
-            var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.toLowerCase()) : Visibility.self;
+            var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
+            List<String> groups = groupIds == null || groupIds.isBlank()
+                    ? List.of()
+                    : Arrays.stream(groupIds.split(",")).map(String::trim).filter(g -> !g.isEmpty()).toList();
 
-            var entry = UserMemoryEntry.fromToolCall(userId, agentId, null, List.of(), key, value, category, vis);
+            var entry = UserMemoryEntry.fromToolCall(userId, agentId, null, groups, key, value, category, vis);
+            // The same floor the REST API enforces — MCP used to accept a key REST
+            // rejected, any value size, and a group entry with no group.
+            String violation = UserMemoryWriteRules.validate(entry);
+            if (violation != null) {
+                return errorJson(violation);
+            }
 
             String id = userMemoryStore.upsert(entry);
 

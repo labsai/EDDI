@@ -27,6 +27,10 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -37,6 +41,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,6 +130,106 @@ class GdprComplianceServiceTest {
                 auditLedgerService, attachments, hitlToolJournalStore,
                 conversationDescriptorStore, checkpointStore,
                 groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, cacheFactory, 30L);
+    }
+
+    /**
+     * scope:"secret" values live in vault slots owned by the user. Erasure must
+     * delete them — sweeping the default tenant plus every tenant the user's
+     * conversations point into, read BEFORE those snapshots are deleted.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_deletesAutoVaultedSecrets_inEveryTenantTheConversationsName() throws Exception {
+        var cleaner = mock(AutoVaultedSecrets.class);
+        Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+        when(cleanerInstance.isResolvable()).thenReturn(true);
+        when(cleanerInstance.get()).thenReturn(cleaner);
+        var withVault = new GdprComplianceService(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, null, List.of(), cleanerInstance, cacheFactory,
+                30L);
+
+        when(conversationMemoryStore.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1"));
+        var snapshot = new ConversationMemorySnapshot();
+        var vaulted = new Property("apiKey", "${vault:acme/agent.u0123456789abcdef.0123456789ab.apiKey}", Property.Scope.conversation);
+        vaulted.setAutoVaulted(Boolean.TRUE);
+        snapshot.setConversationProperties(new LinkedHashMap<>(Map.of("apiKey", vaulted)));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        when(cleaner.deleteForUser(eq("user-1"), any())).thenReturn(3);
+
+        var result = withVault.deleteUserData("user-1");
+
+        var tenants = ArgumentCaptor.forClass(Collection.class);
+        verify(cleaner).deleteForUser(eq("user-1"), tenants.capture());
+        assertTrue(tenants.getValue().contains("acme"), "the tenant named by the conversation must be swept: " + tenants.getValue());
+        assertEquals(3, result.autoVaultedSecretsDeleted());
+        assertTrue(result.complete(), result.failedSteps().toString());
+        // read before the snapshots are deleted
+        var order = inOrder(conversationMemoryStore);
+        order.verify(conversationMemoryStore).loadConversationMemorySnapshot("c1");
+        order.verify(conversationMemoryStore).deleteConversationsByUserId("user-1");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_secretSweepFailure_isReportedNotSwallowed() throws Exception {
+        var cleaner = mock(AutoVaultedSecrets.class);
+        Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+        when(cleanerInstance.isResolvable()).thenReturn(true);
+        when(cleanerInstance.get()).thenReturn(cleaner);
+        var withVault = new GdprComplianceService(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, null, List.of(), cleanerInstance, cacheFactory,
+                30L);
+        when(conversationMemoryStore.getConversationIdsByUserId("user-1")).thenReturn(List.of());
+        when(cleaner.deleteForUser(eq("user-1"), any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
+
+        var result = withVault.deleteUserData("user-1");
+
+        assertTrue(result.failedSteps().contains("autoVaultedSecrets"), result.failedSteps().toString());
+        assertFalse(result.complete());
+        // The snapshots are the only record of a custom tenant the secrets live in —
+        // deleting them now would leave a retry nothing to find.
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId("user-1");
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+    }
+
+    /**
+     * A tenant named only in the undo history — the current property has since
+     * moved to another one — must still be swept.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_sweepsATenantOnlyTheUndoHistoryNames() throws Exception {
+        var cleaner = mock(AutoVaultedSecrets.class);
+        Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+        when(cleanerInstance.isResolvable()).thenReturn(true);
+        when(cleanerInstance.get()).thenReturn(cleaner);
+        var withVault = new GdprComplianceService(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, null, List.of(), cleanerInstance, cacheFactory,
+                30L);
+
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent", 1, "user-1");
+        memory.getConversationProperties().put("apiKey", vaulted("${vault:acme/agent.u0123456789abcdef.0123456789ab.apiKey}"));
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put("apiKey", vaulted("${vault:agent.u0123456789abcdef.ba9876543210.apiKey}"));
+        memory.recordPropertyChanges(baseline);
+        when(conversationMemoryStore.getConversationIdsByUserId("user-1")).thenReturn(List.of("c1"));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("c1")).thenReturn(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        withVault.deleteUserData("user-1");
+
+        var tenants = ArgumentCaptor.forClass(Collection.class);
+        verify(cleaner).deleteForUser(eq("user-1"), tenants.capture());
+        assertTrue(tenants.getValue().contains("acme"), "the tenant the undo history names must be swept: " + tenants.getValue());
+    }
+
+    private static Property vaulted(String reference) {
+        var property = new Property("apiKey", reference, Property.Scope.conversation);
+        property.setAutoVaulted(Boolean.TRUE);
+        return property;
     }
 
     @Test

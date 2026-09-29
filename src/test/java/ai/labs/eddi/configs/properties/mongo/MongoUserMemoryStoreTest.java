@@ -14,6 +14,7 @@ import com.mongodb.MongoWriteException;
 import org.mockito.ArgumentCaptor;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoClientSettings;
+import java.util.Set;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
@@ -174,6 +175,14 @@ class MongoUserMemoryStoreTest {
 
         assertFalse(assertDoesNotThrow(() -> degradedStore.upsertIfOwnedBy(globalEntry("lang", TEST_AGENT), TEST_AGENT)));
         verify(degraded, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — losing the insert race on a global key reports 'already there', not an error")
+    void insertIfAbsent_duplicateKeyMeansAlreadyThere() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenThrow(duplicateKey());
+
+        assertNull(assertDoesNotThrow(() -> store.insertIfAbsent(globalEntry("lang", TEST_AGENT))));
     }
 
     @Test
@@ -519,5 +528,48 @@ class MongoUserMemoryStoreTest {
                 .append("accessCount", 0)
                 .append("createdAt", timestamp.toString())
                 .append("updatedAt", timestamp.toString());
+    }
+
+    // ==================== insertIfAbsent ====================
+
+    @Test
+    @DisplayName("insertIfAbsent — one upserting updateOne whose update is $setOnInsert only, so an existing value is never replaced")
+    void insertIfAbsentNeverReplaces() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(null); // an entry was already there
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        String inserted = store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "OLD-v5", "legacy", Visibility.global, null,
+                List.of(), null, false, 0, null, null));
+
+        assertNull(inserted, "an entry was already there");
+        var update = ArgumentCaptor.forClass(Bson.class);
+        var options = ArgumentCaptor.forClass(UpdateOptions.class);
+        verify(collection).updateOne(any(Bson.class), update.capture(), options.capture());
+        var json = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), json.keySet(), json.toJson());
+        assertTrue(options.getValue().isUpsert());
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — refuses a reserved _gdpr_ key like upsert does, and never reaches the collection")
+    void insertIfAbsentRefusesReservedKeys() {
+        var reserved = new UserMemoryEntry(null, TEST_USER, "_gdpr_processing_restricted", "false", "legacy", Visibility.global, null,
+                List.of(), null, false, 0, null, null);
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> store.insertIfAbsent(reserved));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — reports an insert when the upsert created the document")
+    void insertIfAbsentInserts() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(new BsonObjectId(TEST_OID));
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        assertEquals(TEST_OID.toHexString(),
+                store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
+                        false, 0, null, null)));
     }
 }

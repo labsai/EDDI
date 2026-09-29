@@ -28,6 +28,8 @@ finding on #860 and was deferred there.
     agent holds the key, the upsert attempts a second insert and the index rejects
     it with a duplicate-key error. That error is reported as a refusal.
   - A plain upsert that loses the same insert race retries once as an update.
+  - `insertIfAbsent` that loses the race now returns `null` ("already there"), not a
+    duplicate-key error.
   - If the index cannot be built, because a deployment already holds duplicate
     global keys, the store logs a WARN and falls back to a non-atomic check.
 - **`UserMemoryTool.rememberFact`** uses the conditional write for global writes

@@ -1090,6 +1090,19 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
         }
 
+        boolean dreamSchedule = DreamService.isDreamSchedule(schedule.getMetadata());
+        if (dreamSchedule) {
+            // A Dream cycle consolidates ONE user's memories. Without a real userId it
+            // falls back to the scheduler placeholder, which DreamService refuses —
+            // so the schedule was accepted here and failed on every fire until it
+            // dead-lettered. Say so when it is created instead.
+            String userId = schedule.getUserId();
+            if (userId == null || userId.isBlank() || SCHEDULER_USER_ID.equals(userId)) {
+                throw new IllegalArgumentException("A dream consolidation schedule (metadata dreamType=" + DreamService.METADATA_TYPE_CONSOLIDATION
+                        + ") needs userId: the user whose memories it consolidates.");
+            }
+        }
+
         // Infer trigger type: if heartbeatIntervalSeconds is set, treat as HEARTBEAT
         // regardless of the default value in ScheduleConfiguration
         TriggerType type = schedule.getTriggerType();
@@ -1109,8 +1122,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
             // Message is optional for heartbeats (will default to "heartbeat")
         } else {
-            // CRON type: validate message required
-            if (schedule.getMessage() == null || schedule.getMessage().isBlank()) {
+            // CRON type: validate message required — except for a Dream consolidation
+            // schedule, which never sends one: it dispatches to DreamService, not to a
+            // conversation. The documented Dream schedule has no message and was
+            // rejected here.
+            if (!dreamSchedule && (schedule.getMessage() == null || schedule.getMessage().isBlank())) {
                 throw new IllegalArgumentException("message is required for CRON triggers");
             }
 

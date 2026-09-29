@@ -25,6 +25,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.time.Duration;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -526,13 +527,64 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
     // === Document conversion ===
 
-    private Bson buildUpsertFilter(UserMemoryEntry entry) {
+    /**
+     * Atomic: every field is {@code $setOnInsert}, so an existing entry at the
+     * identity is left exactly as it is — a writer that lands between a lookup and
+     * this call can no longer be overwritten.
+     */
+    @Override
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
+        RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
+        // Same refusal as upsert: reserved keys are written only through
+        // upsertReserved.
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        String now = Instant.now().toString();
+        Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
+                Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),
+                Updates.setOnInsert(FIELD_VISIBILITY, entry.visibility().name()),
+                Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
+                Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
+                Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
+        BsonValue upserted;
+        try {
+            upserted = memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId();
+        } catch (MongoWriteException e) {
+            // GLOBAL_KEY_INDEX: a concurrent writer inserted the same global key
+            // first. The entry exists, which is exactly the "already there" answer.
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return null;
+            }
+            throw e;
+        }
+        return upserted != null ? upserted.asObjectId().getValue().toHexString() : null;
+    }
+
+    /**
+     * The document an upsert of {@code entry} replaces.
+     * <p>
+     * Global entries are one shared document per {@code (userId, key)}. Self and
+     * group entries are one document per {@code (userId, key, sourceAgentId)} among
+     * the agent's <em>non-global</em> entries — the same identity PostgreSQL
+     * enforces with its partial unique index
+     * {@code (user_id, key, source_agent_id) WHERE visibility != 'global'}.
+     * <p>
+     * The visibility term is load-bearing. Without it a self write matched the
+     * global entry the same agent had created (a global entry keeps its creator in
+     * {@code sourceAgentId}), and the {@code $set} flipped the shared memory to
+     * {@code self} — every other agent silently lost it. A model saving "a private
+     * note" under a key it had once shared was enough to trigger it.
+     */
+    static Bson buildUpsertFilter(UserMemoryEntry entry) {
         if (entry.visibility() == Visibility.global) {
             // Global: single shared entry per (userId, key)
             return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_VISIBILITY, Visibility.global.name()));
         }
-        // Self/Group: per-agent entries
-        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()));
+        // Self/Group: per-agent entries, never the shared global one
+        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                ne(FIELD_VISIBILITY, Visibility.global.name()));
     }
 
     private UserMemoryEntry documentToEntry(Document doc) {

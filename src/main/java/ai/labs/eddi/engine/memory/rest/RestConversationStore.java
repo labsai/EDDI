@@ -13,6 +13,9 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -119,6 +122,12 @@ public class RestConversationStore implements IRestConversationStore {
     // (CDI overwrites it with the real registry in production).
     @Inject
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    /**
+     * Optional so the unit tests that construct this store directly need no vault.
+     */
+    @Inject
+    Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -437,6 +446,13 @@ public class RestConversationStore implements IRestConversationStore {
                         sanitize(conversationId), e.getMessage()));
             }
 
+            // The snapshot holds the only references to the conversation's vault
+            // slots: if they cannot be deleted, nothing is — a retry can then still
+            // find them. Deleting the snapshot anyway would orphan the credentials.
+            if (!deleteAutoVaultedSecretsForConversation(conversationId)) {
+                throw new ResourceStoreException("Could not delete the vault secrets of conversation " + conversationId
+                        + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
+            }
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             conversationDescriptorStore.deleteAllDescriptor(conversationId);
@@ -578,6 +594,9 @@ public class RestConversationStore implements IRestConversationStore {
             try {
                 var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, CONVERSATION_DESCRIPTOR_VERSION);
                 if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
+                    if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
+                        continue; // kept, with its secret references, for the next run
+                    }
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
@@ -592,7 +611,9 @@ public class RestConversationStore implements IRestConversationStore {
                 // however recently it was active. Only a snapshot with no descriptor
                 // at all (live or archived) is an orphan to remove straight away.
                 var archive = archiveRetention(endedConversationId, deleteOlderThanThisDate);
-                if (archive == ArchiveRetention.WITHIN_RETENTION) {
+                // The vault slots go first: the snapshot about to be deleted holds the
+                // only references to them.
+                if (archive == ArchiveRetention.WITHIN_RETENTION || !deleteAutoVaultedSecretsForConversation(endedConversationId)) {
                     continue;
                 }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
@@ -795,6 +816,55 @@ public class RestConversationStore implements IRestConversationStore {
             return Response.status(status).entity(result).type(MediaType.APPLICATION_JSON).build();
         } catch (ResourceStoreException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
+     * point to — every version, including those only its undo history and redo
+     * cache still reference. Each auto-vaulted write owns its own slot (see
+     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
+     * resolve them any more — left in place they would be orphaned plaintext
+     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
+     * the references live.
+     * <p>
+     * Unlike the attachment cleanup this is not best effort. A snapshot deleted
+     * after a failed vault delete takes the only record of the slot names with it,
+     * and neither a retry nor a GDPR erasure could find them again (a custom tenant
+     * is named only there).
+     *
+     * @return {@code false} when the slots could not be deleted — the caller must
+     *         then keep the conversation so the cleanup can be retried
+     */
+    private boolean deleteAutoVaultedSecretsForConversation(String conversationId) {
+        if (autoVaultedSecretsInstance == null || !autoVaultedSecretsInstance.isResolvable()) {
+            return true;
+        }
+        ConversationMemorySnapshot snapshot;
+        try {
+            snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        } catch (ResourceNotFoundException e) {
+            return true; // no snapshot, no references
+        } catch (Exception e) {
+            log.warn(format("Could not read conversation %s to delete its auto-vaulted secrets: %s", sanitize(conversationId),
+                    e.getMessage()));
+            return false;
+        }
+        if (snapshot == null) {
+            return true;
+        }
+        try {
+            var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
+            int deleted = autoVaultedSecretsInstance.get().deleteForConversation(ConversationMemory.everyPropertyVersion(memory),
+                    snapshot.getUserId());
+            if (deleted > 0) {
+                log.debug(format("Deleted %d auto-vaulted secret(s) for conversation %s", deleted, sanitize(conversationId)));
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn(format("Failed to delete auto-vaulted secrets for conversation %s; keeping the conversation for a retry: %s",
+                    sanitize(conversationId), e.getMessage()));
+            return false;
         }
     }
 

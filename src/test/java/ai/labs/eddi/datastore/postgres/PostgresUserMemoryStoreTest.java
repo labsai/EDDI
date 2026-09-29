@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -50,6 +51,54 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
     }
 
     // ─── Flat property view ─────────────────────────────────────
+
+    @Nested
+    @DisplayName("insertIfAbsent")
+    class InsertIfAbsent {
+
+        private UserMemoryEntry entry(String key, Object value, Visibility visibility, String agent) {
+            return new UserMemoryEntry(null, "user-1", key, value, "fact", visibility, agent, List.of(), null, false, 0, null, null);
+        }
+
+        @Test
+        @DisplayName("inserts when absent and returns the new id")
+        void insertsWhenAbsent() throws Exception {
+            String id = store.insertIfAbsent(entry("lang", "de", Visibility.global, null));
+
+            assertNotNull(id);
+            assertEquals("de", store.getAllEntries("user-1").getFirst().value());
+        }
+
+        @Test
+        @DisplayName("an existing entry at the identity is left exactly as it is, and no id comes back")
+        void neverReplaces() throws Exception {
+            store.upsert(entry("lang", "en", Visibility.global, "agent-a"));
+
+            assertNull(store.insertIfAbsent(entry("lang", "OLD-v5", Visibility.global, null)));
+
+            var all = store.getAllEntries("user-1");
+            assertEquals(1, all.size());
+            assertEquals("en", all.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("identity, not key: a scoped entry does not block the global one, nor another agent's scoped one")
+        void identityNotKey() throws Exception {
+            store.upsert(entry("lang", "fr", Visibility.self, "agent-a"));
+
+            assertNotNull(store.insertIfAbsent(entry("lang", "de", Visibility.global, null)));
+            assertNotNull(store.insertIfAbsent(entry("lang", "it", Visibility.self, "agent-b")));
+            assertNull(store.insertIfAbsent(entry("lang", "es", Visibility.self, "agent-a")));
+            assertEquals(3, store.getAllEntries("user-1").size());
+        }
+
+        @Test
+        @DisplayName("refuses a reserved _gdpr_ key like upsert does")
+        void refusesReservedKeys() {
+            assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class,
+                    () -> store.insertIfAbsent(entry("_gdpr_processing_restricted", "false", Visibility.global, null)));
+        }
+    }
 
     @Nested
     @DisplayName("Flat Properties")
