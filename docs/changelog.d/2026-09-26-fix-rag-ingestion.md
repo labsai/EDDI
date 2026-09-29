@@ -109,7 +109,8 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   (stopped after 64 characters) and refuses a file with no text — "This PDF has no text layer… EDDI has
   no OCR". They used to be stored, listed as not indexed, and silently skipped by every run.
 - **U3 — the extension no longer vouches for a binary format.** Text content under a `.pdf`, `.docx`,
-  `.xlsx` or `.pptx` name is refused instead of being stored as that format and failing every run.
+  `.xlsx` or `.pptx` name is refused at upload, because it does not have the format that extension
+  claims, instead of being stored as that format and failing every run.
 - **U4 — size is checked before bytes are read, and the 60 MB body limit is scoped to the upload.** The
   REST layer passes each part's declared size and the service refuses an oversized file without
   reading it. The new `RequestBodyLimitGuard` holds every other endpoint to
@@ -122,7 +123,9 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   request without a `content-length` is left to the global ceiling: a filter cannot tell it from a
   request with no body. HTTP/1.x refusals send `Connection: close`; HTTP/2 ones do not, since HTTP/2
   forbids the header. The upload exemption is matched below
-  `quarkus.http.root-path`. A ZIP import is held to the same limit (as it was before 60M).
+  `quarkus.http.root-path`. A ZIP import gets no exemption: it is held to the same effective limit as
+  every other endpoint (`25M` by default, raised to fit the attachment allowance, capped at
+  `quarkus.http.limits.max-body-size`), no longer to the old global 60M.
 - **U5 — concurrent uploads cannot overshoot the limits.** Each file is measured against a fresh
   listing under a per-source (striped) lock on this instance; across instances a new file that finds
   the source over its limit once stored is deleted again — but only if the stored file still has the
