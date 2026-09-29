@@ -17,20 +17,20 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
 - **H2a + NEW (schedules).** A schedule that runs as a real user belongs to that user **(always)**:
   the rule `requireOwnUserId` already applied to update and fire now covers list, read, fire logs,
   delete, enable, disable, retry and dismiss, so an editor can no longer list, disable or delete
-  another user's dream schedule. Unowned (`system:*`) schedules keep their old visibility with
+  another user's dream schedule. Shared (no `userId` or `system:scheduler`) schedules keep their old visibility with
   workspaces off; with them on, they are manageable by their creator and by whoever may EDIT what
   they drive (the agent, the RAG configuration of an ingestion schedule, the group of a cadence).
-  The listing pushes this into the query (`IScheduleStore.ListingScope`, both backends) for the same
-  paging reason the HITL redaction lives there. `readSchedule` now hides HITL timeouts from
+  The listing pushes this into the query (main's `ScheduleOwnerScope`, refined; both backends) for
+  the same paging reason the HITL redaction lives there. `readSchedule` now hides HITL timeouts from
   non-admins like the listing does, and fire logs are visible exactly when their schedule is.
   `fireNow` rethrows `ForbiddenException` instead of turning the ingestion EDIT gate's 403 into a 500.
 - **H2e — forged team cadences.** Create/update reject a body carrying `teamCadenceType` (like the
   HITL and ingestion markers), `fireNow` on a cadence needs EDIT on its group, and
   `TeamCadenceService.processScheduledFire` now takes the firing schedule's id and refuses unless it
   is the `Cadence.scheduleRef` the workspace registered, as a failure so the impostor dead-letters.
-- **H2b — triggers.** Update and delete need EDIT on every agent the stored trigger currently routes
-  to (new targets still need USE); the listing and single read show only triggers whose targets the
-  caller may USE, and an unshown intent answers like an absent one.
+- **H2b — triggers.** The listing and single read show only triggers whose targets the caller may
+  USE, and an unshown intent answers like an absent one. (Update/delete authority over the stored
+  targets is main's USE gate — see the reconciliation below.)
 - **H2c — export download.** Archive keys are `<slug>--<agentId>-<version>-<128-bit token>.zip`; the
   download parses the agent id back out and checks VIEW, like the export. The saved name
   (`Content-Disposition`) is still `<slug>-<agentId>-<version>.zip`. Archives written before this
@@ -69,7 +69,7 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
 - **Export and preview** leave out schedules that run as another user (admins export everything).
 - **Team cadences belong to their group.** A cadence runs as its creator, but callers with VIEW on
   the group can read it and callers with EDIT can toggle or delete it. With workspaces off every
-  cadence is listed (`ListingScope.includeTeamCadences`); under enforcement co-editors reach them
+  cadence is listed (`ScheduleOwnerScope.withTeamCadences()`); under enforcement co-editors reach them
   by id or through the group workspace. Firing and re-pointing still act as the creator.
 - **Refused trigger reads** throw `IRestAgentTriggerStore.TriggerNotVisibleException`, a subclass
   of the not-found exception, so HTTP clients still get a 404 while MCP `chat_managed` no longer
@@ -88,8 +88,6 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
   agents that do not collide are unchanged.
 - **Failed exports leave no archive behind.** `ZipArchive` deletes the target when writing it fails,
   so a truncated ZIP no longer sits under its download key until the retention sweep.
-- `requireOwnUserId` now exempts every `system:` identity, the same test the listing and `mayAccess`
-  use.
 - Streaming discuss refuses a missing USE grant with a plain 403 before the stream opens, the same
   contract `continueDiscussionStreaming` has for its ownership check (the review suggested the
   opposite direction; the existing continuation test documents the 403 contract).
@@ -103,8 +101,6 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
 
 - `ResourceAccessGuard` gained `currentLevel`/`hasAccess` (non-throwing, current descriptor) for
   id-only listings, and `requireUseAccessToEach`.
-- Trigger authority is EDIT on the *current* targets: a trigger has no owner, and what it controls is
-  how those agents are reached.
 - Schedule listing under enforcement without an `agentId` shows the caller's own schedules only;
   a team's shared system schedules appear when listing by an agent the caller may edit. "Agents the
   caller may edit" cannot be pushed into the schedule query, and filtering the page afterwards
@@ -112,7 +108,8 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
 
 ### Compatibility
 
-- `IScheduleStore` gained `ListingScope` overloads; the old signatures are default methods.
+- `ScheduleOwnerScope` (from main) gained `sharedOnlyIfCreatedByCaller()`/`withTeamCadences()`; its
+  two-argument form keeps main's meaning.
 - `TeamCadenceService.processScheduledFire(Map)` became `processScheduledFire(String, Map)`.
 - Export download URLs changed shape (see H2c). `RemoteApiResourceSource` follows the `Location`
   header and is unaffected.
@@ -128,5 +125,40 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
 
 ```decision-log
 | 2026-09-26 | Schedules that run as a real user are that user's for every operation, workspaces on or off | H2a: editors could list/disable/delete other users' dream schedules | Workspace-only scoping (left the per-user leak open with workspaces off) |
-| 2026-09-26 | Trigger update/delete need EDIT on the agents the stored trigger routes to | H2b: any editor could re-point another team's intent | An owner field on triggers (needs a migration for existing triggers) |
 ```
+
+## 🔀 Reconciled with main (2026-09-29)
+
+**Repo:** EDDI (`fix/workspace-authz-scoping`), merge of `origin/main` at `9cf30b8d8`.
+
+Main landed parallel fixes for part of this batch while the PR was open (`8d24ae335` schedule and
+trigger ownership, `566631b94` parser role gate, `37a9b8336` owner-scoped schedule paging, `2eded8789`
+review follow-ups, `74233c293` dream schedules). Where both sides fixed the same thing, main's
+implementation was kept and this branch's copy dropped:
+
+- **H2f parser**: main's `@RolesAllowed` + VIEW check, with main's tests. This branch adds only the
+  sentence in `semantic-parser.md`.
+- **H2a owner scoping**: main's `ScheduleOwnerScope`, `canAccessScheduleOwner` rule and
+  `requireMutableSchedule` guard. `IScheduleStore.ListingScope` is gone; a refused direct read
+  answers main's `403`, not the `404` this branch used. `requireOwnUserId` keeps main's exact
+  `system:scheduler` exemption (the "any `system:` identity" widening is dropped).
+- **H2b triggers**: main gates update/delete on **USE** of the stored targets
+  (`requireUseOnStoredReferencedAgents`); this branch's EDIT gate and its decision-log row are dropped.
+
+What main still lacked is ported onto main's types (`ScheduleOwnerScope`, `RestScheduleStore`):
+
+- `ScheduleOwnerScope` gained two refinements, pushed into both queries:
+  `sharedOnlyIfCreatedByCaller()` (workspaces enforced: shared rows only when `createdBy` is the
+  caller, unless listing by an agent the caller may EDIT) and `withTeamCadences()` (workspaces off:
+  every cadence, whoever created it). The two-argument constructor and `visibleTo` keep main's meaning.
+- `RestScheduleStore`: `mayRead`/`mayAccess` replace `canAccessScheduleOwner` (HITL reads hidden
+  from non-admins, team cadences reachable through their group, shared schedules owned by creator or
+  by the team of what they drive under enforcement); fire logs and `/admin/failed` scoped to it;
+  forged cadence bodies refused on create and on update unless the update echoes the same cadence's
+  own markers (main's `guardManagedSchedule` lets group editors change a cadence's cron by PUT);
+  `fireNow` needs EDIT on a cadence's group and rethrows `ForbiddenException` instead of a `500`.
+- Kept from this branch unchanged (main has no equivalent): H1, H2c, H2d, H2e's `scheduleRef` check,
+  H2g, H2h, H3, A1, A3, E5, the trigger listing/read filter with `TriggerNotVisibleException`, and
+  the export's schedule filter (now on `ScheduleOwnerScope.isShared`).
+- AGENTS.md takes main's text; the E5 self-URL sentence moved with its section to
+  [`agent-config-authoring.md`](../agent-config-authoring.md).
