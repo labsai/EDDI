@@ -571,7 +571,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                 conversationMemoryStore.setConversationEndReason(conversationId, endReason);
             } catch (RuntimeException e) {
                 LOGGER.warnf("Conversation %s ended, but its end reason '%s' could not be recorded: %s",
-                        sanitize(conversationId), endReason, e.getMessage());
+                        sanitize(conversationId), sanitize(endReason), e.getMessage());
             }
         }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume

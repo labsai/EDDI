@@ -33,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
@@ -607,7 +609,7 @@ public class ScheduleFireExecutor {
                     // endAllActiveConversations both end conversations, so a
                     // heartbeat died of either. It gets a fresh conversation instead.
                     LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — creating a fresh conversation",
-                            conversationId, schedule.getId());
+                            sanitize(conversationId), sanitize(schedule.getId()));
                 } else {
                     return conversationId;
                 }

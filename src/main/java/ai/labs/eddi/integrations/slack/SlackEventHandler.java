@@ -1297,7 +1297,7 @@ public class SlackEventHandler {
         if (created.won()) {
             LOGGER.infof("Replaced ended conversation %s in %s with %s (end reason: %s)",
                     sanitize(endedConversationId), sanitize(intent), sanitize(created.conversationId()),
-                    endReason != null ? endReason : "none");
+                    endReason != null ? sanitize(endReason) : "none");
         }
         return new ThreadConversation(created.conversationId(), created.won(), created.won() ? endReason : null);
     }

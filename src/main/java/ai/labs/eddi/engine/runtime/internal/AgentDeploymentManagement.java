@@ -59,6 +59,7 @@ import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentSta
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.undeployed;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static java.lang.String.format;
 import static java.time.temporal.ChronoUnit.DAYS;
 
@@ -509,7 +510,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
         agentFactory.undeployAgent(environment, agentId, agentVersion);
         deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
-        LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", agentId,
+        LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", sanitize(agentId),
                 agentVersion, successor.getAgentVersion()));
         return true;
     }
