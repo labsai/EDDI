@@ -524,6 +524,52 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_persistentStrategy_refusesAConversationOwnedByAnotherUser() throws Exception {
+        // Main's ownership guard (8d24ae335), carried onto the raw-load resolver: the
+        // fire runs with server identity, so the interactive ownership check never
+        // engages — a persistentConversationId naming someone else's conversation must
+        // not be reused, even below the step limit.
+        var schedule = makeHeartbeatSchedule("hb-foreign", "persistent");
+        schedule.setPersistentConversationId("foreign-conv");
+        var foreign = new ConversationMemorySnapshot();
+        foreign.setConversationId("foreign-conv");
+        foreign.setAgentId("agent-1");
+        foreign.setUserId("someone-else");
+        foreign.setConversationState(ConversationState.READY);
+        foreign.getConversationProperties().put("counter", new Property("counter", "41", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("foreign-conv")).thenReturn(foreign);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("own-conv", null));
+        sayCompletes("own-conv");
+        // A regression would say into the unstubbed foreign conversation: fail fast.
+        executor.fireTimeout = Duration.ofSeconds(2);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("own-conv", result.conversationId());
+        verify(conversationService, never()).say(any(), any(), eq("foreign-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        verify(scheduleStore).setPersistentConversationId("hb-foreign", "own-conv");
+    }
+
+    @Test
+    void fire_persistentStrategy_reusesAnUnownedConversation() throws Exception {
+        // Only a provable mismatch counts: a legacy conversation without an owner is
+        // still this schedule's.
+        var schedule = makeHeartbeatSchedule("hb-legacy", "persistent");
+        schedule.setPersistentConversationId("legacy-conv");
+        storedConversation("legacy-conv", ConversationState.READY, 1);
+        sayCompletes("legacy-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("legacy-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
     void fire_persistentStrategy_keepsTheConversationWhenEndingItForRolloverFails() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-endfail", "persistent");
         schedule.setPersistentConversationId("endfail-conv");

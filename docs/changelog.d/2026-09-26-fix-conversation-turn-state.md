@@ -51,30 +51,11 @@ the fix.
 - **M-E1 — lazy redeploy before the ENDED check.** `say()` called `getAgent` (which
   deploys an undeployed agent, without the tenant gate or a deployment-store write)
   before it found out the conversation had ended. The ENDED check now comes first.
-- **M-E2 — group-visible memories lost their groups.** `UserMemoryEntry.fromProperty`
-  hard-coded `groupIds = []`, so a `visibility: group` property could never be
-  recalled (recall matches on `groupIds`). A recalled group memory also lost its
-  groups when it was written back. `Property` now carries the `groupIds` of the
-  entry it was recalled from. On write the groups come from, in order: the
-  property's own, then the baseline property it replaced, then the `groupId`
-  context of the turn itself. An earlier step's `context:groupId` is deliberately
-  NOT used: a step written before reserved context keys were enforced may carry a
-  client-set value. So a resume, which has no context of its own, writes a
-  brand-new group property without groups. Once PR 831 (reserved context keys)
-  merges, this should switch to its verified group resolver. `MemoryCheckpoint`
-  copies the field too. A replacement property adopts the groups of the property it
-  replaced (and a written entry's groups are kept on the live property), so
-  re-setting a group memory to the same value is not a write, and a later turn
-  outside the group or resumed from a pause does not write it back with none.
-  `groupIds` cannot be configured: `PropertyInstruction`
-  ignores it in `property.json`. Recalled group ids do show up in serialized
-  conversation properties over REST and MCP — they are the user's own memory's
-  groups.
-- **M-E3 — redo resurrected an abandoned branch.** A new turn never cleared the redo
-  cache, so undo → say → redo spliced the withdrawn step back in. The public
-  `ConversationMemory.startNextStep()` now clears it. The package-private overload
-  that rebuilds a loaded conversation does not, so a stored redo cache survives
-  the load.
+- **M-E2 / M-E3 — superseded by main.** This branch carried a recalled group
+  memory's `groupIds` on `Property` and cleared the redo cache on a new turn. Main
+  landed both fixes independently (group scoping via `ConversationGroups` at the
+  persistence boundary; the redo clear in `ConversationMemory.startNextStep()`), so
+  the 2026-09-29 reconciliation below keeps main's and drops this branch's.
 - **Step-scoped properties now clear on every exit.** They were dropped only from
   the clean-exit post-tasks. After an ERROR, cancel or abandon they reached the
   persisted snapshot and the next turn's `{properties.x}`. They are now dropped in
@@ -133,14 +114,11 @@ the fix.
 
 ### Compatibility
 
-- Stored data: `Property` gains an optional `groupIds` (absent on every existing
-  property), and deployment rows gain `lastModified` (ignored by the reader). Both
-  are additive. No migration is needed.
-- REST/MCP shapes: unchanged, apart from the new nullable `groupIds` field on
-  serialized properties. The REST `say` endpoint's answer to a skipped turn now
+- Stored data: deployment rows gain `lastModified` (ignored by the reader). Additive;
+  no migration is needed.
+- REST/MCP shapes: unchanged. The REST `say` endpoint's answer to a skipped turn now
   depends on the state (410 for ENDED, a different 409 text for an idle
   conversation that changed under the queued message).
-- `property.json`: a `groupIds` field on a property instruction is ignored.
 - New config keys: `eddi.nats.stream-max-age`, `eddi.nats.stream-max-messages`,
   `eddi.nats.stream-max-bytes`, `eddi.schedule.persistent-conversation-max-steps`.
   They are documented in [configuration-reference.md](../configuration-reference.md).
@@ -150,10 +128,7 @@ the fix.
 [`IConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/IConversationMemoryStore.java),
 [`ConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java),
 [`PostgresConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java),
-[`ConversationMemory.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java),
 [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
-[`Property.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/Property.java),
-[`UserMemoryEntry.java`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java),
 [`NatsConversationCoordinator.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java),
 [`ScheduleFireExecutor.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java),
 [`AgentDeploymentManagement.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java),
@@ -166,6 +141,35 @@ the fix.
   already call for, not a quick cap.
 - Cross-pod concurrent turns of one conversation still merge top-level fields
   last-writer-wins (see H13a above).
+
+### Reconciled with main (2026-09-29)
+
+Main landed parallel work in the same area while this PR was open. Where both sides
+fixed the same thing, main's implementation is kept and this branch's is dropped:
+
+- **M-E2 (group memories)** — kept main's `ConversationGroups.resolveGroupIds` /
+  `persistedVisibility` and `UserMemoryEntry.fromProperty(…, visibility, groupIds)`
+  (bfa438310, bc4908873): the turn's verified group is stamped at the persistence
+  boundary and a group property outside any group is stored as `self`. Dropped this
+  branch's `Property.groupIds` carry (and its `PropertyInstruction` / `MemoryCheckpoint`
+  plumbing, the baseline-adoption helpers in `Conversation` and their tests), which
+  contradicts main's narrowing rule.
+- **M-E3 (redo after a new turn)** — identical fix on main (2984e4e15, 7011bceba);
+  kept main's Javadoc and `ConversationMemoryUndoPropertiesTest`, dropped this
+  branch's duplicate tests.
+- **Step-scoped properties** — still missing on main (a failing turn persisted them;
+  proven by `stepScopedPropertyIsDroppedWhenTheTurnFails` against main's code).
+  Ported onto main's `Conversation`: the turn's `finally` blocks drop them on every
+  exit but a HITL pause; `postConversationLifecycleTasks` keeps main's
+  `recordPropertyChanges`, which still runs after the cleanup.
+- **Persistent schedules** — main's fire-path ownership guard (8d24ae335) is carried
+  onto this branch's raw-load resolver: a persistent conversation owned by another
+  user is neither reused nor rolled over, and a fresh one is started. New tests
+  `fire_persistentStrategy_refusesAConversationOwnedByAnotherUser` and
+  `…_reusesAnUnownedConversation`.
+- Every other item (H13a, E2, state-cache TTL, E4, M-E1, NATS, the rollover, E3,
+  E6) had no counterpart on main and is unchanged; `createPropertiesHandler` calls
+  in the turn builders take main's `isMemoryToolsEnabled()` argument.
 
 ```decision-log
 | 2026-09-26 | A queued turn whose snapshot was superseded is rebuilt over a reloaded memory (revision probe first) | H13a/E1: queued turns ran on request-time memory | Always reloading (doubles every turn's load); refreshing the memory in place (the Conversation's longTerm baseline would stay stale) |
