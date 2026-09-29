@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.capability;
 
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 
 import java.util.Locale;
@@ -67,6 +68,14 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  * <td><strong>no</strong></td>
  * <td>maps to {@code responseMimeType=application/json}, which the Gemini API
  * rejects when {@code tools} are also present</td>
+ * </tr>
+ * <tr>
+ * <td>xai, deepseek, moonshot, qwen, zhipu, groq</td>
+ * <td>yes</td>
+ * <td><strong>no</strong></td>
+ * <td>named OpenAI-compatible providers; read from
+ * {@code llm/openai-compatible-providers.json}. minimax and openrouter are
+ * <strong>no</strong>/<strong>no</strong></td>
  * </tr>
  * <tr>
  * <td>anthropic, bedrock</td>
@@ -136,7 +145,8 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
      * Whether the provider accepts a schemaless request-level JSON format at all.
      */
     public static boolean supportsRequestLevelJson(String provider) {
-        return REQUEST_LEVEL_JSON.contains(normalize(provider));
+        String type = normalize(provider);
+        return REQUEST_LEVEL_JSON.contains(type) || OpenAiCompatibleProviders.find(type).map(p -> p.capabilities().jsonMode()).orElse(false);
     }
 
     /**
@@ -144,7 +154,9 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
      * request that <em>also</em> carries tool specifications.
      */
     public static boolean supportsRequestLevelJsonWithTools(String provider) {
-        return REQUEST_LEVEL_JSON_WITH_TOOLS.contains(normalize(provider));
+        String type = normalize(provider);
+        return REQUEST_LEVEL_JSON_WITH_TOOLS.contains(type)
+                || OpenAiCompatibleProviders.find(type).map(p -> p.capabilities().jsonModeWithTools()).orElse(false);
     }
 
     /**

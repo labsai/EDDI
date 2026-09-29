@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.setup;
 
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -228,7 +230,7 @@ public class AgentSetupService {
         // is the whole point of provisioning a second agent against an existing one.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
             throw new AgentSetupException(
-                    "API key is required for cloud LLM providers (anthropic, openai, gemini) — pass apiKey, or vaultKeyName to reuse a key "
+                    "API key is required for cloud LLM providers (anthropic, openai, gemini, xai, deepseek, ...) — pass apiKey, or vaultKeyName to reuse a key "
                             + "already in the vault");
         }
         // Validate the HITL config HERE, before a single resource exists — same
@@ -1791,9 +1793,13 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
-                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
-                Deployment.Environment.parseStrict(environment));
+        String resolvedProvider = provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER;
+        // A named OpenAI-compatible provider has its own default model; falling back to
+        // DEFAULT_MODEL would hand e.g. xAI a Claude model name.
+        String resolvedModel = model != null && !model.isBlank()
+                ? model.trim()
+                : OpenAiCompatibleProviders.find(resolvedProvider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+        return new ResolvedParams(resolvedProvider, resolvedModel, deploy == null || deploy, Deployment.Environment.parseStrict(environment));
     }
 
     /**

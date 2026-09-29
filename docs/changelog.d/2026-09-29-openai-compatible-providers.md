@@ -25,6 +25,11 @@ that was discoverable in the Manager or the setup tools.
 - **Provider defaults.** DeepSeek and Kimi run with `returnThinking` and `sendThinking` true,
   because they reject a tool-loop follow-up that omits the reasoning of the previous call.
   Qwen and GLM return thinking without echoing it. MiniMax sends `reasoning_split: true`.
+- **Capabilities follow the catalog.** `JsonResponseFormatPolicy` and `ModelCapabilityService`
+  read each provider's JSON-mode and vision-model tokens from it (DeepSeek's vision is
+  `deepseek-flash` only). `AgentSetupService.resolveParams` no longer defaults these providers to
+  `claude-sonnet-4-6`; it uses the provider's own default model. The `setup_agent` and
+  `create_api_agent` MCP tools name the eight ids, and their model example is now `deepseek-v4-pro`.
 - No new dependencies and no migration: existing `type: openai` + `baseUrl` configs behave as before.
 
 ### Verification

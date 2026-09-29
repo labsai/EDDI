@@ -8,12 +8,15 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 
 import java.util.List;
@@ -39,6 +42,37 @@ class AgentSetupServiceBranchCoverageTest {
     void setUp() {
         openMocks(this);
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
+    }
+
+    // ─── default model per provider ──────────────────────────────────────
+
+    @Nested
+    @DisplayName("default model")
+    class DefaultModel {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"xai", "deepseek", "moonshot", "qwen", "zhipu", "minimax", "openrouter", "groq"})
+        @DisplayName("a named OpenAI-compatible provider gets its own default model, not the Claude one")
+        void compatibleProviderDefaultModel(String provider) {
+            var resolved = service.resolveParams(provider, null, null, null);
+            assertEquals(provider, resolved.providerType());
+            assertNotEquals(AgentSetupService.DEFAULT_MODEL, resolved.modelId());
+            assertEquals(OpenAiCompatibleProviders.find(provider).orElseThrow().defaultModel(),
+                    resolved.modelId());
+        }
+
+        @Test
+        @DisplayName("an explicit model always wins")
+        void explicitModelWins() {
+            assertEquals("grok-4.5", service.resolveParams("xai", " grok-4.5 ", null, null).modelId());
+        }
+
+        @Test
+        @DisplayName("other providers keep the historic default")
+        void otherProvidersKeepDefault() {
+            assertEquals(AgentSetupService.DEFAULT_MODEL, service.resolveParams("openai", null, null, null).modelId());
+            assertEquals(AgentSetupService.DEFAULT_MODEL, service.resolveParams(null, null, null, null).modelId());
+        }
     }
 
     // ─── environment resolution ──────────────────────────────────────────

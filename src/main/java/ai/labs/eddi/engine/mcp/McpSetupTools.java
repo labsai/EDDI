@@ -53,9 +53,11 @@ public class McpSetupTools {
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
                              @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', "
                                      + "'gemini-vertex', 'huggingface', 'ollama', 'jlama', 'mistral', "
-                                     + "'azure-openai', 'bedrock', or 'oracle-genai'") String provider,
+                                     + "'azure-openai', 'bedrock', 'oracle-genai', or an OpenAI-compatible provider: "
+                                     + "'xai', 'deepseek', 'moonshot' (Kimi), 'qwen', 'zhipu' (Z.ai GLM), 'minimax', "
+                                     + "'openrouter' or 'groq'") String provider,
                              @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', "
-                                     + "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
+                                     + "'gemini-3.1-pro-preview', 'deepseek-v4-pro', 'llama3.2:1b' (ollama)") String model,
                              @ToolArg(description = "API key for the LLM provider. Required for most cloud providers "
                                      + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
                                      + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
@@ -65,7 +67,8 @@ public class McpSetupTools {
                                      + "when the deployment leaves eddi.setup.vault-key-reuse at 'checksum' and the existing entry "
                                      + "is granted to all agents; otherwise it is stored as a new entry.") String apiKey,
                              @ToolArg(description = "Base URL for the LLM provider (optional). "
-                                     + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
+                                     + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434'). "
+                                     + "For China-mainland endpoints of qwen/moonshot/zhipu/minimax pass that region's URL.") String baseUrl,
                              @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
                              @ToolArg(description = "Enable built-in tools like calculator, "
                                      + "datetime, websearch? (default: false)") Boolean enableBuiltInTools,
@@ -126,7 +129,8 @@ public class McpSetupTools {
                                          + "Include instructions on how to use the API.") String systemPrompt,
                                  @ToolArg(description = "OpenAPI 3.x spec as JSON/YAML string or a URL (required)") String openApiSpec,
                                  @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', 'mistral', "
-                                         + "'azure-openai', 'bedrock', 'oracle-genai', etc.") String provider,
+                                         + "'azure-openai', 'bedrock', 'oracle-genai', 'xai', 'deepseek', 'moonshot', 'qwen', 'zhipu', "
+                                         + "'minimax', 'openrouter', 'groq', etc.") String provider,
                                  @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
                                  @ToolArg(description = "LLM API key (required for most cloud providers: anthropic, openai, gemini, mistral). "
                                          + "Not needed for bedrock (IAM) or oracle-genai (OCI auth). "
