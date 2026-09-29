@@ -761,17 +761,29 @@ export function ChatWidget() {
   // whether the maintainers may read the conversation, which is shown whatever
   // the name setting: it is about the person's data, not decoration. An EDDI
   // older than the profile endpoint answers 404, and there is nothing to announce.
+  // Whether the lookup below has answered. The input stays closed until it has:
+  // otherwise a slow profile let somebody type before they were told the
+  // conversation may be read. A failure (an EDDI without the endpoint) settles
+  // it too, so it only ever waits for the request, never blocks on it.
+  const [profileSettled, setProfileSettled] = useState(false);
   useEffect(() => {
     // A new target starts without the previous one's notice, and a slower answer
     // for the previous target cannot overwrite the new one's.
     dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
-    if (isDemo || !agentId) return;
+    if (isDemo || !agentId) {
+      setProfileSettled(true);
+      return;
+    }
+    setProfileSettled(false);
     let cancelled = false;
     fetchAgentProfile(agentId, environment ?? "production")
       .then((profile) => {
         if (!cancelled) dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
       })
-      .catch(() => { /* no profile endpoint: no notice */ });
+      .catch(() => { /* no profile endpoint: no notice */ })
+      .finally(() => {
+        if (!cancelled) setProfileSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -1559,7 +1571,7 @@ export function ChatWidget() {
             ) : (
               <ChatInput
                 onSend={handleSend}
-                disabled={(!state.conversationId && !isManagedAgent) || isPaused}
+                disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}
               />
             )}

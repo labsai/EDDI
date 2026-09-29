@@ -154,8 +154,12 @@ From CodeRabbit's review of the PR:
 - The deploy-time space check fails closed. A workflow, or the config of a
   scanned extension (LLM, HTTP calls, MCP, RAG), that cannot be read refuses
   the deployment instead of counting as "names no tenant".
+- The same applies to a connection that cannot be read, and to a store failure
+  while reading the agent itself. A missing agent still answers 404.
 - The Chat UI's review notice is cleared and refetched when the chat's target
-  changes, and a slower answer for the previous target cannot overwrite it.
+  changes, and a slower answer for the previous target cannot overwrite it. The
+  input stays closed until the profile lookup has answered, so nobody can type
+  before being told the conversation may be read.
 
 Deliberately not changed, and documented instead:
 

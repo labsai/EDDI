@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -658,10 +660,23 @@ class VaultGrantCheckerTest {
         }
 
         @Test
-        @DisplayName("an unreadable agent names nothing")
-        void unreadable() throws Exception {
-            when(agentStore.read(AGENT_ID, 1)).thenThrow(new RuntimeException("gone"));
+        @DisplayName("a missing agent names nothing — the deploy answers 404 — but a store failure fails closed")
+        void missingVersusUnreadableAgent() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceNotFoundException("gone"));
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
 
+            when(agentStore.read(AGENT_ID, 2)).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 2));
+        }
+
+        @Test
+        @DisplayName("an unreadable connection fails closed; an absent one names nothing")
+        void unreadableConnectionFailsClosed() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            doReturn(null).when(connectionStore).readByName("default", "finance-api");
             assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
         }
     }

@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.RestUtilities;
@@ -252,10 +253,15 @@ public class VaultGrantChecker {
         AgentConfiguration agentConfiguration;
         try {
             agentConfiguration = agentStore.read(agentId, agentVersion);
+        } catch (ResourceNotFoundException e) {
+            // Not there: nothing to deploy, and the deployment's own existence check
+            // answers 404 — refusing here would turn that into a 403.
+            return Set.of();
         } catch (Exception e) {
+            // A store failure is not "names no tenant": fail closed.
             LOGGER.debugf("Could not read agent '%s' v%s for the space-reference check: %s", sanitize(agentId), agentVersion,
                     sanitize(e.getMessage()));
-            return Set.of();
+            throw new UnverifiableReferencesException("agent configuration");
         }
         Set<String> tenants = new LinkedHashSet<>();
         if (agentConfiguration == null) {
@@ -332,9 +338,11 @@ public class VaultGrantChecker {
                     collectTenants(connection, sink, ConnectionConfiguration.effectiveTenant(connection), visitedConnections);
                 }
             } catch (Exception e) {
-                // The grant check refuses an unreadable connection on the same deployment;
-                // here there is nothing more to learn from it.
+                // Fail closed: a connection cached from an earlier read can still resolve
+                // whatever it names at runtime. An absent one (null above) is fine — the
+                // runtime refuses it as NOT_FOUND.
                 LOGGER.debugf("Could not read connection '%s' for the space-reference check: %s", sanitize(name), sanitize(e.getMessage()));
+                throw new UnverifiableReferencesException("connection " + connectionTenant + "/" + name);
             }
         }
     }

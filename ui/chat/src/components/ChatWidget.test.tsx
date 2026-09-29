@@ -1072,6 +1072,31 @@ describe("ChatWidget — conversation review notice", () => {
     );
   });
 
+  it("keeps the input closed until the notice has had its chance to appear", async () => {
+    // A slow profile let somebody type before they were told the conversation
+    // may be read. The input now waits for the lookup to settle.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+  });
+
   it("shows no notice for an agent that did not opt in", async () => {
     backendWithProfile(new Response(JSON.stringify({ name: "Support", reviewNotice: null }), { status: 200 }));
 
