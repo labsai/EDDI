@@ -95,10 +95,10 @@ class ComposeStackTest {
     /**
      * Host addresses an infrastructure port may be published on: the loopback
      * literal, or a variable that DEFAULTS to it (an operator exposing Keycloak
-     * deliberately, behind TLS, sets {@code KEYCLOAK_BIND_ADDRESS}).
+     * deliberately, behind TLS, sets {@code KEYCLOAK_BIND}).
      */
     private static final Pattern LOOPBACK_PUBLISH = Pattern.compile(
-            "^(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND_ADDRESS:-127\\.0\\.0\\.1\\}):.+");
+            "^(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND:-127\\.0\\.0\\.1\\}):.+");
 
     /**
      * Administrator passwords of the bundled third-party services. Each must come
@@ -320,7 +320,7 @@ class ComposeStackTest {
         assertTrue(checked > 0, "no infrastructure port found at all — the sweep would be vacuous");
         assertEquals(List.of(), offenders,
                 "an infrastructure service is published on every interface. Prefix the mapping with 127.0.0.1: (or a"
-                        + " *_BIND_ADDRESS variable defaulting to it) — the containers reach each other over the compose"
+                        + " *_BIND variable defaulting to it) — the containers reach each other over the compose"
                         + " network, so the host binding is only for the developer's own shell.");
     }
 

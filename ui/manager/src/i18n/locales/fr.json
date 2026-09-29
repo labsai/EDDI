@@ -261,6 +261,7 @@
     "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes.",
     "count_many": "{{count}} agents",
     "liveIn": "Actif en {{environment}}",
+    "liveInVersion": "Actif en {{environment}} en version {{version}}",
     "chatIn": "Discuter en {{environment}}",
     "openExternalChatIn": "Ouvrir le chat {{environment}} dans un nouvel onglet",
     "deployToProduction": "Déployer en production",
@@ -551,7 +552,10 @@
     "toolCount": "{{selected}} sur {{total}} sélectionnés",
     "specTooLarge": "Cette spécification est trop volumineuse pour être chargée ici",
     "specUrlInvalid": "Ceci n'est pas une URL valide",
-    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge"
+    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Désactivez les outils intégrés pour les désactiver tous.",
+    "hfToken": "Jeton Hugging Face",
+    "hfTokenHint": "Nécessaire uniquement pour les dépôts restreints ou privés. Il est stocké dans le coffre comme une clé API."
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -757,7 +761,10 @@
     "errorConversationEnded": "Cette conversation est terminée.",
     "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
     "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
-    "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment."
+    "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment.",
+    "sendRejected": "Votre message n'a pas été envoyé : {{reason}}",
+    "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
+    "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -1329,7 +1336,8 @@
     "streamingTimeoutSeconds": "Délai d'attente du streaming (secondes)",
     "streamingTimeoutSecondsHint": "Remplace la valeur par défaut du moteur (120s). S'applique uniquement au streaming ; vide = utiliser la valeur par défaut.",
     "taskPricing": "Tarification des appels simples",
-    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $."
+    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $.",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -2058,6 +2066,7 @@
     "ingestion": "Ingestion de documents",
     "dropFiles": "Glissez-déposez des documents ici",
     "dropHint": "Fichiers textes ou Markdown",
+    "replaceSameName": "Remplacer un document déjà ingéré portant le même nom de fichier",
     "browse": "Parcourir",
     "pasteText": "Ou coller du texte brut",
     "pastePlaceholder": "Collez le contenu ici...",
@@ -2089,6 +2098,8 @@
       "includeSubdomains": "Inclure les sous-domaines",
       "excludePatterns": "Motifs d'exclusion",
       "excludePatternsHint": "Globs appliqués au chemin de l'URL, séparés par des virgules — * reste dans un segment, ** les traverse",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps pour découvrir les pages, séparées par des virgules. Utile seulement si robots.txt ne les liste pas ; les index de sitemaps sont suivis",
       "saveFirst": "Enregistrez la base de connaissances pour exécuter cette source, la prévisualiser ou voir son historique.",
       "run": "Exécuter",
       "runFailed": "Impossible de démarrer l'exécution. Une exécution est peut-être déjà en cours.",
@@ -2716,7 +2727,6 @@
     "contextWindowEntries": "Entrées récentes conservées intégralement",
     "contextWindowSummarize": "Résumer ce qui sort de la fenêtre",
     "contextWindowTruncateNote": "Les entrées anciennes sont remplacées par un simple marqueur « N entrées antérieures omises ».",
-    "retroConfigHint": "Permet à une phase rétro d'inscrire des enseignements dans la mémoire de l'équipe, repris dans les discussions suivantes.",
     "retroPerRun": "Par exécution",
     "retroStored": "Maximum stocké",
     "artifactConfigHint": "Permet aux membres de co-rédiger des documents qui survivent au tour où ils ont été écrits.",
@@ -2920,7 +2930,27 @@
     },
     "stateRejected": "Rejetée",
     "inputDisabledRejected": "Cette recommandation a été rejetée",
-    "debateVerdictNote": "Répond par un verdict chiffré (vainqueur et scores), pas en prose : {{phases}}. Les membres ont au moins deux rôles et les arguments précèdent, donc l'invite de synthèse du modérateur n'est pas utilisée. Définissez un modèle d'entrée sur la phase pour obtenir de la prose."
+    "debateVerdictNote": "Répond par un verdict chiffré (vainqueur et scores), pas en prose : {{phases}}. Les membres ont au moins deux rôles et les arguments précèdent, donc l'invite de synthèse du modérateur n'est pas utilisée. Définissez un modèle d'entrée sur la phase pour obtenir de la prose.",
+    "retroCustomLimits": "Limites personnalisées des leçons de rétro",
+    "retroCustomHint": "Une phase de rétro inscrit des leçons dans la mémoire de l'équipe, reprises dans les discussions suivantes. Ces plafonds en limitent le nombre.",
+    "retroDefaultHint": "Une phase de rétro inscrit toujours des leçons, avec les plafonds par défaut ({{perRun}} par exécution, {{stored}} conservées). Pour l'arrêter, supprimez la phase RETRO.",
+    "voteOptionsTooFew": "Un bulletin explicite nécessite au moins deux options.",
+    "saveProblem": {
+      "title": "Ce groupe ne peut pas encore être créé :",
+      "debateRoles": "Un débat nécessite au moins un membre avec le rôle PRO et un avec le rôle CON.",
+      "devilAdvocateRole": "Un groupe avocat du diable nécessite un membre avec le rôle DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Les membres humains ne peuvent pas rejoindre un groupe de travail (phases de planification, d'exécution et de vérification).",
+      "humanWithPeerPhases": "Les membres humains ne peuvent pas rejoindre un groupe dont les phases s'adressent à chaque pair à tour de rôle, comme la revue par les pairs.",
+      "memberUnassigned_many": "{{count}} membres n'ont aucun agent assigné.",
+      "memberUnassigned_one": "{{count}} membre n'a aucun agent assigné.",
+      "memberUnassigned_other": "{{count}} membres n'ont aucun agent assigné.",
+      "humanNeedsName_many": "{{count}} membres humains ont besoin d'un nom d'affichage.",
+      "humanNeedsName_one": "{{count}} membre humain a besoin d'un nom d'affichage.",
+      "humanNeedsName_other": "{{count}} membres humains ont besoin d'un nom d'affichage.",
+      "humanNeedsId_many": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne.",
+      "humanNeedsId_one": "{{count}} membre humain a besoin de l'identifiant utilisateur de la personne.",
+      "humanNeedsId_other": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne."
+    }
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -2984,7 +3014,7 @@
     "value": "Valeur",
     "deleteAll": "Tout supprimer",
     "deleteAllTitle": "Supprimer toutes les propriétés",
-    "deleteAllDesc": "Toutes les propriétés de cet utilisateur seront définitivement supprimées.",
+    "deleteAllDesc": "Cette action supprime définitivement TOUTES les propriétés globales de cet utilisateur : chaque entrée globale de la mémoire utilisateur, y compris celles enregistrées par des agents, et pas seulement les lignes affichées ici.",
     "deleted": "Propriétés supprimées",
     "noResults": "Aucune propriété trouvée",
     "showingCount": "{{count}} propriétés"
@@ -3086,6 +3116,8 @@
     "title": "Synchronisation d'agents",
     "subtitle": "Synchroniser les agents entre les instances EDDI",
     "connection": "Instance source",
+    "loadingLocalAgents": "Chargement de tous les agents locaux avant l'association…",
+    "localAgentsError": "La liste des agents locaux n'a pas pu être chargée entièrement ; les agents ne peuvent donc pas être associés par nom. Une synchronisation maintenant créerait des doublons.",
     "sourceUrl": "URL de l'instance EDDI source",
     "authToken": "Jeton d'autorisation",
     "authHint": "Facultatif. Envoyé comme en-tête X-Source-Authorization.",
@@ -3783,7 +3815,19 @@
       "toggleConfig": "Afficher/masquer le panneau de détails",
       "unpin": "Détacher la réponse",
       "untitled": "Sans titre",
-      "viewSessions": "Voir les sessions passées"
+      "viewSessions": "Voir les sessions passées",
+      "alreadyEnded": "La discussion était déjà terminée.",
+      "stopRaced": "La discussion a changé d'état au moment de l'arrêt et continue. Réessayez d'arrêter.",
+      "stopUnconfirmed": "Impossible de confirmer l'arrêt de la discussion. Vérifiez son état et réessayez d'arrêter.",
+      "stopFailed": "Impossible d'arrêter la discussion : {{error}}",
+      "stopping": "Arrêt en cours…",
+      "startOver": "Recommencer",
+      "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours.",
+      "confirmNewTitle": "Arrêter la discussion en cours ?",
+      "confirmNewDescription": "Une discussion est encore en cours. En démarrer une nouvelle l'arrête d'abord — tout travail en cours est abandonné.",
+      "confirmNewButton": "Arrêter et recommencer",
+      "keepRunning": "Laisser continuer",
+      "questionRequired": "Ajoutez une question pour votre groupe de travail — les fichiers lui sont transmis au début de la discussion."
     },
     "thread": {
       "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
@@ -3812,7 +3856,8 @@
       "stop": "Arrêter la génération",
       "streamEnded": "La connexion s'est interrompue avant la fin de la réponse. Ce qui est arrivé figure ci-dessus ; renvoyez le message pour réessayer.",
       "newConversation": "Nouvelle conversation",
-      "newConversationFailed": "Impossible de démarrer une nouvelle conversation"
+      "newConversationFailed": "Impossible de démarrer une nouvelle conversation",
+      "initFailed": "Impossible d'ouvrir cette conversation."
     },
     "chat": {
       "agentDetails": "Détails de l agent",
@@ -4994,5 +5039,12 @@
     "headerMismatch": "Cette connexion envoie son identifiant sous « {{expected}} », l'en-tête doit donc porter ce nom — sinon la configuration affiche un nom et la requête en porte un autre.",
     "refusedInRequest": "${connection:…} est refusé dans un chemin, un paramètre de requête ou un corps — un identifiant dans une URL finit dans chaque journal de proxy, et dans un corps il n'est pas lu. Référencez plutôt la connexion depuis un en-tête.",
     "refusedInModel": "Les modèles de langage, les embeddings et les bases vectorielles n'acceptent pas ${connection:…} : une connexion se résout en un en-tête complet, alors qu'ils ont besoin d'un identifiant brut. Utilisez ${vault:…} ici."
+  },
+  "cascadeSave": {
+    "workflowChanged": "Le workflow {{workflowId}} a été modifié ailleurs (version actuelle {{current}}, cette page affiche la version {{version}}). Rechargez la page. Rien n'a été enregistré.",
+    "agentChanged": "L'agent {{agentId}} a été modifié ailleurs (version actuelle {{current}}, cette page affiche la version {{version}}). Rechargez la page. Rien n'a été enregistré.",
+    "workflowMissingResource": "Le workflow {{workflowId}} (version {{version}}) ne référence pas {{resource}} ; l'enregistrer ici ne modifierait donc pas l'agent. Rien n'a été enregistré.",
+    "agentWorkflowMismatch": "L'agent {{agentId}} (version {{version}}) référence le workflow {{workflowId}} en version {{found}}, et non en version {{expected}}. L'agent a changé depuis l'ouverture de cette page. Rechargez-la. Rien n'a été enregistré.",
+    "agentMissingWorkflow": "L'agent {{agentId}} (version {{version}}) ne référence pas le workflow {{workflowId}}. Rien n'a été enregistré."
   }
 }

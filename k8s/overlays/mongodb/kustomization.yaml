@@ -43,7 +43,7 @@ resources:
   - ../../base
   - mongodb-statefulset.yaml
   - mongodb-service.yaml
-  - mongodb-network-policy.yaml
+  - mongodb-networkpolicy.yaml
 
 patches:
   # The base's credential-less MONGODB_CONNECTIONSTRING has to go, not merely

@@ -2,9 +2,9 @@ services:
   chroma:
     image: chromadb/chroma:1.1.0
     restart: always
+    # Bound to loopback: Chroma has no auth, so it must not be reachable off-box.
+    # EDDI reaches it container-to-container as http://chroma:8000 regardless.
     ports:
-      # 127.0.0.1 only. Chroma runs without authentication; on every interface
-      # anyone on the same network could read or overwrite the embeddings.
       - "127.0.0.1:${CHROMA_PORT:-8000}:8000"
     volumes:
       - chroma-data:/chroma/chroma

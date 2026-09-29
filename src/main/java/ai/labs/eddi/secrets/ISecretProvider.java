@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 
@@ -137,6 +138,32 @@ public interface ISecretProvider {
      *             if the operation fails
      */
     List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
+
+    /**
+     * Whether {@code storedChecksum} — as returned in {@link SecretMetadata} — is
+     * the checksum of {@code plaintext} for the given tenant.
+     * <p>
+     * Callers must not compute this comparison themselves: the current (keyed)
+     * checksum scheme uses an HMAC key that only the provider holds, so a caller
+     * with just the plaintext cannot reproduce a keyed checksum. This method hides
+     * both the keyed scheme and the legacy bare-SHA-256 scheme behind one call, so
+     * dedup and value-match keep working across the upgrade.
+     * <p>
+     * The default implementation understands only the legacy scheme, which is
+     * correct for the in-memory and test doubles that never write keyed checksums;
+     * the vault provider overrides it to also verify keyed checksums.
+     *
+     * @param tenantId
+     *            the owning tenant
+     * @param storedChecksum
+     *            the checksum from {@link SecretMetadata#checksum()}
+     * @param plaintext
+     *            the candidate value
+     * @return true when the checksum matches the plaintext
+     */
+    default boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
+        return storedChecksum != null && VaultChecksum.matches(null, tenantId, storedChecksum, plaintext);
+    }
 
     /**
      * Rotate the Data Encryption Key (DEK) for a specific tenant: adds a new DEK

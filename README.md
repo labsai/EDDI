@@ -141,8 +141,6 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Every port except EDDI's own is published on `127.0.0.1` only — Keycloak, Grafana, Prometheus, Jaeger, NATS, Chroma, Ollama and MongoDB are for your own machine, not the network.
-
 Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM), `docker-compose.chroma.yml` (vector store), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`.
 
 The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
@@ -627,21 +625,13 @@ kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 # Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
-# Helm (renders the Secrets itself, so the key and the MongoDB password are required values)
-# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
-# same file to every later `helm upgrade`. Never generate them inline in the
-# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
-# the user it created at first start, and a new vault key makes every stored
-# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
-umask 077
-[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
-eddi:
-  vaultMasterKey: "$(openssl rand -base64 24)"
-mongodb:
-  auth:
-    password: "$(openssl rand -hex 24)"
-EOF
-helm install eddi ./helm/eddi -f eddi-secrets.yaml \
+# Helm (renders the Secret itself, so the key is a required value). Local,
+# port-forward shape without OIDC: the two opt-ins are required, see the guide.
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
 ```
 

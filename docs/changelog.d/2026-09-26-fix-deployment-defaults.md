@@ -20,7 +20,8 @@ in-cluster datastores trusted every pod in the cluster.
 - `docker-compose.auth.yml` hard-coded the Keycloak bootstrap admin as
   `admin`/`admin` on `0.0.0.0`. It now needs `KEYCLOAK_ADMIN_PASSWORD`
   (`${…:?}` — compose refuses to start and says what to set) and publishes on
-  `127.0.0.1` (`KEYCLOAK_BIND_ADDRESS` to change it).
+  `127.0.0.1` (`KEYCLOAK_BIND` to change it — main's name, see the
+  reconciliation entry below).
 - `install.sh` / `install.ps1` generate the admin password and keep it in `.env`.
   They rotate a legacy `admin`/`admin` login to it on re-run, and give `eddi` a
   one-time password (Keycloak forces a change at first login) instead of printing
@@ -37,7 +38,8 @@ in-cluster datastores trusted every pod in the cluster.
   credentials list counted 1; that is fixed.
 
 **Datastores (C5c, C5d).**
-- Helm (chart **3.0.0**): the in-chart MongoDB authenticates. `mongodb.auth.password`
+- Helm (chart **3.0.0**; *superseded on main by #865 before merge — see the
+  reconciliation entry below*): the in-chart MongoDB authenticates. `mongodb.auth.password`
   is required. The credentialed connection string reaches EDDI as a mounted file
   from the `<release>-mongodb` Secret. The ConfigMap's credential-less entry now
   renders only for the explicit `mongodb.auth.enabled=false`: a file listed in
@@ -92,9 +94,9 @@ and the installers warn when auth and monitoring are combined.
 |---|---|---|
 | Realm fixtures have no password; `eddi-frontend` refuses the password grant | New imports only (import is one-shot) | Set passwords in the console, or re-run the installer (`--demo-users`). Existing realms keep `viewer`/`viewer` and `user`/`user` until changed; without `--demo-users` the installers leave them alone but **warn** when either still has a credential. Both installers close the grant on every re-run path. A script that used the password grant on `eddi-frontend` must switch to code flow, or re-enable it deliberately. |
 | `KEYCLOAK_ADMIN_PASSWORD` / `GRAFANA_ADMIN_PASSWORD` required by compose | Everyone running those overlays, including through `eddi update` | Re-run the installer. It rotates a service that still accepts `admin`/`admin` to a generated password and only then records it in `.env`, on the running and the stopped path. If the service no longer accepts `admin`/`admin`, the password is the operator's: a running-stack re-run stops with the exact `.env` line to add. On a stopped-stack re-run, a generated Keycloak value the volume refuses gets a warning, and a generated Grafana value Grafana refuses stops the install before the success banner, with the `.env` line to fix. The Linux/macOS `eddi update` refuses to restart a legacy install and says to re-run the installer; on Windows compose stops with a message naming the variable. Nothing is restarted in either case. |
-| Infrastructure ports bind `127.0.0.1` | Anyone reaching Keycloak/Grafana/Prometheus/NATS/Chroma/Ollama from another machine | SSH tunnel or reverse proxy. `KEYCLOAK_BIND_ADDRESS=0.0.0.0` for Keycloak, behind TLS. |
-| Helm 3.0.0: `mongodb.auth.password` required | Every `helm upgrade` of an install with the in-chart MongoDB — **including `--reuse-values`**, which carries no `mongodb.auth` from 2.x: a missing switch counts as enabled | Rendering fails first, so nothing changes by accident. Generate the password once into a file, run `db.createUser` in the running `<fullname>-mongodb` pod, then upgrade with `--set-file` (the exact sequence is under `mongodb.auth` in values.yaml). Or set `mongodb.auth.enabled=false` explicitly. |
-| Helm datastore NetworkPolicies on by default (also when the key is missing, as on `--reuse-values`) | Other workloads that connect to the in-chart databases (backup jobs) | Add a policy admitting them, or `networkPolicy.datastores.enabled=false`. |
+| Infrastructure ports bind `127.0.0.1` | Anyone reaching Keycloak/Grafana/Prometheus/NATS/Chroma/Ollama from another machine | SSH tunnel or reverse proxy. `KEYCLOAK_BIND=0.0.0.0` for Keycloak, behind TLS. |
+| *(dropped at reconciliation — main's `mongodb.rootPassword` applies)* Helm 3.0.0: `mongodb.auth.password` required | Every `helm upgrade` of an install with the in-chart MongoDB — **including `--reuse-values`**, which carries no `mongodb.auth` from 2.x: a missing switch counts as enabled | Rendering fails first, so nothing changes by accident. Generate the password once into a file, run `db.createUser` in the running `<fullname>-mongodb` pod, then upgrade with `--set-file` (the exact sequence is under `mongodb.auth` in values.yaml). Or set `mongodb.auth.enabled=false` explicitly. |
+| *(dropped at reconciliation — main's policies sit behind `networkPolicy.enabled`)* Helm datastore NetworkPolicies on by default (also when the key is missing, as on `--reuse-values`) | Other workloads that connect to the in-chart databases (backup jobs) | Add a policy admitting them, or `networkPolicy.datastores.enabled=false`. |
 | Kustomize `overlays/mongodb` authenticates from `mongodb-secrets` | Existing installs re-applying the overlay | Create the user in the running pod first, then the Secret, then apply. The overlay header has the commands; the localhost exception lets you recover if applied first. |
 | `postgres-secret.yaml` no longer a resource | New installs | Create `postgres-secrets` from the `.example`. Existing installs keep theirs, since `apply -k` does not prune. |
 | Grafana `grafana-admin` Secret required (k8s) | Monitoring component users | `kubectl create secret generic grafana-admin …` (header + docs). |
@@ -159,3 +161,48 @@ and the installers warn when auth and monitoring are combined.
 | 2026-09-26 | The /chat framing allow-list is an operator property (default 'none'), in its own CSP filter | M-F3: the global DENY blocked the documented embed | Relax frame-ancestors for every path; XFO ALLOW-FROM (unsupported) |
 | 2026-09-26 | The wizard's spec-by-URL needs eddi.csp.extra-connect-sources; connect-src stays strict by default | M-F4: the browser blocked the fetch | Allow https: in connect-src by default (opens exfiltration for any injected script) |
 ```
+
+## 🔀 fix(deploy): deployment defaults reconciled with main's infra hardening (2026-09-29)
+
+**Repo:** EDDI (`fix/deployment-defaults`) — merge of `origin/main` after
+PR #865 (`fix/security-infra`) and the frontend CSP batch landed overlapping fixes.
+
+### Reconciled with main (main's version kept, this branch's duplicate dropped)
+
+- **Helm MongoDB authentication.** Main requires `mongodb.rootPassword`, guards
+  pre-auth upgrades with `mongodb.authMigrated` and URL-encodes the credential in
+  the projected Secret. This branch's `mongodb.auth.*`, `eddi.enabledUnlessFalse`,
+  the mounted `mongodb-secrets.properties`, the chart 3.0.0 bump and the matching
+  `manifest-lint` cases are gone; the chart stays at main's 2.2.0.
+- **Helm datastore NetworkPolicies.** Main's `templates/networkpolicy.yaml` isolates
+  MongoDB, PostgreSQL, NATS and Keycloak behind `networkPolicy.enabled`;
+  `datastore-networkpolicy.yaml` and `networkPolicy.datastores` are dropped.
+- **Kustomize MongoDB NetworkPolicy:** main's `mongodb-networkpolicy.yaml` kept;
+  the PostgreSQL policy this branch adds is renamed `postgres-networkpolicy.yaml`
+  to match.
+- **Loopback binds** in every compose overlay, `EDDI_BIND` and Keycloak's
+  `KEYCLOAK_BIND` (this branch's `KEYCLOAK_BIND_ADDRESS` renamed to it).
+- **`/chat` framing split** (`csp-chat`, per-filter `X-Frame-Options`,
+  `form-action`/`base-uri`/`object-src`) and main's `CspPolicyTest` cases.
+- **GCP provisioner:** main's scoped firewall, VM-side Keycloak admin password
+  (`/root/.eddi-keycloak-admin`) and SSH-tunnel banner. `install.sh` now adopts an
+  exported `KC_BOOTSTRAP_ADMIN_USERNAME`/`_PASSWORD` as `KEYCLOAK_ADMIN_*`, so the
+  VM's password is the one recorded in `.env` and required by the compose overlay.
+- `ci.yml`, `README.md` and the Helm install snippets in
+  [`getting-started.md`](../getting-started.md) and
+  [`kubernetes.md`](../kubernetes.md) take main's text (`mongodb.rootPassword`,
+  the OIDC-off opt-ins).
+
+### What this branch still adds on top of main
+
+No realm account ships a password and `eddi-frontend` refuses the password grant
+(all three realms, the E2E realm generator, the installers' repair of existing
+realms); compose requires `KEYCLOAK_ADMIN_PASSWORD` / `GRAFANA_ADMIN_PASSWORD`,
+generated and rotated by both installers; Kustomize MongoDB authentication and the
+PostgreSQL NetworkPolicy; `postgres-secret.yaml.example`; Grafana's `grafana-admin`
+Secret and the namespaced Prometheus Role; no service-account token in any pod
+(Helm `serviceAccount.automountToken`); CSP `img-src blob:` and
+`eddi.csp.extra-connect-sources`; the explicit `/q/metrics` policy; Helm values
+for `eddi.metrics.httpPolicy`, `eddi.chat.frameAncestors` and
+`eddi.oidc.resourceMetadata.resource`; the `AuthStartupGuard` message fix; and
+`Dockerfile.demo` copying `ui/`.

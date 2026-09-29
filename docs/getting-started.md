@@ -168,22 +168,16 @@ the database credentials, which are not shipped; the
 **Using Helm:**
 
 ```bash
-# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
-# same file to every later `helm upgrade`. Never generate them inline in the
-# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
-# the user it created at first start, and a new vault key makes every stored
-# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
-umask 077
-[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
-eddi:
-  vaultMasterKey: "$(openssl rand -base64 24)"
-mongodb:
-  auth:
-    password: "$(openssl rand -hex 24)"
-EOF
-helm install eddi ./helm/eddi -f eddi-secrets.yaml \
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
 ```
+
+That is the local, port-forward-only shape (no OIDC); the chart refuses to render
+without each of those values. Enable OIDC for anything others can reach.
 
 See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.
 

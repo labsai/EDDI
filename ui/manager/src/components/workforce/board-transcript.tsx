@@ -2,6 +2,7 @@ import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, useState } fr
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, Copy, CheckCircle2, GitMerge } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
@@ -311,7 +312,7 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
           {isAgentFailurePlaceholder(content) ? (
             <AgentFailedNotice />
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{body}</ReactMarkdown>
           )}
         </div>
         {collapsible && !expanded && (

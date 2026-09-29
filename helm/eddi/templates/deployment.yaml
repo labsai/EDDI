@@ -1,7 +1,6 @@
 {{- if .Values.autoscaling.enabled }}
 {{- fail "autoscaling.enabled=true is not supported: EDDI serialises the turns of a conversation with a JVM-local lock (InMemoryConversationCoordinator), and the NATS coordinator still executes each Callable in the JVM that published it. With more than one replica two turns of the same conversation race and one is silently lost, and in-memory replay nonces stop detecting replayed signed envelopes. Scale vertically via eddi.resources. This gate lifts when a distributed conversation coordinator ships." }}
 {{- end }}
-{{- $mongoSecret := eq (include "eddi.mongoAuthEnabled" .) "true" }}
 {{- if gt (int .Values.eddi.replicas) 1 }}
 {{- fail "eddi.replicas must be 1: EDDI is single-writer per conversation and the coordinator lock is JVM-local, so extra replicas silently drop conversation turns. Scale vertically via eddi.resources." }}
 {{- end }}
@@ -54,10 +53,6 @@ spec:
         */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-        {{- if $mongoSecret }}
-        {{- /* mongodb.yaml renders the Secret EDDI mounts its connection string from. */}}
-        checksum/mongodb: {{ include (print $.Template.BasePath "/mongodb.yaml") . | sha256sum }}
-        {{- end }}
       {{- with .Values.eddi.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -98,13 +93,6 @@ spec:
                     - key: postgres-secrets.properties
                       path: postgres-secrets.properties
               {{- end }}
-              {{- if $mongoSecret }}
-              - secret:
-                  name: {{ include "eddi.fullname" . }}-mongodb
-                  items:
-                    - key: mongodb-secrets.properties
-                      path: mongodb-secrets.properties
-              {{- end }}
         # readOnlyRootFilesystem needs explicit writable scratch space.
         # What the app actually writes at runtime:
         #   /tmp             java.io.tmpdir — Quarkus multipart upload buffer and
@@ -126,7 +114,7 @@ spec:
           #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
           #     labsai/eddi:<tag>
           #   crane digest labsai/eddi:<tag>
-          image: "{{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}{{- with .Values.eddi.image.digest }}@{{ . }}{{- end }}"
+          image: "{{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}{{- with .Values.eddi.image.digest }}@{{ . }}{{- end }}"
           imagePullPolicy: {{ .Values.eddi.image.pullPolicy }}
           # Container-level hardening — without this the pod is rejected outright
           # by a namespace running the "restricted" Pod Security Standard.
@@ -146,7 +134,7 @@ spec:
               protocol: TCP
           env:
             - name: QUARKUS_CONFIG_LOCATIONS
-              value: "/etc/eddi/secrets/application-secrets.properties{{ if .Values.postgres.enabled }},/etc/eddi/secrets/postgres-secrets.properties{{ end }}{{ if $mongoSecret }},/etc/eddi/secrets/mongodb-secrets.properties{{ end }}"
+              value: "/etc/eddi/secrets/application-secrets.properties{{ if .Values.postgres.enabled }},/etc/eddi/secrets/postgres-secrets.properties{{ end }}"
           envFrom:
             - configMapRef:
                 name: {{ include "eddi.fullname" . }}-config

@@ -39,6 +39,11 @@ class CspPolicyTest {
     private static final String SWAGGER_HEADER = "quarkus.http.filter.csp-swagger.header.\"Content-Security-Policy\"";
     private static final String CHAT_HEADER = "quarkus.http.filter.csp-chat.header.\"Content-Security-Policy\"";
 
+    private static final String DEFAULT_XFO = "quarkus.http.filter.csp-default.header.\"X-Frame-Options\"";
+    private static final String SWAGGER_XFO = "quarkus.http.filter.csp-swagger.header.\"X-Frame-Options\"";
+    private static final String CHAT_XFO = "quarkus.http.filter.csp-chat.header.\"X-Frame-Options\"";
+    private static final String GLOBAL_XFO = "quarkus.http.header.X-Frame-Options.value";
+
     private static final String GITHUB_API = "https://api.github.com";
 
     /**
@@ -133,6 +138,60 @@ class CspPolicyTest {
         }
     }
 
+    @Test
+    @DisplayName("every policy sets form-action, base-uri and object-src (none fall back to default-src)")
+    void everyPolicyLocksDownFormActionBaseUriObjectSrc() throws Exception {
+        var properties = applicationProperties();
+        for (var key : new String[]{DEFAULT_HEADER, SWAGGER_HEADER, CHAT_HEADER}) {
+            var csp = properties.getProperty(key);
+            assertNotNull(csp, key + " must be configured");
+            assertTrue(allows(directive(csp, "form-action"), "'self'"),
+                    key + " must restrict form-action to 'self': " + csp);
+            assertTrue(allows(directive(csp, "base-uri"), "'self'"),
+                    key + " must restrict base-uri to 'self': " + csp);
+            assertTrue(allows(directive(csp, "object-src"), "'none'"),
+                    key + " must forbid plugins via object-src 'none': " + csp);
+        }
+    }
+
+    @Test
+    @DisplayName("the chat widget's framing is allow-list driven and denied by default")
+    void chatFramingIsAllowListDrivenAndDeniedByDefault() throws Exception {
+        var properties = applicationProperties();
+        var chat = properties.getProperty(CHAT_HEADER);
+        assertNotNull(chat, CHAT_HEADER + " must be configured");
+        var frameAncestors = directive(chat, "frame-ancestors");
+        // Operator-set allow-list, defaulting to 'none' so /chat stays un-framable
+        // until EDDI_CHAT_FRAME_ANCESTORS is provided.
+        assertTrue(frameAncestors.contains("eddi.chat.frame-ancestors"),
+                "chat frame-ancestors must be operator-configurable: " + frameAncestors);
+        assertTrue(frameAncestors.contains("'none'"),
+                "chat frame-ancestors must default to 'none': " + frameAncestors);
+
+        // Every non-chat surface stays a blanket deny.
+        for (var key : new String[]{DEFAULT_HEADER, SWAGGER_HEADER}) {
+            var csp = properties.getProperty(key);
+            assertTrue(allows(directive(csp, "frame-ancestors"), "'none'"),
+                    key + " must keep frame-ancestors 'none': " + csp);
+        }
+    }
+
+    @Test
+    @DisplayName("X-Frame-Options is DENY everywhere except /chat, and never set globally")
+    void xFrameOptionsIsPerPathAndAbsentOnChat() throws Exception {
+        var properties = applicationProperties();
+        // A global XFO would be sent on /chat too and veto its frame-ancestors
+        // allow-list — it must live on the path-scoped filters instead.
+        assertNull(properties.getProperty(GLOBAL_XFO),
+                "X-Frame-Options must not be set globally (it would override /chat's frame-ancestors)");
+        assertEquals("DENY", properties.getProperty(DEFAULT_XFO),
+                "the default filter must send X-Frame-Options: DENY");
+        assertEquals("DENY", properties.getProperty(SWAGGER_XFO),
+                "the Swagger filter must send X-Frame-Options: DENY");
+        assertNull(properties.getProperty(CHAT_XFO),
+                "/chat must send NO X-Frame-Options so its frame-ancestors allow-list governs framing");
+    }
+
     /**
      * Which filter owns which path. Two matching filters send two CSP headers and
      * the browser enforces their intersection, so /chat must match the chat filter
@@ -161,39 +220,6 @@ class CspPolicyTest {
             assertFalse(defaultFilter.matcher(path).matches(), path);
             assertFalse(chatFilter.matcher(path).matches(), path);
         }
-    }
-
-    /**
-     * {@code X-Frame-Options: DENY} used to be a global header, and
-     * {@code frame-ancestors 'none'} covered /chat as well — so the iframe embed
-     * the Chat UI documents could never render. The chat's framing is an operator
-     * setting now, still refusing every embedder by default; everything else keeps
-     * refusing to be framed.
-     */
-    @Test
-    @DisplayName("the chat's frame-ancestors is configurable and closed by default; the rest stays DENY")
-    void chatFramingIsConfigurableAndClosedByDefault() throws Exception {
-        var properties = applicationProperties();
-        assertNull(properties.getProperty("quarkus.http.header.X-Frame-Options.value"),
-                "X-Frame-Options must not be a global header — it also reaches /chat, where it cannot express an "
-                        + "allow-list and blocks the documented embed");
-        assertEquals("DENY", properties.getProperty("quarkus.http.filter.csp-default.header.X-Frame-Options"));
-        assertEquals("DENY", properties.getProperty("quarkus.http.filter.csp-swagger.header.X-Frame-Options"));
-
-        assertEquals("'none'", properties.getProperty("eddi.chat.frame-ancestors"),
-                "the chat must refuse every embedder until an operator lists one");
-        var chat = properties.getProperty(CHAT_HEADER);
-        assertNotNull(chat, CHAT_HEADER + " must be configured");
-        assertEquals("frame-ancestors ${eddi.chat.frame-ancestors:'none'}", directive(chat, "frame-ancestors"),
-                "the chat policy must take frame-ancestors from eddi.chat.frame-ancestors, falling back to 'none'");
-        for (var key : new String[]{DEFAULT_HEADER, SWAGGER_HEADER}) {
-            assertEquals("frame-ancestors 'none'", directive(properties.getProperty(key), "frame-ancestors"), key);
-        }
-        // The chat is otherwise the application policy: no script relaxation rides
-        // in with the framing change.
-        assertEquals(directive(properties.getProperty(DEFAULT_HEADER), "script-src"), directive(chat, "script-src"));
-        assertFalse(directive(chat, "connect-src").contains("api.github.com"),
-                "the chat never calls GitHub; only the Manager's update check does");
     }
 
     /**

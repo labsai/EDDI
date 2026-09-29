@@ -476,6 +476,24 @@ class PostgresSecretPersistenceUnitTest {
         assertThrows(PersistenceException.class, () -> persistence.setMetaValue("k", "v"));
     }
 
+    // ─── setMetaValueIfAbsent ───
+
+    @Test
+    void setMetaValueIfAbsent_insertsWithDoNothing_andReturnsStoredValue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("value")).thenReturn("winner");
+
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+        verify(resultSet).close();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("ON CONFLICT (key) DO NOTHING")), sql.getAllValues().toString());
+        assertTrue(sql.getAllValues().stream().noneMatch(s -> s.contains("DO UPDATE")), "an existing value must never be replaced");
+    }
+
     // ─── ensureSchema idempotency ───
 
     @Test

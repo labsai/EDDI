@@ -19,7 +19,7 @@
 # tokens name http://localhost as their issuer, so a browser on another machine
 # could not complete a login anyway. To expose it deliberately (behind TLS, with
 # KC_HOSTNAME and the two EDDI URLs below changed to the public name), set
-# KEYCLOAK_BIND_ADDRESS=0.0.0.0.
+# KEYCLOAK_BIND=0.0.0.0.
 #
 # keycloak/eddi-realm.json seeds three accounts, and NONE of them has a
 # password:
@@ -94,10 +94,14 @@ services:
       # causing iss-mismatch failures when the browser validates them.
       KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    # Loopback by default, like EDDI itself (EDDI_BIND in docker-compose.yml):
+    # the admin/admin default above must never be reachable off-host by accident.
+    # Nothing off-box needs this port — EDDI reaches Keycloak over the compose
+    # network (keycloak:8080), KC_HOSTNAME above is a localhost URL, and the GCP
+    # VM's HTTPS path proxies https://auth.<ip>.sslip.io to localhost:8180 via
+    # nginx. Set KEYCLOAK_BIND=0.0.0.0 only after changing the admin password.
     ports:
-      # Loopback by default — see the header. KEYCLOAK_BIND_ADDRESS=0.0.0.0
-      # publishes it on every interface.
-      - "${KEYCLOAK_BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
+      - "${KEYCLOAK_BIND:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro

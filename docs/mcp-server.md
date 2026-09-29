@@ -158,7 +158,7 @@ See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, a
 | `get_memory_by_key`       | Get a specific memory entry by key for a user                                                        |
 | `upsert_user_memory`      | Create or update a persistent memory entry for a user                                                |
 | `delete_user_memory`      | Delete a specific memory entry by ID                                                                 |
-| `delete_all_user_memories` | Delete all memory entries for a user (GDPR-compliant bulk erasure)                                  |
+| `delete_all_user_memories` | Delete a user's memory entries, keeping `_gdpr_` bookkeeping (use `delete_user_data` for Art. 17)   |
 | `count_user_memories`     | Count total memory entries for a user                                                                |
 
 See [User Memory](user-memory.md) for visibility scoping, recall order, and dream consolidation.

@@ -339,6 +339,33 @@ class AgentSetupServiceBranchCoverageTest {
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
+        /**
+         * gemini-vertex needs projectId and location, which the request cannot carry.
+         * Setup used to demand an API key it never writes, vault that key, and create
+         * an agent that fails on its first turn.
+         */
+        @Test
+        @DisplayName("gemini-vertex is refused before anything is vaulted or created")
+        void geminiVertexRefused() {
+            var req = new SetupAgentRequest("Agent", "prompt", " Gemini-Vertex ", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
+        @Test
+        @DisplayName("gemini-vertex is refused for an API agent too")
+        void geminiVertexRefusedForApiAgent() {
+            var req = new CreateApiAgentRequest("Agent", "prompt", "openapi: 3.0", "gemini-vertex", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.createApiAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
         @Test
         @DisplayName("null system prompt throws")
         void nullSystemPrompt() {
@@ -564,6 +591,48 @@ class AgentSetupServiceBranchCoverageTest {
                     false, null, null, null, false, false, null);
             var params = config.tasks().get(0).getParameters();
             assertEquals("cohere.command", params.get("modelName"));
+        }
+
+        /**
+         * HuggingFaceLanguageModelBuilder reads {@code modelId} and
+         * {@code accessToken}. The default branch wrote {@code modelName} and
+         * {@code apiKey}, so a wizard-created Hugging Face agent deployed and then
+         * failed on its first turn with no model.
+         */
+        @Test
+        @DisplayName("huggingface sets modelId and accessToken, not modelName/apiKey")
+        void huggingface() {
+            var config = service.createLlmConfig("huggingface", "Qwen/Qwen3.5-7B", "hf_token", "prompt",
+                    false, null, null, null, false, false, null);
+            var params = config.tasks().get(0).getParameters();
+            assertEquals("Qwen/Qwen3.5-7B", params.get("modelId"));
+            assertEquals("hf_token", params.get("accessToken"));
+            assertNull(params.get("modelName"));
+            assertNull(params.get("apiKey"));
+        }
+
+        @Test
+        @DisplayName("huggingface without a key writes no accessToken")
+        void huggingfaceNoKey() {
+            var config = service.createLlmConfig("huggingface", "Qwen/Qwen3.5-7B", null, "prompt",
+                    false, null, null, null, false, false, null);
+            assertNull(config.tasks().get(0).getParameters().get("accessToken"));
+        }
+
+        /**
+         * VertexGeminiLanguageModelBuilder reads {@code modelId}; {@code modelName} is
+         * not one of its parameters, and it authenticates through Application Default
+         * Credentials, so a key is never written.
+         */
+        @Test
+        @DisplayName("gemini-vertex sets modelId and no key")
+        void geminiVertex() {
+            var config = service.createLlmConfig("gemini-vertex", "gemini-2.5-flash", "unused", "prompt",
+                    false, null, null, null, false, false, null);
+            var params = config.tasks().get(0).getParameters();
+            assertEquals("gemini-2.5-flash", params.get("modelId"));
+            assertNull(params.get("modelName"));
+            assertNull(params.get("apiKey"));
         }
 
         @Test

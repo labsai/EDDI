@@ -5,3 +5,5 @@ alwaysApply: true
 ---
 
 Read and follow all instructions in the repository root file AGENTS.md.
+
+When working under `ui/manager/` also follow `ui/manager/AGENTS.md` and `ui/manager/CLAUDE.md`; under `ui/chat/`, `ui/chat/AGENTS.md`.

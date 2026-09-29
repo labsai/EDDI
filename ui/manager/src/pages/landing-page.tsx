@@ -2,9 +2,9 @@ import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Settings2,
-  Users,
   ArrowRight,
   Sparkles,
+  Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/layout/theme-provider";
@@ -182,7 +182,7 @@ export function LandingPage() {
 
           <ModeCard
             to="/workforce"
-            icon={<Users className="h-6 w-6 text-primary" />}
+            icon={<Briefcase className="h-6 w-6 text-primary" />}
             title={t("landing.workforce.title", "Workforce")}
             description={t(
               "landing.workforce.description",

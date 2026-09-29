@@ -126,29 +126,57 @@ PowerShell) only when you mean to rotate.
 ### Option C: Helm
 
 ```bash
-# Generate the chart's secrets ONCE, into a file you keep (0600), and pass that
-# same file to every later `helm upgrade`. Never generate them inline in the
-# upgrade command: a new MongoDB password rotates EDDI's half while mongod keeps
-# the user it created at first start, and a new vault key makes every stored
-# secret unreadable. The `[ -e ]` guard stops a re-run from replacing the file.
-umask 077
-[ -e eddi-secrets.yaml ] || cat > eddi-secrets.yaml <<EOF
-eddi:
-  vaultMasterKey: "$(openssl rand -base64 24)"
-mongodb:
-  auth:
-    password: "$(openssl rand -hex 24)"
-EOF
-helm install eddi ./helm/eddi -f eddi-secrets.yaml \
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
-
-# every later upgrade passes the same file
-helm upgrade eddi ./helm/eddi -f eddi-secrets.yaml --namespace eddi
 ```
 
-Keep `eddi-secrets.yaml` somewhere safe and private — it is the only copy of both
-values outside the cluster. A `helm upgrade` without them fails to render rather
-than inventing new ones.
+This is the local, port-forward-only shape: no OIDC, so the chart refuses to
+render until the MCP server and the secrets vault are opted in to
+unauthenticated access explicitly — without both, EDDI's
+`HighValueSurfaceGuard` would refuse to boot. For anything others can reach,
+enable OIDC instead (`eddi.oidc.enabled=true` with `keycloak.enabled=true` or
+`eddi.oidc.authServerUrl`) and drop the two opt-ins. Keep the generated
+`mongodb.rootPassword`: MongoDB only reads it when its volume is first
+initialised.
+
+#### Upgrading to an authenticated MongoDB
+
+Releases from before MongoDB authentication have a data volume that was
+initialised without a user. The mongo image creates `mongodb.rootUsername` only
+on an **empty** volume, but turns `--auth` on regardless — so a plain upgrade
+leaves MongoDB demanding a user that does not exist, and EDDI loses its
+database. A live `helm upgrade` detects this and refuses to render. Create the
+user first, in the still-unauthenticated database, entering the password you
+will pass as `mongodb.rootPassword` at the prompt:
+
+```bash
+kubectl exec -it -n eddi eddi-mongodb-0 -- mongosh admin --quiet \
+  --eval 'db.createUser({user: "eddi", pwd: passwordPrompt(), roles: ["root"]})'
+
+# Release WITH OIDC (eddi.oidc.enabled=true):
+helm upgrade eddi ./helm/eddi --namespace eddi --reuse-values \
+  --set mongodb.rootPassword='<the same password>' \
+  --set mongodb.authMigrated=true
+
+# Release WITHOUT OIDC: --reuse-values cannot carry values the old chart never
+# had, so the two high-value opt-ins must be added here too, or the chart
+# refuses to render (see Option C).
+helm upgrade eddi ./helm/eddi --namespace eddi --reuse-values \
+  --set mongodb.rootPassword='<the same password>' \
+  --set mongodb.authMigrated=true \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true
+```
+
+(`eddi-mongodb-0` and `user: "eddi"` assume release `eddi` and the default
+`mongodb.rootUsername`; the render error prints the exact names for yours.)
+Existing data is untouched. Leave the opt-ins off an OIDC release: OIDC already
+satisfies the guard there, and the opt-ins are escape hatches, not settings to
+carry by default.
 
 ## Deployment Options
 
@@ -158,7 +186,7 @@ EDDI provides modular overlays (Kustomize) and Helm values for different deploym
 
 | Backend | Kustomize | Helm |
 |---|---|---|
-| **MongoDB** (default) | `kubectl apply -k k8s/overlays/mongodb/` (create `mongodb-secrets` first) | `--set mongodb.auth.password=…` (required) |
+| **MongoDB** (default) | `kubectl apply -k k8s/overlays/mongodb/` (create `mongodb-secrets` first) | `--set mongodb.enabled=true` |
 | **PostgreSQL** | `kubectl apply -k k8s/overlays/postgres/` (create `postgres-secrets` first — see `postgres-secret.yaml.example`) | `--set postgres.enabled=true --set mongodb.enabled=false --set eddi.datastoreType=postgres` |
 
 ### Optional Components
@@ -260,7 +288,7 @@ kubectl apply -k k8s/examples/postgres-ha/
                │
     ┌──────────▼──────────┐    ┌─────────────┐
     │  EDDI Deployment     │───▶│  MongoDB    │
-    │  (labsai/eddi:6.3.0) │    │ StatefulSet │
+    │  (labsai/eddi:6.4.0) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1         │    ┌─────────────┐
     │  (single-writer)     │───▶│ PostgreSQL  │
@@ -489,15 +517,14 @@ for the rare setup that adds something needing one.
 ### Datastore authentication and isolation
 
 The in-cluster MongoDB used to run **without authentication**, behind a Service
-every pod in the cluster could reach — and the network policies selected only the
-EDDI pod, the Helm one being off by default. Any workload could read and rewrite
-every agent, conversation and the audit ledger. Now:
+every pod in the cluster could reach. Any workload could read and rewrite every
+agent, conversation and the audit ledger. Now:
 
-- **Helm** runs MongoDB with authentication. `mongodb.auth.password` is required
-  (no default) and the connection string reaches EDDI through the
-  `<release>-mongodb` Secret as a mounted file. `networkPolicy.datastores.enabled`
-  (on by default, independent of `networkPolicy.enabled`) admits only the EDDI pod
-  to MongoDB, PostgreSQL and NATS.
+- **Helm** runs MongoDB with authentication (`mongodb.rootPassword`, required —
+  see [Option C](#option-c-helm) and
+  [Upgrading to an authenticated MongoDB](#upgrading-to-an-authenticated-mongodb)).
+  With `networkPolicy.enabled=true` the chart also admits only the EDDI pod to
+  MongoDB, PostgreSQL, NATS and Keycloak.
 - **Kustomize** `overlays/mongodb` runs MongoDB with authentication from the
   `mongodb-secrets` Secret you create (see Option B), and `overlays/mongodb` and
   `overlays/postgres` each ship a NetworkPolicy admitting only EDDI.
@@ -509,27 +536,21 @@ every agent, conversation and the audit ledger. Now:
 NetworkPolicies need a CNI that enforces them (Calico, Cilium and most managed
 offerings do); authentication is what holds without one.
 
-> ⚠️ **Upgrading an install whose MongoDB ran without authentication.** The mongo
-> image creates the root user only when it initialises an **empty** data directory,
-> but it switches `--auth` on every time. So create the user in the running
-> database **first**, with the password you are about to configure, then upgrade:
+> ⚠️ **Upgrading a Kustomize install whose MongoDB ran without authentication.**
+> The mongo image creates the root user only when it initialises an **empty** data
+> directory, but it switches `--auth` on every time. So create the user in the
+> running database **first**, with the password you are about to configure:
 >
 > ```bash
-> # Kustomize. For Helm the StatefulSet is <fullname>-mongodb — `eddi-mongodb`
-> # for a release named eddi, otherwise <release>-eddi-mongodb; the exact Helm
-> # sequence is under mongodb.auth in helm/eddi/values.yaml.
 > kubectl exec -n eddi statefulset/mongodb -- mongosh admin \
 >   --eval 'db.createUser({user: "eddi", pwd: "<password>", roles: ["root"]})'
 > ```
 >
-> then `helm upgrade` with that password in your stored values file (or
-> `--set-file mongodb.auth.password=<file>`), or create `mongodb-secrets` with that
-> password and `kubectl apply -k`. `helm upgrade --reuse-values` from chart 2.x
-> carries no `mongodb.auth` at all; a missing setting counts as **enabled**, so it
-> stops at the password check instead of silently keeping the database open. Done the other way
-> round, mongod restarts with `--auth` and no user and EDDI cannot log in until you
-> run the same `createUser` (the localhost exception still allows it). Helm users
-> who cannot migrate yet can set `mongodb.auth.enabled=false` explicitly.
+> then create `mongodb-secrets` with that password and `kubectl apply -k`. Done
+> the other way round, mongod restarts with `--auth` and no user and EDDI cannot
+> log in until you run the same `createUser` (the localhost exception still
+> allows it). For Helm, see
+> [Upgrading to an authenticated MongoDB](#upgrading-to-an-authenticated-mongodb).
 
 ### Network Policy
 
@@ -573,10 +594,9 @@ kubectl apply -k k8s/examples/postgres-ha/
 Add NATS on top only with a `-Dquarkus.profile=nats` image, by listing
 `- ../../overlays/nats` under that example's `components:`.
 
-**Helm** — with an image you built with `-Dquarkus.profile=nats` (`eddi-secrets.yaml`
-as generated in [Option C](#option-c-helm)):
+**Helm** — with an image you built with `-Dquarkus.profile=nats`:
 ```bash
-helm install eddi ./helm/eddi -f eddi-secrets.yaml \
+helm install eddi ./helm/eddi \
   --set eddi.image.repository=your-registry/eddi-nats \
   --set nats.enabled=true \
   --set nats.buildProfileImage=true \

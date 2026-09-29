@@ -91,6 +91,25 @@ COPY --from=build /src/target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --from=build /src/licenses/                   /licenses/
 COPY --from=build /src/docs/*.md                   /deployments/docs/
 
+# Run as a non-root user. The eclipse-temurin base defaults to root, so without
+# this the demo — and anything it executes — runs with uid 0, unlike the
+# production image (Dockerfile) which drops to USER 185. uid 185 matches that
+# image; /deployments is chowned so tmp/import stays writable while the jars
+# themselves are owned by root and are not writable by the running process.
+RUN groupadd -r -g 185 eddi \
+    && useradd -r -u 185 -g eddi -d /deployments -s /usr/sbin/nologin eddi \
+    && chown -R root:eddi /deployments \
+    && chown -R eddi:eddi /deployments/tmp \
+    && chmod -R 0775 /deployments/tmp
+# Audit-ledger dead-letter sink (eddi.audit.dead-letter-path defaults under
+# /opt/eddi/data). uid 185 cannot create it at runtime, so a non-root process
+# would hit NoSuchFileException in a swallowed catch and lose abandoned audit
+# entries — the same reason the production Dockerfile pre-creates it.
+RUN mkdir -p /opt/eddi/data \
+    && chown -R 185:0 /opt/eddi \
+    && chmod -R 0775 /opt/eddi
+USER 185
+
 EXPOSE 7070
 
 # --add-modules=jdk.incubator.vector keeps the in-process `jlama` provider on its SIMD

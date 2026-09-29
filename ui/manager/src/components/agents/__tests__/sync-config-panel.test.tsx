@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 
@@ -116,5 +118,35 @@ describe("SyncConfigPanel", () => {
     expect(
       screen.getByPlaceholderText("Bearer eyJhb...")
     ).toBeInTheDocument();
+  });
+
+  // A reply for credentials that have since been edited is not this panel's to
+  // report: a stale error would claim the NEW token was refused.
+  it("ignores a connect error that arrives after the token was edited", async () => {
+    let release: () => void = () => {};
+    let calls = 0;
+    server.use(
+      http.get("*/backup/import/sync/agents", async () => {
+        calls++;
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.json({ message: "bad token" }, { status: 401 });
+      })
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <SyncConfigPanel {...defaultProps} url="https://src.example.com" />
+    );
+    await user.click(screen.getByTestId("sync-connect-btn"));
+    await waitFor(() => expect(calls).toBe(1));
+
+    await user.type(screen.getByTestId("sync-auth-input"), "x");
+
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.queryByText(/bad token|Connection failed/)).not.toBeInTheDocument();
+    expect(defaultProps.onConnected).not.toHaveBeenCalled();
   });
 });

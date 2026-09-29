@@ -287,6 +287,7 @@
     "deployAndChat": "Deploy & Chat",
     "openExternalChat": "Open in new tab",
     "liveIn": "Live in {{environment}}",
+    "liveInVersion": "Live in {{environment}} at version {{version}}",
     "chatIn": "Chat in {{environment}}",
     "openExternalChatIn": "Open {{environment}} chat in a new tab",
     "deployToProduction": "Deploy to production",
@@ -577,7 +578,10 @@
     "vaultKeyCopied": "Vault reference copied",
     "specTooLarge": "That specification is too large to load here",
     "specUrlInvalid": "That is not a valid URL",
-    "specUrlScheme": "Only http:// and https:// URLs are supported"
+    "specUrlScheme": "Only http:// and https:// URLs are supported",
+    "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
+    "hfToken": "Hugging Face token",
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -774,7 +778,10 @@
     "errorConversationEnded": "This conversation has ended.",
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
-    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment."
+    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "sendRejected": "Your message was not sent: {{reason}}",
+    "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -1355,7 +1362,8 @@
     "streamingTimeoutSeconds": "Streaming Timeout (seconds)",
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
-    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0."
+    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -2116,6 +2124,7 @@
     "ingestion": "Document Ingestion",
     "dropFiles": "Drop documents here to ingest",
     "dropHint": "Text, Markdown, or any text-based file",
+    "replaceSameName": "Replace a previously ingested document with the same file name",
     "browse": "Browse",
     "pasteText": "Or paste text content",
     "pastePlaceholder": "Paste document text here...",
@@ -2147,6 +2156,8 @@
       "includeSubdomains": "Include subdomains",
       "excludePatterns": "Exclude patterns",
       "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
       "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
       "run": "Run now",
       "runFailed": "Could not start the run. A run may already be in flight.",
@@ -2745,7 +2756,6 @@
     "contextWindowEntries": "Recent entries kept in full",
     "contextWindowSummarize": "Summarize what falls out of the window",
     "contextWindowTruncateNote": "Older entries are replaced with a plain \"N earlier entries omitted\" marker instead.",
-    "retroConfigHint": "Lets a retro phase write lessons into the team's memory, carried into later discussions.",
     "retroPerRun": "Per run",
     "retroStored": "Stored max",
     "artifactConfigHint": "Lets members co-author documents that survive the turn they were written in.",
@@ -2940,7 +2950,24 @@
     },
     "stateRejected": "Rejected",
     "inputDisabledRejected": "This recommendation was rejected",
-    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose."
+    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose.",
+    "retroCustomLimits": "Custom retro lesson limits",
+    "retroCustomHint": "A retro phase writes lessons into the team's memory, carried into later discussions. These caps bound how many.",
+    "retroDefaultHint": "A retro phase still writes lessons, with the default caps ({{perRun}} per run, {{stored}} stored). To stop it, remove the RETRO phase.",
+    "voteOptionsTooFew": "An explicit ballot needs at least two options.",
+    "saveProblem": {
+      "title": "This group cannot be created yet:",
+      "debateRoles": "A debate needs at least one member with the role PRO and one with the role CON.",
+      "devilAdvocateRole": "A Devil's Advocate group needs a member with the role DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Human members cannot join a task-force group (planning, execution and verification phases).",
+      "humanWithPeerPhases": "Human members cannot join a group whose phases address each peer in turn, such as peer review.",
+      "memberUnassigned_one": "{{count}} member has no agent assigned.",
+      "memberUnassigned_other": "{{count}} members have no agent assigned.",
+      "humanNeedsName_one": "{{count}} human member needs a display name.",
+      "humanNeedsName_other": "{{count}} human members need a display name.",
+      "humanNeedsId_one": "{{count}} human member needs the person's user id.",
+      "humanNeedsId_other": "{{count}} human members need the person's user id."
+    }
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3170,7 +3197,7 @@
     "value": "Value",
     "deleteAll": "Delete All",
     "deleteAllTitle": "Delete All Properties",
-    "deleteAllDesc": "This will permanently delete ALL properties for this user.",
+    "deleteAllDesc": "This permanently deletes ALL global properties of this user: every global user-memory entry, including those agents saved, not only the rows listed here.",
     "deleted": "Properties deleted",
     "noResults": "No properties found",
     "showingCount": "{{count}} properties"
@@ -3277,6 +3304,8 @@
     "title": "Agent Sync",
     "subtitle": "Synchronize agents between EDDI instances",
     "connection": "Source Instance",
+    "loadingLocalAgents": "Loading all local agents before matching…",
+    "localAgentsError": "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates.",
     "sourceUrl": "Source EDDI Instance URL",
     "authToken": "Authorization Token",
     "authHint": "Optional. Sent as X-Source-Authorization header.",
@@ -3744,7 +3773,19 @@
       "toggleConfig": "Toggle details panel",
       "unpin": "Unpin response",
       "untitled": "Untitled",
-      "viewSessions": "View past sessions"
+      "viewSessions": "View past sessions",
+      "alreadyEnded": "The discussion had already ended.",
+      "stopRaced": "The discussion changed state as you stopped it and is still going. Try Stop again.",
+      "stopUnconfirmed": "Could not confirm that the discussion stopped. Check its state and try Stop again.",
+      "stopFailed": "Could not stop the discussion: {{error}}",
+      "stopping": "Stopping…",
+      "startOver": "Start over",
+      "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+      "confirmNewTitle": "Stop the running discussion?",
+      "confirmNewDescription": "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
+      "confirmNewButton": "Stop and start new",
+      "keepRunning": "Keep running",
+      "questionRequired": "Add a question for your task force — the files are shared with it when the discussion starts."
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
@@ -3773,7 +3814,8 @@
       "stop": "Stop generating",
       "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry.",
       "newConversation": "New conversation",
-      "newConversationFailed": "Could not start a new conversation"
+      "newConversationFailed": "Could not start a new conversation",
+      "initFailed": "This conversation could not be opened."
     },
     "chat": {
       "agentDetails": "Agent Details",
@@ -4945,5 +4987,12 @@
     "headerMismatch": "This connection sends its credential as “{{expected}}”, so the header must be named that — otherwise the config shows one name and the request carries another.",
     "refusedInRequest": "${connection:…} is refused in a path, query parameter or body — a credential in a URL lands in every proxy log, and one in a body is not read. Reference the connection from a header instead.",
     "refusedInModel": "Language models, embeddings and vector stores do not accept ${connection:…}: a connection resolves to a whole header, and these need a bare credential. Use ${vault:…} here."
+  },
+  "cascadeSave": {
+    "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
+    "agentChanged": "Agent {{agentId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
+    "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
+    "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
   }
 }

@@ -5,7 +5,6 @@ metadata:
   name: eddi
   labels:
     app.kubernetes.io/name: eddi
-    app.kubernetes.io/version: "6.4.0"
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
@@ -38,7 +37,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: eddi
-        app.kubernetes.io/version: "6.4.0"
         app.kubernetes.io/component: server
         app.kubernetes.io/part-of: eddi
       annotations:
@@ -85,17 +83,12 @@ spec:
           emptyDir: {}
       containers:
         - name: eddi
-          # Pin an immutable patch version, never the mutable major tag: with
-          # ":6" + IfNotPresent nothing ties the running bits to the digest CI
-          # cosign-signed and SLSA-attested.
-          # Strongest form — resolve and pin the digest at rollout time:
-          #   cosign verify \
-          #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-          #     labsai/eddi:6.4.0
-          #   crane digest labsai/eddi:6.4.0   # → sha256:...
-          # then append it here:  image: labsai/eddi:6.4.0@sha256:<digest>
-          image: labsai/eddi:6.4.0
+          # The tag is NOT set here. kustomization.yaml's `images:` entry pins it
+          # (and, optionally, the digest), so a release moves one line instead
+          # of several. The placeholder is deliberately a tag that does not
+          # exist: applying this file without kustomize fails with ErrImagePull
+          # rather than silently running whatever `latest` happens to be.
+          image: labsai/eddi:pinned-by-kustomization
           imagePullPolicy: IfNotPresent
           # Container-level hardening — without this the pod is rejected outright
           # by a namespace running the "restricted" Pod Security Standard.

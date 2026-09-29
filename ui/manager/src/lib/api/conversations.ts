@@ -120,6 +120,27 @@ export interface SimpleConversationMemorySnapshot {
   hitlApprovalTimeout?: string;
 }
 
+/**
+ * Placeholder the backend persists in `input:initial` (and the echoed `input`)
+ * for a secret-flagged turn — see Conversation.scrubSecretUserInput. The raw
+ * text is scrubbed server-side, so a rebuilt transcript never carries it.
+ */
+export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
+/** Neutral mask shown in place of the placeholder token (no i18n needed). */
+export const SECRET_INPUT_MASK = "••••••••";
+
+/**
+ * Render a user input for display: map the backend secret placeholder to a mask
+ * so a secret turn shows a masked bubble rather than the raw `<secret input>`
+ * token, and pass anything else through unchanged. Use this at every site that
+ * displays `input:initial`.
+ */
+export function displayUserInput(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value === SECRET_INPUT_PLACEHOLDER ? SECRET_INPUT_MASK : value;
+}
+
 /** Extract user input from a conversation step's key/value pairs */
 export function extractInput(step: SimpleConversationStep): string | undefined {
   const entry = step.conversationStep?.find(
@@ -168,6 +189,45 @@ export function extractOutputParts(conversationOutput?: ConversationOutput): str
     }
   }
   return texts;
+}
+
+/**
+ * Why a turn failed, from the `taskErrors` the backend records in the turn's
+ * output — one line per failed task, already redacted server-side. `null` when
+ * nothing failed.
+ */
+export function extractTaskErrors(conversationOutput?: ConversationOutput): string | null {
+  const entries = conversationOutput?.taskErrors;
+  if (!Array.isArray(entries)) return null;
+  const texts = entries
+    .map((entry) =>
+      entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).text === "string"
+        ? ((entry as Record<string, unknown>).text as string).trim()
+        : "",
+    )
+    .filter(Boolean);
+  return texts.length > 0 ? texts.join("\n") : null;
+}
+
+/**
+ * The notice to show for a failed turn, or `null` for one that did not fail.
+ *
+ * A turn whose LLM call was rejected used to come back as `ERROR` with an empty
+ * output and render as nothing at all — the spinner stopped and no bubble
+ * appeared. The backend's reason is preferred; `fallback` covers a turn that
+ * errored without one.
+ */
+export function describeTurnFailure(
+  conversationOutput: ConversationOutput | undefined,
+  conversationState: string | undefined,
+  fallback: string,
+): string | null {
+  const reported = extractTaskErrors(conversationOutput);
+  if (reported) return reported;
+  if (conversationState === "ERROR" && extractOutputParts(conversationOutput).length === 0) {
+    return fallback;
+  }
+  return null;
 }
 
 /** Extract agent output from a conversationOutput map as a single string.
@@ -396,11 +456,19 @@ export interface DetailedConversation {
 }
 
 /** Fetch a fully-detailed conversation snapshot including all step data.
- *  Used by the Memory Inspector debug tab. */
+ *  Used by the Memory Inspector debug tab.
+ *
+ *  `returnCurrentStepOnly=false` is explicit because the backend DEFAULTS it to
+ *  `true` on `GET /agents/{conversationId}` — without it the inspector's step
+ *  tabs only ever showed the latest step. */
 export function getDetailedConversation(
   conversationId: string,
 ): Promise<DetailedConversation> {
+  const params = new URLSearchParams({
+    returnDetailed: "true",
+    returnCurrentStepOnly: "false",
+  });
   return api.get<DetailedConversation>(
-    `/agents/${conversationId}?returnDetailed=true`,
+    `/agents/${conversationId}?${params.toString()}`,
   );
 }
