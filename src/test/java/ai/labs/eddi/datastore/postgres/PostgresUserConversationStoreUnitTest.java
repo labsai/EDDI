@@ -138,6 +138,8 @@ class PostgresUserConversationStoreUnitTest {
 
         assertThrows(IResourceStore.ResourceAlreadyExistsException.class,
                 () -> store.createUserConversation(createUserConversation()));
+        // The existence check's result set is closed even though the insert failed.
+        verify(resultSet).close();
     }
 
     @Test
@@ -149,6 +151,8 @@ class PostgresUserConversationStoreUnitTest {
 
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.createUserConversation(createUserConversation()));
+        // The existence check's result set is closed even though the insert failed.
+        verify(resultSet).close();
     }
 
     // ─── deleteUserConversationIfMatches ───
