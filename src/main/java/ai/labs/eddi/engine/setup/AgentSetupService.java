@@ -1324,7 +1324,17 @@ public class AgentSetupService {
         boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
 
         if (existing != null) {
-            if (haveNewPlaintext && !secretProvider.matchesChecksum(ref.tenantId(), existing.checksum(), key)) {
+            boolean matches;
+            try {
+                matches = !haveNewPlaintext || secretProvider.matchesChecksum(ref.tenantId(), existing.checksum(), key);
+            } catch (RuntimeException e) {
+                // A keyed checksum needs the checksum key, which may have to be read and
+                // unwrapped first. A failure there means "could not compare", not "does
+                // not match" — so it must not fall through to the mismatch message.
+                throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': "
+                        + e.getClass().getSimpleName(), e);
+            }
+            if (!matches) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
                         + "apiKey supplied. Setup will not overwrite it, because other agents may reference it. Use a different "
                         + "vaultKeyName, omit apiKey to reuse the stored value, or rotate the key through the secrets API first.");

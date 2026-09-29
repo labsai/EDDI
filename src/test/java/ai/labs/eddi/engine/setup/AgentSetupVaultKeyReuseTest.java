@@ -428,6 +428,20 @@ class AgentSetupVaultKeyReuseTest {
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
+        @Test
+        @DisplayName("a failure comparing against an existing entry is a setup error, not a mismatch")
+        void checksumComparisonFailureIsASetupError() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.matchesChecksum(anyString(), any(), anyString())).thenThrow(new IllegalStateException("meta read failed"));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("Could not verify"), e.getMessage());
+            assertFalse(e.getMessage().contains("does not match"), e.getMessage());
+            assertTrue(e.getCause() instanceof IllegalStateException);
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
         /**
          * Rollback deletes what it finds under VAULTED_SECRET_KEY. A caller-chosen name
          * cannot grow the vault on retry (the retry reuses the name), while a
