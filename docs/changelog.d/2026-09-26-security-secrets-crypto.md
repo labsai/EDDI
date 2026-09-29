@@ -85,8 +85,10 @@ authors, and existing vaults keep working.
   on a weak key to rotate off it, never for rotating onto one). The checksum key is
   unwrapped and re-wrapped during the verification phase, so a malformed or
   unwrappable one aborts the rotation before any DEK is written; and a failed write
-  during the commit rolls the already-written DEKs back to the old KEK, so the vault
-  stays readable under its configured master key and the rotation can be retried.
+  during the commit — any failure, including an unchecked store error, not only a
+  `PersistenceException` — rolls the already-written DEKs back to the old KEK, so the
+  vault stays readable under its configured master key and the rotation can be
+  retried. Every rotation failure surfaces as `SecretProviderException`.
 - **GCM AAD:** existing (no-AAD) rows decrypt via fallback; DEK rotation rebinds AAD
   to the new generation. The grant list is intentionally not part of the AAD so grant
   edits (which do not re-encrypt) keep values readable.

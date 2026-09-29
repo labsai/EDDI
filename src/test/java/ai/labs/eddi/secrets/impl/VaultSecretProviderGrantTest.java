@@ -668,4 +668,22 @@ class VaultSecretProviderGrantTest {
         assertEquals(before, dekSnapshot(), "DEKs written before the failure must be restored to their old wrapping");
         assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
     }
+
+    @Test
+    @DisplayName("an UNCHECKED failure of the checksum-key write also rolls the DEKs back and surfaces as SecretProviderException")
+    void uncheckedChecksumKeyWriteFailureRollsBackDeks() throws Exception {
+        storeSecret(List.of("*"));
+        Map<String, String> before = dekSnapshot();
+        // Not a PersistenceException — e.g. a driver/pool error the store does not
+        // wrap.
+        persistence.metaWriteFailure = new IllegalStateException("connection pool closed");
+
+        SecretProviderException thrown = assertThrows(SecretProviderException.class,
+                () -> provider.rotateKek(MASTER_KEY, "rotated-master-key-98765432109876"));
+        assertTrue(thrown.getCause() instanceof IllegalStateException, "the original failure is kept as the cause");
+
+        persistence.metaWriteFailure = null;
+        assertEquals(before, dekSnapshot(), "DEKs written before the failure must be restored to their old wrapping");
+        assertEquals(PLAINTEXT, newProvider(MASTER_KEY).resolve(REF), "the vault still opens with the configured master key");
+    }
 }

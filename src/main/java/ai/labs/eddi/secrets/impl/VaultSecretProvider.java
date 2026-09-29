@@ -713,7 +713,11 @@ public class VaultSecretProvider implements ISecretProvider {
                 if (rewrappedChecksumKey != null) {
                     persistence.setMetaValue(CHECKSUM_KEY_META, rewrappedChecksumKey);
                 }
-            } catch (PersistenceException e) {
+            } catch (RuntimeException e) {
+                // Any failure, not only a PersistenceException: an unchecked error from a
+                // store call (a driver/pool exception the implementation does not wrap)
+                // after DEKs were written must still roll them back, or the stored DEKs
+                // would sit on the new KEK while this node keeps using the old one.
                 rollBackDeks(attempted);
                 throw e;
             }
@@ -733,7 +737,10 @@ public class VaultSecretProvider implements ISecretProvider {
             LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
                     migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
             return allDeks.size();
-        } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
+        } catch (RuntimeException e) {
+            // Covers PersistenceException and CryptoException as well as any unchecked
+            // store error, so a failed rotation always surfaces as the documented
+            // SecretProviderException rather than a raw unchecked exception.
             errorCounter.increment();
             throw new SecretProviderException("KEK rotation failed", e);
         }
