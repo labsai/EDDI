@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import {
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Copy,
@@ -12,6 +11,7 @@ import {
   Share2,
   MessageSquare,
   Sparkles,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatuses, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
@@ -43,7 +43,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/20" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/20" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10", ring: "ring-destructive/20" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
 };
 
 export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: AgentCardProps) {

@@ -5,6 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { useState, useCallback, useId, type KeyboardEvent } from "react";
+import { Eye, EyeOff, Lock, SendHorizontal } from "lucide-react";
 import { useChatDispatch } from "@/store/chat-store";
 
 interface SecretInputProps {
@@ -58,7 +59,7 @@ export function SecretInput({
           className="secret-input__label"
           data-testid="secret-input-label"
         >
-          🔒 {label}
+          <Lock className="secret-input__label-icon" size="1em" /> {label}
         </label>
       )}
       <div className="secret-input__row">
@@ -84,7 +85,8 @@ export function SecretInput({
             title={visible ? "Hide" : "Show"}
             data-testid="secret-input-eye"
           >
-            {visible ? "👁" : "👁‍🗨"}
+            {/* Shows the action, like the aria-label: an open eye reveals. */}
+            {visible ? <EyeOff size="1em" /> : <Eye size="1em" />}
           </button>
         </div>
         <button
@@ -95,7 +97,7 @@ export function SecretInput({
           aria-label="Send secret"
           data-testid="secret-input-send"
         >
-          ▶
+          <SendHorizontal size="1em" />
         </button>
       </div>
     </div>

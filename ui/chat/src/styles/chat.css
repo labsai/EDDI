@@ -521,6 +521,11 @@ a:hover { opacity: 0.85; }
   to { transform: rotate(360deg); }
 }
 
+/* An icon that marks work in progress (an upload), not decoration. */
+.chat-icon-spin {
+  animation: spin 1s linear infinite;
+}
+
 /* ─── Attach button in ChatInput ─────────────── */
 
 .chat-input__attach {
@@ -643,6 +648,12 @@ a:hover { opacity: 0.85; }
   color: var(--chat-accent);
   margin-bottom: 8px;
   letter-spacing: 0.02em;
+}
+
+/* Icons inline with a line of text sit on its baseline, not above it. */
+.secret-input__label-icon,
+.chat-attachments__icon {
+  vertical-align: -0.125em;
 }
 
 .secret-input__row {
@@ -1307,7 +1318,9 @@ a:hover { opacity: 0.85; }
 }
 
 .paused-card__icon {
+  flex-shrink: 0;
   font-size: 1rem;
+  color: var(--chat-accent);
 }
 
 .paused-card__title {

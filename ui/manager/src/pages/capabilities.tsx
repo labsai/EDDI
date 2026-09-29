@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
-  Layers,
   Search,
   RefreshCw,
   AlertCircle,
@@ -12,6 +11,7 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Blocks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -57,7 +57,7 @@ export function CapabilitiesPage() {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10">
-            <Layers className="h-5 w-5 text-violet-500" />
+            <Blocks className="h-5 w-5 text-violet-500" />
           </div>
           {t("capabilities.title", "Capability Registry")}
         </h1>
@@ -96,7 +96,7 @@ export function CapabilitiesPage() {
       {/* ═══ Registry Overview Table ═══ */}
       <section>
         <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Layers className="h-4 w-4 text-violet-500" />
+          <Blocks className="h-4 w-4 text-violet-500" />
           {t("capabilities.registryOverview", "Registry Overview")}
           {allSkills && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
@@ -322,7 +322,7 @@ export function CapabilitiesPage() {
                       </Link>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Layers className="h-3.5 w-3.5 text-violet-500" />
+                      <Blocks className="h-3.5 w-3.5 text-violet-500" />
                       <span className="text-xs text-foreground">{match.skill}</span>
                     </div>
                     <div className="flex items-center gap-2">

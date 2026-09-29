@@ -7,6 +7,7 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useState } from "react";
+import { Hand } from "lucide-react";
 import {
   approvalDeadline,
   gatedToolNames,
@@ -60,9 +61,9 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
   return (
     <div className="paused-card" role="status" aria-live="polite" data-testid="paused-card">
       <div className="paused-card__head">
-        <span className="paused-card__icon" aria-hidden="true">
-          ⏸
-        </span>
+        {/* A raised hand: the same "waiting on a human" icon the Manager uses
+            for a paused conversation, so both UIs say it the same way. */}
+        <Hand className="paused-card__icon" size="1em" />
         <span className="paused-card__title">Waiting for approval</span>
       </div>
 
