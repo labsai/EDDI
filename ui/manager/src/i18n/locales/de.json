@@ -761,7 +761,8 @@
     "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
     "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
     "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut.",
-    "reviewNoticeLabel": "Gesprächseinsicht"
+    "reviewNoticeLabel": "Gesprächseinsicht",
+    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation."
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -2050,6 +2051,7 @@
     "ingestion": "Dokumenten-Aufnahme",
     "dropFiles": "Dokumente hierhin ziehen zum Aufnehmen",
     "dropHint": "Text, Markdown oder beliebige Textdateien",
+    "replaceSameName": "Zuvor aufgenommenes Dokument mit gleichem Dateinamen ersetzen",
     "browse": "Durchsuchen",
     "pasteText": "Oder Textinhalt einfügen",
     "pastePlaceholder": "Dokumententext hier einfügen...",
@@ -2081,6 +2083,8 @@
       "includeSubdomains": "Subdomains einbeziehen",
       "excludePatterns": "Ausschlussmuster",
       "excludePatternsHint": "Globs für den URL-Pfad, kommagetrennt — * bleibt in einem Segment, ** überschreitet sie",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap-URLs zur Seitenermittlung, kommagetrennt. Nur nötig, wenn robots.txt sie nicht aufführt; Sitemap-Indizes werden verfolgt",
       "saveFirst": "Speichern Sie die Wissensdatenbank, um diese Quelle auszuführen, zu testen oder ihren Verlauf zu sehen.",
       "run": "Jetzt ausführen",
       "runFailed": "Ausführung konnte nicht gestartet werden. Möglicherweise läuft bereits eine.",

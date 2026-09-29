@@ -604,7 +604,7 @@ describe("ChatWidget — round-3 regressions", () => {
     expect(JSON.parse(bodies[0]).context.attachment_0.value.storageRef).toBe("ref-1");
   });
 
-  it("does not put a secret back into the unmasked composer after a 409", async () => {
+  it("puts a refused secret back only into the masked composer after a 409", async () => {
     globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
       const href = String(url);
       if (href.includes("/start")) {
@@ -628,12 +628,18 @@ describe("ChatWidget — round-3 regressions", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
 
     await screen.findByText(/reviewer must resolve/i);
-    // Let the restore effect run before asserting — checking immediately after
-    // the error text appears races it, and the assertion passes vacuously.
-    await waitFor(() => {});
 
-    const composer = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-    expect(composer.value).toBe("");
+    // Handed back — the server never consumed it — but masked and still in
+    // secret mode, so a resend goes out with secretInput again.
+    await waitFor(() =>
+      expect((screen.getByTestId("chat-input") as HTMLInputElement).value).toBe("hunter2"),
+    );
+    const composer = screen.getByTestId("chat-input") as HTMLInputElement;
+    expect(composer.type).toBe("password");
+    expect(screen.getByTestId("chat-secret-toggle")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Secret mode ON"),
+    );
     expect(screen.queryByText("hunter2")).toBeNull();
   });
 });
@@ -1075,13 +1081,15 @@ describe("ChatWidget — conversation review notice", () => {
     expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
   });
 
-  it("falls back to the descriptor for the name on an EDDI without the profile endpoint", async () => {
+  it("shows no notice, and still chats, on an EDDI without the profile endpoint", async () => {
+    // The agent's name comes from the conversation (loadAgentName); the profile
+    // is only asked about review, and a 404 there must not get in the way.
     const calls = backendWithProfile(new Response(JSON.stringify({ message: "not found" }), { status: 404 }));
 
     renderWidget();
 
     expect(await screen.findByText("Hello!")).toBeInTheDocument();
-    await waitFor(() => expect(calls.some((c) => c.includes("/descriptorstore/") || c.includes("/agentstore/"))).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.includes("/profile"))).toBe(true));
     expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
   });
 });

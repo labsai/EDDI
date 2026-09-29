@@ -157,6 +157,18 @@ export interface UseSpacesResult {
    */
   enabled: boolean;
   /**
+   * Whether enforcement is on, as the backend actually answered it — or
+   * `undefined` while the query is in flight **or has failed**.
+   *
+   * `enabled` folds a failure into `false` so the rest of the Manager degrades
+   * to "no workspaces". That is the wrong default for deciding what a caller may
+   * *do*: a 502 on `/workspaces` would then read as "nothing is enforced" and
+   * offer Delete to a non-owner. Anything that grants a control on the strength
+   * of "enforcement is off" reads this instead. An old backend's 404 still
+   * counts as a real `false` — `getWorkspaceInfo` maps it to that answer.
+   */
+  enforcement: boolean | undefined;
+  /**
    * The caller's principal as the backend records it — the value stamped as
    * `ownerId`. Compare against this, not the token's display name.
    */
@@ -286,6 +298,7 @@ export function useSpaces(): UseSpacesResult {
 
   return {
     enabled: info.enabled,
+    enforcement: data ? data.enabled : undefined,
     principal: principalOf(info),
     seesEverything: info.seesEverything,
     spaces,

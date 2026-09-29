@@ -43,6 +43,14 @@ class SecretValueScrubberTest {
     }
 
     @Test
+    @DisplayName("token mode never renames a map key, only values")
+    void wholeTokensLeaveMapKeysAlone() {
+        Object cleaned = SecretValueScrubber.scrubDeepTokens(Map.of("id", "value id"), List.of("id"), MARK);
+
+        assertEquals(Map.of("id", "value " + MARK), cleaned);
+    }
+
+    @Test
     @DisplayName("null when nothing carries the plaintext, and for types it cannot walk")
     void nothingToDo() {
         assertNull(SecretValueScrubber.scrubValue(Map.of("a", List.of("b")), SECRET, MARK));

@@ -771,7 +771,8 @@
     "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
     "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
     "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment.",
-    "reviewNoticeLabel": "Consultation des conversations"
+    "reviewNoticeLabel": "Consultation des conversations",
+    "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -2072,6 +2073,7 @@
     "ingestion": "Ingestion de documents",
     "dropFiles": "Glissez-déposez des documents ici",
     "dropHint": "Fichiers textes ou Markdown",
+    "replaceSameName": "Remplacer un document déjà ingéré portant le même nom de fichier",
     "browse": "Parcourir",
     "pasteText": "Ou coller du texte brut",
     "pastePlaceholder": "Collez le contenu ici...",
@@ -2103,6 +2105,8 @@
       "includeSubdomains": "Inclure les sous-domaines",
       "excludePatterns": "Motifs d'exclusion",
       "excludePatternsHint": "Globs appliqués au chemin de l'URL, séparés par des virgules — * reste dans un segment, ** les traverse",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps pour découvrir les pages, séparées par des virgules. Utile seulement si robots.txt ne les liste pas ; les index de sitemaps sont suivis",
       "saveFirst": "Enregistrez la base de connaissances pour exécuter cette source, la prévisualiser ou voir son historique.",
       "run": "Exécuter",
       "runFailed": "Impossible de démarrer l'exécution. Une exécution est peut-être déjà en cours.",

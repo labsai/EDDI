@@ -761,7 +761,8 @@
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
     "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
-    "reviewNoticeLabel": "对话审阅"
+    "reviewNoticeLabel": "对话审阅",
+    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -2050,6 +2051,7 @@
     "ingestion": "文档摄入",
     "dropFiles": "将文档拖放到此处进行摄入",
     "dropHint": "文本，Markdown或任何基于文本的文件",
+    "replaceSameName": "替换之前导入的同名文档",
     "browse": "浏览",
     "pasteText": "或粘贴文本内容",
     "pastePlaceholder": "在此粘贴文档文本...",
@@ -2081,6 +2083,8 @@
       "includeSubdomains": "包含子域名",
       "excludePatterns": "排除模式",
       "excludePatternsHint": "针对 URL 路径的通配符，以逗号分隔 — * 限于一个路径段，** 可跨段",
+      "sitemapUrls": "站点地图",
+      "sitemapUrlsHint": "用于发现页面的站点地图 URL，以逗号分隔。仅当 robots.txt 未列出时需要；会跟踪站点地图索引",
       "saveFirst": "请先保存知识库，然后才能运行、预览此源或查看其历史记录。",
       "run": "立即运行",
       "runFailed": "无法启动运行。可能已有一次运行正在进行。",

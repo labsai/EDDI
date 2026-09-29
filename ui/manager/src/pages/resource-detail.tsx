@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import {
   Trash2,
   Copy,
@@ -104,6 +106,11 @@ export function ResourceDetailPage() {
     isLoading: isVersionsLoading,
     isError: isVersionsError,
   } = useResourceVersions(type ?? "", id ?? "");
+  // Deleting a resource needs OWN; an EDIT grantee may still change it.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Resolve latest version from descriptors
   useEffect(() => {
@@ -542,14 +549,17 @@ export function ResourceDetailPage() {
             <Copy className="h-4 w-4" />
             {t("common.duplicate")}
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => setShowDeleteDialog(true)}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 className="h-4 w-4" />
-            {t("common.delete")}
-          </Button>
+          {access.canOwn && (
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={deleteMutation.isPending}
+              data-testid="delete-resource-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("common.delete")}
+            </Button>
+          )}
         </div>
       </div>
 
