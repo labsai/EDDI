@@ -180,6 +180,12 @@ fixed the same thing, main's implementation is kept and this branch's is dropped
   `lastModified` and `deploymentStatus` the dedupe observed, so a rewritten row
   survives. A group whose kept row changed after it was observed is left for the
   next pass. No transaction is used, so a standalone server keeps working.
+- **E3: callers wait for the deferred migrations to finish before deploying.** The
+  flag was cleared when the migrations started. The startup callback and the
+  scheduled sweep can run `checkDeployments` at the same time, so the second one
+  skipped the migrations and deployed from documents still being migrated. The run
+  now holds a lock and clears the flag only when it finishes. Every caller waits
+  for it before it deploys or reports ready.
 
 ```decision-log
 | 2026-09-26 | A queued turn whose snapshot was superseded is rebuilt over a reloaded memory (revision probe first) | H13a/E1: queued turns ran on request-time memory | Always reloading (doubles every turn's load); refreshing the memory in place (the Conversation's longTerm baseline would stay stale) |

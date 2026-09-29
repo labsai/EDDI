@@ -33,8 +33,10 @@ import org.mockito.Mock;
 
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 import static org.junit.jupiter.api.Assertions.*;
@@ -203,6 +205,48 @@ class AgentDeploymentManagementBranchTest {
             order.verify(agentsReadiness).setAgentsReadiness(true);
             verify(v6QuteMigration, times(1)).runIfNeeded();
             verify(channelConnectorMigration, times(1)).runIfNeeded();
+        }
+
+        /**
+         * The startup callback and the scheduled sweep can both be inside
+         * checkDeployments at once. The deferred flag used to be cleared when the
+         * migrations STARTED, so the second caller skipped them and deployed from
+         * documents the first was still migrating.
+         */
+        @Test
+        @DisplayName("a second caller arriving while the deferred migrations run waits for them before deploying")
+        void aConcurrentSweepWaitsForTheDeferredMigrations() throws Exception {
+            when(v6RenameMigration.isPending()).thenReturn(true, false);
+            when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of());
+            management.autoDeployAgents();
+
+            CountDownLatch migrating = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            doAnswer(inv -> {
+                migrating.countDown();
+                assertTrue(release.await(10, TimeUnit.SECONDS));
+                return null;
+            }).when(v6QuteMigration).runIfNeeded();
+
+            Thread first = new Thread(management::checkDeployments);
+            first.start();
+            assertTrue(migrating.await(10, TimeUnit.SECONDS));
+            Thread second = new Thread(management::checkDeployments);
+            second.start();
+
+            // While the first caller is still migrating, nobody may read the
+            // deployments to deploy them.
+            verify(deploymentStore, after(500).never()).readDeploymentInfos(any());
+
+            release.countDown();
+            first.join(10_000);
+            second.join(10_000);
+
+            verify(deploymentStore, times(2)).readDeploymentInfos(deployed);
+            verify(v6QuteMigration, times(1)).runIfNeeded();
+            InOrder order = inOrder(channelConnectorMigration, deploymentStore);
+            order.verify(channelConnectorMigration).runIfNeeded();
+            order.verify(deploymentStore, times(2)).readDeploymentInfos(deployed);
         }
 
         @Test
