@@ -213,6 +213,16 @@ public class SecretScrubber {
         }
     }
 
+    /**
+     * Whether a field of this name holds a credential, whatever its value — the
+     * name rules of {@link #scrubJson(String)} on their own. A caller that walks a
+     * structure itself needs them for a credential-named field whose value is an
+     * object: the scrubber judges the strings inside by their own names.
+     */
+    public static boolean isCredentialFieldName(String fieldName) {
+        return isSecretFieldName(fieldName, null);
+    }
+
     private void scrubNode(JsonNode node, String parentFieldName) {
         if (node.isObject()) {
             ObjectNode objectNode = (ObjectNode) node;
