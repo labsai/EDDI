@@ -853,6 +853,15 @@ public class GroupConversation {
         private List<Concession> concessions = new CopyOnWriteArrayList<>();
 
         /**
+         * Concessions parsed after the ledger reached its cap
+         * ({@code negotiationConfig.maxLedgerConcessions}) and therefore not recorded.
+         * Counted so the outcome can say the ledger is incomplete rather than present a
+         * truncated one as the whole record. Additive: a document stored without it
+         * reads as 0.
+         */
+        private int droppedConcessions;
+
+        /**
          * Read-only view — all mutation goes through {@link #addProposal},
          * {@link #replaceProposal} and {@link #addConcession}, so the table cannot be
          * edited behind the state's back.
@@ -888,6 +897,21 @@ public class GroupConversation {
 
         public void addConcession(Concession concession) {
             concessions.add(concession);
+        }
+
+        public int getDroppedConcessions() {
+            return droppedConcessions;
+        }
+
+        public void setDroppedConcessions(int droppedConcessions) {
+            this.droppedConcessions = Math.max(0, droppedConcessions);
+        }
+
+        /** Records {@code count} concessions the full ledger could not take. */
+        public void recordDroppedConcessions(int count) {
+            if (count > 0) {
+                droppedConcessions += count;
+            }
         }
     }
 

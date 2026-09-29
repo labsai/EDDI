@@ -552,7 +552,10 @@
     "toolCount": "{{selected}} sur {{total}} sélectionnés",
     "specTooLarge": "Cette spécification est trop volumineuse pour être chargée ici",
     "specUrlInvalid": "Ceci n'est pas une URL valide",
-    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge"
+    "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Désactivez les outils intégrés pour les désactiver tous.",
+    "hfToken": "Jeton Hugging Face",
+    "hfTokenHint": "Nécessaire uniquement pour les dépôts restreints ou privés. Il est stocké dans le coffre comme une clé API."
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -761,6 +764,8 @@
     "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
     "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
     "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment.",
+    "sendRejected": "Votre message n'a pas été envoyé : {{reason}}",
+    "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
     "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
   },
   "resources": {
@@ -1333,7 +1338,8 @@
     "streamingTimeoutSeconds": "Délai d'attente du streaming (secondes)",
     "streamingTimeoutSecondsHint": "Remplace la valeur par défaut du moteur (120s). S'applique uniquement au streaming ; vide = utiliser la valeur par défaut.",
     "taskPricing": "Tarification des appels simples",
-    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $."
+    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $.",
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",

@@ -85,13 +85,53 @@ class ClientContextGuardTest {
     }
 
     @Test
-    @DisplayName("key matching is exact — near-miss names are ordinary keys")
-    void exactMatching() {
+    @DisplayName("matching is case-sensitive, and a key that merely contains a reserved name is ordinary")
+    void caseSensitiveAndAnchoredAtTheStart() {
         Map<String, Context> context = new HashMap<>();
         context.put("GroupId", str("a"));
-        context.put("groupId_display", str("b"));
+        context.put("screenGroupId", str("b"));
+        context.put("group", str("c"));
 
         assertSame(context, ClientContextGuard.strict().strip(context));
+    }
+
+    /**
+     * Defence in depth for the prefix-matching step lookups (CWE-863, PR #831): a
+     * key that starts with a reserved name is stored as {@code context:<key>},
+     * which {@code getLatestData("context:<reserved>")} would also return.
+     */
+    @Test
+    @DisplayName("a key that starts with a reserved name is removed too")
+    void keysExtendingAReservedNameAreRemoved() {
+        Map<String, Context> context = new HashMap<>();
+        context.put("groupIdSuffix", str("another-teams-group"));
+        context.put("groupId_display", str("x"));
+        context.put("dynamicAgentConfigX", str("{}"));
+        context.put("dynamicCreatedAgentIdsX", str("victim"));
+        context.put("delegationDepthX", str("0"));
+        context.put("groupConversationIdX", str("gc-other"));
+        context.put("language", str("en"));
+
+        var stripped = ClientContextGuard.strict().strip(context);
+
+        assertEquals(Map.of("language", context.get("language")), stripped);
+        assertTrue(ClientContextGuard.shadowsReserved("groupTranscriptV2"));
+        assertFalse(ClientContextGuard.shadowsReserved("group"));
+        assertFalse(ClientContextGuard.shadowsReserved(null));
+    }
+
+    @Test
+    @DisplayName("a permitted reserved key permits its extensions; other reserved prefixes are still removed")
+    void permittedKeyPermitsItsExtensions() {
+        var guard = new ClientContextGuard(Optional.of(List.of("groupId")));
+        Map<String, Context> context = new HashMap<>();
+        context.put("groupIdLabel", str("g"));
+        context.put("delegationDepthMax", str("0"));
+
+        var stripped = guard.strip(context);
+
+        assertTrue(stripped.containsKey("groupIdLabel"));
+        assertFalse(stripped.containsKey("delegationDepthMax"));
     }
 
     @Test
