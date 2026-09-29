@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -343,9 +344,16 @@ class TemplateSyntaxMigratorTest {
         assertEquals("{a}}{b}", migrator.migrate("[[${a + '}' + b}]]"));
     }
 
+    /**
+     * The literal '{' is output text. Inlined bare it would sit in front of
+     * <code>{b}</code> and Qute would read <code>{{b}</code> as an expression, so
+     * it goes into an unparsed block.
+     */
     @Test
     void migrateConcat_withOpeningBraceInsideALiteral() {
-        assertEquals("{a}{{b}", migrator.migrate("[(${a + '{' + b})]"));
+        String migrated = migrator.migrate("[(${a + '{' + b})]");
+        assertEquals("{a}{|{|}{b}", migrated);
+        assertEquals("A{B", Engine.builder().addDefaults().build().parse(migrated).data("a", "A").data("b", "B").render());
     }
 
     /**
@@ -417,6 +425,23 @@ class TemplateSyntaxMigratorTest {
     void literalClosingDelimiterIsNotRefused() {
         assertNull(migrator.unconvertibleReason("[[${a + ']]' + b}]]"));
         assertEquals("{a}]]{b}", migrator.migrate("[[${a + ']]' + b}]]"));
+    }
+
+    /**
+     * Braces assembled from literals are output text in Thymeleaf. Inlined as-is
+     * they would form a Qute expression — {@code '{' + 'name' + '}'} became
+     * <code>{name}</code>, which Qute evaluates. Rendered through Qute, the
+     * converted template must print the same text Thymeleaf did.
+     */
+    @Test
+    void bracesAssembledFromLiteralsStayText() {
+        Engine qute = Engine.builder().addDefaults().build();
+
+        String assembled = migrator.migrate("[[${'{' + 'name' + '}'}]]");
+        assertEquals("{name}", qute.parse(assembled).data("name", "EVALUATED").render());
+
+        String jsonBody = migrator.migrate("[[${'{\"id\": ' + id + '}'}]]");
+        assertEquals("{\"id\": 42}", qute.parse(jsonBody).data("id", 42).render());
     }
 
     @Test

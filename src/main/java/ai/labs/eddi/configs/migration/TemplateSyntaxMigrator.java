@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayDeque;
@@ -173,8 +174,13 @@ public class TemplateSyntaxMigrator {
         for (String part : splitOnConcatOperator(expr)) {
             String trimmed = part.trim();
             if (isStringLiteral(trimmed)) {
-                // String literal → inline without braces
-                replacement.append(literalText(trimmed));
+                // String literal → inline without braces. A literal holding '{' is output
+                // text in Thymeleaf, but inlined as-is it would open a Qute expression:
+                // '{' + 'name' + '}' became {name}, which Qute evaluates. Such text goes
+                // into an unparsed block, which Qute outputs verbatim. A lone '}' is only
+                // text to Qute and stays as it is.
+                String text = literalText(trimmed);
+                replacement.append(text.indexOf('{') >= 0 ? TemplateEscaping.unparsedBlock(text) : text);
             } else if (!trimmed.isEmpty()) {
                 // Variable → wrap in Qute expression. An empty part is not a variable:
                 // it only arises from a leading, trailing or doubled +, i.e. from a
