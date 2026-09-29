@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -80,7 +81,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         this.historyCollection = database.getCollection(collectionName + HISTORY_POSTFIX);
         this.documentBuilder = documentBuilder;
 
-        ensureIndex(currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
+        ensureIndex(database, currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
         // History rows are addressed by the NESTED id, not by a range over the
         // composite _id (see historyRowsOf). MongoDB's built-in _id index covers the
         // whole embedded subdocument and cannot serve a dotted path into it, so
@@ -88,11 +89,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // COLLSCAN of the history collection. That is not academic: descriptors.history
         // holds one row per conversation, and GdprComplianceService's erasure loop
         // calls deleteAllDescriptor once per conversation.
-        ensureIndex(historyCollection, Indexes.ascending(HISTORY_NESTED_ID_FIELD, HISTORY_NESTED_VERSION_FIELD), false);
+        ensureIndex(database, historyCollection, Indexes.ascending(HISTORY_NESTED_ID_FIELD, HISTORY_NESTED_VERSION_FIELD), false);
 
         Arrays.stream(indexes).forEach(index -> {
-            ensureIndex(currentCollection, Indexes.ascending(index), false);
-            ensureIndex(historyCollection, Indexes.ascending(index), false);
+            ensureIndex(database, currentCollection, Indexes.ascending(index), false);
+            ensureIndex(database, historyCollection, Indexes.ascending(index), false);
         });
     }
 
@@ -131,7 +132,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      * constructed takes the application down with it.
      * </p>
      */
-    private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
+    private static void ensureIndex(MongoDatabase database, MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
         MongoCommandException conflict = null;
         try {
             mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
@@ -142,7 +143,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             conflict = e;
         }
         try {
-            reconcileIndexesOnKey(mongoCollection, indexKey.toBsonDocument(), unique, conflict);
+            reconcileIndexesOnKey(database, mongoCollection, indexKey.toBsonDocument(), unique, conflict);
         } catch (RuntimeException e) {
             if (conflict != null) {
                 LOGGER.errorf("Cannot create index %s on '%s' (%s), and the conflicting index could not be reconciled: %s. "
@@ -164,7 +165,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      *            the error {@code createIndex} raised, or {@code null} when it
      *            succeeded
      */
-    private static void reconcileIndexesOnKey(MongoCollection<Document> mongoCollection, BsonDocument keyPattern, boolean unique,
+    private static void reconcileIndexesOnKey(MongoDatabase database, MongoCollection<Document> mongoCollection, BsonDocument keyPattern,
+                                              boolean unique,
                                               MongoCommandException conflict) {
         String collectionName = mongoCollection.getNamespace().getCollectionName();
         Map<String, Document> indexes = new LinkedHashMap<>();
@@ -177,7 +179,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         boolean nameHeldByForeignIndex = nameHolder != null && !sameKeyPattern(nameHolder, keyPattern);
 
         List<Document> onKey = indexes.values().stream().filter(index -> sameKeyPattern(index, keyPattern)).toList();
-        List<Document> mismatched = onKey.stream().filter(index -> !hasSpecification(index, unique)).toList();
+        // Read only when an index on the key carries a collation, which is rare.
+        Document defaultCollation = onKey.stream().anyMatch(index -> index.containsKey(COLLATION))
+                ? defaultCollation(database, collectionName)
+                : null;
+        List<Document> mismatched = onKey.stream().filter(index -> !hasSpecification(index, unique, defaultCollation)).toList();
         if (conflict == null && mismatched.isEmpty()) {
             return;
         }
@@ -221,16 +227,35 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      */
     static final String ALTERNATE_INDEX_NAME_SUFFIX = "_eddi";
 
+    private static final String COLLATION = "collation";
+
     /**
      * Whether an index on the right key also has the specification asked for: the
-     * same uniqueness, and none of the options that make an index serve only some
-     * queries. A partial, sparse or collated index is not an equivalent — the
-     * queries this store issues carry neither the filter nor the collation, so the
-     * server cannot use it for them.
+     * same uniqueness, and nothing that keeps it from serving this store's queries.
+     * A partial or sparse index serves only queries that carry its filter, and a
+     * hidden one serves none; this store's queries carry no filter. A collation
+     * other than the collection's default is not used by those queries either — but
+     * the collection's default is, since MongoDB applies it to an index created
+     * without one, and rejecting that would rebuild a correct index on every start.
+     *
+     * @param defaultCollation
+     *            the collection's default collation, or {@code null} when it has
+     *            none
      */
-    static boolean hasSpecification(Document index, boolean unique) {
+    static boolean hasSpecification(Document index, boolean unique, Document defaultCollation) {
         return index.getBoolean("unique", false) == unique && !index.containsKey("partialFilterExpression")
-                && !index.getBoolean("sparse", false) && !index.containsKey("collation");
+                && !index.getBoolean("sparse", false) && !index.getBoolean("hidden", false)
+                && Objects.equals(index.get(COLLATION), defaultCollation);
+    }
+
+    /** The collection's default collation, or {@code null} when it has none. */
+    private static Document defaultCollation(MongoDatabase database, String collectionName) {
+        for (Document collection : database.listCollections().filter(Filters.eq("name", collectionName))) {
+            if (collection.get("options") instanceof Document options && options.get(COLLATION) instanceof Document collation) {
+                return collation;
+            }
+        }
+        return null;
     }
 
     /**

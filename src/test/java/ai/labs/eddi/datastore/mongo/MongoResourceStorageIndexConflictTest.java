@@ -7,6 +7,8 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.DescriptorStore;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Collation;
+import com.mongodb.client.model.CreateCollectionOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import org.bson.Document;
@@ -186,6 +188,52 @@ class MongoResourceStorageIndexConflictTest extends MongoTestBase {
         assertEquals(1, onKey.size());
         assertFalse(onKey.getFirst().containsKey("partialFilterExpression"), "the full index replaced the partial one");
         assertDescriptorRoundTrip(store);
+    }
+
+    @Test
+    @DisplayName("a hidden index on the key is replaced: the server does not use it for queries")
+    void hiddenIndexIsReplaced() throws Exception {
+        var descriptors = getDatabase().getCollection(DESCRIPTORS);
+        descriptors.createIndex(Indexes.ascending("resource"));
+        getDatabase().runCommand(new Document("collMod", DESCRIPTORS).append("index",
+                new Document("name", "resource_1").append("hidden", true)));
+
+        var store = assertDoesNotThrow(MongoResourceStorageIndexConflictTest::constructStore);
+
+        var onResource = indexesOn(descriptors, new Document("resource", 1));
+        assertEquals(1, onResource.size());
+        assertFalse(onResource.getFirst().getBoolean("hidden", false), "the index the store relies on is visible");
+        assertDescriptorRoundTrip(store);
+    }
+
+    /**
+     * MongoDB gives an index created without a collation the collection's default
+     * one. Taking that for a mismatch rebuilt a correct index on every start, which
+     * {@code $indexStats} shows as a new {@code accesses.since}.
+     */
+    @Test
+    @DisplayName("an index carrying the collection's default collation is kept, not rebuilt on every start")
+    void defaultCollationIsNotAMismatch() throws Exception {
+        getDatabase().createCollection(DESCRIPTORS, new CreateCollectionOptions().collation(Collation.builder().locale("en").build()));
+        constructStore();
+        var descriptors = getDatabase().getCollection(DESCRIPTORS);
+        Object since = indexSince(descriptors, "resource_1");
+        assertNotNull(indexNamed(descriptors, "resource_1"));
+
+        Thread.sleep(1100);
+        var store = constructStore();
+
+        assertEquals(since, indexSince(descriptors, "resource_1"), "resource_1 was dropped and rebuilt");
+        assertDescriptorRoundTrip(store);
+    }
+
+    private static Object indexSince(MongoCollection<Document> collection, String name) {
+        for (Document stats : collection.aggregate(List.of(new Document("$indexStats", new Document())))) {
+            if (name.equals(stats.getString("name"))) {
+                return stats.get("accesses", Document.class).get("since");
+            }
+        }
+        return null;
     }
 
     @Test
