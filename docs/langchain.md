@@ -8,7 +8,7 @@ The **LLM Lifecycle Task** (formerly "Langchain") is EDDI's unified integration 
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
-EDDI supports **12 LLM providers** out of the box — eleven registered model builders: OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face, and Jlama — plus any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via the `baseUrl` parameter.
+EDDI supports **19 named LLM providers** out of the box — eleven model builders (OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face and Jlama) plus eight first-class OpenAI-compatible providers (xAI Grok, DeepSeek, Moonshot Kimi, Alibaba Qwen, Z.ai GLM, MiniMax, OpenRouter and Groq; see [OpenAI-compatible providers](#openai-compatible-providers)). Any other OpenAI-compatible endpoint works through the `openai` type and a `baseUrl`.
 
 The task automatically detects which mode to use based on your configuration—no manual switching required.
 
@@ -45,7 +45,8 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 The Langchain task integrates with multiple LLM providers via the langchain4j library:
 
-- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also supports **DeepSeek** and **Cohere** via `baseUrl`
+- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also any other OpenAI-compatible endpoint via `baseUrl`
+- **OpenAI-compatible providers** with their own type: `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `minimax`, `openrouter`, `groq` ([details](#openai-compatible-providers))
 - **Anthropic** (Claude)
 - **Google Gemini** (`gemini` - AI Studio API, `gemini-vertex` - Vertex AI)
 - **Mistral AI** (Mistral Large, Codestral, Pixtral)
@@ -663,7 +664,74 @@ the builder does read; `threadCount` is deliberately absent from it — see
 
 **Note**: Oracle GenAI does not require an `apiKey`. Authentication is via OCI SDK (`~/.oci/config`). The `configProfile` parameter selects which OCI profile to use (defaults to `"DEFAULT"`).
 
-#### DeepSeek / Cohere (via OpenAI-Compatible Endpoints)
+#### OpenAI-compatible providers
+
+Eight providers that speak the OpenAI chat-completions protocol have a type of their own, so
+the config needs only a key. The endpoint, the default model and the vendor's reasoning quirks
+come from a preset (`src/main/resources/llm/openai-compatible-providers.json`), which the
+Manager mirrors for its provider picker.
+
+| `type` | Provider | Default endpoint | Regions (`region`) | Default model |
+|---|---|---|---|---|
+| `xai` | xAI Grok | `https://api.x.ai/v1` | | `grok-4.7` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | | `deepseek-v4-pro` |
+| `moonshot` | Moonshot Kimi | `https://api.moonshot.ai/v1` | `intl`, `cn` | `kimi-k3` |
+| `qwen` | Alibaba Qwen | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `intl`, `cn`, `us` | `qwen3.7-plus` |
+| `zhipu` | Z.ai GLM (Zhipu) | `https://api.z.ai/api/paas/v4` | `intl`, `cn` | `glm-5.3` |
+| `minimax` | MiniMax | `https://api.minimax.io/v1` | `intl`, `cn` | `MiniMax-M3` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | | `openrouter/auto` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | | `openai/gpt-oss-120b` |
+
+Model ids and endpoints were checked against the vendors' documentation on 2026-09-29. Vendors
+retire models often, so treat the defaults as a starting point and set `modelName` explicitly
+in production. Alibaba is moving the Singapore and Beijing regions to workspace-specific hosts;
+the shared hosts above still work, and a workspace URL goes in `baseUrl`.
+
+**Precedence.**
+- Endpoint: an explicit `baseUrl`, then the `region` parameter (a region id from the table), then
+  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is still
+  checked against the cloud-metadata block list.
+- Model: `modelName`, then the provider default.
+- Any parameter you set beats the preset's defaults (below).
+- `apiKey` is required. Use a vault reference, for example `${vault:xai-key}`; the error names
+  the provider and suggests one.
+
+**Thinking defaults.** Reasoning models return their reasoning in a separate field, and some
+providers require it back on the next request of a tool loop. The presets set:
+
+| Provider | `returnThinking` | `sendThinking` | Why |
+|---|---|---|---|
+| `deepseek`, `moonshot` | `true` | `true` | The API rejects a tool-loop follow-up that omits the previous turn's reasoning |
+| `qwen`, `zhipu` | `true` | `false` | Reasoning is returned but does not have to be echoed |
+| `minimax` | default | default | Sends `reasoning_split: true` so reasoning arrives in its own field |
+| `xai`, `openrouter`, `groq` | default | default | |
+
+`returnThinking` and `sendThinking` are ordinary parameters and also work on `type: openai`
+(both default to `false` there, so existing configs are unchanged). `minimax` additionally sends
+the request-body field `reasoning_split`; that is fixed by the preset.
+
+**Capabilities.** `jsonResponseFormat: auto` sends a JSON response format to `xai`, `deepseek`,
+`moonshot`, `qwen`, `zhipu` and `groq` when the request carries no tools (never with tools), and
+never to `minimax` or `openrouter`. Image input is enabled by model id: `grok-4*`,
+`deepseek-flash`, `kimi-k3`, `kimi-k2.6`, the Qwen `qwen3.7*`/`qwen3-vl`/`qwen-vl`/`qvq` families,
+`glm-4.5v`/`glm-5v` and `minimax-m3`. Override either per task or per deployment as usual.
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "grokChat",
+      "type": "xai",
+      "parameters": {
+        "apiKey": "${vault:xai-key}",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
 
 ```json
 {
@@ -671,12 +739,10 @@ the builder does read; `threadCount` is deliberately absent from it — see
     {
       "actions": ["send_message"],
       "id": "deepseekChat",
-      "type": "openai",
-      "description": "DeepSeek via OpenAI-compatible endpoint",
+      "type": "deepseek",
       "parameters": {
-        "apiKey": "your-deepseek-api-key",
-        "modelName": "deepseek-chat",
-        "baseUrl": "https://api.deepseek.com",
+        "apiKey": "${vault:deepseek-key}",
+        "modelName": "deepseek-flash",
         "temperature": "0.7",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -686,7 +752,33 @@ the builder does read; `threadCount` is deliberately absent from it — see
 }
 ```
 
-**Note**: Any OpenAI-compatible provider (DeepSeek, Cohere, etc.) can be used by setting the `baseUrl` parameter on the `openai` type. No additional dependencies are required.
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "qwenChina",
+      "type": "qwen",
+      "parameters": {
+        "apiKey": "${vault:qwen-key}",
+        "region": "cn",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Any other endpoint.** Cohere, Together, a corporate gateway and the like still work through
+`type: openai` with a `baseUrl`; they simply have no preset.
+
+**Known limitation.** A durable tool-approval pause stores the in-flight transcript, including
+each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
+pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcript-max-bytes`) the
+gating assistant message is replayed with its thinking, unless that single message exceeds its
+64 KB cap: it is then persisted without the thinking, and those two providers can reject the
+resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
 
 ---
 
@@ -1538,6 +1630,8 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `mistral` | ✅ | ✅ |
 | `gemini`, `gemini-vertex` | ✅ | ❌ — the Gemini API rejects `responseMimeType: application/json` together with `tools` |
 | `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
+| `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
+| `minimax`, `openrouter` | ❌ | ❌ |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
 
 #### Overriding the matrix per task
@@ -1761,7 +1855,7 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
+2. ✅ **19 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + xAI, DeepSeek, Kimi, Qwen, GLM, MiniMax, OpenRouter, Groq (and any other OpenAI-compatible endpoint via `baseUrl`)
 3. ✅ **Built-in Tools** - 9 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation

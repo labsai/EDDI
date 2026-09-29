@@ -50,6 +50,20 @@ and Beijing regions towards workspace-specific hosts, while the shared `dashscop
 `dashscope` hosts remain the defaults here, so a workspace URL goes in `baseUrl`. Groq
 announced the retirement of `llama-3.3-70b-versatile` (2026-08-16), so it is not suggested.
 
+### Known limitations
+
+- Vendors retire models quickly; defaults were verified on 2026-09-29 and `modelName` should be set
+  explicitly in production. Alibaba's docs now favour workspace-specific hosts for Singapore and
+  Beijing; the shared `dashscope-intl` / `dashscope` hosts are kept as region defaults.
+- HITL: a paused tool call round-trips the assistant message's `thinking` (covered by a new
+  `ChatTranscriptCodecTest` case), so DeepSeek and Kimi tool turns resume correctly. Only a
+  gating message above its 64 KB cap loses its thinking on the degraded resume, which those two
+  providers can reject with a 400. Documented in [`langchain.md`](../langchain.md).
+- The group wizard and workforce team builder keep flat provider selects (they include the new
+  providers, ungrouped).
+- Local baseline: `hitl-config-negotiation.test.ts` fails on a Windows checkout because the Java
+  text block it compares against has CRLF line endings; it is unrelated to this change.
+
 ### Design decisions
 
 ```decision-log

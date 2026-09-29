@@ -747,7 +747,7 @@ Hello {context.userName}!
 - **[Architecture Overview](architecture.md)** - Deep dive into design
 - **[Behavior Rules](behavior-rules.md)** - Master decision logic
 - **[HTTP Calls](httpcalls.md)** - Integrate external APIs
-- **[LLM Integration](langchain.md)** - Configure LLMs (12 providers)
+- **[LLM Integration](langchain.md)** - Configure LLMs (19 providers)
 - **[Output Configuration](output-configuration.md)** - Message and quick-reply types
 - **[Human-in-the-Loop](hitl.md)** - Gate an agent's writes on human approval
 
