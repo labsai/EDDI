@@ -175,9 +175,11 @@ class ConversationServiceAgentVersionTest {
 
             assertEquals(3, memory.getAgentVersion());
             assertEquals(1, memory.takePreviousAgentVersion(), "the step must be able to record where it came from");
-            verify(conversationSetup).updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
             verify(agentFactory, never()).getAgent(any(), anyString(), anyInt());
-            assertEquals(1.0, switches());
+            // Recorded once the turn has run, not here: a turn refused after resolution
+            // must not leave the descriptor naming a version it never ran on.
+            verify(conversationSetup, never()).updateConversationAgentVersion(anyString(), anyString(), anyInt());
+            assertEquals(0.0, switches());
         }
 
         @Test
@@ -237,17 +239,44 @@ class ConversationServiceAgentVersionTest {
             assertEquals(1, memory.getAgentVersion());
         }
 
+    }
+
+    @Nested
+    @DisplayName("recording a move once the turn has run")
+    class RecordMove {
+
         @Test
-        @DisplayName("a descriptor that cannot be updated does not stop the move")
+        @DisplayName("a turn that ran on another version points the descriptor at it and counts the move")
+        void movedTurnIsRecorded() throws Exception {
+            var memory = memoryOn(1, 2);
+            memory.switchAgentVersion(3);
+
+            conversationService.recordAgentVersionMove(memory, 1);
+
+            verify(conversationSetup).updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
+            assertEquals(1.0, switches());
+        }
+
+        @Test
+        @DisplayName("a turn on the stored version records nothing")
+        void unmovedTurnRecordsNothing() throws Exception {
+            conversationService.recordAgentVersionMove(memoryOn(1, 2), 1);
+
+            verify(conversationSetup, never()).updateConversationAgentVersion(anyString(), anyString(), anyInt());
+            assertEquals(0.0, switches());
+        }
+
+        @Test
+        @DisplayName("a descriptor that cannot be updated does not fail the turn")
         void descriptorFailureIsTolerated() throws Exception {
             var memory = memoryOn(1, 2);
-            IAgent newer = agent(3, 2);
-            when(agentFactory.getLatestReadyAgentOfGeneration(ENV, AGENT_ID, 2)).thenReturn(newer);
+            memory.switchAgentVersion(3);
             doThrow(new IResourceStore.ResourceStoreException("down")).when(conversationSetup)
                     .updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
 
-            assertSame(newer, conversationService.resolveConversationAgent(ENV, memory));
-            assertEquals(3, memory.getAgentVersion());
+            conversationService.recordAgentVersionMove(memory, 1);
+
+            assertEquals(1.0, switches(), "the move happened; only the descriptor is stale");
         }
     }
 
@@ -290,10 +319,18 @@ class ConversationServiceAgentVersionTest {
                     });
 
             ArgumentCaptor<IConversationMemory> ranOn = ArgumentCaptor.forClass(IConversationMemory.class);
-            verify(newer).continueConversation(ranOn.capture(), any(), any());
+            ArgumentCaptor<IConversation.IConversationOutputRenderer> completion = ArgumentCaptor
+                    .forClass(IConversation.IConversationOutputRenderer.class);
+            verify(newer).continueConversation(ranOn.capture(), any(), completion.capture());
             assertEquals(3, ranOn.getValue().getAgentVersion());
             assertEquals(2, ranOn.getValue().getCompatibilityGeneration());
             verify(agentFactory, never()).getAgent(any(), anyString(), anyInt());
+
+            // The turn completes: only now is the move recorded.
+            verify(conversationSetup, never()).updateConversationAgentVersion(anyString(), anyString(), anyInt());
+            completion.getValue().renderOutput(ranOn.getValue());
+            verify(conversationSetup).updateConversationAgentVersion(CONVERSATION_ID, AGENT_ID, 3);
+            assertEquals(1.0, switches());
         }
 
         @Test

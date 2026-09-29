@@ -1,3 +1,24 @@
+## 🐛 fix(conversations): review findings for version following (2026-09-29)
+
+**Repo:** EDDI (`feat/agent-version-following`) — found by reviewing Phases 0–3 against the code
+paths around them.
+
+- **The daily deployment sweep ended conversations that could have moved.** It retires old versions
+  by ending their idle conversations, then undeploying once none are left. For an old version with a
+  newer compatible version ready, it now undeploys at once and ends nothing
+  (`AgentDeploymentManagement.retireIfConversationsCanMove`): those conversations continue on the
+  newer version whenever they return.
+- **A group member's private conversation that ended mid-discussion failed the member for every
+  remaining turn** (`MemberTurnExecutor`). It now continues in a fresh conversation, once; a second
+  end in a row is an ordinary member failure.
+- **The move was recorded before the turn was admitted.** The descriptor update and the switch
+  counter ran when the version was resolved, before the quota check, so a refused turn left the
+  descriptor naming a version the conversation never ran on. Both now run when the turn completes.
+- **Docs**: [`docs/deployment-management-of-agents.md`](../deployment-management-of-agents.md#running-conversations-and-new-agent-versions)
+  has the full model; `hitl.md`, `architecture.md`, `scheduling.md`, `slack-integration.md`,
+  `mcp-server.md` and `metrics.md` link to it, and the full-metrics dashboard charts
+  `eddi_conversation_agent_version_switch_count`.
+
 ## ✨ feat(deployment): undeploy and deploy understand compatible versions (2026-09-29)
 
 **Repo:** EDDI (`feat/agent-version-following`) — Phase 3 of

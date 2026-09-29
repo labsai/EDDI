@@ -112,7 +112,7 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 | version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
-| endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. |
+| endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. Conversations that can move to another deployed, compatible version are neither counted nor ended — see [Running conversations and new agent versions](#running-conversations-and-new-agent-versions). |
 | undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. |
 
 ### Example :
@@ -141,6 +141,116 @@ hard failure will abort a rollback here.
 Retry with `endAllActiveConversations=true` to end those conversations and proceed:
 
 `http://localhost:7070/administration/production/undeploy/5aaf98e19f7dd421ac3c7de9?version=1&endAllActiveConversations=true`
+
+Conversations ended this way record the end reason `agent-version-retired`, so clients can tell
+their users that the assistant was updated: a Slack thread says so and continues in a fresh
+conversation, and managed conversations and the `/v1` API start a new one on the next message.
+
+Conversations that another deployed version of the **same compatibility generation** can take over
+do not count here at all — see the next section.
+
+## Running conversations and new agent versions
+
+A conversation used to run on the agent version it started on for its whole life. It can now
+**follow** newer versions of its agent — but only versions its author declared **compatible**.
+Every save is a **breaking change** unless the save says otherwise, so nothing changes for anyone
+who does not opt in.
+
+### The compatibility generation
+
+Every agent version carries a `compatibilityGeneration`, assigned by the server on every save:
+
+| Save | Generation of the new version |
+| --- | --- |
+| New agent (create, duplicate, import of a new agent) | `1` |
+| Update with `compatible=true` | the previous version's |
+| Update without it (the default), and every import or sync of an existing agent | the previous version's + 1 — a breaking change |
+| Any update of a version stored before generations existed | `1` — a new chain starts |
+
+Versions with the same generation are compatible. A value for the field in the request body is
+ignored: the Manager saves by sending back the configuration it read, and honouring that value
+would make every save compatible. Only the latest version of an agent can be updated, so
+generations only ever go up.
+
+Declare a save compatible with the `compatible` query parameter:
+
+```
+PUT /agentstore/agents/{id}?version=4&compatible=true
+PUT /agentstore/agents/{id}/updateResourceUri?version=4&compatible=true
+```
+
+In the Manager, the save dialogs that write a new agent version offer the same choice as a
+checkbox, unticked by default. Over MCP, `apply_agent_changes` takes a `compatible` argument
+(default `false`).
+
+### What a conversation does on its next turn
+
+| The conversation | Runs on |
+| --- | --- |
+| started on a version **with** a generation | the highest `READY` version of that generation on the serving node — a newer compatible version as soon as it is deployed, or an older one when the newer one was undeployed |
+| started on a version **without** a generation (every conversation that existed before this) | its own version, exactly as before |
+| is paused for human approval | its own version until the resume completes — a pending approval is never re-evaluated against a newer version's gates |
+| has no version of its generation ready on this node | its own version, deployed on demand as before |
+
+Each step records the version that ran it as step data `agent:version`, and the first step after
+a move records `agent:switch = {"from": 4, "to": 5}`. The conversation's descriptor, its
+`agentVersion` in snapshots, `{conversationInfo.agentVersion}` in templates and the audit ledger
+all name the version the turn actually ran on. Moves are logged at INFO and counted in
+`eddi_conversation_agent_version_switch_count`.
+
+### What "compatible" means
+
+**Compatible means either version can continue a conversation the other one started.** It has to
+hold in both directions: during a rollout, or after undeploying a faulty version, a conversation
+can move back to an older version of the same generation.
+
+| Compatible — tick the box | Breaking — leave it unticked |
+| --- | --- |
+| Prompt wording, a different model or parameters | A property renamed or removed, or its meaning changed |
+| New tools | An action renamed or removed (behavior rules matching `lastStep` stop firing) |
+| New behavior rules that need no new state | Workflow steps removed or reordered in a way a flow depends on |
+| Output text changes | An output or quick-reply contract a client relies on |
+| | A version that **requires** conversation state older conversations do not have |
+
+**Never mark a security fix as breaking unless the old version is undeployed with it.** A
+conversation that stays on the old version keeps its old configuration, including its HITL gates
+and tool whitelist. Declared compatible, the fix reaches every running conversation on its next
+turn.
+
+### Deploying: preview the impact
+
+Before deploying a version, ask what it does to the conversations already running:
+
+| Element | Value |
+| --- | --- |
+| HTTP Method | `GET` |
+| API endpoint | `/administration/{environment}/deploymentimpact/{agentId}?version={version}` |
+| Response | `{"agentId", "version", "compatibilityGeneration", "deployedVersions": [{"version", "compatibilityGeneration", "activeConversations", "outcome"}]}` |
+
+`deployedVersions` lists every other deployed version in the environment, highest first.
+`outcome` is `FOLLOW` when its conversations move to the new version on their next turn (same
+generation, older version) and `STAY` otherwise (another generation, no generation, or a newer
+version). The Manager shows this in its deploy flow.
+
+### Undeploying: old versions can be retired freely
+
+Undeploying a version whose conversations have another deployed version of the same generation to
+go to answers `202` without ending them — they move on their next turn. Only conversations with
+nowhere to go are counted for the `409` and ended by `endAllActiveConversations`. "Deployed" means
+recorded as deployed, or running on the node that handles the request (a deployment made with
+`autoDeploy=false` is never recorded). A version undeployed by the same call —
+`undeployThisAndAllPreviousAgentVersions` — never counts as somewhere to go.
+
+Undeploying no longer disables the agent's schedules while another version of it stays deployed in
+the environment; they are disabled only when the last deployed version goes.
+
+### A breaking change and the conversations on the old version
+
+There is no separate policy to configure; the existing options cover it:
+
+- **Keep them**: leave the old version deployed. It serves its conversations until they end.
+- **End them**: `undeploy?endAllActiveConversations=true`. They record `agent-version-retired`,
+  and the channels that can start a fresh conversation do so (see above).
 
 
 ## **Check the deployment status of an agent:**

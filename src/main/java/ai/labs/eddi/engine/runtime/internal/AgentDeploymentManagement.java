@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -441,6 +442,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                                     return (UndeploymentExecutor) () -> {
                                         try {
+                                            // Evaluated here, after every current version has been
+                                            // deployed above, so a newer compatible version is ready.
+                                            if (retireIfConversationsCanMove(environment, agentId, agentVersion)) {
+                                                return;
+                                            }
                                             // attempt to undeploy Agent if this Agent version is no longer in use
                                             endOldConversationsWithOldAgents(agentId, agentVersion);
 
@@ -469,6 +475,43 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Retires an old version at once when its conversations have somewhere to go: a
+     * newer version of the same compatibility generation that is ready on this
+     * node.
+     * <p>
+     * Without this the sweep treated such a version like any other old one — it
+     * ENDED its idle conversations and kept it deployed while any were left. Those
+     * conversations can simply continue on the newer version whenever they return,
+     * so ending them destroys exactly what version following exists to keep, and
+     * keeping the old version deployed for them serves no one. A version without a
+     * generation, or with no newer compatible version ready, takes the old path.
+     *
+     * @return {@code true} when the version was undeployed here
+     */
+    boolean retireIfConversationsCanMove(Environment environment, String agentId, Integer agentVersion)
+            throws ServiceException, IllegalAccessException {
+        Integer generation;
+        try {
+            var configuration = agentStore.read(agentId, agentVersion);
+            generation = configuration != null ? configuration.getCompatibilityGeneration() : null;
+        } catch (ResourceNotFoundException | ResourceStoreException | RuntimeException e) {
+            return false;
+        }
+        if (generation == null) {
+            return false;
+        }
+        IAgent successor = agentFactory.getLatestReadyAgentOfGeneration(environment, agentId, generation);
+        if (successor == null || successor.getAgentVersion() <= agentVersion) {
+            return false;
+        }
+        agentFactory.undeployAgent(environment, agentId, agentVersion);
+        deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+        LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", agentId,
+                agentVersion, successor.getAgentVersion()));
+        return true;
     }
 
     private void manageDeploymentOfOldAgent(Environment environment, String agentId, Integer agentVersion)

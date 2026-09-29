@@ -142,6 +142,14 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
 
 On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback.
 
+### A pause and a new agent version
+
+Conversations can follow compatible versions of their agent
+([Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions)),
+but never while paused: a resume finishes on the version that paused, under that version's gates,
+and the conversation moves only on the next turn after it. A pending approval is never
+re-evaluated against a newer version's configuration.
+
 ---
 
 ## Surface 2: Group Conversations

@@ -749,6 +749,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
+                        recordAgentVersionMove(returnConversationMemory, agentVersion);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                         processingTurn.release();
                         responseHandler.onComplete(memorySnapshot);
@@ -984,6 +985,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                         memorySnapshot.setEnvironment(environment);
                         cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         conversationDescriptorStore.updateTimeStamp(conversationId);
+                        recordAgentVersionMove(returnConversationMemory, agentVersion);
                         recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                         processingTurn.release();
                         streamingHandler.onComplete(memorySnapshot);
@@ -1669,17 +1671,32 @@ public class ConversationService implements IConversationService, UserErasurePar
     private void moveToAgentVersion(IConversationMemory memory, Integer toVersion, Integer generation) {
         Integer fromVersion = memory.getAgentVersion();
         memory.switchAgentVersion(toVersion);
-        counterAgentVersionSwitch.increment();
         LOGGER.infof("Conversation %s moves from version %s to version %s of agent %s (compatibility generation %s)",
                 sanitize(memory.getConversationId()), fromVersion, toVersion, sanitize(memory.getAgentId()), generation);
-        // The descriptor names the agent version too, and conversation listings filter
-        // on it. Best-effort: if this fails the listing is stale until the next move,
-        // and the conversation itself runs on the right version either way.
+    }
+
+    /**
+     * Once a turn has run on another version than the conversation was stored on:
+     * count the move, and point the descriptor — which names the agent version too,
+     * and which conversation listings filter on — at the version it ran on.
+     * <p>
+     * After the turn rather than when the version is resolved: a turn refused
+     * between the two (quota, a queued turn skipped) must not leave the descriptor
+     * naming a version the conversation never ran on. Best-effort: a descriptor
+     * that cannot be updated stays stale until the next move, and the conversation
+     * runs on the right version either way.
+     */
+    void recordAgentVersionMove(IConversationMemory memory, Integer storedVersion) {
+        Integer ranOn = memory.getAgentVersion();
+        if (ranOn == null || Objects.equals(ranOn, storedVersion)) {
+            return;
+        }
+        counterAgentVersionSwitch.increment();
         try {
-            conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), toVersion);
+            conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), ranOn);
         } catch (Exception e) {
             LOGGER.warnf("Conversation %s moved to version %s of agent %s, but its descriptor still names the old version: %s",
-                    sanitize(memory.getConversationId()), toVersion, sanitize(memory.getAgentId()), e.getMessage());
+                    sanitize(memory.getConversationId()), ranOn, sanitize(memory.getAgentId()), e.getMessage());
         }
     }
 

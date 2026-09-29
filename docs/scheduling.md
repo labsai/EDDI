@@ -46,9 +46,16 @@ rather than recurring. Exactly one of the two is required.
 
 ### Conversation Strategies
 
+A schedule belongs to its agent, not to a version: a `new` fire starts on the latest deployed
+version, and a `persistent` conversation follows compatible versions like any other conversation (see
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions)).
+Undeploying a version disables the agent's schedules only when no version of the agent is left
+deployed in that environment — retiring an old version after deploying a new one leaves them
+running.
+
 | Strategy | Behavior | Use When |
 |----------|----------|----------|
-| `persistent` | Reuses the same conversation across all fires. Context accumulates. | Dream consolidation, ongoing monitoring, stateful agents |
+| `persistent` | Reuses the same conversation across all fires. Context accumulates. If that conversation has ended (the idle sweep, or an undeploy with `endAllActiveConversations`), the next fire starts a fresh one and records it on the schedule instead of failing until the schedule dead-letters. | Dream consolidation, ongoing monitoring, stateful agents |
 | `new` | Creates a fresh conversation for each fire. Clean context each time. | Report generation, data pipelines, stateless tasks |
 
 ## Configuration

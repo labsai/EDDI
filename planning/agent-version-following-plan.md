@@ -1,6 +1,6 @@
 # Agent Version Following — Conversations Move to Compatible Versions
 
-> **Status:** planned, not started. Written 2026-09-29 on `docs/agent-version-following`.
+> **Status:** implemented on `feat/agent-version-following` (2026-09-29), Phases 0–6. Where the implementation departs from or adds to this plan, §11 says so.
 >
 > **One-line summary:** a running conversation moves to the newest deployed version of its agent **when, and only when, that version was explicitly saved as compatible**. Every save is a breaking change unless the author says otherwise, so nothing changes for anyone who does not opt in.
 
@@ -253,4 +253,17 @@ Each phase is one PR and leaves `main` releasable. Phase 1 alone changes no beha
 
 **Checked in Phase 1:** every path that creates an agent version — REST, MCP (`setup_agent`, `create_api_agent`, `apply_agent_changes`), ZIP import (`RestImportService`), agent sync (`UpgradeExecutor`) — goes through `IRestAgentStore.createAgent` / `updateAgent` and from there the agent store, so the assignment rule cannot be bypassed.
 
-**To check in Phase 2:** how a group member's private conversation behaves when it has ended (`MemberTurnExecutor` reuses it by id), and whether it needs the same recovery as §6.1.
+**Checked in Phase 2:** a group member's private conversation that ends mid-discussion failed the member for every remaining turn. It now gets a fresh conversation once, like a Slack thread (§11).
+
+## 11. As Implemented — Departures and Additions
+
+- **Undeploy no longer disables the agent's schedules while another version stays deployed** in the environment. Undeploying any version used to disable all of them, which would have made "deploy v6, retire v5" — the normal rollout this feature encourages — switch every heartbeat off.
+- **The daily deployment sweep** (`AgentDeploymentManagement.manageAgentDeployments`) retires an old version at once when a newer version of its generation is ready, instead of ending its idle conversations first. Those conversations continue on the newer version whenever they return.
+- **`say` refuses an ENDED conversation before looking its agent up** (Phase 0), so an ended conversation whose version is gone reports "ended", which the channels recover on, rather than "agent not ready".
+- **Both user-conversation stores report a raced duplicate insert as `ResourceAlreadyExistsException`**, which the existing create-race recovery listens for.
+- **A group member's private conversation that has ended is replaced once** (`MemberTurnExecutor`), as for Slack threads.
+- **The move is recorded when the turn completes** — the descriptor update and `eddi_conversation_agent_version_switch_count` — not when the version is resolved, so a turn refused in between (quota) leaves nothing behind.
+- **Per-step keys**: `agent:version` and `agent:switch` (not `agentVersionChange`): step lookups match keys by prefix.
+- **The end reason** travels as an allow-listed `endReason` query parameter on the bulk end endpoint; free text is refused because clients show it to users.
+- **MCP**: only `apply_agent_changes` creates an agent version from an existing one, so only it takes `compatible`.
+- **Known limitation**: with `undeployThisAndAllPreviousAgentVersions`, a lower version answering 409 after higher ones were already undeployed leaves the schedules disabled by those undeploys — no worse than before, when every undeploy disabled them.

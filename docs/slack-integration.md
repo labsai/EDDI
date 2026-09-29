@@ -218,6 +218,17 @@ owns (a DM) is attributed to the integration whose secret actually signed it.
 
 The bot responds in a thread under the user's message.
 
+Each thread keeps one EDDI conversation. When that conversation has **ended** — the idle sweep
+ends inactive conversations, and so does undeploying its agent version with
+`endAllActiveConversations` — or no longer exists, the next message in the thread starts a fresh
+conversation instead of being refused, and is answered there. If the old conversation ended because
+its agent version was retired, the bot first says so in the thread ("I've been updated, so I'm
+starting a fresh conversation in this thread"); any other end is replaced silently, since the
+thread's history is still on screen. What the agent remembers about the user (long-term memory)
+carries over; only the conversation's own state starts again. Two messages arriving at once on an
+ended thread end up in the same new conversation. See
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
 ### Direct Messages (DMs)
 
 Send a message directly to the bot — no @mention needed:

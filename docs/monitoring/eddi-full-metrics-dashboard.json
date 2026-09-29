@@ -842,6 +842,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "store conflict"
+            },
+            {
+              "refId": "H",
+              "expr": "sum(rate(eddi_conversation_agent_version_switch_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "agent version switch"
             }
           ],
           "fieldConfig": {
