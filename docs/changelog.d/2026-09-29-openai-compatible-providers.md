@@ -23,13 +23,19 @@ that was discoverable in the Manager or the setup tools.
   `type: openai` is unchanged) and has public `build`/`buildStreaming` overloads that take extra
   request-body fields. They are public because the delegate is reached through a CDI client proxy.
 - **Provider defaults.** DeepSeek and Kimi run with `returnThinking` and `sendThinking` true,
-  because they reject a tool-loop follow-up that omits the reasoning of the previous call.
-  Qwen and GLM return thinking without echoing it. MiniMax sends `reasoning_split: true`.
+  because they reject a tool-loop follow-up that omits the reasoning of the previous call. GLM and
+  MiniMax also set both: Z.ai asks for the historical `reasoning_content` back during tool use,
+  and MiniMax (which the preset sends `reasoning_split: true`) puts thinking into
+  `reasoning_content` and wants the full assistant message appended to the history. Qwen sets
+  neither. `returnThinking` only matters together with `sendThinking` today, since EDDI does not
+  read a response's thinking for any other purpose. A blank parameter counts as not set, so the
+  preset default still applies.
 - **Capabilities follow the catalog.** `JsonResponseFormatPolicy` and `ModelCapabilityService`
   read each provider's JSON-mode and vision-model tokens from it (DeepSeek's vision is
-  `deepseek-flash` only). `AgentSetupService.resolveParams` no longer defaults these providers to
+  `deepseek-flash`/`deepseek-v4-flash`; a unit test checks that no vision token matches a known
+  text-only model such as `qwen3.7-max` or `glm-5.3`). `AgentSetupService.resolveParams` no longer defaults these providers to
   `claude-sonnet-4-6`; it uses the provider's own default model. The `setup_agent` and
-  `create_api_agent` MCP tools name the eight ids, and their model example is now `deepseek-v4-pro`.
+  `create_api_agent` MCP tools name the eight ids, and their model example is now `deepseek-flash`.
 - **Manager.** A grouped provider picker (model labs, OpenAI-compatible providers, cloud platforms,
   local) replaces the flat lists in the agent wizard, the operator activation form and the LLM
   editor (task type, cascade steps and judge, summary provider). Providers with more than one
@@ -37,9 +43,7 @@ that was discoverable in the Manager or the setup tools.
   base URL, the default region clears it, and the backend `region` parameter stays for
   hand-written configs. A type the Manager does not know renders as "<type> (custom)" instead
   of being rewritten. `llm-provider-catalog.ts` mirrors the backend JSON, and
-  `llm-provider-catalog.test.ts` reads that JSON and fails on any drift. The group wizard and team
-  builder keep their flat selects, which now simply include the new providers. Twelve i18n keys in
-  all 11 locales.
+  `llm-provider-catalog.test.ts` reads that JSON and fails on any drift. Twelve i18n keys in all 11 locales.
 - No new dependencies and no migration: existing `type: openai` + `baseUrl` configs behave as before.
 
 ### Verification
@@ -55,14 +59,40 @@ announced the retirement of `llama-3.3-70b-versatile` (2026-08-16), so it is not
 - Vendors retire models quickly; defaults were verified on 2026-09-29 and `modelName` should be set
   explicitly in production. Alibaba's docs now favour workspace-specific hosts for Singapore and
   Beijing; the shared `dashscope-intl` / `dashscope` hosts are kept as region defaults.
-- HITL: a paused tool call round-trips the assistant message's `thinking` (covered by a new
-  `ChatTranscriptCodecTest` case), so DeepSeek and Kimi tool turns resume correctly. Only a
+- HITL: a paused tool call round-trips the assistant message's `thinking` (a new
+  `ChatTranscriptCodecTest` case is a characterisation test that pins this existing behaviour),
+  so DeepSeek and Kimi tool turns resume correctly. Only a
   gating message above its 64 KB cap loses its thinking on the degraded resume, which those two
   providers can reject with a 400. Documented in [`langchain.md`](../langchain.md).
-- The group wizard and workforce team builder keep flat provider selects (they include the new
-  providers, ungrouped).
 - Local baseline: `hitl-config-negotiation.test.ts` fails on a Windows checkout because the Java
   text block it compares against has CRLF line endings; it is unrelated to this change.
+
+### Review follow-up (backend)
+
+- **Catalog corrections.** xAI gains an `intl`/`us` region pair (the US host serves `grok-4.7` and
+  `grok-4.6` only, at about a 10% premium) and `grok-4.6`. DeepSeek's default is now
+  `deepseek-flash` (V4.1 Flash, 2026-09-10, multimodal). Moonshot's key URL is the console page and
+  `kimi-k2.7-code` is vision-capable. Qwen drops the legacy `qwen3.7-max` / superseded
+  `qwen3.6-flash` suggestions, its vision tokens no longer match the text-only `qwen3.7-max`, and
+  it sets no thinking defaults. Z.ai GLM sets both thinking flags and lists `glm-4.6v` and
+  `glm-5.3-flash` for vision (`glm-5v` is unconfirmed). MiniMax's `cn` region is
+  `api.minimax.cn` (the old host 302-redirects, which can drop the POST body/Authorization) and
+  it sets both thinking flags. OpenRouter's `openrouter/auto` is vision-capable. Groq moves to
+  `qwen/qwen3.8-27b` (`qwen3.6-27b` was shut down 2026-09-14). Sources: the vendor docs linked from
+  [`langchain.md`](../langchain.md).
+- **Default model outside the builder.** `AgentSetupService.defaultModelFor` is the one rule (preset
+  default, else `claude-sonnet-4-6`); `resolveParams` and `CreateSubAgentTool` (including its
+  `allowedModels` guard) use it. `LlmTask.resolveModelName(params, type)` and the cascade executor
+  fall back to the preset default too, so vision forwarding and the audit/cost records see the
+  real model instead of null or the type string. `McpSetupTools` no longer calls
+  `claude-sonnet-4-6` the default for every provider.
+- **Blank values** in the task parameters no longer block a preset default (`"sendThinking": ""`).
+- **Catalog records** ignore unknown JSON properties, and a null key or value in
+  `parameterDefaults`/`customParameters` fails with a message naming the provider and field.
+  `OpenAiCompatibleProviders.isCompatibleProvider` (test-only) was removed.
+- **Tests.** The builder test now asserts custom parameters and thinking flags reach the langchain4j
+  model, a new `LlmModuleTest` covers registration and the id-collision guard, and a unit test
+  checks vision tokens against a list of known text-only model ids.
 
 ### Design decisions
 

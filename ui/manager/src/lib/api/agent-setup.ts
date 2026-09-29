@@ -124,7 +124,7 @@ export const LLM_PROVIDERS = [
   // Named OpenAI-compatible providers. Endpoints, regions and suggestions live in
   // `llm-provider-catalog.ts`, which mirrors the backend catalog.
   { id: "xai", name: "xAI Grok", defaultModel: "grok-4.7", needsKey: true, group: "compatible" },
-  { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-v4-pro", needsKey: true, group: "compatible" },
+  { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-flash", needsKey: true, group: "compatible" },
   { id: "moonshot", name: "Moonshot Kimi", defaultModel: "kimi-k3", needsKey: true, group: "compatible" },
   { id: "qwen", name: "Alibaba Qwen", defaultModel: "qwen3.7-plus", needsKey: true, group: "compatible" },
   { id: "zhipu", name: "Z.ai GLM (Zhipu)", defaultModel: "glm-5.3", needsKey: true, group: "compatible" },
@@ -141,7 +141,13 @@ export const LLM_PROVIDERS = [
   // repo id — it is shown as the model placeholder and seeds the operator
   // activation form. See MODEL_SUGGESTIONS.jlama.
   { id: "jlama", name: "Jlama (In-Process)", defaultModel: "tjake/Llama-3.2-1B-Instruct-JQ4", needsKey: false, group: "local" },
-] as const;
+] as const satisfies readonly {
+  id: string;
+  name: string;
+  defaultModel: string;
+  needsKey: boolean;
+  group: ProviderGroup;
+}[];
 
 /** Display order of the provider groups, with the i18n key of each heading. */
 export const LLM_PROVIDER_GROUPS: readonly { id: ProviderGroup; labelKey: string; fallback: string }[] = [

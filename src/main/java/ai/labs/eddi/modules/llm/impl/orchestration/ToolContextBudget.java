@@ -74,7 +74,7 @@ public class ToolContextBudget {
     public TokenCountEstimator resolveToolContextEstimator(LlmConfiguration.Task task) {
         try {
             Map<String, String> parameters = task.getParameters();
-            String modelName = parameters != null ? LlmTask.resolveModelName(parameters) : null;
+            String modelName = parameters != null ? LlmTask.resolveModelName(parameters, task.getType()) : null;
             return tokenCounterFactory.getEstimator(task.getType(), modelName);
         } catch (Exception e) {
             LOGGER.debugf("Tool-context budget: falling back to the approximate token estimator (%s)", e.getMessage());

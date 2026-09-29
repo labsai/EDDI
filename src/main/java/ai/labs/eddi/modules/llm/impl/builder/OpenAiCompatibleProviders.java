@@ -51,10 +51,6 @@ public final class OpenAiCompatibleProviders {
         return Optional.ofNullable(Holder.PROVIDERS.get(type.trim().toLowerCase(Locale.ROOT)));
     }
 
-    public static boolean isCompatibleProvider(String type) {
-        return find(type).isPresent();
-    }
-
     static Map<String, OpenAiCompatibleProvider> load() {
         try (InputStream in = OpenAiCompatibleProviders.class.getResourceAsStream(RESOURCE)) {
             if (in == null) {

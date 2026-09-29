@@ -26,6 +26,8 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
@@ -425,7 +427,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
@@ -449,7 +451,7 @@ public class LlmTask implements ILifecycleTask {
             var audio = mm != null
                     ? ModelCapabilityService.Support.parse(mm.getAudio())
                     : ModelCapabilityService.Support.AUTO;
-            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams, resolvedType),
                     vision, documents, audio);
         }
 
@@ -697,7 +699,7 @@ public class LlmTask implements ILifecycleTask {
             // resolveModelName, not params["model"]: most providers take "modelName", so
             // the
             // ledger recorded the provider type ("anthropic") instead of the model id.
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -772,7 +774,8 @@ public class LlmTask implements ILifecycleTask {
                 // decided by resolveInheritedSummaryParameters — a summary config naming a
                 // different vendor gets the neutral tuning values and none of the
                 // credentials.
-                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams));
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
+                        resolveModelName(processedParams, resolvedType));
                 conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
@@ -1125,7 +1128,7 @@ public class LlmTask implements ILifecycleTask {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -1728,6 +1731,23 @@ public class LlmTask implements ILifecycleTask {
         if (name != null)
             return name;
         return processedParams.get("deploymentName");
+    }
+
+    /**
+     * As {@link #resolveModelName(Map)}, but a named OpenAI-compatible provider
+     * (xAI, DeepSeek, ...) configured without a model resolves to its preset's
+     * default model — the same one its builder will send. Without this, vision
+     * forwarding and the audit/cost records saw no model at all.
+     *
+     * @param resolvedType
+     *            the task type after global-variable resolution
+     */
+    public static String resolveModelName(Map<String, String> processedParams, String resolvedType) {
+        String name = resolveModelName(processedParams);
+        if (name == null || name.isBlank()) {
+            return OpenAiCompatibleProviders.find(resolvedType).map(OpenAiCompatibleProvider::defaultModel).orElse(name);
+        }
+        return name;
     }
 
     /**

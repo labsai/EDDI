@@ -77,7 +77,8 @@ describe("llm-provider-catalog parity with the backend catalog", () => {
 describe("llm-provider-catalog helpers", () => {
   it("returns regions only for providers with more than the default endpoint", () => {
     expect(getProviderRegions("qwen").map((r) => r.id)).toEqual(["intl", "cn", "us"]);
-    expect(getProviderRegions("xai")).toEqual([]);
+    expect(getProviderRegions("xai").map((r) => r.id)).toEqual(["intl", "us"]);
+    expect(getProviderRegions("deepseek")).toEqual([]);
     expect(getProviderRegions("openai")).toEqual([]);
   });
 

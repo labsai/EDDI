@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.List;
 import java.util.Map;
 
@@ -42,11 +44,13 @@ import java.util.Map;
  * @param capabilities
  *            what the provider's API supports
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record OpenAiCompatibleProvider(String id, String displayName, String defaultBaseUrl, List<Region> regions, String defaultModel,
         List<String> modelSuggestions, String apiKeyUrl, String apiKeyPlaceholder, Map<String, String> parameterDefaults,
         Map<String, Object> customParameters, Capabilities capabilities) {
 
     /** A named alternative endpoint, e.g. {@code cn} for China-mainland keys. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Region(String id, String baseUrl) {
     }
 
@@ -58,6 +62,7 @@ public record OpenAiCompatibleProvider(String id, String displayName, String def
      * @param visionModelTokens
      *            substrings of a model id that identify image-capable models
      */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Capabilities(boolean jsonMode, boolean jsonModeWithTools, List<String> visionModelTokens) {
         public Capabilities {
             visionModelTokens = visionModelTokens == null ? List.of() : List.copyOf(visionModelTokens);
@@ -67,9 +72,23 @@ public record OpenAiCompatibleProvider(String id, String displayName, String def
     public OpenAiCompatibleProvider {
         regions = regions == null ? List.of() : List.copyOf(regions);
         modelSuggestions = modelSuggestions == null ? List.of() : List.copyOf(modelSuggestions);
+        // Map.copyOf would throw a bare NPE; name the provider and the field instead.
+        requireNoNulls(id, "parameterDefaults", parameterDefaults);
+        requireNoNulls(id, "customParameters", customParameters);
         parameterDefaults = parameterDefaults == null ? Map.of() : Map.copyOf(parameterDefaults);
         customParameters = customParameters == null ? Map.of() : Map.copyOf(customParameters);
         capabilities = capabilities == null ? new Capabilities(false, false, List.of()) : capabilities;
+    }
+
+    private static void requireNoNulls(String id, String field, Map<String, ?> values) {
+        if (values == null) {
+            return;
+        }
+        values.forEach((k, v) -> {
+            if (k == null || v == null) {
+                throw new IllegalStateException("Provider '" + id + "' has a null key or value in " + field);
+            }
+        });
     }
 
     /**

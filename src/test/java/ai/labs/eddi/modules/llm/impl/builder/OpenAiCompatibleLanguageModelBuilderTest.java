@@ -100,7 +100,8 @@ class OpenAiCompatibleLanguageModelBuilderTest {
                     new OpenAILanguageModelBuilder());
             Map<String, String> in = withKey();
             in.put("baseUrl", "http://169.254.169.254/v1");
-            assertThrows(RuntimeException.class, () -> real.build(in));
+            var e = assertThrows(IllegalArgumentException.class, () -> real.build(in));
+            assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
         }
     }
 
@@ -149,6 +150,17 @@ class OpenAiCompatibleLanguageModelBuilderTest {
             Map<String, String> in = withKey();
             in.put("sendThinking", "false");
             assertEquals("false", merged(builderFor("deepseek"), in).get("sendThinking"));
+        }
+
+        @Test
+        @DisplayName("a present-but-blank value counts as absent, so the preset default still applies")
+        void blankValueTakesDefault() {
+            Map<String, String> in = withKey();
+            in.put("sendThinking", "");
+            in.put("returnThinking", "  ");
+            Map<String, String> out = merged(builderFor("deepseek"), in);
+            assertEquals("true", out.get("sendThinking"));
+            assertEquals("true", out.get("returnThinking"));
         }
 
         @Test

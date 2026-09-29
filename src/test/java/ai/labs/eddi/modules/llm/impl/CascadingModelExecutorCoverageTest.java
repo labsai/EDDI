@@ -710,6 +710,26 @@ class CascadingModelExecutorCoverageTest {
     }
 
     @Test
+    @DisplayName("a named OpenAI-compatible step without a model traces the preset default, not the bare type")
+    void compatibleProviderStepTracesPresetDefaultModel() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("xai");
+        cascade.setSteps(List.of(step));
+
+        ChatModel answering = modelReturning("answer");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(answering);
+
+        var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
+                mock(AgentOrchestrator.class), Map.of(), false, false, false);
+
+        assertEquals("grok-4.7", result.trace().get(0).get("model"));
+    }
+
+    @Test
     @DisplayName("step params — a TemplateEngineException falls back to the raw parameter value")
     void templateParams_templateEngineException_fallsBackToRawValue() throws Exception {
         var cascade = new ModelCascadeConfig();

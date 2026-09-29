@@ -9,8 +9,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -72,8 +75,22 @@ class OpenAiCompatibleProvidersTest {
         void find() {
             assertTrue(OpenAiCompatibleProviders.find("  XAI ").isPresent());
             assertTrue(OpenAiCompatibleProviders.find(null).isEmpty());
-            assertFalse(OpenAiCompatibleProviders.isCompatibleProvider("openai"));
-            assertTrue(OpenAiCompatibleProviders.isCompatibleProvider("deepseek"));
+            assertTrue(OpenAiCompatibleProviders.find("openai").isEmpty());
+            assertTrue(OpenAiCompatibleProviders.find("deepseek").isPresent());
+        }
+
+        @Test
+        @DisplayName("no vision token matches a known text-only model id")
+        void visionTokensNeverMatchTextOnlyModels() {
+            List<String> textOnly = List.of("qwen3.7-max", "glm-5.3", "glm-5.2", "deepseek-v4-pro", "MiniMax-M2.7", "openai/gpt-oss-120b");
+            for (OpenAiCompatibleProvider p : OpenAiCompatibleProviders.all()) {
+                for (String token : p.capabilities().visionModelTokens()) {
+                    for (String model : textOnly) {
+                        assertFalse(model.toLowerCase(Locale.ROOT).contains(token.toLowerCase(Locale.ROOT)),
+                                p.id() + " vision token '" + token + "' falsely matches text-only model " + model);
+                    }
+                }
+            }
         }
 
         @Test
@@ -84,6 +101,10 @@ class OpenAiCompatibleProvidersTest {
             assertEquals("true", deepseek.parameterDefaults().get("sendThinking"));
             var minimax = OpenAiCompatibleProviders.find("minimax").orElseThrow();
             assertEquals(true, minimax.customParameters().get("reasoning_split"));
+            // reasoning_split puts thinking into reasoning_content, which MiniMax wants
+            // appended back to the history.
+            assertEquals("true", minimax.parameterDefaults().get("returnThinking"));
+            assertEquals("true", minimax.parameterDefaults().get("sendThinking"));
         }
     }
 
@@ -108,6 +129,36 @@ class OpenAiCompatibleProvidersTest {
             assertThrows(IllegalStateException.class, () -> OpenAiCompatibleProviders.validate(List.of(provider("a", " ", "m"))));
             assertThrows(IllegalStateException.class, () -> OpenAiCompatibleProviders.validate(List.of(provider("a", "https://a.example", ""))));
             assertThrows(IllegalStateException.class, () -> OpenAiCompatibleProviders.validate(List.of(provider("a", "http://a.example", "m"))));
+        }
+
+        @Test
+        @DisplayName("rejects a null key or value in the parameter maps, naming the provider and field")
+        void nullParameterEntries() {
+            var nullValue = new HashMap<String, String>();
+            nullValue.put("sendThinking", null);
+            var e = assertThrows(IllegalStateException.class,
+                    () -> new OpenAiCompatibleProvider("p", "P", "https://a.example", List.of(), "m", List.of("m"), null, null, nullValue, null,
+                            null));
+            assertTrue(e.getMessage().contains("'p'") && e.getMessage().contains("parameterDefaults"), e.getMessage());
+
+            var nullCustom = new HashMap<String, Object>();
+            nullCustom.put("reasoning_split", null);
+            var e2 = assertThrows(IllegalStateException.class,
+                    () -> new OpenAiCompatibleProvider("p", "P", "https://a.example", List.of(), "m", List.of("m"), null, null, null, nullCustom,
+                            null));
+            assertTrue(e2.getMessage().contains("customParameters"), e2.getMessage());
+        }
+
+        @Test
+        @DisplayName("the catalog tolerates unknown JSON properties")
+        void ignoresUnknownProperties() throws Exception {
+            String json = "{\"id\":\"a\",\"extra\":1,\"defaultBaseUrl\":\"https://a.example\",\"defaultModel\":\"m\","
+                    + "\"regions\":[{\"id\":\"r\",\"baseUrl\":\"https://r.example\",\"note\":\"x\"}],"
+                    + "\"capabilities\":{\"jsonMode\":true,\"future\":1}}";
+            var p = new ObjectMapper().readValue(json, OpenAiCompatibleProvider.class);
+            assertEquals("a", p.id());
+            assertEquals(1, p.regions().size());
+            assertTrue(p.capabilities().jsonMode());
         }
 
         @Test

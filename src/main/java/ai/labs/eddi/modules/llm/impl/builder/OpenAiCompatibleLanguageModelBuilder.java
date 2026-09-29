@@ -57,7 +57,10 @@ public class OpenAiCompatibleLanguageModelBuilder implements ILanguageModelBuild
 
     private Map<String, String> merged(Map<String, String> parameters) {
         Map<String, String> merged = new HashMap<>(parameters == null ? Map.of() : parameters);
-        provider.parameterDefaults().forEach(merged::putIfAbsent);
+        // A present-but-blank value counts as absent: the Manager and templated
+        // configs submit "" for an untouched field, and that must not switch a
+        // preset default (sendThinking, ...) off.
+        provider.parameterDefaults().forEach((k, def) -> merged.merge(k, def, (old, d) -> old == null || old.isBlank() ? d : old));
 
         if (isBlank(merged.get(KEY_BASE_URL))) {
             merged.put(KEY_BASE_URL, provider.resolveBaseUrl(merged.get(KEY_REGION)));

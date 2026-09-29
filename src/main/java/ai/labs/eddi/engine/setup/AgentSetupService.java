@@ -5,8 +5,6 @@
 package ai.labs.eddi.engine.setup;
 
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
-import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
-import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -42,6 +40,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -1780,6 +1780,16 @@ public class AgentSetupService {
     }
 
     /**
+     * The model to use for {@code provider} when none was named: a named
+     * OpenAI-compatible provider's own preset default (falling back to
+     * {@link #DEFAULT_MODEL} would hand e.g. xAI a Claude model name), otherwise
+     * {@link #DEFAULT_MODEL}.
+     */
+    public static String defaultModelFor(String provider) {
+        return OpenAiCompatibleProviders.find(provider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+    }
+
+    /**
      * Resolve the caller-supplied setup parameters, applying defaults.
      * <p>
      * The environment is parsed with {@link Deployment.Environment#parseStrict} —
@@ -1794,11 +1804,7 @@ public class AgentSetupService {
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
         String resolvedProvider = provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER;
-        // A named OpenAI-compatible provider has its own default model; falling back to
-        // DEFAULT_MODEL would hand e.g. xAI a Claude model name.
-        String resolvedModel = model != null && !model.isBlank()
-                ? model.trim()
-                : OpenAiCompatibleProviders.find(resolvedProvider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+        String resolvedModel = model != null && !model.isBlank() ? model.trim() : defaultModelFor(resolvedProvider);
         return new ResolvedParams(resolvedProvider, resolvedModel, deploy == null || deploy, Deployment.Environment.parseStrict(environment));
     }
 

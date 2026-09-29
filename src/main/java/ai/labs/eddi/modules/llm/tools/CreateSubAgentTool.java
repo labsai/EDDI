@@ -172,7 +172,7 @@ public class CreateSubAgentTool {
             // omission, because a null model skipped the guard and AgentSetupService
             // then substituted DEFAULT_MODEL — deploying a model the policy never saw.
             final String resolvedModel = requestedModel == null || requestedModel.isBlank()
-                    ? AgentSetupService.DEFAULT_MODEL
+                    ? AgentSetupService.defaultModelFor(resolvedProvider)
                     : requestedModel;
 
             // A vault reference names ONE provider's secret. Handing the parent's

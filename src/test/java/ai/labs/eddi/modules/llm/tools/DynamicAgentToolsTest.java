@@ -106,6 +106,32 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("a named OpenAI-compatible provider without a model gets its own default, not the Claude one")
+        void createSubAgent_compatibleProviderDefaultModel() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            "xai", "grok-4.7", true, "ready", null, null, null, null, null, null));
+
+            tool.createSubAgent("Test", "prompt", "xai", null, null, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture());
+            assertEquals("grok-4.7", captor.getValue().model());
+        }
+
+        @Test
+        @DisplayName("the allowedModels guard sees the resolved default of a compatible provider")
+        void createSubAgent_allowedModelsSeesResolvedDefault() throws Exception {
+            config.setAllowedModels(Map.of("xai", List.of("grok-4.5")));
+
+            String result = tool.createSubAgent("Test", "prompt", "xai", null, null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("grok-4.7"), result);
+            verify(agentSetupService, never()).setupAgent(any());
+        }
+
+        @Test
         void createSubAgent_creationDisabled() {
             config.setAllowCreation(false);
 

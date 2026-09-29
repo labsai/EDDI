@@ -673,8 +673,8 @@ Manager mirrors for its provider picker.
 
 | `type` | Provider | Default endpoint | Regions (`region`) | Default model |
 |---|---|---|---|---|
-| `xai` | xAI Grok | `https://api.x.ai/v1` | | `grok-4.7` |
-| `deepseek` | DeepSeek | `https://api.deepseek.com` | | `deepseek-v4-pro` |
+| `xai` | xAI Grok | `https://api.x.ai/v1` | `intl`, `us` | `grok-4.7` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | | `deepseek-flash` |
 | `moonshot` | Moonshot Kimi | `https://api.moonshot.ai/v1` | `intl`, `cn` | `kimi-k3` |
 | `qwen` | Alibaba Qwen | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `intl`, `cn`, `us` | `qwen3.7-plus` |
 | `zhipu` | Z.ai GLM (Zhipu) | `https://api.z.ai/api/paas/v4` | `intl`, `cn` | `glm-5.3` |
@@ -685,7 +685,13 @@ Manager mirrors for its provider picker.
 Model ids and endpoints were checked against the vendors' documentation on 2026-09-29. Vendors
 retire models often, so treat the defaults as a starting point and set `modelName` explicitly
 in production. Alibaba is moving the Singapore and Beijing regions to workspace-specific hosts;
-the shared hosts above still work, and a workspace URL goes in `baseUrl`.
+the shared hosts above still work (they enter maintenance mode on 2026-09-30, which means no
+new features rather than shutdown), and a workspace host
+(`https://{WorkspaceId}.<region>.maas.aliyuncs.com/compatible-mode/v1`) goes in `baseUrl`.
+xAI's `us` region is its US data-residency host: it serves `grok-4.7` and `grok-4.6` only, at
+roughly a 10% premium. DeepSeek's V4.1 Flash (released 2026-09-10) is multimodal and is the
+model DeepSeek recommends; whether `deepseek-v4-pro` is still a distinct model is unconfirmed.
+Moonshot fixes `temperature` on `kimi-k2.7-code` and `kimi-k2.6`, so do not set it there.
 
 **Precedence.**
 - Endpoint: an explicit `baseUrl`, then the `region` parameter (a region id from the table), then
@@ -702,19 +708,25 @@ providers require it back on the next request of a tool loop. The presets set:
 | Provider | `returnThinking` | `sendThinking` | Why |
 |---|---|---|---|
 | `deepseek`, `moonshot` | `true` | `true` | The API rejects a tool-loop follow-up that omits the previous turn's reasoning |
-| `qwen`, `zhipu` | `true` | `false` | Reasoning is returned but does not have to be echoed |
-| `minimax` | default | default | Sends `reasoning_split: true` so reasoning arrives in its own field |
-| `xai`, `openrouter`, `groq` | default | default | |
+| `zhipu` | `true` | `true` | Z.ai asks that the historical `reasoning_content` be returned during tool use |
+| `minimax` | `true` | `true` | With `reasoning_split: true` (sent by the preset) thinking arrives in `reasoning_content`, and MiniMax's docs say the full assistant message must be appended to the history |
+| `qwen`, `xai`, `openrouter`, `groq` | default | default | Nothing to echo |
 
 `returnThinking` and `sendThinking` are ordinary parameters and also work on `type: openai`
-(both default to `false` there, so existing configs are unchanged). `minimax` additionally sends
-the request-body field `reasoning_split`; that is fixed by the preset.
+(both default to `false` there, so existing configs are unchanged). Today `returnThinking` only
+matters together with `sendThinking`: EDDI does not read a response's thinking for any other
+purpose, so returning it without echoing it buys nothing. `minimax` additionally sends the
+request-body field `reasoning_split`; that is fixed by the preset. A parameter left blank
+(`""`) counts as not set, so the preset default still applies.
 
 **Capabilities.** `jsonResponseFormat: auto` sends a JSON response format to `xai`, `deepseek`,
 `moonshot`, `qwen`, `zhipu` and `groq` when the request carries no tools (never with tools), and
 never to `minimax` or `openrouter`. Image input is enabled by model id: `grok-4*`,
-`deepseek-flash`, `kimi-k3`, `kimi-k2.6`, the Qwen `qwen3.7*`/`qwen3-vl`/`qwen-vl`/`qvq` families,
-`glm-4.5v`/`glm-5v` and `minimax-m3`. Override either per task or per deployment as usual.
+`deepseek-flash`/`deepseek-v4-flash`, `kimi-k3`, `kimi-k2.6`, `kimi-k2.7-code`, the Qwen
+`qwen3.8*`, `qwen3.7-plus`, `qwen3.7-flash`, `qwen3.6-plus`, `qwen3.6-flash` and
+`qwen3-vl`/`qwen-vl`/`qvq` families (not the text-only `qwen3.7-max`), `glm-5.3-flash`,
+`glm-4.6v`/`glm-4.5v` (`glm-5.3` itself is text-only), `minimax-m3`, `openrouter/auto` and
+Groq's `qwen3.8-27b`. Override either per task or per deployment as usual.
 
 ```json
 {

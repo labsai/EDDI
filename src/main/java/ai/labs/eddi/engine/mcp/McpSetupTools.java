@@ -56,8 +56,8 @@ public class McpSetupTools {
                                      + "'azure-openai', 'bedrock', 'oracle-genai', or an OpenAI-compatible provider: "
                                      + "'xai', 'deepseek', 'moonshot' (Kimi), 'qwen', 'zhipu' (Z.ai GLM), 'minimax', "
                                      + "'openrouter' or 'groq'") String provider,
-                             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', "
-                                     + "'gemini-3.1-pro-preview', 'deepseek-v4-pro', 'llama3.2:1b' (ollama)") String model,
+                             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default for anthropic; named OpenAI-compatible providers use their own default model), 'gpt-5.4', "
+                                     + "'gemini-3.1-pro-preview', 'deepseek-flash', 'llama3.2:1b' (ollama)") String model,
                              @ToolArg(description = "API key for the LLM provider. Required for most cloud providers "
                                      + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
                                      + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
@@ -131,7 +131,7 @@ public class McpSetupTools {
                                  @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', 'mistral', "
                                          + "'azure-openai', 'bedrock', 'oracle-genai', 'xai', 'deepseek', 'moonshot', 'qwen', 'zhipu', "
                                          + "'minimax', 'openrouter', 'groq', etc.") String provider,
-                                 @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
+                                 @ToolArg(description = "Model name (default for anthropic: 'claude-sonnet-4-6'; named OpenAI-compatible providers use their own default model)") String model,
                                  @ToolArg(description = "LLM API key (required for most cloud providers: anthropic, openai, gemini, mistral). "
                                          + "Not needed for bedrock (IAM) or oracle-genai (OCI auth). "
                                          + "Use vault reference: '${vault:key-name}', e.g. the apiKeyVaultReference returned by an "

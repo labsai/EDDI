@@ -11,7 +11,11 @@
 export type ProviderGroup = "frontier" | "compatible" | "cloud" | "local";
 
 export interface ProviderRegion {
-  /** Region id sent to the backend's `region` parameter: `intl`, `cn` or `us`. */
+  /**
+   * Region id: `intl`, `cn` or `us`. The wizard and the operator form send the
+   * region's `baseUrl` (the default region sends none); the backend also accepts
+   * the id as a `region` parameter in hand-written configs.
+   */
   id: string;
   baseUrl: string;
 }
@@ -32,9 +36,12 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
     id: "xai",
     name: "xAI Grok",
     defaultBaseUrl: "https://api.x.ai/v1",
-    regions: [],
+    regions: [
+      { id: "intl", baseUrl: "https://api.x.ai/v1" },
+      { id: "us", baseUrl: "https://us.api.x.ai/v1" },
+    ],
     defaultModel: "grok-4.7",
-    suggestions: ["grok-4.7", "grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning"],
+    suggestions: ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning"],
     apiKeyUrl: "https://console.x.ai",
     keyPlaceholder: "xai-...",
   },
@@ -43,8 +50,8 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
     name: "DeepSeek",
     defaultBaseUrl: "https://api.deepseek.com",
     regions: [],
-    defaultModel: "deepseek-v4-pro",
-    suggestions: ["deepseek-v4-pro", "deepseek-flash"],
+    defaultModel: "deepseek-flash",
+    suggestions: ["deepseek-flash", "deepseek-v4-pro"],
     apiKeyUrl: "https://platform.deepseek.com",
     keyPlaceholder: "sk-...",
   },
@@ -58,7 +65,7 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
     ],
     defaultModel: "kimi-k3",
     suggestions: ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
-    apiKeyUrl: "https://platform.kimi.ai",
+    apiKeyUrl: "https://platform.kimi.ai/console/api-keys",
     keyPlaceholder: "sk-...",
   },
   {
@@ -71,7 +78,7 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
       { id: "us", baseUrl: "https://dashscope-us.aliyuncs.com/compatible-mode/v1" },
     ],
     defaultModel: "qwen3.7-plus",
-    suggestions: ["qwen3.7-plus", "qwen3.8-max", "qwen3.7-max", "qwen3.6-flash"],
+    suggestions: ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-flash"],
     apiKeyUrl: "https://modelstudio.console.alibabacloud.com",
     keyPlaceholder: "sk-...",
   },
@@ -84,7 +91,7 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
       { id: "cn", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
     ],
     defaultModel: "glm-5.3",
-    suggestions: ["glm-5.3", "glm-5.3-flash", "glm-5.2"],
+    suggestions: ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-5.2"],
     apiKeyUrl: "https://z.ai/manage-apikey/apikey-list",
     keyPlaceholder: "...",
   },
@@ -94,10 +101,10 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
     defaultBaseUrl: "https://api.minimax.io/v1",
     regions: [
       { id: "intl", baseUrl: "https://api.minimax.io/v1" },
-      { id: "cn", baseUrl: "https://api.minimaxi.com/v1" },
+      { id: "cn", baseUrl: "https://api.minimax.cn/v1" },
     ],
     defaultModel: "MiniMax-M3",
-    suggestions: ["MiniMax-M3", "MiniMax-M2.5"],
+    suggestions: ["MiniMax-M3", "MiniMax-M3.1-Flash-Preview", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
     apiKeyUrl: "https://platform.minimax.io",
     keyPlaceholder: "...",
   },
@@ -117,7 +124,7 @@ export const COMPATIBLE_PROVIDERS: readonly CompatibleProvider[] = [
     defaultBaseUrl: "https://api.groq.com/openai/v1",
     regions: [],
     defaultModel: "openai/gpt-oss-120b",
-    suggestions: ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"],
+    suggestions: ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
     apiKeyUrl: "https://console.groq.com/keys",
     keyPlaceholder: "gsk_...",
   },

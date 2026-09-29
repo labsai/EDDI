@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl.builder;
 
 import dev.langchain4j.model.ollama.OllamaChatRequestParameters;
+import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.jlama.JlamaChatModel;
@@ -94,9 +96,40 @@ class LanguageModelBuildersTest {
             params.put("returnThinking", "true");
             params.put("sendThinking", "true");
 
-            assertNotNull(builder.build(params));
-            assertNotNull(builder.build(params, Map.of("reasoning_split", true)));
-            assertNotNull(builder.buildStreaming(params, Map.of("reasoning_split", true)));
+            ChatModel plain = builder.build(params);
+            assertInstanceOf(OpenAiChatModel.class, plain);
+            assertTrue(((OpenAiChatModel) plain).defaultRequestParameters().customParameters().isEmpty());
+
+            ChatModel custom = builder.build(params, Map.of("reasoning_split", true));
+            assertEquals(Map.of("reasoning_split", true), ((OpenAiChatModel) custom).defaultRequestParameters().customParameters());
+            assertEquals(true, field(custom, "returnThinking"));
+            assertEquals(true, field(custom, "sendThinking"));
+
+            StreamingChatModel streaming = builder.buildStreaming(params, Map.of("reasoning_split", true));
+            assertInstanceOf(OpenAiStreamingChatModel.class, streaming);
+            assertEquals(Map.of("reasoning_split", true), ((OpenAiStreamingChatModel) streaming).defaultRequestParameters().customParameters());
+            assertEquals(true, field(streaming, "returnThinking"));
+            assertEquals(true, field(streaming, "sendThinking"));
+        }
+
+        @Test
+        @DisplayName("thinking flags default to off when not configured")
+        void thinkingFlagsDefaultOff() {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "sk-test");
+            ChatModel model = builder.build(params);
+            assertEquals(false, field(model, "returnThinking"));
+            assertEquals(false, field(model, "sendThinking"));
+        }
+
+        private static Object field(Object model, String name) {
+            try {
+                var f = model.getClass().getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(model);
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("langchain4j no longer exposes field " + name, e);
+            }
         }
     }
 

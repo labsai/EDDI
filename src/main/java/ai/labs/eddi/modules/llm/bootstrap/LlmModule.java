@@ -17,6 +17,7 @@ import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Startup(1000)
@@ -76,15 +77,25 @@ public class LlmModule {
 
         // Named OpenAI-compatible providers (xAI, DeepSeek, ...) share one builder
         // class, parameterised by their catalog preset.
-        for (OpenAiCompatibleProvider provider : OpenAiCompatibleProviders.all()) {
-            if (languageModelApiConnectorBuilders.containsKey(provider.id())) {
-                throw new IllegalStateException("OpenAI-compatible provider id '" + provider.id() + "' collides with a built-in LLM type");
-            }
-            languageModelApiConnectorBuilders.put(provider.id(), () -> new OpenAiCompatibleLanguageModelBuilder(provider,
-                    langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get()));
-        }
+        registerCompatibleProviders(OpenAiCompatibleProviders.all(), languageModelApiConnectorBuilders, langModelBuilderInstance);
 
         lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
         LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
+    }
+
+    /**
+     * Registers one builder per catalog provider, refusing an id that is already
+     * taken by a built-in type (or by an earlier entry).
+     */
+    static void registerCompatibleProviders(List<OpenAiCompatibleProvider> providers,
+                                            Map<String, Provider<ILanguageModelBuilder>> builders,
+                                            Instance<ILanguageModelBuilder> builderInstance) {
+        for (OpenAiCompatibleProvider provider : providers) {
+            if (builders.containsKey(provider.id())) {
+                throw new IllegalStateException("OpenAI-compatible provider id '" + provider.id() + "' collides with a built-in LLM type");
+            }
+            builders.put(provider.id(), () -> new OpenAiCompatibleLanguageModelBuilder(provider,
+                    builderInstance.select(OpenAILanguageModelBuilder.class).get()));
+        }
     }
 }

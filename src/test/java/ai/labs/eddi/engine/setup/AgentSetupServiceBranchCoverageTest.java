@@ -62,6 +62,15 @@ class AgentSetupServiceBranchCoverageTest {
         }
 
         @Test
+        @DisplayName("defaultModelFor is the shared rule: preset default, else the historic default")
+        void defaultModelFor() {
+            assertEquals("grok-4.7", AgentSetupService.defaultModelFor("xai"));
+            assertEquals("grok-4.7", AgentSetupService.defaultModelFor(" XAI "));
+            assertEquals(AgentSetupService.DEFAULT_MODEL, AgentSetupService.defaultModelFor("openai"));
+            assertEquals(AgentSetupService.DEFAULT_MODEL, AgentSetupService.defaultModelFor(null));
+        }
+
+        @Test
         @DisplayName("an explicit model always wins")
         void explicitModelWins() {
             assertEquals("grok-4.5", service.resolveParams("xai", " grok-4.5 ", null, null).modelId());

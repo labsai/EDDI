@@ -4,9 +4,12 @@
       "id": "xai",
       "displayName": "xAI Grok",
       "defaultBaseUrl": "https://api.x.ai/v1",
-      "regions": [],
+      "regions": [
+        {"id": "intl", "baseUrl": "https://api.x.ai/v1"},
+        {"id": "us", "baseUrl": "https://us.api.x.ai/v1"}
+      ],
       "defaultModel": "grok-4.7",
-      "modelSuggestions": ["grok-4.7", "grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning"],
+      "modelSuggestions": ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning"],
       "apiKeyUrl": "https://console.x.ai",
       "apiKeyPlaceholder": "xai-...",
       "parameterDefaults": {},
@@ -18,13 +21,13 @@
       "displayName": "DeepSeek",
       "defaultBaseUrl": "https://api.deepseek.com",
       "regions": [],
-      "defaultModel": "deepseek-v4-pro",
-      "modelSuggestions": ["deepseek-v4-pro", "deepseek-flash"],
+      "defaultModel": "deepseek-flash",
+      "modelSuggestions": ["deepseek-flash", "deepseek-v4-pro"],
       "apiKeyUrl": "https://platform.deepseek.com",
       "apiKeyPlaceholder": "sk-...",
       "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
       "customParameters": {},
-      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["deepseek-flash"]}
+      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["deepseek-flash", "deepseek-v4-flash"]}
     },
     {
       "id": "moonshot",
@@ -36,11 +39,11 @@
       ],
       "defaultModel": "kimi-k3",
       "modelSuggestions": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
-      "apiKeyUrl": "https://platform.kimi.ai",
+      "apiKeyUrl": "https://platform.kimi.ai/console/api-keys",
       "apiKeyPlaceholder": "sk-...",
       "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
       "customParameters": {},
-      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["kimi-k3", "kimi-k2.6"]}
+      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code"]}
     },
     {
       "id": "qwen",
@@ -52,12 +55,12 @@
         {"id": "us", "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1"}
       ],
       "defaultModel": "qwen3.7-plus",
-      "modelSuggestions": ["qwen3.7-plus", "qwen3.8-max", "qwen3.7-max", "qwen3.6-flash"],
+      "modelSuggestions": ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-flash"],
       "apiKeyUrl": "https://modelstudio.console.alibabacloud.com",
       "apiKeyPlaceholder": "sk-...",
-      "parameterDefaults": {"returnThinking": "true", "sendThinking": "false"},
+      "parameterDefaults": {},
       "customParameters": {},
-      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["qwen3-vl", "qwen-vl", "qvq", "qwen3.7"]}
+      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["qwen3-vl", "qwen-vl", "qvq", "qwen3.8", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"]}
     },
     {
       "id": "zhipu",
@@ -68,12 +71,12 @@
         {"id": "cn", "baseUrl": "https://open.bigmodel.cn/api/paas/v4"}
       ],
       "defaultModel": "glm-5.3",
-      "modelSuggestions": ["glm-5.3", "glm-5.3-flash", "glm-5.2"],
+      "modelSuggestions": ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-5.2"],
       "apiKeyUrl": "https://z.ai/manage-apikey/apikey-list",
       "apiKeyPlaceholder": "...",
-      "parameterDefaults": {"returnThinking": "true", "sendThinking": "false"},
+      "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
       "customParameters": {},
-      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["glm-4.5v", "glm-5v"]}
+      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["glm-5.3-flash", "glm-4.6v", "glm-4.5v"]}
     },
     {
       "id": "minimax",
@@ -81,13 +84,13 @@
       "defaultBaseUrl": "https://api.minimax.io/v1",
       "regions": [
         {"id": "intl", "baseUrl": "https://api.minimax.io/v1"},
-        {"id": "cn", "baseUrl": "https://api.minimaxi.com/v1"}
+        {"id": "cn", "baseUrl": "https://api.minimax.cn/v1"}
       ],
       "defaultModel": "MiniMax-M3",
-      "modelSuggestions": ["MiniMax-M3", "MiniMax-M2.5"],
+      "modelSuggestions": ["MiniMax-M3", "MiniMax-M3.1-Flash-Preview", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
       "apiKeyUrl": "https://platform.minimax.io",
       "apiKeyPlaceholder": "...",
-      "parameterDefaults": {},
+      "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
       "customParameters": {"reasoning_split": true},
       "capabilities": {"jsonMode": false, "jsonModeWithTools": false, "visionModelTokens": ["minimax-m3"]}
     },
@@ -102,7 +105,7 @@
       "apiKeyPlaceholder": "sk-or-...",
       "parameterDefaults": {},
       "customParameters": {},
-      "capabilities": {"jsonMode": false, "jsonModeWithTools": false, "visionModelTokens": []}
+      "capabilities": {"jsonMode": false, "jsonModeWithTools": false, "visionModelTokens": ["openrouter/auto"]}
     },
     {
       "id": "groq",
@@ -110,12 +113,12 @@
       "defaultBaseUrl": "https://api.groq.com/openai/v1",
       "regions": [],
       "defaultModel": "openai/gpt-oss-120b",
-      "modelSuggestions": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"],
+      "modelSuggestions": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
       "apiKeyUrl": "https://console.groq.com/keys",
       "apiKeyPlaceholder": "gsk_...",
       "parameterDefaults": {},
       "customParameters": {},
-      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": []}
+      "capabilities": {"jsonMode": true, "jsonModeWithTools": false, "visionModelTokens": ["qwen3.8-27b"]}
     }
   ]
 }
