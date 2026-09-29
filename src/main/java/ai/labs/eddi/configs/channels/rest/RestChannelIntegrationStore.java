@@ -234,6 +234,15 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }
+        // '|' separates the integration name from the subject and card id in a Slack
+        // approval button value (<integration>|<subject>|<cardId>). A name containing
+        // it is split at the wrong place, so every decision on that integration's
+        // cards would be resolved against another integration name and refused. A
+        // configuration stored before this rule still loads; its approval cards are
+        // posted without buttons (SlackHitlSupport.isBindableIntegrationName).
+        if (config.getName().contains("|")) {
+            throw new BadRequestException("Channel integration name must not contain '|'.");
+        }
 
         warnOnPlaintextSecrets(config);
 
