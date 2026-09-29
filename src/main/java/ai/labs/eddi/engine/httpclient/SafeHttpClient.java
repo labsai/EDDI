@@ -281,20 +281,30 @@ public class SafeHttpClient {
             throws IOException, InterruptedException {
         long remaining = deadlineNanos - System.nanoTime();
         if (remaining <= 0) {
-            throw new HttpTimeoutException("Total request timeout exceeded for: " + request.uri());
+            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
         }
         CompletableFuture<HttpResponse<T>> exchange = httpClient.sendAsync(request, bodyHandler);
         try {
             return exchange.get(remaining, TimeUnit.NANOSECONDS);
         } catch (TimeoutException e) {
             exchange.cancel(true);
-            throw new HttpTimeoutException("Total request timeout exceeded for: " + request.uri());
+            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
         } catch (InterruptedException e) {
             exchange.cancel(true);
             throw e;
         } catch (ExecutionException e) {
             throw unwrap(e);
         }
+    }
+
+    /**
+     * {@code uri} without its query or fragment, for an error message. A query
+     * string may carry a credential ({@code key=}, {@code appid=}), and a tool
+     * hands the message of a failed call to the model and the log.
+     */
+    static String withoutQuery(URI uri) {
+        int port = uri.getPort();
+        return uri.getScheme() + "://" + uri.getHost() + (port == -1 ? "" : ":" + port) + (uri.getRawPath() == null ? "" : uri.getRawPath());
     }
 
     /**

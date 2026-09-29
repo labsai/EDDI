@@ -98,13 +98,17 @@ class SafeHttpClientBodyBoundsTest {
         // connect timeout 200ms → budget floor 600ms; the 300ms request timeout is
         // below it.
         SafeHttpClient client = new SafeHttpClient(200);
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/trickle"))
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/trickle?key=s3cret"))
                 .timeout(Duration.ofMillis(300)).GET().build();
 
         long start = System.nanoTime();
-        assertThrows(HttpTimeoutException.class, () -> client.send(request, HttpResponse.BodyHandlers.ofString()));
+        HttpTimeoutException e = assertThrows(HttpTimeoutException.class, () -> client.send(request, HttpResponse.BodyHandlers.ofString()));
         long elapsedMs = Duration.ofNanos(System.nanoTime() - start).toMillis();
         assertTrue(elapsedMs < 3000, "the call must end near its 600ms budget, not when the server finishes; took " + elapsedMs + "ms");
+        // Tools hand this message to the model: a credential in the query string
+        // (a search key, an appid) must not ride along.
+        assertTrue(e.getMessage().endsWith("/trickle"), e.getMessage());
+        assertFalse(e.getMessage().contains("s3cret"), e.getMessage());
     }
 
     @Test
