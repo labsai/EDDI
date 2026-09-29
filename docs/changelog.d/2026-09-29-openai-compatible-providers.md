@@ -120,8 +120,32 @@ announced the retirement of `llama-3.3-70b-versatile` (2026-08-16), so it is not
   `llmEditor.modelType`, `operator.activation.llmEndpoint`) and one reworded
   (`llmProviders.region.custom`) in all 11 locales.
 
+### CI follow-up: startup crash
+
+The first CI run's E2E jobs could not boot the image: `LlmModule.configure()` is both
+`@PostConstruct` and `@Inject`, so CDI runs it twice, and the catalog's collision guard
+(`builders.containsKey(id)`) rejected the providers it had registered itself on the first pass —
+`IllegalStateException: OpenAI-compatible provider id 'xai' collides with a built-in LLM type`.
+Unit tests construct the module by hand and call `configure()` once, so they could not see it.
+The guard now checks a fixed `BUILT_IN_TYPES` set plus duplicates within the catalog, which makes
+registration idempotent. `LlmModuleTest.configureIsIdempotent` calls `configure()` twice and fails
+with the original exception when the old guard is restored; the packaged jar was also booted
+locally against MongoDB and reached `/q/health/ready`.
+
+### Review follow-up: group wizard key reset
+
+CodeRabbit (PR 904) found the group wizard's member and moderator provider selects kept the API
+key across a provider change, so a key typed for one vendor was submitted with another's
+configuration — the same gap already closed in the agent wizard. Both handlers now clear
+`apiKey`; a test switches each slot's provider and asserts the key is empty, and fails with either
+reset removed. The gap predates this branch; the added providers made it easier to hit.
+
 ### Design decisions
 
 ```decision-log
 | 2026-09-29 | OpenAI-compatible vendors are catalog entries, not Java classes | One JSON file feeds the backend registry and (through a parity test) the Manager, so a new vendor is a data change. | A Java builder class per vendor; a REST catalog endpoint. |
+```
+
+```regression-note
+| 2026-09-29 | EDDI failed to start on this branch (caught by CI E2E before merge) | `LlmModule.configure()` runs twice under CDI and the provider collision guard checked the map it had just filled | Guard against a fixed built-in type set; a test calls `configure()` twice | feat/openai-compatible-providers |
 ```

@@ -17,8 +17,10 @@ import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Startup(1000)
 @ApplicationScoped
@@ -36,6 +38,10 @@ public class LlmModule {
     public static final String LLM_TYPE_AZURE_OPENAI = "azure-openai";
     public static final String LLM_TYPE_BEDROCK = "bedrock";
     public static final String LLM_TYPE_ORACLE_GENAI = "oracle-genai";
+
+    /** The types backed by a dedicated builder; catalog ids may not reuse them. */
+    static final Set<String> BUILT_IN_TYPES = Set.of(LLM_TYPE_OPENAI, LLM_TYPE_HUGGING_FACE, LLM_TYPE_ANTHROPIC, LLM_TYPE_GEMINI_VERTEX,
+            LLM_TYPE_GEMINI, LLM_TYPE_OLLAMA, LLM_TYPE_JLAMA, LLM_TYPE_MISTRAL, LLM_TYPE_AZURE_OPENAI, LLM_TYPE_BEDROCK, LLM_TYPE_ORACLE_GENAI);
 
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> lifecycleTaskInstance;
@@ -84,15 +90,24 @@ public class LlmModule {
     }
 
     /**
-     * Registers one builder per catalog provider, refusing an id that is already
-     * taken by a built-in type (or by an earlier entry).
+     * Registers one builder per catalog provider, refusing an id that is taken by a
+     * built-in type or repeated within the catalog.
+     * <p>
+     * The guard checks {@link #BUILT_IN_TYPES}, not the map's current keys:
+     * {@link #configure()} is both {@code @PostConstruct} and {@code @Inject}, so
+     * CDI runs it twice, and a key check would reject the providers this method
+     * registered on the first pass — which aborted startup.
      */
     static void registerCompatibleProviders(List<OpenAiCompatibleProvider> providers,
                                             Map<String, Provider<ILanguageModelBuilder>> builders,
                                             Instance<ILanguageModelBuilder> builderInstance) {
+        Set<String> seen = new HashSet<>();
         for (OpenAiCompatibleProvider provider : providers) {
-            if (builders.containsKey(provider.id())) {
+            if (BUILT_IN_TYPES.contains(provider.id())) {
                 throw new IllegalStateException("OpenAI-compatible provider id '" + provider.id() + "' collides with a built-in LLM type");
+            }
+            if (!seen.add(provider.id())) {
+                throw new IllegalStateException("OpenAI-compatible provider id '" + provider.id() + "' is declared twice");
             }
             builders.put(provider.id(), () -> new OpenAiCompatibleLanguageModelBuilder(provider,
                     builderInstance.select(OpenAILanguageModelBuilder.class).get()));

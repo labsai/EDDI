@@ -1601,9 +1601,12 @@ function MemberCard({
                         <ProviderSelect
                           value={member.provider}
                           onChange={(provider) => {
+                            // Clear the key too: a key typed for one vendor must never be
+                            // submitted with another's configuration.
                             onUpdate({
                               provider,
                               model: "",
+                              apiKey: "",
                             });
                           }}
                           ariaLabel={t("groupWizard.provider")}
@@ -1771,7 +1774,8 @@ function ModeratorCard({
               <ProviderSelect
                 value={moderator.provider}
                 onChange={(provider) => {
-                  onChange({ provider, model: "" });
+                  // Same as the member slot: the key belongs to the previous vendor.
+                  onChange({ provider, model: "", apiKey: "" });
                 }}
                 ariaLabel={t("groupWizard.provider")}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"

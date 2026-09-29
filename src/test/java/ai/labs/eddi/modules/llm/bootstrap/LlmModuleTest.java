@@ -54,13 +54,34 @@ class LlmModuleTest {
     }
 
     @Test
-    @DisplayName("a provider id colliding with an already registered type is refused")
+    @DisplayName("configure() survives running twice, as CDI does for a @PostConstruct @Inject method")
+    void configureIsIdempotent() {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        var module = module(builders);
+
+        assertDoesNotThrow(module::configure);
+        assertTrue(module.getLanguageModelApiConnectorBuilders().keySet().containsAll(COMPATIBLE_IDS));
+    }
+
+    @Test
+    @DisplayName("a provider id colliding with a built-in type is refused")
     void collisionThrows() {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-        builders.put("openai", () -> new OpenAILanguageModelBuilder());
-        var clash = new OpenAiCompatibleProvider("openai", "Clash", "https://a.example", List.of(), "m", List.of("m"), null, null, null, null,
-                null);
+        var clash = provider("openai");
         var e = assertThrows(IllegalStateException.class, () -> LlmModule.registerCompatibleProviders(List.of(clash), builders, null));
         assertTrue(e.getMessage().contains("'openai'") && e.getMessage().contains("collides"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a provider id declared twice in the catalog is refused")
+    void duplicateThrows() {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        var e = assertThrows(IllegalStateException.class,
+                () -> LlmModule.registerCompatibleProviders(List.of(provider("dup"), provider("dup")), builders, null));
+        assertTrue(e.getMessage().contains("'dup'") && e.getMessage().contains("twice"), e.getMessage());
+    }
+
+    private static OpenAiCompatibleProvider provider(String id) {
+        return new OpenAiCompatibleProvider(id, "Test", "https://a.example", List.of(), "m", List.of("m"), null, null, null, null, null);
     }
 }
