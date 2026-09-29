@@ -74,6 +74,16 @@ public class LlmModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_ORACLE_GENAI,
                 () -> langModelBuilderInstance.select(OracleGenAiLanguageModelBuilder.class).get());
 
+        // Named OpenAI-compatible providers (xAI, DeepSeek, ...) share one builder
+        // class, parameterised by their catalog preset.
+        for (OpenAiCompatibleProvider provider : OpenAiCompatibleProviders.all()) {
+            if (languageModelApiConnectorBuilders.containsKey(provider.id())) {
+                throw new IllegalStateException("OpenAI-compatible provider id '" + provider.id() + "' collides with a built-in LLM type");
+            }
+            languageModelApiConnectorBuilders.put(provider.id(), () -> new OpenAiCompatibleLanguageModelBuilder(provider,
+                    langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get()));
+        }
+
         lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
         LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }

@@ -78,6 +78,26 @@ class LanguageModelBuildersTest {
             StreamingChatModel model = builder.buildStreaming(params);
             assertNotNull(model);
         }
+
+        @Test
+        @DisplayName("recognises returnThinking and sendThinking")
+        void recognisesThinkingParameters() {
+            assertTrue(builder.recognisedParameters().containsAll(Set.of("returnThinking", "sendThinking")));
+        }
+
+        @Test
+        @DisplayName("builds sync and streaming models with thinking flags and custom parameters")
+        void buildsWithThinkingAndCustomParameters() {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "sk-test");
+            params.put("modelName", "some-model");
+            params.put("returnThinking", "true");
+            params.put("sendThinking", "true");
+
+            assertNotNull(builder.build(params));
+            assertNotNull(builder.build(params, Map.of("reasoning_split", true)));
+            assertNotNull(builder.buildStreaming(params, Map.of("reasoning_split", true)));
+        }
     }
 
     // ==================== Anthropic ====================
