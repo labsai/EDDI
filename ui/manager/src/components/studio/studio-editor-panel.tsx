@@ -16,6 +16,8 @@ import {
 } from "@/hooks/use-resources";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { useAgent } from "@/hooks/use-agents";
 import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
@@ -124,6 +126,13 @@ export function StudioEditorPanel({
   // Save with cascade
   const cascadeSave = useCascadeSave(slug);
 
+  // Every save here writes a new agent version. Unticked by default and reset
+  // after each save that wrote one — a stale tick would let running
+  // conversations follow a change nobody judged.
+  const [compatible, setCompatible] = useState(false);
+  // Only for its generation: whether ticking has to warn about a legacy version.
+  const { data: currentAgent } = useAgent(agentId, agentVersion);
+
   // Track save success for inline feedback
   const [saveSuccess, setSaveSuccess] = useState(false);
   useEffect(() => {
@@ -164,10 +173,12 @@ export function StudioEditorPanel({
             version: currentVersion,
             body: parsed,
             context: cascadeContext,
+            compatible,
           },
           {
             onSuccess: (result) => {
               toast.success(t("editor.saved", "Saved successfully"));
+              setCompatible(false);
               setSaveSuccess(true);
               setCurrentVersion(result.newResourceVersion);
               onResourceVersionSaved?.(resourceId, result.newResourceVersion);
@@ -193,7 +204,7 @@ export function StudioEditorPanel({
         toast.error(t("editor.invalidJson", "Invalid JSON"));
       }
     },
-    [resourceId, currentVersion, cascadeSave, cascadeContext, onCascadeContextChange, onResourceVersionSaved, t],
+    [resourceId, currentVersion, cascadeSave, cascadeContext, compatible, onCascadeContextChange, onResourceVersionSaved, t],
   );
 
   // ---- No URI / unsupported type ----
@@ -244,6 +255,13 @@ export function StudioEditorPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-4" data-testid="studio-editor-panel">
+      <CompatibleVersionCheckbox
+        checked={compatible}
+        onChange={setCompatible}
+        disabled={cascadeSave.isPending}
+        previousGeneration={currentAgent ? (currentAgent.compatibilityGeneration ?? null) : undefined}
+        className="mb-3"
+      />
       <ConfigEditorLayout
         typeName={typeName}
         resourceId={resourceId}

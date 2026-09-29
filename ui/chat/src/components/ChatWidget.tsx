@@ -64,6 +64,7 @@ import type {
   ConversationState,
   ConversationSnapshot,
 } from "@/types";
+import { END_REASON_AGENT_VERSION_RETIRED } from "@/types";
 
 /**
  * Per-turn mutable bookkeeping for the SSE loop. `tokenCount` is what
@@ -593,6 +594,7 @@ export function ChatWidget() {
         dispatch({
           type: "SET_CONVERSATION_STATE",
           state: snapshot.conversationState,
+          endReason: snapshot.endReason ?? null,
         });
       }
 
@@ -978,6 +980,9 @@ export function ChatWidget() {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
+                // A turn refused with `conversation_ended` lands here: the
+                // reason decides what the ended footer tells the user.
+                endReason: after.endReason ?? null,
               });
             }
           } catch {
@@ -1035,6 +1040,7 @@ export function ChatWidget() {
                 dispatch({
                   type: "SET_CONVERSATION_STATE",
                   state: snap.conversationState,
+                  endReason: snap.endReason ?? null,
                 });
               }
             } catch {
@@ -1042,6 +1048,31 @@ export function ChatWidget() {
             }
           }
           return;
+        }
+
+        if (err instanceof ApiError && err.status === 410 && state.conversationId) {
+          // The conversation has ended (RestAgentEngine answers 410 GONE) and
+          // the turn was never consumed. Only an agent update that retired
+          // the conversation's version gets its own handling: say so, and
+          // point at a new conversation. Every other ended case keeps the
+          // generic handling below.
+          let endReason: string | null = null;
+          try {
+            const snap = await readConversation(
+              environment ?? "",
+              agentId ?? "",
+              state.conversationId,
+              true,
+            );
+            endReason = snap.endReason ?? null;
+          } catch {
+            // best effort — falls through to the generic handling
+          }
+          if (endReason === END_REASON_AGENT_VERSION_RETIRED) {
+            withdrawTurn();
+            dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
+            return;
+          }
         }
 
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -1290,7 +1321,11 @@ export function ChatWidget() {
       const snapshot = await readConversation("", "", state.conversationId, true);
       if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
-        dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: snapshot.conversationState,
+          endReason: snapshot.endReason ?? null,
+        });
       }
       // Retry re-reads the same step that failed; its output is already shown.
       processSnapshot(snapshot, { dedupe: true });
@@ -1454,8 +1489,20 @@ export function ChatWidget() {
       )}
 
       {isEnded ? (
-        <div className="chat-ended">
-          <span className="chat-ended__label">Conversation Ended</span>
+        <div className="chat-ended" data-testid="chat-ended">
+          {state.endReason === END_REASON_AGENT_VERSION_RETIRED ? (
+            // Ended because the agent was updated in a way this conversation
+            // could not follow — say so, rather than a bare "ended".
+            <span
+              className="chat-ended__label"
+              role="status"
+              data-testid="chat-ended-retired"
+            >
+              This assistant was updated. Start a new conversation to continue.
+            </span>
+          ) : (
+            <span className="chat-ended__label">Conversation Ended</span>
+          )}
           <button className="chat-ended__restart" onClick={handleRestart}>
             Start New Conversation
           </button>

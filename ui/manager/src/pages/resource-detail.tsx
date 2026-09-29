@@ -28,6 +28,8 @@ import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { useAgent } from "@/hooks/use-agents";
 import {
   findResourceUsage,
   type ResourceUsage,
@@ -88,6 +90,17 @@ export function ResourceDetailPage() {
   useEffect(() => {
     setCascadeContext(initialCascade);
   }, [initialCascade]);
+
+  /*
+   * Whether the agent version a cascade save writes is compatible with the one
+   * it replaces. Unticked by default, and reset after every save that wrote an
+   * agent version: each save is its own decision, and a stale tick would let
+   * running conversations follow a change nobody judged.
+   */
+  const [cascadeCompatible, setCascadeCompatible] = useState(false);
+  // The agent version the next cascade replaces — only for its generation,
+  // which decides whether the checkbox has to warn about a legacy version.
+  const { data: cascadeAgent } = useAgent(cascadeContext?.agentId ?? "", cascadeContext?.agentVersion);
 
   // Version state — default to latest version once descriptors are loaded
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
@@ -203,10 +216,12 @@ export function ResourceDetailPage() {
               version: currentVersion,
               body: parsed,
               context: cascadeContext,
+              compatible: cascadeCompatible,
             },
             {
               onSuccess: (result) => {
                 const newAgentVersion = result.newAgentVersion;
+                setCascadeCompatible(false);
                 /*
                  * "Saved successfully" on its own is misleading here. This path
                  * cascades resource -> workflow -> agent and stops: the running
@@ -313,7 +328,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt, t, queryClient, adoptPartialCascade]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, queryClient, adoptPartialCascade]
   );
 
   const handleSaveAndDeploy = useCallback(
@@ -331,6 +346,7 @@ export function ResourceDetailPage() {
                 version: currentVersion,
                 body: parsed,
                 context: cascadeContext,
+                compatible: cascadeCompatible,
               });
             } catch (err) {
               adoptPartialCascade(err);
@@ -338,6 +354,7 @@ export function ResourceDetailPage() {
               throw err instanceof CascadeReferenceError ? new Error(describeSaveError(err, t)) : err;
             }
             setCurrentVersion(result.newResourceVersion);
+            setCascadeCompatible(false);
             // Update cascade context so next Save & Test uses correct versions
             setCascadeContext(prev => prev ? nextCascadeContext(prev, result) : prev);
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
@@ -347,11 +364,11 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy, adoptPartialCascade, t]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, t]
   );
 
   const handleCascadeConfirm = useCallback(
-    async (selected: ResourceUsage[]) => {
+    async (selected: ResourceUsage[], { compatible }: { compatible: boolean }) => {
       if (newResourceVersion === null || previousResourceVersion === null || !rt) return;
       setIsCascading(true);
 
@@ -391,6 +408,7 @@ export function ResourceDetailPage() {
                   ? { agentWorkflowVersion: usage.workflowVersion }
                   : {}),
               },
+              { compatible },
             );
 
             if (result.newWorkflowVersion) {
@@ -536,6 +554,15 @@ export function ResourceDetailPage() {
                 "Changes will cascade to parent workflow and agent"
               )}
             </p>
+          )}
+          {cascadeContext && (
+            <CompatibleVersionCheckbox
+              checked={cascadeCompatible}
+              onChange={setCascadeCompatible}
+              disabled={cascadeSave.isPending || isSaveAndDeploying}
+              previousGeneration={cascadeAgent ? (cascadeAgent.compatibilityGeneration ?? null) : undefined}
+              className="mt-2 max-w-xl"
+            />
           )}
         </div>
         <div className="flex gap-2">

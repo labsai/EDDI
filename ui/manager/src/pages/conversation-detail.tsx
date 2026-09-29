@@ -22,6 +22,7 @@ import {
   Download,
   Search,
   Hand,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -37,7 +38,16 @@ import type {
   ConversationOutput,
   SimpleConversationStep,
 } from "@/lib/api/conversations";
-import { extractInput, extractOutput, extractActions, displayUserInput } from "@/lib/api/conversations";
+import {
+  extractInput,
+  extractOutput,
+  extractActions,
+  displayUserInput,
+  extractAgentSwitch,
+  extractAgentVersion,
+  END_REASON_AGENT_VERSION_RETIRED,
+} from "@/lib/api/conversations";
+import { AgentSwitchNotice } from "@/components/conversations/agent-switch-notice";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -265,6 +275,18 @@ export function ConversationDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Why it ended, when the backend recorded a reason */}
+      {state === "ENDED" && conversation.endReason === END_REASON_AGENT_VERSION_RETIRED && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-foreground"
+          data-testid="end-reason-retired"
+        >
+          <Info className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {t("conversationDetail.endReasonRetired", "Ended: the agent version was retired")}
+        </div>
+      )}
 
       {/* HITL Approval Banner */}
       {state === "AWAITING_HUMAN" && (
@@ -512,6 +534,10 @@ function ChatBubbleStep({
   const input = displayUserInput(extractInput(step));
   const output = extractOutput(conversationOutput);
   const actions = extractActions(step);
+  // Version following: which agent version ran this step, and whether the
+  // conversation moved to it on this step. Both absent on older steps.
+  const agentVersion = extractAgentVersion(step);
+  const agentSwitch = extractAgentSwitch(step);
 
   // Calculate processing time from timestamps of conversationStep data entries
   const processingTime = (() => {
@@ -528,6 +554,12 @@ function ChatBubbleStep({
 
   return (
     <div className={cn("space-y-3", !isLast && "pb-3")}>
+      {agentSwitch && (
+        <div className="flex justify-center">
+          <AgentSwitchNotice from={agentSwitch.from} to={agentSwitch.to} />
+        </div>
+      )}
+
       {/* User message — right aligned */}
       {input && (
         <div className="flex justify-end">
@@ -582,6 +614,15 @@ function ChatBubbleStep({
         >
           <Code className="h-3 w-3" />
           {t("conversationDetail.step", "Step")} {stepNumber}
+          {agentVersion !== null && (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={t("conversationDetail.stepAgentVersion", "Answered by agent version {{version}}", { version: agentVersion })}
+              data-testid={`step-agent-version-${stepNumber}`}
+            >
+              v{agentVersion}
+            </span>
+          )}
           {processingTime && (
             <span className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
               <Clock className="h-2.5 w-2.5" />

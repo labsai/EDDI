@@ -269,7 +269,8 @@
     "openExternalChatIn": "فتح دردشة {{environment}} في علامة تبويب جديدة",
     "deployToProduction": "النشر في الإنتاج",
     "undeployFromProduction": "الإزالة من الإنتاج",
-    "deployFailedIn": "فشل النشر في {{environment}}"
+    "deployFailedIn": "فشل النشر في {{environment}}",
+    "undeployCompatibleHint": "المحادثات التي يمكن لإصدار منشور متوافق متابعتها لا تُنهى: تنتقل إليه في دورها التالي."
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -705,7 +706,9 @@
     "exportMd": "تصدير كـ Markdown",
     "toolSummary": "ملخص استخدام الأدوات",
     "totalCost": "التكلفة الإجمالية",
-    "cacheHitRate": "معدل إصابة التخزين المؤقت"
+    "cacheHitRate": "معدل إصابة التخزين المؤقت",
+    "endReasonRetired": "انتهت: تم سحب إصدار الوكيل",
+    "stepAgentVersion": "أجاب عنه إصدار الوكيل {{version}}"
   },
   "chat": {
     "hide": "إخفاء",
@@ -5196,5 +5199,30 @@
     "workflowMissingResource": "سير العمل {{workflowId}} (الإصدار {{version}}) لا يشير إلى {{resource}}، لذا فإن الحفظ هنا لن يغيّر الوكيل. لم يُحفظ شيء.",
     "agentWorkflowMismatch": "الوكيل {{agentId}} (الإصدار {{version}}) يشير إلى سير العمل {{workflowId}} في الإصدار {{found}} وليس الإصدار {{expected}}. تغيّر الوكيل منذ فتح هذه الصفحة. أعد تحميلها. لم يُحفظ شيء.",
     "agentMissingWorkflow": "الوكيل {{agentId}} (الإصدار {{version}}) لا يشير إلى سير العمل {{workflowId}}. لم يُحفظ شيء."
+  },
+  "agentVersioning": {
+    "compatibleLabel": "متوافق مع الإصدار السابق — يمكن للمحادثات الجارية الانتقال إليه",
+    "compatibleHint": "فقط للتغييرات التي لا يمكن أن تُفسد محادثة جارية، مثل صياغة الموجّه أو نموذج مختلف. اتركه دون تحديد إذا تمت إعادة تسمية الخصائص أو الإجراءات أو خطوات سير العمل أو حذفها.",
+    "compatibleLegacyNote": "الإصدار الحالي أقدم من ميزة تتبّع الإصدارات، لذا تبقى المحادثات الجارية عليه. يربط الحفظ المتوافق التالي السلسلة.",
+    "compatibleUnknownNote": "المحادثات على إصدار أقدم من ميزة تتبّع الإصدارات تبقى عليه.",
+    "generationBadge": "جيل التوافق {{generation}}",
+    "generationTooltip": "جيل التوافق {{generation}}: إصدارات هذا الوكيل التي تحمل الجيل نفسه متوافقة، لذا تنتقل المحادثة الجارية إلى أحدث إصدار منشور في دورها التالي. الحفظ غير المتوافق يبدأ جيلًا جديدًا.",
+    "impactTitle": "نشر v{{version}} في {{environment}} — المحادثات الجارية",
+    "impactFollow_zero": "{{count}} محادثة نشطة على v{{from}} ستستمر على v{{to}}",
+    "impactFollow_one": "محادثة نشطة واحدة على v{{from}} ستستمر على v{{to}}",
+    "impactFollow_two": "محادثتان نشطتان على v{{from}} ستستمران على v{{to}}",
+    "impactFollow_few": "{{count}} محادثات نشطة على v{{from}} ستستمر على v{{to}}",
+    "impactFollow_many": "{{count}} محادثة نشطة على v{{from}} ستستمر على v{{to}}",
+    "impactFollow_other": "{{count}} محادثة نشطة على v{{from}} ستستمر على v{{to}}",
+    "impactStay_zero": "{{count}} محادثة نشطة على v{{from}} ستبقى على v{{from}}",
+    "impactStay_one": "محادثة نشطة واحدة على v{{from}} ستبقى على v{{from}}",
+    "impactStay_two": "محادثتان نشطتان على v{{from}} ستبقيان على v{{from}}",
+    "impactStay_few": "{{count}} محادثات نشطة على v{{from}} ستبقى على v{{from}}",
+    "impactStay_many": "{{count}} محادثة نشطة على v{{from}} ستبقى على v{{from}}",
+    "impactStay_other": "{{count}} محادثة نشطة على v{{from}} ستبقى على v{{from}}",
+    "impactReasonNewer": "إصدار أحدث",
+    "impactReasonLegacy": "أقدم من تتبّع الإصدارات",
+    "impactReasonBreaking": "تغيير غير متوافق",
+    "switchNotice": "انتقل الوكيل من v{{from}} إلى v{{to}}"
   }
 }
