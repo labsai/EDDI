@@ -10,6 +10,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,6 +19,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Centralized, SSRF-safe HTTP client wrapper. All outbound HTTP requests from
@@ -64,11 +67,35 @@ public class SafeHttpClient {
      */
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(15);
 
-    /** Security-sensitive headers stripped on cross-origin redirects. */
-    private static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization");
+    /**
+     * Security-sensitive headers stripped on cross-origin redirects. Beyond the
+     * three RFC-managed ones, this also carries the widely-used custom credential
+     * header names: a redirect from a public host to another origin must not replay
+     * an {@code X-Api-Key} (or the like) any more than it may replay
+     * {@code Authorization}.
+     * <p>
+     * Public and lower-cased so the Vert.x httpcalls client
+     * ({@code HttpClientModule}) strips the same set on its own cross-origin
+     * redirect hops — its default redirect handler copies every request header and
+     * removes only {@code Content-Length}, so without this it replayed credentials
+     * of any name across origins.
+     */
+    public static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
+            "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication");
 
     private final HttpClient httpClient;
     private final long connectTimeoutMs;
+
+    /**
+     * Interrupts a body read that stalled after the response headers arrived — see
+     * {@link BoundedBodyReader}. One daemon thread per client instance; cheap, and
+     * the client is {@code @ApplicationScoped} so there is one of it in production.
+     */
+    private final ScheduledExecutorService bodyReadWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "safe-http-body-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public SafeHttpClient(
             @ConfigProperty(name = "httpClient.connectTimeoutInMillis", defaultValue = "10000") int connectTimeoutMs) {
@@ -121,6 +148,46 @@ public class SafeHttpClient {
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
         return sendWithRedirects(withDefaultTimeout(request), bodyHandler, 0, Instant.now());
+    }
+
+    /**
+     * A response whose body was read through {@link BoundedBodyReader}: the status
+     * code, the bytes (never more than the requested cap), and whether the body was
+     * cut short at the cap or the read deadline.
+     */
+    public record BoundedResponse(int statusCode, byte[] body, boolean truncated) {
+    }
+
+    /**
+     * Like {@link #sendValidated} but reads the body through
+     * {@link BoundedBodyReader} with a hard {@code maxBytes} cap, so a
+     * user/LLM-chosen URL cannot stream an unbounded body into memory. The size is
+     * checked <em>while</em> reading, not after buffering the whole response.
+     */
+    public BoundedResponse sendValidatedBounded(HttpRequest request, long maxBytes)
+            throws IOException, InterruptedException {
+        UrlValidationUtils.validateUrl(request.uri().toString());
+        HttpRequest bounded = withDefaultTimeout(request);
+        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, Instant.now());
+        return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
+    }
+
+    /**
+     * Like {@link #send} but reads the body through {@link BoundedBodyReader} with
+     * a hard {@code maxBytes} cap. For config-constructed URLs that still return
+     * caller/LLM-relayed bodies (redirects are still followed and per-hop
+     * validated).
+     */
+    public BoundedResponse sendBounded(HttpRequest request, long maxBytes)
+            throws IOException, InterruptedException {
+        HttpRequest bounded = withDefaultTimeout(request);
+        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, Instant.now());
+        return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
+    }
+
+    private BoundedResponse toBounded(HttpResponse<InputStream> response, long maxBytes, Duration timeout) throws IOException {
+        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), maxBytes, timeout, bodyReadWatchdog);
+        return new BoundedResponse(response.statusCode(), bounded.bytes(), bounded.truncated());
     }
 
     /**

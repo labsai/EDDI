@@ -1460,4 +1460,61 @@ class BuildQualityGatesTest {
                         + " dragging them in — an unrelated dependency bump then breaks the compile. Declared: "
                         + declared);
     }
+
+    /**
+     * Slack's Block Kit caps a section block at 10 {@code fields} and rejects the
+     * whole message over it ({@code invalid_blocks}). {@code notify-slack} posts
+     * with {@code curl -sf}, so an eleventh status field did not produce a
+     * truncated message — it produced none: every failure and release notification
+     * failed, and the only trace was a red step nobody was told about. The statuses
+     * now sit in two sections; this keeps each under the cap and keeps every
+     * {@code --arg *_icon} rendered somewhere, so splitting the fields cannot
+     * quietly drop one.
+     */
+    @Test
+    @DisplayName("the Slack notification stays within Block Kit's 10 fields per section")
+    void slackSectionsStayWithinTheFieldCap() throws IOException {
+        List<String> lines = read(CI_WORKFLOW).lines().toList();
+        int start = lines.indexOf("  notify-slack:");
+        assertTrue(start >= 0, CI_WORKFLOW + " has no notify-slack job");
+        int end = start + 1;
+        while (end < lines.size() && !lines.get(end).matches("  [a-z][\\w-]*:\\s*")) {
+            end++;
+        }
+        List<String> job = lines.subList(start, end);
+
+        List<Integer> sectionSizes = new ArrayList<>();
+        List<String> rendered = new ArrayList<>();
+        Pattern iconUse = Pattern.compile("\\$(\\w+_icon)");
+        for (int i = 0; i < job.size(); i++) {
+            if (!job.get(i).strip().equals("fields: [")) {
+                continue;
+            }
+            int count = 0;
+            for (int j = i + 1; j < job.size() && !job.get(j).strip().startsWith("]"); j++) {
+                if (job.get(j).strip().startsWith("{")) {
+                    count++;
+                    Matcher m = iconUse.matcher(job.get(j));
+                    while (m.find()) {
+                        rendered.add(m.group(1));
+                    }
+                }
+            }
+            sectionSizes.add(count);
+        }
+        assertFalse(sectionSizes.isEmpty(), "found no `fields: [` block in notify-slack; this guard no longer reads it");
+        for (int size : sectionSizes) {
+            assertTrue(size <= 10, "a notify-slack section has " + size + " fields; Slack rejects the whole message above 10."
+                    + " Split them into another section. Section sizes: " + sectionSizes);
+        }
+
+        List<String> declared = new ArrayList<>();
+        Matcher arg = Pattern.compile("--arg (\\w+_icon) ").matcher(String.join("\n", job));
+        while (arg.find()) {
+            declared.add(arg.group(1));
+        }
+        assertFalse(declared.isEmpty(), "found no `--arg *_icon` in notify-slack; this guard no longer reads it");
+        List<String> missing = declared.stream().filter(d -> !rendered.contains(d)).toList();
+        assertEquals(List.of(), missing, "these statuses are computed but no longer rendered in any section");
+    }
 }

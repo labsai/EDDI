@@ -97,7 +97,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.2</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -109,7 +109,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.2</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -118,23 +118,17 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.2</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.3</version>
-            </dependency>
-            <!-- Pinned with core/databind for the same reason as csv/xml: we declare it,
-                 and the Quarkus BOM would otherwise leave it a patch behind its own core. -->
-            <dependency>
-                <groupId>com.fasterxml.jackson.dataformat</groupId>
-                <artifactId>jackson-dataformat-yaml</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.2</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
-                 The 1.3 line, because it is the one built against reactor-core 3.8, which is what
-                 the build resolves; 1.2.x is built against reactor-core 3.7. -->
+                 The 1.3 line, because it is the one built against reactor-core 3.8, which is
+                 what the Quarkus BOM manages (3.8.7 in 3.39.5); 1.2.x is built against
+                 reactor-core 3.7. Keep it on the line that matches Quarkus's reactor-core. -->
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>

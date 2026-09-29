@@ -24,6 +24,8 @@ import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -476,6 +478,50 @@ class ChannelTargetRouterDeepBranchTest {
         @DisplayName("null channel type → false")
         void nullType() {
             assertFalse(router.hasAnyChannels(null));
+        }
+    }
+
+    // ─── getIntegrationByName — ambiguity refusal (Finding C) ─────────────
+
+    @Nested
+    @DisplayName("getIntegrationByName — non-unique display name")
+    class GetIntegrationByNameAmbiguity {
+
+        private ChannelIntegrationConfiguration named(String channelId, String name, String secret) {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setName(name);
+            cfg.setChannelType("slack");
+            var pc = new HashMap<String, String>();
+            pc.put("channelId", channelId);
+            pc.put("signingSecret", secret);
+            cfg.setPlatformConfig(pc);
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("unique name resolves")
+        void uniqueNameResolves() throws Exception {
+            setField(router, "integrationMap", Map.of(
+                    "slack:C_VICTIM", named("C_VICTIM", "Support Hub", "victim-secret")));
+            var resolved = router.getIntegrationByName("slack", "Support Hub");
+            assertTrue(resolved.isPresent());
+            assertEquals("victim-secret", resolved.get().getPlatformConfig().get("signingSecret"));
+        }
+
+        @Test
+        @DisplayName("two integrations sharing a name → refuse (empty), so an attacker "
+                + "cannot bind a decision to the victim by copying its name")
+        void duplicateNameRefused() throws Exception {
+            // Victim integration and an attacker's integration (different channel, its own
+            // secret) both named "Support Hub".
+            setField(router, "integrationMap", new LinkedHashMap<>(Map.of(
+                    "slack:C_VICTIM", named("C_VICTIM", "Support Hub", "victim-secret"),
+                    "slack:C_ATTACKER", named("C_ATTACKER", "Support Hub", "attacker-secret"))));
+
+            var resolved = router.getIntegrationByName("slack", "Support Hub");
+
+            assertTrue(resolved.isEmpty(),
+                    "an ambiguous name must resolve to no integration (fail-closed), never to either one");
         }
     }
 

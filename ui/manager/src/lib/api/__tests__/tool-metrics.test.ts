@@ -68,9 +68,16 @@ describe("tool-metrics API", () => {
   // ─── getToolHistory ─────────────────────────────────────────────
   describe("getToolHistory", () => {
     it("fetches tool execution history", async () => {
+      // A ToolExecutionTrace object — the backend never sends a bare array.
       const result = await getToolHistory("conv1");
-      expect(result).toBeDefined();
-      expect(Array.isArray(result)).toBe(true);
+      expect(Array.isArray(result)).toBe(false);
+      expect(result.toolCalls.length).toBeGreaterThan(0);
+      expect(result.toolCalls[0]).toMatchObject({
+        toolName: "fetch_weather",
+        arguments: '{"city":"Vienna"}',
+        executionTimeMs: 156,
+      });
+      expect(result).toHaveProperty("totalCost");
     });
   });
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp.impl;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -11,6 +12,7 @@ import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.nlp.IInputParser;
 import ai.labs.eddi.modules.nlp.IRestSemanticParser;
 import ai.labs.eddi.modules.nlp.Solution;
@@ -68,6 +70,7 @@ public class RestSemanticParser implements IRestSemanticParser {
     private final IRuntime runtime;
     private final IResourceClientLibrary resourceClientLibrary;
     private final Provider<ILifecycleTask> parserProvider;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     /**
      * Bounded, thread-safe parser cache. This bean is an {@code @ApplicationScoped}
@@ -82,8 +85,8 @@ public class RestSemanticParser implements IRestSemanticParser {
 
     @Inject
     public RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
-            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks) {
-        this(runtime, resourceClientLibrary, lifecycleTasks, Ticker.systemTicker());
+            @LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTasks, ResourceAccessGuard resourceAccessGuard) {
+        this(runtime, resourceClientLibrary, lifecycleTasks, resourceAccessGuard, Ticker.systemTicker());
     }
 
     /**
@@ -92,10 +95,11 @@ public class RestSemanticParser implements IRestSemanticParser {
      * {@link #PARSER_CACHE_TTL}.
      */
     RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
-            Map<String, Provider<ILifecycleTask>> lifecycleTasks, Ticker ticker) {
+            Map<String, Provider<ILifecycleTask>> lifecycleTasks, ResourceAccessGuard resourceAccessGuard, Ticker ticker) {
         this.runtime = runtime;
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
+        this.resourceAccessGuard = resourceAccessGuard;
 
         this.parserCache = Caffeine.newBuilder()
                 .maximumSize(MAX_CACHED_PARSERS)
@@ -107,6 +111,12 @@ public class RestSemanticParser implements IRestSemanticParser {
     @Override
     public void parse(String configId, Integer version, String sentence, AsyncResponse asyncResponse) {
         asyncResponse.setTimeout(30, TimeUnit.SECONDS);
+
+        // Enforce VIEW on the specific parser configuration on the REQUEST thread —
+        // ResourceAccessGuard reads the request-scoped SecurityIdentity, which is not
+        // available on the runtime pool thread the parse itself runs on. A refusal
+        // (ForbiddenException) propagates synchronously and maps to 403.
+        resourceAccessGuard.requireAccess(configId, AccessLevel.VIEW, "parser configuration");
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {

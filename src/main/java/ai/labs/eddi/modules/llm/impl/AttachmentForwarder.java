@@ -32,7 +32,6 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -417,9 +416,17 @@ public class AttachmentForwarder {
         try {
             validateUrl(url);
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-            HttpResponse<byte[]> response = httpClient.sendValidated(request, HttpResponse.BodyHandlers.ofByteArray());
+            // Bounded at the per-file limit and read as it arrives, so an over-sized
+            // or endlessly-streaming URL is aborted rather than buffered whole and
+            // measured afterwards. A body that hits the cap comes back truncated,
+            // which is the same outcome as exceeding the per-file limit.
+            SafeHttpClient.BoundedResponse response = httpClient.sendValidatedBounded(request, maxForwardBytes);
             if (response.statusCode() != 200) {
                 throw new ForwardSkipException("Attachment '" + name + "' download failed: HTTP " + response.statusCode());
+            }
+            if (response.truncated()) {
+                throw new ForwardSkipException(("Attachment '%s' exceeds the per-file forward limit of %d bytes and was not sent. "
+                        + "Use the readAttachment tool to access it.").formatted(name, maxForwardBytes));
             }
             return response.body();
         } catch (ForwardSkipException e) {

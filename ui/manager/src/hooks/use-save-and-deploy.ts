@@ -59,28 +59,43 @@ export function useSaveAndDeploy() {
         // Step 3: Poll deployment status (2s interval, 30s timeout)
         const maxAttempts = 15;
         let deployed = false;
+        let deployError = false;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           await sleep(2000);
           if (abortRef.current?.signal.aborted) {
             drawerStore.setStep("idle");
             return;
           }
+          let status: Awaited<ReturnType<typeof getDeploymentStatus>>;
           try {
-            const status = await getDeploymentStatus(
+            status = await getDeploymentStatus(
               "production",
               opts.agentId,
               newAgentVersion
             );
-            if (status.status === "READY") {
-              deployed = true;
-              break;
-            }
-            if (status.status === "ERROR") {
-              throw new Error(t("editor.deployFailed", "Deployment failed"));
-            }
           } catch (err) {
+            // A failed status READ is worth retrying; only the last one counts.
             if (attempt === maxAttempts - 1) throw err;
+            continue;
           }
+          if (status.status === "READY") {
+            deployed = true;
+            break;
+          }
+          /*
+           * ERROR is the backend's answer, not a flaky read — stop polling now.
+           * The throw used to sit inside the try above, whose catch swallowed
+           * it on every attempt but the last, so a failed deployment was
+           * polled for the full 30 s and then reported as "Deploy timed out".
+           */
+          if (status.status === "ERROR") {
+            deployError = true;
+            break;
+          }
+        }
+
+        if (deployError) {
+          throw new Error(t("editor.deployFailed", "Deployment failed"));
         }
 
         if (!deployed) {

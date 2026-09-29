@@ -132,7 +132,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                     }
                 }
 
-                if (isDELETE(invokedHttpMethod)) {
+                if (isDELETE(invokedHttpMethod) && addressesResourceItself(uriInfo.getPath())) {
                     String currentResourceURI = uriInfo.getRequestUri().toString();
                     var descriptorStore = getDescriptorStore(currentResourceURI);
                     IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
@@ -196,6 +196,29 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
         }
         String path = uriPath.startsWith("/") ? uriPath.substring(1) : uriPath;
         return path.equals(BACKUP_PATH_PREFIX) || path.startsWith(BACKUP_PATH_PREFIX + "/");
+    }
+
+    /**
+     * Whether a request path addresses a configuration resource itself —
+     * {@code {store}/{collection}/{id}} — rather than something beneath one.
+     * <p>
+     * A DELETE deeper than that removes a sub-resource, not the configuration, and
+     * its last segment is not a configuration id. {@code DELETE
+     * /ragstore/rags/{id}/sources/{sourceId}/files/{fileId}?version=1} ends in a
+     * 32-hex file id that {@link RestUtilities#extractResourceId} accepts, so the
+     * descriptor lookup ran on it after the file was already gone — and answered a
+     * completed delete with a 400 ("hexString has 24 characters") on MongoDB, or a
+     * 404 wherever the lookup merely misses.
+     */
+    static boolean addressesResourceItself(String uriPath) {
+        if (uriPath == null) {
+            return false;
+        }
+        String path = uriPath.startsWith("/") ? uriPath.substring(1) : uriPath;
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return !path.isEmpty() && path.split("/").length == 3;
     }
 
     private static boolean isPUT(String resourceMethod) {

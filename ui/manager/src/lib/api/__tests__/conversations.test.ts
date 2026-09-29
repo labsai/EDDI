@@ -7,6 +7,8 @@ import {
   extractInput,
   extractOutput,
   extractOutputParts,
+  extractTaskErrors,
+  describeTurnFailure,
   extractInputField,
   extractQuickReplies,
   extractActions,
@@ -214,6 +216,51 @@ describe("extractOutputParts", () => {
   it("returns empty array for empty output", () => {
     const output = { output: [] };
     expect(extractOutputParts(output)).toEqual([]);
+  });
+});
+
+describe("extractTaskErrors", () => {
+  it("joins the text of every reported task failure", () => {
+    expect(
+      extractTaskErrors({
+        taskErrors: [
+          { type: "errorDigest", taskId: "llm", text: "Task 'llm' failed: model not found" },
+          { type: "errorDigest", taskId: "api", text: " Task 'api' failed: 503 " },
+        ],
+      }),
+    ).toBe("Task 'llm' failed: model not found\nTask 'api' failed: 503");
+  });
+
+  it("is null when nothing failed or the entries carry no text", () => {
+    expect(extractTaskErrors(undefined)).toBeNull();
+    expect(extractTaskErrors({ output: ["hi"] })).toBeNull();
+    expect(extractTaskErrors({ taskErrors: "not a list" })).toBeNull();
+    expect(extractTaskErrors({ taskErrors: [{ type: "errorDigest" }, null, 3] })).toBeNull();
+  });
+});
+
+describe("describeTurnFailure", () => {
+  const fallback = "The agent could not answer.";
+
+  it("prefers the backend's reason", () => {
+    expect(
+      describeTurnFailure(
+        { taskErrors: [{ text: "Task 'llm' failed: `temperature` is deprecated" }] },
+        "ERROR",
+        fallback,
+      ),
+    ).toBe("Task 'llm' failed: `temperature` is deprecated");
+  });
+
+  it("falls back for an ERROR turn with no reply and no reason — the turn that used to render as nothing", () => {
+    expect(describeTurnFailure({ actions: ["send_message"] }, "ERROR", fallback)).toBe(fallback);
+    expect(describeTurnFailure(undefined, "ERROR", fallback)).toBe(fallback);
+  });
+
+  it("stays quiet when the turn succeeded, or errored after producing a reply", () => {
+    expect(describeTurnFailure({ output: [{ type: "text", text: "Hi" }] }, "READY", fallback)).toBeNull();
+    expect(describeTurnFailure({ output: [{ type: "text", text: "Partial answer" }] }, "ERROR", fallback)).toBeNull();
+    expect(describeTurnFailure({}, "READY", fallback)).toBeNull();
   });
 });
 
@@ -462,5 +509,18 @@ describe("getDetailedConversation", () => {
   it("fetches detailed conversation", async () => {
     const result = await getDetailedConversation("conv1");
     expect(result).toBeDefined();
+  });
+
+  it("asks for EVERY step — the backend defaults returnCurrentStepOnly to true", async () => {
+    let params: URLSearchParams | null = null;
+    server.use(
+      http.get("*/agents/:conversationId", ({ request }) => {
+        params = new URL(request.url).searchParams;
+        return HttpResponse.json({ conversationSteps: [], conversationProperties: {} });
+      }),
+    );
+    await getDetailedConversation("conv1");
+    expect(params!.get("returnDetailed")).toBe("true");
+    expect(params!.get("returnCurrentStepOnly")).toBe("false");
   });
 });

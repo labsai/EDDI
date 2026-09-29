@@ -47,8 +47,9 @@ Security vulnerability reporting follows [SECURITY.md](SECURITY.md). The Project
 
 ## Releases
 
-- Releases are tagged from `main` using semantic versioning (`v6.0.0`, `v6.0.1`, etc.).
-- Release candidates use the `-RC` suffix (`v6.0.0-RC1`).
+- Releases are tagged from `main` using semantic versioning, with **no `v` prefix**: `6.0.0`, `6.0.1`, etc. CI triggers only on tags that start with a digit, so a `v6.0.0` tag builds, signs and publishes nothing.
+- Release candidates use the `-RC` suffix (`6.0.0-RC1`).
+- The full process — tagging, the Docker tags each one publishes, and what happens after a release — is in [docs/release-versioning.md](docs/release-versioning.md).
 - Docker images are signed with Cosign (keyless OIDC) and published to Docker Hub.
 - All releases include an SBOM (Software Bill of Materials) generated during CI.
 

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Users, Activity, Layers, AlertTriangle, CheckCircle2, AlertCircle } from "lucide-react";
+import { Users, Activity, AlertTriangle, CheckCircle2, AlertCircle, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useKnowledgeHealth,
@@ -76,7 +76,7 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
     {
       value: health.workforceSize,
       label: t("knowledgeHealth.workforceSize", "Workforce Size"),
-      icon: Users,
+      icon: Bot,
       description: t(
         "knowledgeHealth.workforceSizeDesc",
         "Total deployed digital experts",
@@ -96,7 +96,7 @@ export function KnowledgeHealthCard({ className }: KnowledgeHealthCardProps) {
     {
       value: health.taskForceCount,
       label: t("knowledgeHealth.taskForces", "Task Forces"),
-      icon: Layers,
+      icon: Users,
       description: t(
         "knowledgeHealth.taskForcesDesc",
         "Collaborative agent groups",

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 import { filesFromClipboard, useFileDrop } from "@/hooks/use-attachment-staging";
 import { FileDropOverlay } from "@/components/chat/attachment-chip";
 import {
@@ -217,6 +218,8 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             rows={1}
             disabled={disabled || isLoading}
             onKeyDown={(e) => {
+              // The Enter that confirms an IME composition is not a send.
+              if (isImeComposing(e)) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSubmit();
@@ -286,6 +289,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             rows={8}
             disabled={isLoading || disabled}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 handleSubmit();
