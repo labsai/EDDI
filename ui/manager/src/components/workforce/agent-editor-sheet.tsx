@@ -137,6 +137,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   useEffect(() => {
     setPromptSynced(false);
     setDiscardOpen(false);
+    // A compatibility choice is about ONE agent's next version: ticked for agent A
+    // and closed unsaved, it must not carry over and write B's version as compatible.
+    setCompatible(false);
     // The capability draft is pure UI state — unlike description/capabilities
     // there is no effect syncing it from `agent`, so a half-typed skill stayed
     // on screen for the NEXT agent and Add would have written it there.

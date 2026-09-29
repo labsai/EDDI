@@ -1068,6 +1068,9 @@ export function ChatWidget() {
           } catch {
             // best effort — falls through to the generic handling
           }
+          // The user may have started a new conversation while the reread was in
+          // flight; this send's outcome must not land in that one.
+          if (sendGen !== generationRef.current) return;
           if (endReason === END_REASON_AGENT_VERSION_RETIRED) {
             withdrawTurn();
             dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });

@@ -117,6 +117,58 @@ describe("ChatWidget — conversation ended by an agent update", () => {
     expect(screen.queryByTestId("chat-ended-retired")).toBeNull();
   });
 
+  /**
+   * The 410 path re-reads the conversation before deciding. A restart while that
+   * read is in flight must win: the stale answer describes the OLD conversation
+   * and must not stamp the retired footer onto the new one.
+   */
+  it("non-streaming: a restart during the 410 re-read keeps the new conversation live", async () => {
+    let releaseRead: (() => void) | undefined;
+    let refused = false;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/start")) {
+        const id = refused ? "conv-2" : "conv-1";
+        return new Response(null, { status: 201, headers: { Location: `/agents/${id}` } });
+      }
+      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      if (init?.method === "POST") {
+        refused = true;
+        return new Response("Conversation has ended", { status: 410 });
+      }
+      if (refused && href.includes("conv-1")) {
+        // The re-read after the 410: held until the test has restarted.
+        await new Promise<void>((resolve) => (releaseRead = resolve));
+        return new Response(
+          JSON.stringify({
+            conversationId: "conv-1",
+            conversationState: "ENDED",
+            conversationSteps: [],
+            endReason: "agent-version-retired",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ conversationId: href.includes("conv-2") ? "conv-2" : "conv-1", conversationState: "READY", conversationSteps: [] }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    renderWidget("?hideStreaming=true");
+
+    await send("hello?");
+    await waitFor(() => expect(releaseRead).toBeDefined());
+    fireEvent.click(screen.getByTestId("restart-btn"));
+    await waitFor(() =>
+      expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([u]) => String(u).includes("/start") && refused)).toBe(true),
+    );
+    releaseRead!();
+
+    expect(await screen.findByTestId("chat-input")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("chat-ended-retired")).toBeNull();
+  });
+
   it("starting a new conversation clears the notice", async () => {
     mockEndedOnSend({ streaming: true, endReason: "agent-version-retired" });
     renderWidget();

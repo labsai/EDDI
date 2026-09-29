@@ -186,6 +186,36 @@ describe("AgentEditorSheet unsaved changes", () => {
   });
 
   /**
+   * The compatibility choice is about ONE agent's next version. Ticked for agent A
+   * and left unsaved, it must not follow the sheet to agent B — both of B's save
+   * paths would then write B's new version as compatible without anyone choosing
+   * that for B.
+   */
+  it("does not carry a ticked compatibility choice to the next agent", async () => {
+    function Parent() {
+      const [agentId, setAgentId] = useState<string | null>("agent1");
+      return (
+        <>
+          <button onClick={() => setAgentId("agent2")}>switch agent</button>
+          <AgentEditorSheet agentId={agentId} onClose={() => setAgentId(null)} />
+        </>
+      );
+    }
+
+    const user = userEvent.setup();
+    renderWithProviders(<Parent />);
+
+    const checkbox = await screen.findByTestId("agent-editor-compatible-checkbox");
+    await user.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "switch agent" }));
+
+    await screen.findByLabelText("Description");
+    expect(await screen.findByTestId("agent-editor-compatible-checkbox")).not.toBeChecked();
+  });
+
+  /**
    * Reload and tab-close are the fifth exit, and only the browser can ask about
    * them. Asserting the event is cancelled is the whole of what the guard does.
    */
