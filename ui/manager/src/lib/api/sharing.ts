@@ -190,7 +190,7 @@ export function moveToSpace(resourceId: string, spaceId: string, options: ShareO
 }
 
 /** What the server says happened to an access request. */
-export type AccessRequestOutcome = "SENT" | "ALREADY_HAS_ACCESS" | "ALREADY_REQUESTED";
+export type AccessRequestOutcome = "SENT" | "ALREADY_HAS_ACCESS";
 
 /**
  * Ask the owner of a resource the caller cannot open for access.

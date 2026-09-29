@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -74,6 +75,38 @@ class UserDirectoryTest {
 
     private static DirectoryUser user(String principal, String username, String email, boolean verified, String name) {
         return new DirectoryUser(principal, "sub-" + principal, username, email, verified, name, List.of(), Instant.EPOCH, Instant.EPOCH);
+    }
+
+    @Nested
+    @DisplayName("search is not an email oracle")
+    class SearchPrivacy {
+
+        @Test
+        @DisplayName("a match on an unverified email alone suggests nobody")
+        void unverifiedEmailNotSearchable() {
+            when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", false, "Jane Doe")));
+
+            assertTrue(directory.search("ceo", 8, ALICE).isEmpty());
+        }
+
+        @Test
+        @DisplayName("with emails hidden, a match on the email alone suggests nobody")
+        void hiddenEmailNotSearchable() {
+            var hidden = new UserDirectory(store, identity, spaceContext, settings, executor, true, false);
+            when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", true, "Jane Doe")));
+
+            assertTrue(hidden.search("ceo", 8, ALICE).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a name still finds the person, and a verified shown email does too")
+        void nameAndVerifiedEmailSearchable() {
+            when(store.search(eq("jan"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", false, "Jane Doe")));
+            when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", true, "Jane Doe")));
+
+            assertEquals(1, directory.search("jan", 8, ALICE).size());
+            assertEquals(1, directory.search("ceo", 8, ALICE).size());
+        }
     }
 
     @Nested

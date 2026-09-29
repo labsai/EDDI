@@ -443,7 +443,7 @@ public class UserDirectory {
             Set<String> self = caller == null ? Set.of() : caller.selfPrincipals();
             try {
                 for (DirectoryUser user : store.search(userQuery, bounded + 1)) {
-                    if (self.contains(user.principal())) {
+                    if (self.contains(user.principal()) || !searchableBy(user, userQuery)) {
                         continue;
                     }
                     String subject = Subjects.user(user.principal());
@@ -454,6 +454,27 @@ public class UserDirectory {
             }
         }
         return matches.values().stream().limit(bounded).toList();
+    }
+
+    /**
+     * Whether {@code user} may be suggested for {@code query}. A match on the name,
+     * username or principal always may. A match on the email address alone only
+     * when the deployment shows emails and the provider verified this one —
+     * otherwise typing a prefix would answer "does anybody here have an address
+     * starting with ceo@", which is exactly what hiding emails is meant to stop,
+     * and an unverified address is not a way to find anybody (see
+     * {@link #resolveSubject}).
+     */
+    private boolean searchableBy(DirectoryUser user, String query) {
+        String q = DirectoryUser.lower(query);
+        if (startsWith(user.displayName(), q) || startsWith(user.username(), q) || startsWith(user.principal(), q)) {
+            return true;
+        }
+        return exposeEmail && user.emailVerified() && startsWith(user.email(), q);
+    }
+
+    private static boolean startsWith(String value, String loweredPrefix) {
+        return value != null && loweredPrefix != null && value.toLowerCase(Locale.ROOT).startsWith(loweredPrefix);
     }
 
     /** Recorded members of a team, for notifying them. */

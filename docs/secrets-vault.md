@@ -72,6 +72,14 @@ reference, so a `${vars:…}` the configuration wrote still resolves through to 
 that arrived through conversation data refuses the call — the check runs again after variable
 expansion, against the configured template expanded the same way.
 
+Because agent-secret grants are checked at **deploy** time, a global variable that resolves to a
+secret can be used to redirect a deployed agent's credentials past that check by editing the
+variable after deployment. To close that, **only an `eddi-admin` may store a global variable whose
+value contains a `${vault:…}`, `${eddivault:…}` or `${connection:…}` reference** — a non-admin
+editor writing such a value is refused with `403`. Plain-literal variables are unaffected, and
+callers on a deployment with authentication disabled are out of scope (there is no editor/admin
+distinction to enforce).
+
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
 string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
@@ -316,9 +324,11 @@ When a property has `scope: secret`:
 When the **client flags input as secret** (via the `secretInput` context key):
 
 1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
-2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
-3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
-4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in the conversation output
+3. The actual plaintext still flows through the turn's **transient lifecycle data** — `input:initial` (and, after normalizers, `input:normalized`) — so the parser, behavior rules and `PropertySetterTask` (including a `scope: secret` vault) all run normally
+4. At the end of the turn, before the step snapshot is persisted or returned, `scrubSecretUserInput()` rewrites `input:initial`/`input:normalized` and the echoed `input` output to `<secret input>`, **and drops the parser-derived forms** — `expressions:parsed`, `expressions:matches`, `intents`, `properties:extracted` and the `expressions`/`intents` conversation outputs. This matters because the parser runs on the raw plaintext and, with `includeUnknown`/`includeUnused` on (the defaults), emits `unknown(<token>)` expressions that embed the (normalized, lower-cased) secret — a free-text secret (API key, password) matches no dictionary entry and would otherwise survive verbatim in those keys. The scrub runs in the turn's `finally` (so it fires on the error/pause paths too) and before the audit flush (whose `inputWasScrubbed()` keys off the placeholder on `input:initial` to redact the recorded input). The result: **the raw input is never persisted and never echoed back on reload** — the conversation log, the stored document (including the raw-step / memory-inspector view) and the API responses all show `<secret input>` and carry no `unknown(<secret>)` expression
+
+> Previously only the echoed `input` output was masked; the raw `input:initial` (and the parser's `unknown(<token>)` expressions) were still stored as step data and replayed to the client on reload (`convertSimpleConversationMemory` always includes `input:initial`, and the raw-step view returns the expressions). The `finally`-block scrub closes that gap for the client-flagged case, mirroring `PropertySetterTask.dropParsedForms`, which does the same for the `scope: secret` property path.
 
 When the **client sends a credential as context** — for example the caller's token for a
 downstream API — it marks that context entry `"secret": true`. The value works for that one
@@ -407,7 +417,7 @@ One provider key usually serves many agents, so setup avoids storing it many tim
 | `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
 | `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
 
-Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+Plaintext reuse is matched on the keyed checksum the vault stores per entry — nothing is decrypted to make the decision, and the match is performed by the vault provider (which holds the checksum key) rather than by recomputing a digest in the setup code — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
@@ -471,7 +481,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -503,11 +513,12 @@ It returns the vault reference:
     "tenantId": "default",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
-    "lastAccessedAt": "2026-03-16T14:00:00Z",
-    "checksum": "a1b2c3d4..."
+    "lastAccessedAt": "2026-03-16T14:00:00Z"
   }
 ]
 ```
+
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
 
 **`GET /health`** — returns vault provider status:
 
@@ -681,7 +692,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 ### Features
 
 - **Namespace filtering** — select tenant ID to scope the view
-- **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
+- **Secrets table** — displays `keyName`, `createdAt`, and `lastAccessedAt` (the checksum is internal and not returned over the API)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
 - **Vault Health** — live status badge showing vault online/offline state

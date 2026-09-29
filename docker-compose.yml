@@ -28,10 +28,17 @@ services:
       # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # EDDI ships unauthenticated by default (the escape hatch above), so it must
+    # NOT be reachable from off-box out of the box. MongoDB is already bound to
+    # 127.0.0.1 below; EDDI is bound the same way here. To expose it on the LAN
+    # (or on 0.0.0.0), set EDDI_BIND=0.0.0.0 in .env — and turn authentication on
+    # first (EDDI_SECURITY_ALLOW_UNAUTHENTICATED=false + QUARKUS_OIDC_TENANT_ENABLED=true,
+    # via docker-compose.auth.yml). Exposing an unauthenticated instance is then an
+    # explicit, deliberate choice rather than the default.
     ports:
-      - "${EDDI_PORT:-7070}:7070"
-      - "${EDDI_HTTPS_PORT:-7443}:7443"
-      # - "5005:5005"
+      - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+      - "${EDDI_BIND:-127.0.0.1}:${EDDI_HTTPS_PORT:-7443}:7443"
+      # - "127.0.0.1:5005:5005"
     depends_on:
       mongodb:
         condition: service_healthy

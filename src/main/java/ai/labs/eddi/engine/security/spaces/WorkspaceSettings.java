@@ -88,7 +88,7 @@ public class WorkspaceSettings {
 
     private static final long TTL_NANOS = STORED_SETTINGS_TTL.toNanos();
 
-    private static final Snapshot NOTHING_STORED = new Snapshot(null, 0L);
+    private static final Snapshot NOTHING_STORED = new Snapshot(null, 0L, false);
 
     private final boolean enabled;
     private final boolean authEnabled;
@@ -107,7 +107,12 @@ public class WorkspaceSettings {
 
     private volatile Snapshot snapshot;
 
-    private record Snapshot(StoredWorkspaceSettings stored, long loadedAtNanos) {
+    /**
+     * @param unreadable
+     *            the store could not be read and nothing was ever read from it — so
+     *            what an administrator stored is unknown, not absent
+     */
+    private record Snapshot(StoredWorkspaceSettings stored, long loadedAtNanos, boolean unreadable) {
     }
 
     @Inject
@@ -208,7 +213,15 @@ public class WorkspaceSettings {
         if (pinnedLegacyVisibility != null) {
             return pinnedLegacyVisibility.toLowerCase(Locale.ROOT);
         }
-        StoredWorkspaceSettings stored = snapshot().stored();
+        Snapshot current = snapshot();
+        if (current.unreadable()) {
+            // Unknown is not "unset". Answering the default here would open every
+            // unowned resource to every user whenever the store blinked, on a
+            // deployment whose administrator had closed them. Fail closed until the
+            // stored value can be read.
+            return LEGACY_ADMIN_ONLY;
+        }
+        StoredWorkspaceSettings stored = current.stored();
         if (stored != null && stored.legacyVisibility() != null) {
             if (isValidLegacyVisibility(stored.legacyVisibility())) {
                 return stored.legacyVisibility().trim().toLowerCase(Locale.ROOT);
@@ -280,7 +293,7 @@ public class WorkspaceSettings {
             return;
         }
         synchronized (this) {
-            snapshot = new Snapshot(written, nanoClock.getAsLong());
+            snapshot = new Snapshot(written, nanoClock.getAsLong(), false);
         }
     }
 
@@ -327,15 +340,15 @@ public class WorkspaceSettings {
 
     private Snapshot load(Snapshot previous, long now) {
         try {
-            return new Snapshot(store.read(TENANT).orElse(null), now);
+            return new Snapshot(store.read(TENANT).orElse(null), now, false);
         } catch (RuntimeException e) {
             if (previous != null) {
                 LOGGER.warnf("Could not read the stored workspace settings (%s); keeping the values last read.", e.getClass().getSimpleName());
-                return new Snapshot(previous.stored(), now);
+                return new Snapshot(previous.stored(), now, previous.unreadable());
             }
-            LOGGER.warnf("Could not read the stored workspace settings (%s); pinned properties and defaults apply until they can be read.",
-                    e.getClass().getSimpleName());
-            return new Snapshot(null, now);
+            LOGGER.warnf("Could not read the stored workspace settings (%s); pinned properties apply, and unowned resources stay "
+                    + "admin-only, until they can be read.", e.getClass().getSimpleName());
+            return new Snapshot(null, now, true);
         }
     }
 }

@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.security.spaces.notifications.WorkspaceNotifications;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
@@ -66,21 +67,18 @@ public class ResourceSharingService {
     private final ConfigGraphResolver graphResolver;
     private final UserDirectory directory;
     private final WorkspaceNotifications notifications;
+    private final Event<SharingChangedEvent> sharingChanged;
 
     @Inject
     public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
-            ConfigGraphResolver graphResolver, UserDirectory directory, WorkspaceNotifications notifications) {
+            ConfigGraphResolver graphResolver, UserDirectory directory, WorkspaceNotifications notifications,
+            Event<SharingChangedEvent> sharingChanged) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
         this.graphResolver = graphResolver;
         this.directory = directory;
         this.notifications = notifications;
-    }
-
-    /** Without notifications. Test seam. */
-    public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
-            ConfigGraphResolver graphResolver, UserDirectory directory) {
-        this(documentDescriptorStore, accessGuard, graphResolver, directory, null);
+        this.sharingChanged = sharingChanged;
     }
 
     /**
@@ -267,7 +265,7 @@ public class ResourceSharingService {
         if (!dryRun && notifications != null && updated.stream().anyMatch(target -> target.id().equals(resourceId))) {
             announce(resourceId, subject, level);
         }
-        return new ShareResult(updated, skipped, dryRun);
+        return notifyChanged(new ShareResult(updated, skipped, dryRun));
     }
 
     /** Removes {@code subject}'s grant, mirroring {@link #share}. */
@@ -286,7 +284,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyRevoke(referenced, subject, updated, skipped, dryRun);
         }
-        return new ShareResult(updated, skipped, dryRun);
+        return notifyChanged(new ShareResult(updated, skipped, dryRun));
     }
 
     /**
@@ -313,7 +311,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             applyVisibility(referenced, visibility, updated, skipped, dryRun);
         }
-        return new ShareResult(updated, skipped, dryRun);
+        return notifyChanged(new ShareResult(updated, skipped, dryRun));
     }
 
     /**
@@ -351,7 +349,7 @@ public class ResourceSharingService {
         for (String referenced : targets(resourceId, cascade)) {
             mutate(referenced, updated, skipped, descriptor -> descriptor.setSpaceId(target), dryRun);
         }
-        return new ShareResult(updated, skipped, dryRun);
+        return notifyChanged(new ShareResult(updated, skipped, dryRun));
     }
 
     /**
@@ -407,7 +405,25 @@ public class ResourceSharingService {
                 skipped.add(new ShareTarget(id, null));
             }
         }
-        return new ShareResult(updated, skipped, dryRun);
+        return notifyChanged(new ShareResult(updated, skipped, dryRun));
+    }
+
+    /**
+     * Tells ownership-derived caches (prompt snippet scoping, for one) that access
+     * changed, so a revoked or unpublished resource stops being served now rather
+     * than when their TTL expires. A failing observer must not undo a sharing
+     * change that has already been written, so it is logged and swallowed. A dry
+     * run changed nothing, so it announces nothing.
+     */
+    private ShareResult notifyChanged(ShareResult result) {
+        if (!result.dryRun() && !result.updated().isEmpty() && sharingChanged != null) {
+            try {
+                sharingChanged.fire(new SharingChangedEvent(result.updatedIds()));
+            } catch (RuntimeException e) {
+                LOGGER.warnf("A sharing-change observer failed; dependent caches converge on their TTL instead: %s", e.getMessage());
+            }
+        }
+        return result;
     }
 
     /**

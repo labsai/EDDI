@@ -18,9 +18,12 @@ import java.util.regex.Pattern;
  * verbatim in agent configuration — {@code ${vault:<tenant>/openai}}. A space
  * id such as {@code team:eng/backend} or {@code user:alice@example.com} fits
  * neither. So each space gets a tenant id that is readable where it can be
- * ({@code t.engineering.3f9a1c2b}) and unique always: the slug drops characters
- * the stores refuse, which could make two spaces look alike, so eight hex
- * characters of a hash of the <em>exact</em> space id are always appended. Two
+ * ({@code t.engineering.3f9a1c2b7d04e615}) and unique always: the slug drops
+ * characters the stores refuse, which could make two spaces look alike, so
+ * sixteen hex characters (64 bits) of a hash of the <em>exact</em> space id are
+ * always appended. Eight were not enough: two principals that slug alike
+ * ({@code alice.smith@corp.com}, {@code alice@smith.corp.com}) collided after
+ * about 2^32 attempts, and a collision is membership of the other tenant. Two
  * spaces can therefore never share a tenant, which is the property the access
  * checks on these tenants rely on.
  *
@@ -34,7 +37,7 @@ import java.util.regex.Pattern;
 public final class SpaceTenants {
 
     /** Tenant ids this class produces, and only those. */
-    private static final Pattern SPACE_TENANT = Pattern.compile("^[tu]\\.[A-Za-z0-9_-]{1,48}\\.[0-9a-f]{8}$");
+    private static final Pattern SPACE_TENANT = Pattern.compile("^[tu]\\.[A-Za-z0-9_-]{1,48}\\.[0-9a-f]{16}$");
 
     private static final int MAX_SLUG = 48;
 
@@ -89,7 +92,7 @@ public final class SpaceTenants {
     private static String hash(String spaceId) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(spaceId.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, 4);
+            return HexFormat.of().formatHex(digest, 0, 8);
         } catch (NoSuchAlgorithmException e) {
             // Every JVM ships SHA-256; this cannot happen.
             throw new IllegalStateException(e);

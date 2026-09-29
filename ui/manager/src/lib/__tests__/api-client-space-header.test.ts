@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
-import { api, SPACE_HEADER } from "../api-client";
+import { api, createsResources, SPACE_HEADER } from "../api-client";
 
-const PATH = "/probe";
+const PATH = "/agentstore/agents";
 const URL = `${window.location.origin}${PATH}`;
 
 /**
@@ -39,6 +39,18 @@ describe("api X-EDDI-Space", () => {
     await api.post(PATH, {});
 
     expect(seen.header).toBeNull();
+  });
+
+  it("only goes on requests that create resources, so a chat turn never trips over it", async () => {
+    // A header naming a space the caller has left is refused by the server —
+    // which, on a chat POST, meant a failed message.
+    expect(createsResources("/agentstore/agents")).toBe(true);
+    expect(createsResources("/llmstore/llms?x=1")).toBe(true);
+    expect(createsResources("/administration/agents/setup-api")).toBe(true);
+    expect(createsResources("/agents/abc/def")).toBe(false);
+    expect(createsResources("/descriptorstore/descriptors/abc/shares")).toBe(false);
+    expect(createsResources("/conversationstore/conversations/end")).toBe(false);
+    expect(createsResources("/workspaces/notifications/read")).toBe(false);
   });
 
   it("never sends it on reads or updates, which do not create anything", async () => {

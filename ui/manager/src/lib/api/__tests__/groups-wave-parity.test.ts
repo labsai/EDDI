@@ -8,6 +8,8 @@ import {
   normalizeGroupConfig,
   normalizeLifecyclePolicy,
   startGroupDiscussion,
+  followupGroupMember,
+  streamGroupContinue,
   streamGroupDiscussion,
   type AgentGroupConfiguration,
   type TranscriptEntry,
@@ -211,8 +213,48 @@ describe("group discussion attachments", () => {
     await startGroupDiscussion("g1", "hello");
     expect(api.post).toHaveBeenCalledWith("/groups/g1/conversations", {
       question: "hello",
-      userId: "manager-user",
     });
+  });
+});
+
+describe("discussion owner (userId)", () => {
+  // With auth on, OwnershipValidator 403s a non-admin who names ANY user but
+  // themselves. The old "manager-user" fallback therefore locked every
+  // non-admin out of group discussions, and stamped admins' runs with a
+  // synthetic owner. Omitted, the backend resolves the signed-in caller.
+  it("omits userId on start when the caller names none", async () => {
+    api.post.mockResolvedValue({});
+    await startGroupDiscussion("g1", "hello");
+    expect(api.post.mock.calls[0]![1]).not.toHaveProperty("userId");
+  });
+
+  it("omits userId on follow-up", async () => {
+    api.post.mockResolvedValue({});
+    await followupGroupMember("g1", "gc1", "why?", "agent-a");
+    expect(api.post).toHaveBeenCalledWith("/groups/g1/conversations/gc1/followup", {
+      question: "why?",
+      targetAgentId: "agent-a",
+    });
+  });
+
+  it("omits userId on the streaming start and continue", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: { getReader: () => ({ read: async () => ({ done: true }), releaseLock() {} }) },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await streamGroupDiscussion("g1", "q").next();
+    await streamGroupContinue("g1", "gc1", "more").next();
+    for (const call of fetchMock.mock.calls) {
+      expect(JSON.parse(call[1].body)).not.toHaveProperty("userId");
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("still sends an explicit userId", async () => {
+    api.post.mockResolvedValue({});
+    await followupGroupMember("g1", "gc1", "why?", "agent-a", "alice");
+    expect(api.post.mock.calls[0]![1]).toMatchObject({ userId: "alice" });
   });
 
   it("sends inline attachments on the start endpoint", async () => {

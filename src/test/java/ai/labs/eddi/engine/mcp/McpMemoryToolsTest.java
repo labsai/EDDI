@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -12,6 +13,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -205,10 +207,30 @@ class McpMemoryToolsTest {
 
     @Test
     void deleteAllUserMemories_success() throws Exception {
-        when(userMemoryStore.countEntries("user1")).thenReturn(5L);
+        when(userMemoryStore.deleteAllExceptReserved("user1")).thenReturn(5L);
         when(jsonSerialization.serialize(any())).thenReturn("ok");
         tools.deleteAllUserMemories("user1", "CONFIRM");
-        verify(userMemoryStore).deleteAllForUser("user1");
+        // H9c: housekeeping keeps the GDPR bookkeeping rows — the full wipe is the
+        // erasure cascade's, and an Art. 18 flag must not vanish as a side effect.
+        verify(userMemoryStore).deleteAllExceptReserved("user1");
+        verify(userMemoryStore, never()).deleteAllForUser(any());
+    }
+
+    @Test
+    void upsertUserMemory_refusesAReservedKey() throws Exception {
+        var result = tools.upsertUserMemory("user1", "_gdpr_processing_restricted", "false", "agent1", "fact", "global");
+        assertTrue(result.contains("reserved"), result);
+        verify(userMemoryStore, never()).upsert(any());
+    }
+
+    @Test
+    void deleteUserMemory_refusesTheRestrictionRow() throws Exception {
+        var row = new UserMemoryEntry("e1", "user1", "_gdpr_processing_restricted", "true", "gdpr",
+                Property.Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.findEntryById("e1")).thenReturn(Optional.of(row));
+        var result = tools.deleteUserMemory("e1");
+        assertTrue(result.contains("reserved"), result);
+        verify(userMemoryStore, never()).deleteEntry(any());
     }
 
     @Test

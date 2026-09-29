@@ -140,6 +140,23 @@ class SpaceResourcesTest {
 
             verify(variables).upsert(new GlobalVariable(SpaceTenants.tenantFor(ENGINEERING), "model", "gpt-x", null, false));
         }
+
+        @Test
+        @DisplayName("a member may not point a space variable at a secret — the deploy check would never see it")
+        void variableMayNotReferenceASecret() {
+            // ${vars:...} resolves before ${vault:...}, and space membership is checked
+            // when an agent is deployed. A variable edited afterwards to hold a vault
+            // or connection reference would redirect a running agent's credentials.
+            for (String value : List.of("${vault:t.finance.00000000/openai}", "${eddivault:openai}", "${connection:crm}")) {
+                assertThrows(ForbiddenException.class,
+                        () -> sut.storeVariable(ENGINEERING, "key", new IRestSpaceResources.VariableWrite(value, null)), value);
+            }
+            verify(variables, never()).upsert(any());
+
+            when(guard.isAdmin()).thenReturn(true);
+            sut.storeVariable(ENGINEERING, "key", new IRestSpaceResources.VariableWrite("${vault:t.finance.00000000/openai}", null));
+            verify(variables).upsert(any());
+        }
     }
 
     @Nested

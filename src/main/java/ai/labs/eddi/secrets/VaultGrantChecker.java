@@ -135,6 +135,10 @@ public class VaultGrantChecker {
     public List<String> findUngrantedReferences(String agentId, Integer agentVersion) {
         try {
             return findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // A verdict, not an unreadable configuration: the catch-all below would
+            // turn it into "no violations" and let the agent deploy.
+            return List.of("a reference assembled from global variables (" + e.getMessage() + ")");
         } catch (Exception e) {
             LOGGER.debugf("Could not read agent '%s' v%s for the vault-grant check: %s", sanitize(agentId), agentVersion,
                     sanitize(e.getMessage()));
@@ -209,7 +213,16 @@ public class VaultGrantChecker {
         if (agentConfiguration == null) {
             return false;
         }
-        for (String reference : collectVaultReferences(agentConfiguration, new ArrayList<>())) {
+        Set<String> found;
+        try {
+            found = collectVaultReferences(agentConfiguration, new ArrayList<>());
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // The agent assembles a reference from variables, so which secret it
+            // reaches depends on their values. Reporting it as a user of this one is
+            // the conservative answer for an impact analysis.
+            return true;
+        }
+        for (String reference : found) {
             try {
                 if (secret.equals(SecretReference.parse(reference))) {
                     return true;
@@ -472,6 +485,13 @@ public class VaultGrantChecker {
      * it, so a scan sees both what is written and what the runtime resolves it to.
      * One helper for the vault scan and the connection scan: expanding for only one
      * of them is how a variable came to hide a connection hop.
+     * <p>
+     * The config is also resolved in place, the way the runtime does it. Each
+     * expansion on its own line could not show a reference split across two
+     * variables; resolving in place refuses one
+     * ({@link GlobalVariableResolver.AssembledReferenceException}), so such an
+     * agent fails to deploy instead of failing its first turn. That exception is
+     * let through deliberately — it is a verdict, not an unreadable variable.
      *
      * @param tenantId
      *            the tenant a short-form {@code ${vars:key}} resolves in
@@ -481,6 +501,10 @@ public class VaultGrantChecker {
             return serialized;
         }
         StringBuilder scanned = new StringBuilder(serialized);
+        String inPlace = globalVariableResolver.resolveValue(serialized, tenantId);
+        if (inPlace != null && !inPlace.equals(serialized)) {
+            scanned.append('\n').append(inPlace);
+        }
         Matcher vars = VARS_PATTERN.matcher(serialized);
         while (vars.find()) {
             String expanded;

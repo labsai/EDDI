@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.security.spaces.rest;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -140,6 +141,17 @@ public class RestSpaceResources implements IRestSpaceResources {
         if (body == null || body.value() == null) {
             throw new BadRequestException("A value is required.");
         }
+        // The rule RestGlobalVariableStore applies to deployment-wide variables, for
+        // the same reason: ${vars:...} resolves before ${vault:...}, and grants and
+        // space membership are checked when an agent is DEPLOYED. A variable edited
+        // afterwards to hold a vault or connection reference would point a running
+        // agent at a secret nobody vetted. A space's secrets are referenced directly
+        // instead — ${vault:<tenant>/<key>} — which the deploy check does see.
+        if (referencesASecret(body.value()) && !accessGuard.isAdmin()) {
+            throw new ForbiddenException("A space variable cannot hold a ${vault:...}, ${eddivault:...} or ${connection:...} reference "
+                    + "unless an eddi-admin stores it. Reference the secret directly in the agent's configuration instead: "
+                    + new SecretReference(tenant, "<key>").toReferenceString() + ".");
+        }
         // Not exportable: a space's variables are the space's, and must not travel in
         // an agent export to a deployment where the same tenant id means nothing.
         variableStore.upsert(new GlobalVariable(tenant, key, body.value(), body.description(), false));
@@ -194,6 +206,14 @@ public class RestSpaceResources implements IRestSpaceResources {
     private static SpaceSecret toSecret(SecretMetadata metadata) {
         return new SpaceSecret(metadata.keyName(), new SecretReference(metadata.tenantId(), metadata.keyName()).toReferenceString(),
                 metadata.description(), metadata.allowedAgents(), metadata.createdAt() == null ? null : metadata.createdAt().toString());
+    }
+
+    /**
+     * A vault or connection reference — the same test RestGlobalVariableStore
+     * applies.
+     */
+    private static boolean referencesASecret(String value) {
+        return value != null && (SecretReference.isVaultReference(value) || ConnectionReference.contains(value));
     }
 
     private static String variableReference(String tenant, String key) {

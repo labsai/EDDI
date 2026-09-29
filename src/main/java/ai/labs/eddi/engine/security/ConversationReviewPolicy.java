@@ -55,7 +55,10 @@ public class ConversationReviewPolicy {
      * stale.
      */
     private final Cache<String, Optional<AgentConfiguration.ConversationReview>> reviewByVersion = Caffeine.newBuilder()
-            .expireAfterAccess(Duration.ofMinutes(30)).maximumSize(10_000).build();
+            // After write, not after access: a conversation read often keeps an entry
+            // hot for ever, and an id re-imported after a permanent delete would then
+            // never be looked at again.
+            .expireAfterWrite(Duration.ofMinutes(30)).maximumSize(10_000).build();
 
     @Inject
     public ConversationReviewPolicy(IAgentStore agentStore, ResourceAccessGuard accessGuard, SecurityIdentity identity) {

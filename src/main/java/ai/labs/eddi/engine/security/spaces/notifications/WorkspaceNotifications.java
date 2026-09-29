@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.context.ManagedExecutor;
@@ -20,7 +22,9 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -135,14 +139,14 @@ public class WorkspaceNotifications {
     /** What happened to an access request, as far as the requester may know. */
     public enum RequestOutcome {
         /**
-         * Delivered — or, indistinguishably, addressed to nothing: a resource that does
-         * not exist or has no owner.
+         * Delivered — or, indistinguishably, addressed to nothing (a resource that does
+         * not exist or has no owner), or a repeat of a request still waiting for the
+         * owner. A distinct answer for the repeat would say that the id names an owned
+         * resource, which is the one thing a request must not reveal.
          */
         SENT,
         /** The requester already holds the level they asked for. */
         ALREADY_HAS_ACCESS,
-        /** An identical request is still waiting for the owner. */
-        ALREADY_REQUESTED,
         /** The requester has sent too many requests today. */
         RATE_LIMITED
     }
@@ -159,7 +163,11 @@ public class WorkspaceNotifications {
             return RequestOutcome.SENT;
         }
         Instant now = Instant.now();
-        if (store.countByActorSince(actor, WorkspaceNotification.Type.ACCESS_REQUESTED, now.minus(Duration.ofDays(1))) >= MAX_REQUESTS_PER_DAY) {
+        // Attempts count, not deliveries: counting only what reached an owner let a
+        // caller probe any number of ids that match nothing without ever reaching the
+        // limit. The stored count stays as the floor across nodes and restarts.
+        if (store.countByActorSince(actor, WorkspaceNotification.Type.ACCESS_REQUESTED, now.minus(Duration.ofDays(1))) >= MAX_REQUESTS_PER_DAY
+                || !recordAttempt(actor, now)) {
             return RequestOutcome.RATE_LIMITED;
         }
 
@@ -187,11 +195,37 @@ public class WorkspaceNotifications {
             return RequestOutcome.SENT;
         }
         if (store.hasUnread(owner, actor, resourceId, WorkspaceNotification.Type.ACCESS_REQUESTED)) {
-            return RequestOutcome.ALREADY_REQUESTED;
+            // Not delivered twice — and answered exactly like a delivery, see SENT.
+            return RequestOutcome.SENT;
         }
         deliver(new WorkspaceNotification(UUID.randomUUID().toString(), owner, WorkspaceNotification.Type.ACCESS_REQUESTED, resourceId,
                 resourceUri(descriptor), descriptor.getName(), actor, directory.labelFor(actor), level.name(), cleanMessage(message), now, null));
         return RequestOutcome.SENT;
+    }
+
+    /**
+     * This node's record of each requester's attempts in the last day — whatever
+     * they asked for, existing or not. Per node: across a cluster a requester gets
+     * up to the limit on each node, still bounded, and the stored count of
+     * delivered requests applies everywhere.
+     */
+    private final Cache<String, Deque<Instant>> attempts = Caffeine.newBuilder().expireAfterAccess(Duration.ofDays(1)).maximumSize(100_000)
+            .build();
+
+    /** Records an attempt, or answers false when the requester is at the limit. */
+    boolean recordAttempt(String actor, Instant now) {
+        Deque<Instant> recent = attempts.get(actor, key -> new ArrayDeque<>());
+        synchronized (recent) {
+            Instant cutoff = now.minus(Duration.ofDays(1));
+            while (!recent.isEmpty() && recent.peekFirst().isBefore(cutoff)) {
+                recent.pollFirst();
+            }
+            if (recent.size() >= MAX_REQUESTS_PER_DAY) {
+                return false;
+            }
+            recent.addLast(now);
+            return true;
+        }
     }
 
     /** Plain text, single spaces, bounded — it is shown to the owner verbatim. */

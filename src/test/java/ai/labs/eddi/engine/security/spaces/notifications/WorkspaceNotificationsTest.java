@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.security.spaces.notifications;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -121,13 +122,26 @@ class WorkspaceNotificationsTest {
         }
 
         @Test
-        @DisplayName("are not delivered twice while the first is unanswered")
+        @DisplayName("are not delivered twice while the first is unanswered — and say so no differently")
         void deduplicated() throws Exception {
             ownedBy("alice");
             when(store.hasUnread("alice", "bob", RESOURCE, WorkspaceNotification.Type.ACCESS_REQUESTED)).thenReturn(true);
 
-            assertEquals(WorkspaceNotifications.RequestOutcome.ALREADY_REQUESTED, sut.requestAccess(RESOURCE, AccessLevel.USE, null));
+            // A distinct answer for a repeat would tell the caller the id names an
+            // owned resource — which a request for a missing id answers as SENT.
+            assertEquals(WorkspaceNotifications.RequestOutcome.SENT, sut.requestAccess(RESOURCE, AccessLevel.USE, null));
             verify(store, never()).add(any());
+        }
+
+        @Test
+        @DisplayName("count every attempt, so probing ids that match nothing reaches the limit too")
+        void probingIsLimited() throws Exception {
+            when(descriptors.readCurrentDescriptor(anyString())).thenThrow(new ResourceNotFoundException("none"));
+
+            for (int i = 0; i < WorkspaceNotifications.MAX_REQUESTS_PER_DAY; i++) {
+                assertEquals(WorkspaceNotifications.RequestOutcome.SENT, sut.requestAccess("probe-" + i, AccessLevel.USE, null));
+            }
+            assertEquals(WorkspaceNotifications.RequestOutcome.RATE_LIMITED, sut.requestAccess("probe-x", AccessLevel.USE, null));
         }
 
         @Test

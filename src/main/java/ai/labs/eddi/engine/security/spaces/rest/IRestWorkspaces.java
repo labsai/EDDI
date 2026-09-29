@@ -56,6 +56,7 @@ public interface IRestWorkspaces {
      * membership.
      */
     @GET
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read workspace settings for the calling user",
                description = "Whether workspace enforcement is active, the caller's principal and default space, "
@@ -119,6 +120,7 @@ public interface IRestWorkspaces {
      * what they own — newest first. There is no way to read anybody else's.
      */
     @GET
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
     @Path("/notifications")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read my notifications", description = "Shares with the caller and access requests for their resources.")
@@ -130,6 +132,7 @@ public interface IRestWorkspaces {
 
     /** How many of the caller's notifications are unread — for a badge. */
     @GET
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
     @Path("/notifications/count")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Count my unread notifications")
@@ -143,6 +146,7 @@ public interface IRestWorkspaces {
      *            {@code {"ids": [...]}}, or {@code {}} for all of them
      */
     @POST
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-viewer"})
     @Path("/notifications/read")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)

@@ -9,6 +9,29 @@ import userEvent from "@testing-library/user-event";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
+/**
+ * Serve an llm resource's version history the way the backend does: the latest
+ * version from `currentversion`, each version's descriptor from the descriptor
+ * store. (The store listing has no `version` parameter, so it cannot list them.)
+ */
+function mockLlmVersions(descriptors: Array<{ version: number; name: string; lastModifiedOn?: number }>) {
+  server.use(
+    http.get("*/llmstore/llms/:id/currentversion", () =>
+      HttpResponse.json(Math.max(...descriptors.map((d) => d.version))),
+    ),
+    http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+      const version = Number(new URL(request.url).searchParams.get("version"));
+      const d = descriptors.find((x) => x.version === version);
+      if (!d) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        resource: `eddi://ai.labs.llm/llmstore/llms/${params.id}?version=${version}`,
+        name: d.name,
+        lastModifiedOn: d.lastModifiedOn ?? Date.now(),
+      });
+    }),
+  );
+}
+
 function LocationDisplay() {
   const location = useLocation();
   return <div data-testid="location-display">{location.pathname}</div>;
@@ -353,15 +376,11 @@ describe("ResourceDetailPage - Core Functions", () => {
   });
 
   it("resolves latest version from multiple descriptors", async () => {
-    server.use(
-      http.get("*/:store/:plural/descriptors", () => {
-        return HttpResponse.json([
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=1", name: "V1" },
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=3", name: "V3" },
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=2", name: "V2" },
-        ]);
-      })
-    );
+    mockLlmVersions([
+      { version: 1, name: "V1" },
+      { version: 2, name: "V2" },
+      { version: 3, name: "V3" },
+    ]);
 
     renderPage("llm", "res1");
 
@@ -374,17 +393,7 @@ describe("ResourceDetailPage - Core Functions", () => {
   // --- Descriptor name in title ---
 
   it("shows descriptor name in page title", async () => {
-    server.use(
-      http.get("*/:store/:plural/descriptors", () => {
-        return HttpResponse.json([
-          {
-            resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=1",
-            name: "My LLM Config",
-            lastModifiedOn: Date.now(),
-          },
-        ]);
-      })
-    );
+    mockLlmVersions([{ version: 1, name: "My LLM Config" }]);
 
     renderPage("llm", "res1");
 
@@ -559,14 +568,10 @@ describe("ResourceDetailPage - Core Functions", () => {
   // --- Compare versions button (requires >1 versions) ---
 
   it("renders compare versions button when multiple versions exist", async () => {
-    server.use(
-      http.get("*/:store/:plural/descriptors", () => {
-        return HttpResponse.json([
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=1", name: "V1", lastModifiedOn: Date.now() - 100000 },
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=2", name: "V2", lastModifiedOn: Date.now() },
-        ]);
-      })
-    );
+    mockLlmVersions([
+      { version: 1, name: "V1", lastModifiedOn: Date.now() - 100000 },
+      { version: 2, name: "V2" },
+    ]);
 
     renderPage("llm", "res1");
     await waitFor(() => {
@@ -575,13 +580,7 @@ describe("ResourceDetailPage - Core Functions", () => {
   });
 
   it("does not show compare button when only one version exists", async () => {
-    server.use(
-      http.get("*/:store/:plural/descriptors", () => {
-        return HttpResponse.json([
-          { resource: "eddi://ai.labs.mock/llmstore/llms/res1?version=1", name: "V1" },
-        ]);
-      })
-    );
+    mockLlmVersions([{ version: 1, name: "V1" }]);
 
     renderPage("llm", "res1");
     await waitFor(() => {

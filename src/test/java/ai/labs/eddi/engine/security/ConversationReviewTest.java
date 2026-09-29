@@ -170,6 +170,7 @@ class ConversationReviewTest {
             conversation(AGENT_V2);
 
             assertEquals("alice", sut.requireConversationReader("c1"));
+            assertTrue(sut.requireConversationRead("c1").review(), "admitted as a reviewer, so read surfaces show less");
         }
 
         @Test

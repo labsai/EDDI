@@ -198,9 +198,16 @@ is `USE`. Following a link to something you cannot open shows a **Request
 access** panel instead of an error; the request reaches the owner's
 notifications, and they grant it in one click.
 
-The request endpoint never reveals whether the resource exists or who owns it —
-an id matching nothing is answered exactly like a delivered request. A person
-may send 20 requests a day; notifications are kept for 90 days.
+The request endpoint never reveals whether the resource exists or who owns it:
+an id matching nothing, and a repeat of a request still waiting for the owner,
+are both answered exactly like a delivered request (`SENT`). The only other
+answer, `ALREADY_HAS_ACCESS`, is given only to someone who can already open the
+resource. A person may make 20 requests a day, whether or not they reach
+anybody, so probing ids is bounded too.
+
+A recipient's inbox is trimmed to their newest 200 notifications, and to the
+last 90 days, whenever a new one arrives for them. An erasure request removes
+every notification that names the person, at any age.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -374,8 +381,31 @@ Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
 what authorizes, and it is checked where a human acts: **deploying an agent that
 references a space's tenant requires the deployer to be a member of that
 space**, so somebody lent edit access to your agent cannot point it at your
-team's key and deploy it. Variables are expanded before the check, so a
-reference cannot be smuggled in through one.
+team's key and deploy it.
+
+**A reference is never assembled from pieces.** Variables resolve before
+vault, connection and caller references, and a variable can be edited after an
+agent is deployed. So a variable that holds a reference must hold all of it —
+`${vault:<tenant>/key}` as its entire value — and a reference that only appears
+once variables are joined (`"${vau"` + `"lt:t.finance…/key}"`, or `${` in the
+configuration followed by a variable) is refused wherever it is resolved, and
+refused at deploy. Separately, only an administrator may store a variable whose
+value is a vault or connection reference at all, in a space or deployment-wide.
+
+**Sub-agents and team keys.** An agent that creates a sub-agent for the person
+chatting (`create_sub_agent`) makes that person its owner. A sub-agent that
+inherits the parent's `${vault:<team tenant>/…}` key can therefore only be
+deployed when that person is a member of the team — otherwise they could
+repoint the sub-agent they own and read the team's key. Give such agents a key
+of their own, or keep sub-agent creation to team members.
+
+**GDPR.** An erasure removes the secrets and variables in the person's own
+space, and an export lists them — secrets by name and date, never by value. A
+team's secrets and variables belong to the team and are left alone.
+
+Tenant ids read as `u.<name>.<hash>` or `t.<team>.<hash>`, where the hash is 64
+bits of the exact space id: the readable part can coincide for two spaces, the
+hash in practice cannot.
 
 ### Conversation review
 
@@ -387,7 +417,11 @@ read them. An agent can opt in to review:
 ```
 
 Then the people who maintain the agent (`EDIT` on it) may read its
-conversations, and **only read** them. The opt-in is per version: a version
+conversations, and **only read** them — and only the dialogue: the simple log
+(`/conversationstore/conversations/simple/{id}`), without the detailed view and
+without the conversation's properties, which carry the person's long-term
+memory from other conversations. The raw memory document stays owner-only.
+Each review read is logged naming the reader. The opt-in is per version: a version
 that did not opt in grants nothing, whatever later versions say. Every chat
 window — the Manager and the Chat UI — shows the notice before the first
 message (without a custom `notice`, a default sentence), from

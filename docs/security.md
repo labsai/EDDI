@@ -14,14 +14,16 @@ EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) 
 
 ### Architecture
 
-EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The Manager SPA and Chat UI handle login via `keycloak-js`, then send Bearer tokens to the backend for validation.
+EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
+
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` handshake from an allow-listed parent origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
 
 ```
-Browser (EDDI Manager / Chat UI)
-    │
-    ├── keycloak-js → Keycloak login → JWT access token
-    │
-    ├── Authorization: Bearer <token> → EDDI backend
+Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
+    │                                        │
+    ├── keycloak-js → login → JWT            ├── token from host (config / postMessage)
+    │                                        │
+    ├── Authorization: Bearer <token> ───────┴──→ EDDI backend
     │                                      │
     │                                      ├── Quarkus OIDC validates token via JWKS
     │                                      ├── SecurityIdentity populated
@@ -136,7 +138,7 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | --- | --- |
 | `/q/health/*` | **Permit** (GET only) — required for k8s probes |
 | `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
-| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
+| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
 | `/.well-known/agent.json`, `/a2a/agents/*/agent.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
@@ -150,19 +152,21 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 
 ### RestAgentManagement Gate
 
-`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth:
+`RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):
 
 ```java
 if (checkForUserAuthentication &&
-        !production.equals(userConversation.getEnvironment()) &&
+        !production.equals(environment) &&
         identity.isAnonymous()) {
     throw new UnauthorizedException();
 }
 ```
 
 - When `quarkus.oidc.tenant-enabled=false` → `checkForUserAuthentication=false` → all requests pass
-- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`unrestricted`, `test`) must be authenticated; `production` conversations are exempt from this particular gate
+- When `quarkus.oidc.tenant-enabled=true` → a request against a non-production environment (`test`) must be authenticated; `production` conversations are exempt from this particular gate (the legacy `unrestricted`/`restricted` names are read as `production`)
 - Requests to `/production/` environments always pass regardless of auth status
+
+**The check runs before any side effect.** The managed `GET` and `POST /agents/managed/{intent}/{userId}` create the user's conversation when none exists and replace it when it has ended. The environment checked is the one the request acts on: a live conversation's stored environment, or — for a conversation about to be created or to replace an ended one — the environment of the trigger deployment it will be started with, which is picked *before* the check and then used for the start. So a `401` from these endpoints means nothing was created, deleted or replaced. The `POST` hands the `UnauthorizedException` to the JAX-RS exception mappers, so it answers `401` like the `GET` does (it used to answer an opaque `500`).
 
 ### Local Development Keycloak
 

@@ -142,6 +142,24 @@ class RuntimeWorkspaceSettingsTest {
         }
 
         @Test
+        @DisplayName("a store that cannot be read at all keeps unowned resources closed, until it can")
+        void unreadableFromTheStartFailsClosed() {
+            // No value was ever read, so what the administrator stored is unknown.
+            // Answering the permissive default opened every unowned resource to every
+            // user whenever the store blinked at startup.
+            store.write("default", stored(null, "shared"));
+            store.failing = true;
+            var s = settings(null, null);
+
+            assertFalse(s.admitsLegacy());
+            assertEquals(Optional.empty(), s.getDefaultSpaceTeam(), "no default team: people keep their own space");
+
+            store.failing = false;
+            clock.addAndGet(WorkspaceSettings.STORED_SETTINGS_TTL.toNanos() + 1);
+            assertTrue(s.admitsLegacy(), "once readable, the stored value applies");
+        }
+
+        @Test
         @DisplayName("team names are normalised whichever way they are written")
         void normalisesTeam() {
             assertEquals("engineering", WorkspaceSettings.normalizeTeam(" /engineering/ "));

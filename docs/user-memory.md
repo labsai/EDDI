@@ -99,6 +99,8 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `maxValueLength` | `int` | `1000` | Maximum characters for memory values |
 | `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn |
 | `allowedCategories` | `List<String>` | `["preference","fact","context"]` | Allowed memory categories |
+| `allowedVisibilities` | `List<String>` | `["self"]` | Visibilities the `rememberFact` tool may write (`self`, `group`, `global`). By default the model can only store memories private to this agent, so a prompt-injected model cannot broadcast to every agent (`global`) or the group. The configured `defaultVisibility` is always added, so a default can never block every write |
+| `allowGlobalKeyOverwrite` | `boolean` | `false` | Whether a `global` write may replace the value of an existing global key this agent does not provably own — one owned by another agent, or one whose entry records no owning agent (legacy/migrated data). Off by default: such a write is refused with a message suggesting a different key or `self` visibility |
 
 ### Dream Configuration
 
@@ -191,6 +193,11 @@ Returns: "✅ Forgotten: favorite_color"
 
 When agents participate in a [Group Conversation](group-conversations.md), the `groupId` is automatically injected into the conversation context. Memories stored with `group` visibility are visible to all agents in that group.
 
+The group is taken only from that injected context value. A client cannot supply
+`groupId` in its own request context (see [Reserved Context Keys](passing-context-information.md#reserved-context-keys)),
+and a conversation *property* named `groupId` does not select a group scope for the
+`usermemory` tool.
+
 ## REST API
 
 Base path: `/usermemorystore/memories`
@@ -241,11 +248,13 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 | `count_user_memories` | `eddi-viewer` | Count entries |
 | `upsert_user_memory` | `eddi-admin` | Insert or update an entry |
 | `delete_user_memory` | `eddi-admin` | Delete a specific entry |
-| `delete_all_user_memories` | `eddi-admin` | GDPR delete-all (requires `CONFIRM`) |
+| `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
 
 ### GDPR Compliance
 
-The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint permanently remove **all** memory entries and legacy properties for a user. The MCP tool requires an explicit `confirmation="CONFIRM"` parameter as a safety gate.
+The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint permanently remove a user's memory entries and legacy properties, **except** the GDPR bookkeeping entries (keys starting with `_gdpr_`, such as an Art. 18 processing restriction), which only the GDPR admin endpoints set or lift. They are memory housekeeping, not an Art. 17 erasure — for that use `DELETE /admin/gdpr/{userId}` (MCP: `delete_user_data`), which removes everything, including those entries, across every store. The MCP tool requires an explicit `confirmation="CONFIRM"` parameter as a safety gate.
+
+Keys starting with `_gdpr_` are reserved: agents, property setters and the memory/property REST and MCP endpoints cannot write or delete them.
 
 ## Dream Consolidation
 

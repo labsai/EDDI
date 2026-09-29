@@ -52,6 +52,11 @@ import java.util.Map;
  *            still said the bundle was whole, so a DPO handed the data subject
  *            an Art. 15 answer the code knew was short. Counts against
  *            {@link #complete()}.
+ * @param connectionGrants
+ *            the OAuth accounts the user linked through connections — metadata
+ *            only (connection, status, scopes, dates). Token material is never
+ *            exported: it is a credential, not the user's data, and the
+ *            ciphertext is meaningless outside this deployment.
  * @param additionalData
  *            what each {@link IGdprParticipant} holds on the user — the user
  *            directory entry, workspace notifications — keyed by the
@@ -71,10 +76,12 @@ public record UserDataExport(
         int totalConversations,
         boolean conversationsTruncated,
         List<String> failedConversationIds,
+        List<ConnectionGrantExportEntry> connectionGrants,
         Map<String, Object> additionalData) {
 
     public UserDataExport {
         failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
+        connectionGrants = connectionGrants == null ? List.of() : List.copyOf(connectionGrants);
         additionalData = additionalData == null ? Map.of() : Map.copyOf(additionalData);
     }
 
@@ -85,9 +92,22 @@ public record UserDataExport(
     public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
             List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
             List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds,
+            List<ConnectionGrantExportEntry> connectionGrants) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, Map.of());
+    }
+
+    /**
+     * Backward-compatible constructor for the shape that predates connection-grant
+     * export.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
             int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds) {
         this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
-                totalConversations, conversationsTruncated, failedConversationIds, Map.of());
+                totalConversations, conversationsTruncated, failedConversationIds, List.of(), Map.of());
     }
 
     /**
@@ -186,6 +206,21 @@ public record UserDataExport(
             String fileName,
             String mimeType,
             long sizeBytes) {
+    }
+
+    /**
+     * One linked OAuth account, for export. Deliberately a field list rather than
+     * the {@code ConnectionGrant} entity, which carries token ciphertext.
+     */
+    public record ConnectionGrantExportEntry(
+            String tenantId,
+            String connectionName,
+            String status,
+            List<String> scopes,
+            Instant connectedAt,
+            Instant updatedAt,
+            Instant lastRefreshAt,
+            Instant accessTokenExpiresAt) {
     }
 
     /**

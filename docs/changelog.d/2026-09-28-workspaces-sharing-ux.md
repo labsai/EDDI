@@ -95,8 +95,71 @@ fixes all of that; [`docs/workspaces.md`](../workspaces.md) describes the result
   "you already have access" showed as "sent". It now answers 200 with the
   outcome.
 
+### Hardening from a critical review, and the merge with main's security batch
+
+An independent review of the branch found these problems; each is fixed here and has a test.
+
+- **A secret could be read by assembling a reference from pieces (high).** Variables
+  resolve before vault references, and every check saw only the pieces. Two variables
+  holding `"${vau"` and `"lt:t.finance…/openai}"` joined into another team's key at
+  runtime, past the deploy-time membership check, the grant check and the API-call
+  reference guard, and a variable could be edited after deploy. `GlobalVariableResolver`
+  now refuses any `${scheme:…}` reference that is not present whole in the value as
+  written or in one substituted variable (`AssembledReferenceException`), and the deploy
+  scan resolves in place so such an agent is refused at deploy. The false sentence in
+  `docs/workspaces.md` that claimed variables were covered is replaced.
+- **Space variables holding secret references.** The merge brought main's rule that
+  only an admin may store a variable whose value is a vault or connection reference.
+  `/spacestore/variables` now applies it too.
+- **Conversation review showed too much.** Reviewers could read the raw memory
+  document, including the person's long-term properties from other conversations. The
+  raw read is owner-only again; reviewers get the simple log without properties or the
+  detailed view.
+- **GDPR missed personal-space secrets and variables.** A new participant erases them
+  and exports them (secrets by name, never by value). Team spaces are untouched.
+- **Access requests revealed that a resource existed.** A repeated request answered
+  `ALREADY_REQUESTED`, where an unknown id answered `SENT`. It now answers `SENT`, and
+  every attempt counts toward the 20-a-day limit, not only the delivered ones.
+- **Legacy visibility failed open.** It fell back to `shared` when the settings store
+  was unreadable at startup, even if an admin had set `admin-only`. It now fails closed
+  until the store can be read.
+- **Tenant hashes were 32 bits.** Two principals that slug alike collided after about
+  2^32 attempts, and a collision means membership of the other tenant. They are now
+  64 bits.
+- **Smaller fixes:**
+  - directory search no longer matches unverified or hidden email addresses;
+  - `/workspaces` and the notification endpoints are open to every signed-in role;
+  - space variables written by tenant id through `/variablestore` are never
+    exportable;
+  - the review-policy cache expires after write;
+  - `X-EDDI-Space` is sent only on POSTs that create resources, so a chat turn can no
+    longer be refused because of it.
+
+Deliberately not changed, and documented instead:
+
+- A sub-agent that inherits a team's key cannot be deployed for a non-member. The
+  guard is right: the chatting user owns the sub-agent and could repoint it.
+- Notification retention is applied when a new notification arrives, not by a sweep.
+- Still open, as follow-ups:
+  - exact principal or username taking precedence over a verified email that looks
+    alike;
+  - `internal` snippets being exported with USE;
+  - admin-created non-space tenants being reachable from agents;
+  - the Mongo usage count scanning every distinct user.
+
+The merge with `main` (PRs 859 to 865) was resolved by hand in:
+
+- `RestGlobalVariableStore`: both restrictions kept.
+- `GdprDeletionResult` / `UserDataExport` / `GdprComplianceService` / `McpGdprTools`:
+  `connectionGrants` and the participant maps both kept; the constructor duplicate the
+  auto-merge created is removed.
+- `RestConversationStore`: main's strict delete and EDIT gates, plus the review reads.
+- `ResourceSharingService`: main's `SharingChangedEvent`, never fired on a dry run,
+  plus moves and notifications.
+- `use-agents.ts`, the compose file and the 11 locales.
+
 ```decision-log
 | 2026-09-28 | Shares resolve names and emails through a user directory; the principal stays the storage key | Sharing with an email stored `user:<email>`, which matched no principal and reached nobody while answering 200 | Keying grants on email (mutable; unverified emails let anyone collect shares), or requiring raw principals from users |
-| 2026-09-28 | Space secrets and variables use hashed per-space tenants, authorized by membership and checked again at deploy | Editors could not store their own keys, and any editor could overwrite a global variable other teams relied on | Per-secret ACLs; letting EDIT on an agent imply use of the owner's team secrets |
+| 2026-09-28 | Space secrets and variables use hashed (64-bit) per-space tenants, authorized by membership and checked again at deploy; a reference assembled from variable pieces is refused at resolution | Editors could not store their own keys, and any editor could overwrite a global variable other teams relied on | Per-secret ACLs; letting EDIT on an agent imply use of the owner's team secrets |
 | 2026-09-28 | Conversation review is opt-in per agent version and read-only, with a notice shown before the first message | Owners of shared agents could not see how the agent was used, and silent access to other people's chats is not acceptable | Owners always reading conversations; an opt-in that applies retroactively to versions that did not announce it |
 ```

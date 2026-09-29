@@ -49,6 +49,9 @@ import java.util.Map;
  *            number of shared artifacts removed
  * @param schedulesDeleted
  *            number of schedules removed
+ * @param connectionGrantsDeleted
+ *            number of OAuth connection grants removed — each holds a live
+ *            refresh token for the user's account at a third party
  * @param failedSteps
  *            names of the cascade steps that threw; empty on a clean run
  * @param additionalDeleted
@@ -73,6 +76,7 @@ public record GdprDeletionResult(
         long groupConversationsDeleted,
         long sharedArtifactsDeleted,
         long schedulesDeleted,
+        long connectionGrantsDeleted,
         List<String> failedSteps,
         Instant completedAt,
         Map<String, Long> additionalDeleted) {
@@ -84,10 +88,23 @@ public record GdprDeletionResult(
     public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
             long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
             long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
+            long connectionGrantsDeleted, List<String> failedSteps, Instant completedAt) {
+        this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
+                attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, connectionGrantsDeleted, failedSteps, completedAt, Map.of());
+    }
+
+    /**
+     * Compatibility constructor for the shape that predates
+     * {@code connectionGrantsDeleted}, reported as 0.
+     */
+    public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
+            long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
+            long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
             List<String> failedSteps, Instant completedAt) {
         this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
                 attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, failedSteps, completedAt, Map.of());
+                schedulesDeleted, 0, failedSteps, completedAt);
     }
 
     /**
@@ -98,7 +115,7 @@ public record GdprDeletionResult(
     public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
             long logsPseudonymized, long auditEntriesPseudonymized, Instant completedAt) {
         this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
-                0, 0, 0, 0, 0, 0, List.of(), completedAt);
+                0, 0, 0, 0, 0, 0, 0, List.of(), completedAt);
     }
 
     public GdprDeletionResult {
