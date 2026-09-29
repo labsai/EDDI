@@ -2913,14 +2913,14 @@ jobs:
                     { type: "mrkdwn", text: ($codeql_icon + " CodeQL SAST") },
                     { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
                     { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
-                    { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
+                    { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") },
+                    { type: "mrkdwn", text: ($post_release_icon + " Post-release bump") }
                   ]
                 },
                 {
                   type: "context",
                   elements: [
-                    { type: "mrkdwn", text: ("<" + $run_url + "|View Run #" + $run_number + ">") },
-                    { type: "mrkdwn", text: ($post_release_icon + " Post-release bump") }
+                    { type: "mrkdwn", text: ("<" + $run_url + "|View Run #" + $run_number + ">") }
                   ]
                 }
               ]
