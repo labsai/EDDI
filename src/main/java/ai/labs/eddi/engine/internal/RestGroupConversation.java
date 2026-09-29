@@ -418,6 +418,8 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
+    private static final String PAUSE_CHANGED_MESSAGE = "The pending approval changed since this decision was made "
+            + "(pauseId no longer current) — re-read approval-status and decide again.";
 
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
@@ -449,6 +451,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer current: the
+            // discussion is still awaiting approval, but on something the reviewer
+            // never saw. Same 409 as the conversation resume endpoint.
+            LOGGER.infof("Approve of group conversation %s rejected (pause changed)", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity(PAUSE_CHANGED_MESSAGE).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // #12: wrong-state (e.g., double-approve) → 409, not 500. The current state
             // is discoverable via the approval-status endpoint.
@@ -679,6 +688,10 @@ public class RestGroupConversation implements IRestGroupConversation {
                 | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
+            closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // Still awaiting approval, but not the pause this decision was made for.
+            sendErrorEvent(eventSink, sse, PAUSE_CHANGED_MESSAGE);
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // wrong-state (e.g., double-approve) — the current state is discoverable
