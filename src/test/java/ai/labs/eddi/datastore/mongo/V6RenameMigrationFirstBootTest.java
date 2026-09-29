@@ -282,6 +282,21 @@ class V6RenameMigrationFirstBootTest {
                 .getString("result"));
     }
 
+    @Test
+    @DisplayName("a step with packages and a null workflows is renamed, like one without workflows")
+    void stepWithNullWorkflowsIsRenamed() {
+        Document conversation = v5Conversation();
+        Document step = v5Step(v5Result("input:initial", "hello")).append("workflows", null);
+        conversation.put("conversationSteps", List.of(step));
+        conversations().insertOne(conversation);
+
+        runMigration();
+
+        Document stored = conversations().find().first().getList("conversationSteps", Document.class).getFirst();
+        assertFalse(stored.containsKey("packages"));
+        assertEquals(1, stored.getList("workflows", Document.class).size());
+    }
+
     // --- workflows ------------------------------------------------------------
 
     private static Document v5Package(Object id) {

@@ -17,6 +17,7 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -82,6 +83,27 @@ public class PropertiesMigrationService {
         this.datastoreType = datastoreType;
         this.secretScrubber = secretScrubber;
         this.skipKeys = new TreeSet<>(skipKeys == null ? List.of() : skipKeys.stream().map(String::trim).filter(k -> !k.isEmpty()).toList());
+    }
+
+    /**
+     * {@code value} with every BSON {@code ObjectId} replaced by a fixed
+     * placeholder, for the credential check only. An ObjectId is an identifier by
+     * type; serialised as extended JSON it becomes <code>{"$oid": "65a1…"}</code>,
+     * a random-looking hex string the scrubber's entropy rule would take for a key.
+     */
+    static Object withoutObjectIds(Object value) {
+        if (value instanceof ObjectId) {
+            return "objectid";
+        }
+        if (value instanceof Map<?, ?> map) {
+            Document copy = new Document();
+            map.forEach((k, v) -> copy.put(String.valueOf(k), withoutObjectIds(v)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(PropertiesMigrationService::withoutObjectIds).toList();
+        }
+        return value;
     }
 
     void onStartup(@Observes StartupEvent event) {
@@ -158,7 +180,7 @@ public class PropertiesMigrationService {
                     continue;
                 }
                 Object value = doc.get(key);
-                if (secretScrubber.containsCredential(new Document(key, value).toJson())) {
+                if (secretScrubber.containsCredential(new Document(key, withoutObjectIds(value)).toJson())) {
                     skippedAsCredential.merge(key, 1, Integer::sum);
                     continue;
                 }

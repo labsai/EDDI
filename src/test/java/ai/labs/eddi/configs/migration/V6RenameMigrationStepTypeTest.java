@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -57,10 +58,12 @@ class V6RenameMigrationStepTypeTest {
             "eddi://ai.labs.templating");
 
     private static Set<String> registeredExtensions;
+    private static Map<String, Provider<ILifecycleTask>> registry;
 
     @BeforeAll
     static void readRegistry() throws Exception {
-        registeredExtensions = new TreeSet<>(buildRegistry().keySet());
+        registry = buildRegistry();
+        registeredExtensions = new TreeSet<>(registry.keySet());
     }
 
     /**
@@ -145,15 +148,29 @@ class V6RenameMigrationStepTypeTest {
         }
     }
 
+    /**
+     * A renamed type may stay registered — as an alias for data the migration never
+     * reached — but only as an alias of the very task it is renamed to. Anything
+     * else would make the rewrite change which task a step runs.
+     */
     @Test
-    @DisplayName("every rename points at a registered extension, and renames only a type that is not registered")
+    @DisplayName("every rename points at a registered extension; a v5 type still registered is an alias of the same task")
     void renameTableAgreesWithTheRegistry() {
         assertFalse(V6RenameMigration.STEP_TYPE_REWRITES.isEmpty());
         V6RenameMigration.STEP_TYPE_REWRITES.forEach((v5, v6) -> {
             assertTrue(registeredExtensions.contains(extensionId(v6)), () -> v6 + " is not registered: " + registeredExtensions);
-            assertFalse(registeredExtensions.contains(extensionId(v5)),
-                    () -> v5 + " is still registered, so rewriting it is unnecessary and may point it elsewhere");
+            if (registeredExtensions.contains(extensionId(v5))) {
+                assertSame(registry.get(extensionId(v6)), registry.get(extensionId(v5)),
+                        () -> v5 + " is registered to a different task than " + v6 + ", so the rewrite would change what runs");
+            }
         });
+    }
+
+    @Test
+    @DisplayName("a workflow the migration never reached still resolves: the v5 LLM step type is an alias")
+    void unmigratedLlmStepTypeStillResolves() {
+        assertTrue(registeredExtensions.contains(extensionId("eddi://ai.labs.langchain")),
+                "a database migrated by 6.0-6.4 still holds eddi://ai.labs.langchain in its workflows");
     }
 
     @Test

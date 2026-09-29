@@ -492,6 +492,23 @@ class PropertiesMigrationServiceTest {
             assertEquals(Visibility.global, entries.getFirst().visibility());
         }
 
+        /**
+         * A BSON ObjectId is an identifier by type. As extended JSON it is a
+         * random-looking 24-character hex string, which the scrubber's entropy rule
+         * would take for a key.
+         */
+        @Test
+        @DisplayName("an ObjectId value is not taken for a credential")
+        void objectIdIsNotACredential() throws Exception {
+            var lastOrder = new ObjectId("65a1b2c3d4e5f6a7b8c9d0e1");
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("lastOrder", lastOrder)
+                    .append("history", List.of(new Document("order", lastOrder)));
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(Set.of("lastOrder", "history"), entries.stream().map(UserMemoryEntry::key).collect(Collectors.toSet()));
+        }
+
         @Test
         @DisplayName("the skip list is configurable; a credential is still caught when userInfo is taken off it")
         void skipListIsConfigurable() throws Exception {

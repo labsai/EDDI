@@ -28,6 +28,7 @@ import static com.mongodb.client.model.Filters.elemMatch;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Filters.nor;
 import static com.mongodb.client.model.Filters.or;
 
 /**
@@ -730,7 +731,7 @@ public class V6RenameMigration {
         List<Bson> holdsV5Step = new ArrayList<>();
         Document set = new Document();
         for (String array : CONVERSATION_STEP_ARRAYS) {
-            holdsV5Step.add(exists(array + "." + FIELD_STEP_RUNS_V5));
+            holdsV5Step.add(elemMatch(array, renamableStep()));
             set.append(array, new Document("$cond", List.of(new Document("$isArray", "$" + array),
                     new Document("$map", new Document("input", "$" + array).append("as", "step").append("in", v6Step("$$step"))),
                     "$" + array)));
@@ -753,7 +754,7 @@ public class V6RenameMigration {
         List<Bson> leftAlone = new ArrayList<>();
         List<Bson> neither = new ArrayList<>();
         for (String array : CONVERSATION_STEP_ARRAYS) {
-            leftAlone.add(exists(array + "." + FIELD_STEP_RUNS_V5));
+            leftAlone.add(elemMatch(array, and(exists(FIELD_STEP_RUNS_V5), nor(renamableStep()))));
             neither.add(elemMatch(array, new Document(FIELD_STEP_RUNS_V5, new Document("$exists", false))
                     .append(FIELD_STEP_RUNS_V6, new Document("$exists", false))));
         }
@@ -776,6 +777,17 @@ public class V6RenameMigration {
     }
 
     /**
+     * A step this pass renames: it holds {@code packages}, and its
+     * {@code workflows} is absent, null or empty. Matched per array element, so a
+     * document whose only v5-shaped steps are the ambiguous ones is not matched —
+     * and so not rewritten, with its revision bumped, on every run.
+     */
+    private static Bson renamableStep() {
+        return and(exists(FIELD_STEP_RUNS_V5), or(exists(FIELD_STEP_RUNS_V6, false), eq(FIELD_STEP_RUNS_V6, null),
+                new Document(FIELD_STEP_RUNS_V6, new Document("$size", 0))));
+    }
+
+    /**
      * The aggregation expression that turns one stored step into its v6 shape.
      * Every branch is a {@code $cond}, which evaluates lazily, so a value of an
      * unexpected type is passed through unchanged rather than failing the whole
@@ -785,7 +797,7 @@ public class V6RenameMigration {
         String v5Runs = step + "." + FIELD_STEP_RUNS_V5;
         String v6Runs = step + "." + FIELD_STEP_RUNS_V6;
         Document hasV5Runs = new Document("$ne", List.of(new Document("$type", v5Runs), "missing"));
-        Document v6RunsEmpty = new Document("$or", List.of(new Document("$eq", List.of(new Document("$type", v6Runs), "missing")),
+        Document v6RunsEmpty = new Document("$or", List.of(new Document("$in", List.of(new Document("$type", v6Runs), List.of("missing", "null"))),
                 new Document("$eq", List.of(v6Runs, List.of()))));
         Document renamed = new Document("$mergeObjects", List.of(withoutField(step, FIELD_STEP_RUNS_V5),
                 new Document(FIELD_STEP_RUNS_V6, v6Runs(v5Runs))));
