@@ -333,6 +333,19 @@ Legacy flat property operations (`readProperties`, `mergeProperties`, `deletePro
 
 On first startup, `PropertiesMigrationService` automatically migrates existing `properties` documents into `usermemories` as `global` entries with `category=legacy`. A key the user already has in `usermemories` keeps its value — it is newer than the frozen v5 data (or the result of an earlier, partial run), so migration never overwrites it. A legacy document without a `userId` cannot be migrated and is skipped (not counted as a failure). Once every key made it across, the old collection is renamed to `properties_migrated_v6` as a safety backup; after a partial failure it stays in place and the next startup retries. The migration is idempotent and skipped if no legacy collection exists.
 
+**Credentials are not migrated.** Long-term memories are loaded into every conversation as `{properties.*}`, so anything copied here reaches template data, prompts and outbound API calls. Two kinds of key stay behind in `properties_migrated_v6`:
+
+- the keys in `eddi.migration.properties.skip-keys` (default `userInfo`). In 5.x, `userInfo` was the caller's per-request identity: a platform bearer token next to names and ids, not a memory;
+- any key whose value holds a credential at any depth, judged by the same rules the agent export uses to redact secrets. The check is deliberately cautious: a long, random-looking identifier can be caught too. Its value stays in the backup collection, and an operator can restore it by hand.
+
+Skipped keys are logged by name and count, never by value, and they don't count as failures. Before this rule, the migration copied `userInfo` across. A database that already ran it can be cleaned up with:
+
+```javascript
+db.usermemories.deleteMany({ category: "legacy", key: "userInfo" })
+```
+
+Once the migration is verified, consider dropping `properties_migrated_v6`, since it keeps the legacy values, credentials included.
+
 > **Note:** PostgreSQL deployments do not need migration — the `properties` table only existed in MongoDB (v5).
 
 ## Data Model

@@ -24,8 +24,11 @@ import java.util.*;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
 import static com.mongodb.client.model.Filters.and;
+import static com.mongodb.client.model.Filters.elemMatch;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Filters.or;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -61,6 +64,44 @@ public class V6RenameMigration {
             {"eddi://ai.labs.httpcalls/", "eddi://ai.labs.apicalls/"}, {"eddi://ai.labs.behavior/", "eddi://ai.labs.rules/"},
             {"eddi://ai.labs.langchain/", "eddi://ai.labs.llm/"}, {"eddi://ai.labs.package/", "eddi://ai.labs.workflow/"},
             {"eddi://ai.labs.bot/", "eddi://ai.labs.agent/"},};
+
+    /**
+     * Workflow step types renamed in v6 (v5 type → v6 type), matched against the
+     * whole value of a step's {@code type} field and nothing else.
+     *
+     * <p>
+     * {@link #URI_AUTHORITY_REWRITES} cannot do this. Its entries carry a trailing
+     * slash so that they match config URIs
+     * ({@code eddi://ai.labs.langchain/langchainstore/...}) and nothing shorter —
+     * and a step type is the bare {@code eddi://ai.labs.langchain}. Dropping the
+     * slash is not the fix either: most v5 step types were <em>not</em> renamed.
+     * {@code eddi://ai.labs.behavior} and {@code eddi://ai.labs.httpcalls} are
+     * still the registered ids of the rules and API-call tasks, while their config
+     * URIs moved to {@code ai.labs.rules} and {@code ai.labs.apicalls}; rewriting
+     * the step types the same way would point every workflow at the aliases, and
+     * any mapping without a registered target at nothing. So this table lists only
+     * the step types that no longer resolve, each against the id 6.x registers for
+     * it — {@code V6RenameMigrationStepTypeTest} checks both sides against the
+     * extension registry itself.
+     * </p>
+     *
+     * <p>
+     * Package-private for testing.
+     * </p>
+     */
+    static final Map<String, String> STEP_TYPE_REWRITES = Map.of("eddi://ai.labs.langchain", "eddi://ai.labs.llm");
+
+    /**
+     * The fields a workflow document keeps its steps under: {@code workflowSteps}
+     * in 6.x, and the older names {@code WorkflowConfiguration} still accepts —
+     * {@code packageExtensions} is what EDDI 5 wrote.
+     */
+    private static final List<String> WORKFLOW_STEP_FIELDS = List.of("workflowSteps", "packageExtensions", "workflowExtensions",
+            "pipelineSteps");
+
+    private static final String FIELD_STEP_TYPE = "type";
+
+    private static final String COLLECTION_WORKFLOWS = "workflows";
 
     /** Store path rewrites (old → new) — applied inside URI strings. */
     private static final String[][] STORE_PATH_REWRITES = {{"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
@@ -226,8 +267,14 @@ public class V6RenameMigration {
         total = total.plus(migrateDescriptors("descriptors"));
         total = total.plus(migrateDescriptors("descriptors.history"));
 
-        // 4. Rewrite environment fields in deployment/conversation documents
-        for (String collectionName : List.of("conversationmemories", COLLECTION_DEPLOYMENTS)) {
+        // 4. Rename the v5 step shape inside stored conversations (packages →
+        // workflows).
+        // Server-side, and before the per-document pass below, which then rewrites the
+        // renamed documents as it finds them.
+        total = total.plus(migrateConversationStepShape());
+
+        // 5. Rewrite environment fields in deployment/conversation documents
+        for (String collectionName : List.of(COLLECTION_CONVERSATIONS, COLLECTION_DEPLOYMENTS)) {
             total = total.plus(migrateEnvironments(collectionName));
         }
 
@@ -455,11 +502,14 @@ public class V6RenameMigration {
             return MigrationResult.NOTHING;
         }
 
+        boolean isWorkflowCollection = collectionName.equals(COLLECTION_WORKFLOWS)
+                || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
         int migrated = 0;
         int failed = 0;
         for (Document doc : collection.find()) {
+            boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
             Document rewritten = rewriteUrisInDocument(doc);
-            if (rewritten != null) {
+            if (rewritten != null || stepTypesRewritten) {
                 if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
                     migrated++;
                 } else {
@@ -472,6 +522,33 @@ public class V6RenameMigration {
             LOGGER.infof("  %s: migrated %d documents", collectionName, migrated);
         }
         return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * Rewrites the {@code type} of every step of a workflow document whose type was
+     * renamed in v6 — see {@link #STEP_TYPE_REWRITES}.
+     * <p>
+     * Package-private for testing.
+     *
+     * @return whether any step type was changed
+     */
+    static boolean rewriteStepTypes(Document workflow) {
+        boolean changed = false;
+        for (String field : WORKFLOW_STEP_FIELDS) {
+            if (!(workflow.get(field) instanceof List<?> steps)) {
+                continue;
+            }
+            for (Object step : steps) {
+                if (step instanceof Document stepDocument && stepDocument.get(FIELD_STEP_TYPE) instanceof String type) {
+                    String renamed = STEP_TYPE_REWRITES.get(type);
+                    if (renamed != null) {
+                        stepDocument.put(FIELD_STEP_TYPE, renamed);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        return changed;
     }
 
     /**
@@ -586,6 +663,166 @@ public class V6RenameMigration {
         LOGGER.errorf("  %s could not be read (%s) — counted as a failure, so the migration is NOT recorded as "
                 + "complete and runs again on the next start", collectionName, e.getMessage());
         return MigrationResult.UNREADABLE;
+    }
+
+    private static final String COLLECTION_CONVERSATIONS = "conversationmemories";
+
+    /**
+     * The arrays of a conversation document whose elements are conversation steps.
+     */
+    private static final List<String> CONVERSATION_STEP_ARRAYS = List.of("conversationSteps", "redoCache");
+
+    /**
+     * What a stored conversation step holds its workflow runs under: v5, then v6.
+     */
+    private static final String FIELD_STEP_RUNS_V5 = "packages";
+    private static final String FIELD_STEP_RUNS_V6 = "workflows";
+
+    /** What a stored step result records its origin under: v5, then v6. */
+    private static final String FIELD_ORIGIN_V5 = "originPackageId";
+    private static final String FIELD_ORIGIN_V6 = "originWorkflowId";
+
+    /**
+     * Renames the v5 shape of a stored conversation step to the v6 one:
+     * {@code conversationSteps[].packages} becomes {@code workflows}, and inside it
+     * each result's {@code originPackageId} becomes {@code originWorkflowId}. The
+     * redo cache holds steps of the same shape and is renamed the same way.
+     *
+     * <p>
+     * Without this every conversation created on EDDI 5 loaded with no data in any
+     * step. {@code ConversationStepSnapshot} serialises its runs as
+     * {@code workflows}, the stored key was {@code packages}, and an unknown key is
+     * ignored on read — so the load answered 200 with the whole history silently
+     * gone, the LLM saw none of it, and the next save wrote the empty steps back
+     * over the stored ones. The snapshot now also accepts {@code packages} on read;
+     * this pass is what makes the stored data v6-shaped, so that nothing depends on
+     * that alias being kept.
+     * </p>
+     *
+     * <p>
+     * One {@code updateMany} with an aggregation pipeline, so the documents never
+     * leave the server. {@code $rename} cannot reach into array elements, and a
+     * read-modify-write in Java costs the transfer of every conversation in full —
+     * on a throttled database the existing per-document pass over the same
+     * collection took twenty minutes. Only documents that still hold a v5 step are
+     * matched, so a second run changes nothing.
+     * </p>
+     *
+     * <p>
+     * A step that already holds a non-empty {@code workflows} beside its
+     * {@code packages} is left exactly as it is: which of the two is right cannot
+     * be told, and picking one would destroy the other. Steps with neither key are
+     * counted and reported too — there is nothing to rename in them, but a step
+     * with no runs at all is not something either version writes.
+     * </p>
+     */
+    private MigrationResult migrateConversationStepShape() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<Bson> holdsV5Step = new ArrayList<>();
+        Document set = new Document();
+        for (String array : CONVERSATION_STEP_ARRAYS) {
+            holdsV5Step.add(exists(array + "." + FIELD_STEP_RUNS_V5));
+            set.append(array, new Document("$cond", List.of(new Document("$isArray", "$" + array),
+                    new Document("$map", new Document("input", "$" + array).append("as", "step").append("in", v6Step("$$step"))),
+                    "$" + array)));
+        }
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the conversation steps could not be renamed (%s → %s) — counted as a failure, so the "
+                    + "migration is NOT recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS,
+                    FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: renamed the step shape (%s → %s) in %d documents", COLLECTION_CONVERSATIONS, FIELD_STEP_RUNS_V5,
+                    FIELD_STEP_RUNS_V6, migrated);
+        }
+
+        List<Bson> leftAlone = new ArrayList<>();
+        List<Bson> neither = new ArrayList<>();
+        for (String array : CONVERSATION_STEP_ARRAYS) {
+            leftAlone.add(exists(array + "." + FIELD_STEP_RUNS_V5));
+            neither.add(elemMatch(array, new Document(FIELD_STEP_RUNS_V5, new Document("$exists", false))
+                    .append(FIELD_STEP_RUNS_V6, new Document("$exists", false))));
+        }
+        try {
+            long ambiguous = collection.countDocuments(or(leftAlone));
+            if (ambiguous > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold steps with both '%s' and a non-empty '%s'; those steps were left "
+                        + "unchanged. Their v5 runs load only if '%s' is emptied by hand.", COLLECTION_CONVERSATIONS, ambiguous,
+                        FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6, FIELD_STEP_RUNS_V6);
+            }
+            long empty = collection.countDocuments(or(neither));
+            if (empty > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold steps with neither '%s' nor '%s' — nothing to rename, but those "
+                        + "steps load with no data", COLLECTION_CONVERSATIONS, empty, FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the steps left unrenamed: %s", COLLECTION_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * The aggregation expression that turns one stored step into its v6 shape.
+     * Every branch is a {@code $cond}, which evaluates lazily, so a value of an
+     * unexpected type is passed through unchanged rather than failing the whole
+     * update.
+     */
+    private static Document v6Step(String step) {
+        String v5Runs = step + "." + FIELD_STEP_RUNS_V5;
+        String v6Runs = step + "." + FIELD_STEP_RUNS_V6;
+        Document hasV5Runs = new Document("$ne", List.of(new Document("$type", v5Runs), "missing"));
+        Document v6RunsEmpty = new Document("$or", List.of(new Document("$eq", List.of(new Document("$type", v6Runs), "missing")),
+                new Document("$eq", List.of(v6Runs, List.of()))));
+        Document renamed = new Document("$mergeObjects", List.of(withoutField(step, FIELD_STEP_RUNS_V5),
+                new Document(FIELD_STEP_RUNS_V6, v6Runs(v5Runs))));
+        return cond(isObject(step), cond(new Document("$and", List.of(hasV5Runs, v6RunsEmpty)), renamed, step), step);
+    }
+
+    /** Each run of a v5 step, with its results' origin field renamed. */
+    private static Document v6Runs(String runs) {
+        Document run = cond(new Document("$and", List.of(isObject("$$run"), new Document("$isArray", "$$run.lifecycleTasks"))),
+                new Document("$mergeObjects", List.of("$$run", new Document("lifecycleTasks", new Document("$map",
+                        new Document("input", "$$run.lifecycleTasks").append("as", "result").append("in", v6Result("$$result")))))),
+                "$$run");
+        return cond(new Document("$isArray", runs), new Document("$map", new Document("input", runs).append("as", "run").append("in", run)),
+                runs);
+    }
+
+    private static Document v6Result(String result) {
+        String origin = result + "." + FIELD_ORIGIN_V5;
+        Document renamed = new Document("$mergeObjects", List.of(withoutField(result, FIELD_ORIGIN_V5),
+                new Document(FIELD_ORIGIN_V6, origin)));
+        return cond(isObject(result), cond(new Document("$ne", List.of(new Document("$type", origin), "missing")), renamed, result), result);
+    }
+
+    /**
+     * {@code object} without {@code field} — {@code $unsetField} needs MongoDB 5.0.
+     */
+    private static Document withoutField(String object, String field) {
+        return new Document("$arrayToObject", new Document("$filter", new Document("input", new Document("$objectToArray", object))
+                .append("as", "field").append("cond", new Document("$ne", List.of("$$field.k", field)))));
+    }
+
+    private static Document isObject(String value) {
+        return new Document("$eq", List.of(new Document("$type", value), "object"));
+    }
+
+    private static Document cond(Object condition, Object then, Object otherwise) {
+        return new Document("$cond", Arrays.asList(condition, then, otherwise));
     }
 
     /**

@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import org.mockito.ArgumentCaptor;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.secrets.sanitize.SecretScrubber;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
@@ -24,9 +26,12 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.mongodb.client.ListCollectionNamesIterable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
@@ -47,7 +52,7 @@ class PropertiesMigrationServiceTest {
     @Test
     void shouldSkipMigrationInPostgresMode() {
         // Given
-        PropertiesMigrationService service = new PropertiesMigrationService(database, userMemoryStore, "postgres");
+        PropertiesMigrationService service = service("postgres");
 
         // When
         service.onStartup(startupEvent);
@@ -61,7 +66,7 @@ class PropertiesMigrationServiceTest {
     @Test
     void shouldAttemptMigrationInMongoMode() {
         // Given
-        PropertiesMigrationService service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+        PropertiesMigrationService service = service("mongodb");
         when(database.listCollectionNames()).thenThrow(new RuntimeException("Simulated check"));
 
         // When
@@ -79,7 +84,7 @@ class PropertiesMigrationServiceTest {
         @DisplayName("should skip when legacy collection does not exist")
         void skipNoLegacyCollection() {
             // Given — listCollectionNames returns names without 'properties'
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable = mockIterableOf("users", "conversations");
             when(database.listCollectionNames()).thenReturn(iterable);
 
@@ -96,7 +101,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void skipWhenCollectionEmpty() {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable = mockIterableOf("properties", "other");
             when(database.listCollectionNames()).thenReturn(iterable);
 
@@ -116,7 +121,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void successfulMigration() throws Exception {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
 
             // First call for migrateIfNeeded, second call for rename backup check
             var iterable1 = mockIterableOf("properties", "other");
@@ -156,7 +161,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void skipDocumentWithoutUserId() throws Exception {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable1 = mockIterableOf("properties");
             var iterable2 = mockIterableOf();
             when(database.listCollectionNames())
@@ -200,7 +205,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void partialFailureDoesNotRetireTheSource() throws Exception {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable1 = mockIterableOf("properties");
             var iterable2 = mockIterableOf();
             when(database.listCollectionNames())
@@ -244,7 +249,7 @@ class PropertiesMigrationServiceTest {
         @DisplayName("a document without a userId does not hold the rename back — retrying it can never succeed")
         @SuppressWarnings("unchecked")
         void unownedDocumentDoesNotHoldTheRenameBack() throws Exception {
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             // Build both iterables before stubbing: mockIterableOf() mocks internally, and
             // calling it inside a when(...) chain is nested stubbing, which Mockito
             // rejects.
@@ -280,7 +285,7 @@ class PropertiesMigrationServiceTest {
         @DisplayName("a key the user already has in usermemories keeps its newer value")
         @SuppressWarnings("unchecked")
         void existingV6EntryIsNotOverwritten() throws Exception {
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable1 = mockIterableOf("properties");
             var iterable2 = mockIterableOf();
             when(database.listCollectionNames()).thenReturn(iterable1).thenReturn(iterable2);
@@ -318,7 +323,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void dropsExistingBackup() throws Exception {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable1 = mockIterableOf("properties");
             var iterable2 = mockIterableOf("properties_migrated_v6");
             when(database.listCollectionNames())
@@ -353,7 +358,7 @@ class PropertiesMigrationServiceTest {
         @SuppressWarnings("unchecked")
         void handleRenameFailure() throws Exception {
             // Given
-            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb");
+            var service = service("mongodb");
             var iterable1 = mockIterableOf("properties");
             var iterable2 = mockIterableOf();
             when(database.listCollectionNames())
@@ -379,6 +384,138 @@ class PropertiesMigrationServiceTest {
             // Then — rename was attempted
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
         }
+    }
+
+    /**
+     * Long-term memories are loaded into every future conversation as properties,
+     * so whatever this migration copies reaches template data — and from there
+     * prompts and outbound API calls. EDDI 5 kept the caller's per-request identity
+     * under {@code userInfo}, a platform bearer token included, and the migration
+     * used to copy it into {@code global} memory for every such user.
+     * <p>
+     * The fake credentials here are zero-entropy on purpose: the scrubber also
+     * redacts random-looking strings by entropy, so a random fake would be caught
+     * even if the name- and structure-based rules this migration relies on were
+     * broken, and the tests would pass for the wrong reason.
+     */
+    @Nested
+    @DisplayName("credentials are not migrated into long-term memory")
+    class CredentialsAreNotMigrated {
+
+        private static final String FAKE_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        @SuppressWarnings("unchecked")
+        private List<UserMemoryEntry> migrate(PropertiesMigrationService service, Document legacy) throws Exception {
+            var withLegacy = mockIterableOf("properties");
+            var afterRename = mockIterableOf();
+            when(database.listCollectionNames()).thenReturn(withLegacy, afterRename);
+            MongoCollection<Document> legacyCollection = mock(MongoCollection.class);
+            when(database.getCollection("properties")).thenReturn(legacyCollection);
+            when(legacyCollection.countDocuments()).thenReturn(1L);
+            when(database.getName()).thenReturn("testdb");
+            FindIterable<Document> findIterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(legacyCollection.find()).thenReturn(findIterable);
+            when(findIterable.iterator()).thenReturn(cursor);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(legacy);
+            when(userMemoryStore.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
+
+            service.onStartup(startupEvent);
+
+            var captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
+            verify(userMemoryStore, atLeast(0)).insertIfAbsent(captor.capture());
+            // A skipped key is not a failure: the source is still retired.
+            verify(legacyCollection).renameCollection(any(MongoNamespace.class));
+            return captor.getAllValues();
+        }
+
+        private static String everythingMigrated(List<UserMemoryEntry> entries) {
+            var all = new StringBuilder();
+            for (UserMemoryEntry entry : entries) {
+                all.append(entry.key()).append('=').append(new Document("v", entry.value()).toJson()).append('\n');
+            }
+            return all.toString();
+        }
+
+        @Test
+        @DisplayName("userInfo is not migrated, and no entry holds its token anywhere; ordinary preferences are")
+        void userInfoIsNotMigrated() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("lang", "de")
+                    .append("favoriteTopic", "algebra")
+                    .append("userInfo", new Document("token", FAKE_TOKEN).append("courseId", "course-1").append("firstName", "Ada"));
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(Set.of("lang", "favoriteTopic"), entries.stream().map(UserMemoryEntry::key).collect(Collectors.toSet()));
+            assertFalse(everythingMigrated(entries).contains(FAKE_TOKEN), "the token reached long-term memory");
+        }
+
+        @Test
+        @DisplayName("a key named like a credential is skipped, whatever its value looks like")
+        void credentialNamedKeyIsSkipped() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("apiKey", FAKE_TOKEN)
+                    .append("lang", "de");
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(List.of("lang"), entries.stream().map(UserMemoryEntry::key).toList());
+            assertFalse(everythingMigrated(entries).contains(FAKE_TOKEN));
+        }
+
+        @Test
+        @DisplayName("a credential nested inside an ordinary-looking key is found, and the key is skipped")
+        void nestedCredentialIsFound() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user")
+                    .append("session", new Document("profile", new Document("accessToken", FAKE_TOKEN)))
+                    .append("lang", "de");
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(List.of("lang"), entries.stream().map(UserMemoryEntry::key).toList());
+            assertFalse(everythingMigrated(entries).contains(FAKE_TOKEN));
+        }
+
+        @Test
+        @DisplayName("an ordinary long-term property migrates unchanged")
+        void ordinaryPropertyMigratesUnchanged() throws Exception {
+            var preferences = new Document("theme", "dark").append("fontSize", 14);
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("preferences", preferences)
+                    .append("overallConversationCount", 7);
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(2, entries.size());
+            var byKey = entries.stream().collect(Collectors.toMap(UserMemoryEntry::key, UserMemoryEntry::value));
+            assertEquals(preferences, byKey.get("preferences"));
+            assertEquals(7, byKey.get("overallConversationCount"));
+            assertEquals(Visibility.global, entries.getFirst().visibility());
+        }
+
+        @Test
+        @DisplayName("the skip list is configurable; a credential is still caught when userInfo is taken off it")
+        void skipListIsConfigurable() throws Exception {
+            var service = new PropertiesMigrationService(database, userMemoryStore, "mongodb", scrubber(), List.of("lang"));
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("lang", "de")
+                    .append("favoriteTopic", "algebra").append("userInfo", new Document("token", FAKE_TOKEN));
+
+            var entries = migrate(service, legacy);
+
+            assertEquals(List.of("favoriteTopic"), entries.stream().map(UserMemoryEntry::key).toList());
+        }
+    }
+
+    private static SecretScrubber scrubber() {
+        return new SecretScrubber(new ObjectMapper());
+    }
+
+    private PropertiesMigrationService service(String datastoreType) {
+        return new PropertiesMigrationService(database, userMemoryStore, datastoreType, scrubber(),
+                List.of(PropertiesMigrationService.DEFAULT_SKIP_KEYS));
+    }
+
+    private PropertiesMigrationService service() {
+        return service("mongodb");
     }
 
     /**

@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
@@ -16,15 +17,19 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReplaceOptions;
+import org.bson.BsonDocument;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +40,13 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * @author ginccc
  */
 public class MongoResourceStorage<T> implements IResourceStorage<T> {
+    private static final Logger LOGGER = Logger.getLogger(MongoResourceStorage.class);
+
+    /** MongoDB {@code IndexOptionsConflict}. */
+    static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
+    /** MongoDB {@code IndexKeySpecsConflict}. */
+    static final int INDEX_KEY_SPECS_CONFLICT_ERROR_CODE = 86;
+
     public static final String VERSION_FIELD = "_version";
     public static final String ID_FIELD = "_id";
     private static final String DELETED_FIELD = "_deleted";
@@ -84,8 +96,153 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         });
     }
 
+    /**
+     * Creates an index, and brings any index an earlier EDDI left on the same key
+     * into line with the specification asked for here.
+     *
+     * <p>
+     * The case that made this necessary: databases created before 6.3 hold
+     * {@code descriptors.resource_1} with {@code unique: true}, and this store asks
+     * for it non-unique. MongoDB refuses that with {@code IndexKeySpecsConflict}
+     * (86) — same name, different options — and the exception used to escape this
+     * constructor. The descriptor store could then never be built, so every
+     * deployed agent ended in ERROR and every descriptor listing answered 500.
+     * </p>
+     *
+     * <p>
+     * The index asked for here wins. For {@code resource_1} that is deliberate:
+     * since 6.3 neither backend enforces uniqueness on the field (PostgreSQL's
+     * expression index is not unique, and a MongoDB created by 6.3 or later never
+     * had it), so no 6.x write path relies on it, and keeping it would make one
+     * class of installation refuse writes the others accept. For the same reason a
+     * unique index on the same key under <em>another</em> name is replaced too: the
+     * server accepts a second, non-unique index beside it without complaint, and
+     * the stricter one would go on refusing writes.
+     * </p>
+     *
+     * <p>
+     * As in {@code MongoDeploymentStorage}, the error code alone decides nothing:
+     * both 85 (an equivalent index under another name) and 86 (same name, other
+     * options — or the same name on a <em>different</em> key) are answered by
+     * reading the collection's own indexes. An index that holds the generated name
+     * on another key is someone else's and is never dropped. A conflict that cannot
+     * be resolved is logged at ERROR and the store is built anyway: it works
+     * without the index, only more slowly, whereas a store that cannot be
+     * constructed takes the application down with it.
+     * </p>
+     */
     private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
-        mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
+        MongoCommandException conflict = null;
+        try {
+            mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
+                throw e;
+            }
+            conflict = e;
+        }
+        try {
+            reconcileIndexesOnKey(mongoCollection, indexKey.toBsonDocument(), unique, conflict);
+        } catch (RuntimeException e) {
+            if (conflict != null) {
+                LOGGER.errorf("Cannot create index %s on '%s' (%s), and the conflicting index could not be reconciled: %s. "
+                        + "Queries on this field scan.", indexKey.toBsonDocument().toJson(),
+                        String.valueOf(mongoCollection.getNamespace()), conflict.getErrorMessage(), e.toString());
+            } else {
+                LOGGER.warnf("Could not check '%s' for indexes an earlier EDDI left on %s: %s",
+                        String.valueOf(mongoCollection.getNamespace()), indexKey.toBsonDocument().toJson(), e.toString());
+            }
+        }
+    }
+
+    /**
+     * Replaces every index on {@code keyPattern} whose uniqueness differs from the
+     * one asked for, and builds the requested one if nothing equivalent is left.
+     *
+     * @param conflict
+     *            the error {@code createIndex} raised, or {@code null} when it
+     *            succeeded
+     */
+    private static void reconcileIndexesOnKey(MongoCollection<Document> mongoCollection, BsonDocument keyPattern, boolean unique,
+                                              MongoCommandException conflict) {
+        String collectionName = mongoCollection.getNamespace().getCollectionName();
+        Map<String, Document> indexes = new LinkedHashMap<>();
+        for (Document index : mongoCollection.listIndexes()) {
+            indexes.put(index.getString("name"), index);
+        }
+
+        String generatedName = generatedIndexName(keyPattern);
+        Document nameHolder = indexes.get(generatedName);
+        if (conflict != null && nameHolder != null && !sameKeyPattern(nameHolder, keyPattern)) {
+            LOGGER.errorf("Cannot create index %s on '%s': the name '%s' is already held by an index on a different key (%s). "
+                    + "Nothing was dropped; queries on this field scan until that index is renamed or removed by hand.",
+                    keyPattern.toJson(), collectionName, generatedName, nameHolder.get("key"));
+            return;
+        }
+
+        List<Document> onKey = indexes.values().stream().filter(index -> sameKeyPattern(index, keyPattern)).toList();
+        List<Document> mismatched = onKey.stream().filter(index -> index.getBoolean("unique", false) != unique).toList();
+        if (conflict == null && mismatched.isEmpty()) {
+            return;
+        }
+
+        for (Document index : mismatched) {
+            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with unique=%s; replacing it with the current "
+                    + "specification (unique=%s).", index.getString("name"), collectionName, !unique, unique);
+            mongoCollection.dropIndex(index.getString("name"));
+        }
+
+        Document equivalent = onKey.stream().filter(index -> !mismatched.contains(index)).findFirst().orElse(null);
+        if (equivalent != null) {
+            if (conflict != null) {
+                LOGGER.infof("Index %s on '%s' already exists as '%s' with the same specification; kept.", keyPattern.toJson(),
+                        collectionName, equivalent.getString("name"));
+            }
+            return;
+        }
+        try {
+            mongoCollection.createIndex(keyPattern, new IndexOptions().unique(unique));
+        } catch (RuntimeException e) {
+            LOGGER.errorf("Dropped the conflicting index(es) on '%s' but could not rebuild %s: %s. Queries on this field "
+                    + "scan until the index is created by hand.", collectionName, keyPattern.toJson(), e.getMessage());
+        }
+    }
+
+    /**
+     * The name MongoDB gives an index when none is supplied: each field and its
+     * direction, joined by underscores.
+     */
+    static String generatedIndexName(BsonDocument keyPattern) {
+        var name = new StringBuilder();
+        keyPattern.forEach((field, direction) -> {
+            if (!name.isEmpty()) {
+                name.append('_');
+            }
+            name.append(field).append('_').append(direction.isNumber() ? String.valueOf(direction.asNumber().intValue()) : direction);
+        });
+        return name.toString();
+    }
+
+    /**
+     * Whether an index sits on exactly this key: the same fields in the same order
+     * with the same directions. Compared numerically, since the server may report
+     * {@code 1} as an int, a long or a double.
+     */
+    static boolean sameKeyPattern(Document index, BsonDocument keyPattern) {
+        if (!(index.get("key") instanceof Document actual)) {
+            return false;
+        }
+        if (!new ArrayList<>(actual.keySet()).equals(new ArrayList<>(keyPattern.keySet()))) {
+            return false;
+        }
+        for (String field : keyPattern.keySet()) {
+            BsonValue expected = keyPattern.get(field);
+            if (!expected.isNumber() || !(actual.get(field) instanceof Number direction)
+                    || direction.doubleValue() != expected.asNumber().doubleValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

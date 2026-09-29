@@ -186,6 +186,33 @@ public class SecretScrubber {
         }
     }
 
+    /**
+     * Whether scrubbing {@code json} would redact anything — that is, whether it
+     * holds a value this class treats as a credential, judged by exactly the rules
+     * {@link #scrubJson(String)} applies. Nothing is changed.
+     *
+     * <p>
+     * For callers that must keep a credential out of somewhere rather than mask it
+     * in place, such as the migration that copies legacy properties into long-term
+     * memory. JSON that cannot be parsed answers {@code true}: a value that could
+     * not be inspected has not been shown to be safe.
+     * </p>
+     */
+    public boolean containsCredential(String json) {
+        if (json == null || json.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode original = objectMapper.readTree(json);
+            JsonNode scrubbed = original.deepCopy();
+            scrubNode(scrubbed, null);
+            return !scrubbed.equals(original);
+        } catch (Exception e) {
+            LOGGER.warnv("Could not parse JSON to check it for credentials, treating it as holding one: {0}", e.getMessage());
+            return true;
+        }
+    }
+
     private void scrubNode(JsonNode node, String parentFieldName) {
         if (node.isObject()) {
             ObjectNode objectNode = (ObjectNode) node;
