@@ -192,7 +192,7 @@ public class PropertySetterTask implements ILifecycleTask {
                                         // API sent. Rendering it would evaluate their "{vars.x}" or
                                         // "{#for ...}" with the server's template data. valueString is the
                                         // authored alternative and is still templated below.
-                                        if (!isScrubbedInputPlaceholder(name, valueString)) {
+                                        if (!isScrubbedPlaceholder(name, valueString, scope)) {
                                             conversationProperties.put(name, new Property(name, valueString, scope));
                                         }
                                     } else if (templatedObj instanceof Map<?, ?>) {
@@ -214,9 +214,11 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        if (isScrubbedInputPlaceholder(name, templateString)) {
-                                            // Neither vaulted nor stored — see isScrubbedInputPlaceholder.
-                                        } else if (scope == Scope.secret) {
+                                        if (isScrubbedPlaceholder(name, templateString, scope)) {
+                                            // Neither vaulted nor stored — see isScrubbedPlaceholder.
+                                            continue;
+                                        }
+                                        if (scope == Scope.secret) {
                                             // Auto-vault: store the plaintext in the vault and
                                             // replace it with a vault reference in conversation properties.
                                             templateString = autoVaultSecret(memory, name, templateString);
@@ -289,7 +291,7 @@ public class PropertySetterTask implements ILifecycleTask {
                     if (initialInputData != null) {
                         String initialInput = initialInputData.getResult();
                         if (initialInput != null && !initialInput.isEmpty()
-                                && !isScrubbedInputPlaceholder(EXPRESSION_MEANING_USER_INPUT, initialInput)) {
+                                && !isScrubbedPlaceholder(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation)) {
                             properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
                         }
                     }
@@ -429,24 +431,35 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     /**
-     * True when a property value resolved to the {@code <secret input>}
-     * placeholder, which means the input it was meant to capture had already been
+     * True when a property value resolved to a scrub placeholder instead of the
+     * value it was meant to capture, which means that value had already been
      * scrubbed. This happens when a turn the client flagged {@code secretInput}
      * paused on a RULE pause and this setter runs after the resume:
      * {@code Conversation} scrubs a secret input when the turn stops, so
-     * {@code {memory.current.input}} then reads the placeholder. Storing it would
-     * silently configure the agent with the literal text "&lt;secret input&gt;" —
-     * for {@code scope:"secret"}, vault it as the secret. The value is skipped
-     * instead, and the reason logged.
+     * {@code {memory.current.input}} then reads the placeholder.
+     * <ul>
+     * <li>Any scope: a value that IS {@code <secret input>}. Storing it would
+     * silently configure the agent with that literal text.</li>
+     * <li>{@code scope:"secret"}: a value that CONTAINS either placeholder
+     * ({@code <secret input>} or the secret-context one). Vaulting it would
+     * overwrite the stored secret with the placeholder; the plaintext is
+     * deliberately not carried across a pause, so the user must submit the
+     * credential again.</li>
+     * </ul>
+     * The property is left unset instead, and the reason logged.
      */
-    private static boolean isScrubbedInputPlaceholder(String keyName, String value) {
-        if (value == null || !SECRET_INPUT_PLACEHOLDER.equals(value.trim())) {
+    private static boolean isScrubbedPlaceholder(String keyName, String value, Scope scope) {
+        if (value == null) {
             return false;
         }
-        LOGGER.warnf("Property '%s' resolved to the %s placeholder: the secret input it captures was already scrubbed "
-                + "(typically a capture that runs after a HITL resume of a secretInput turn). The property is not set. "
-                + "Capture the input before the pause.", keyName, SECRET_INPUT_PLACEHOLDER);
-        return true;
+        boolean scrubbed = SECRET_INPUT_PLACEHOLDER.equals(value.trim()) || scope == Scope.secret
+                && (value.contains(SECRET_INPUT_PLACEHOLDER) || value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
+        if (scrubbed) {
+            LOGGER.warnf("Property '%s' resolved to a scrub placeholder, not the value it captures: that value was already scrubbed "
+                    + "(typically a capture that runs after a HITL resume of a secretInput turn). The property is not set "
+                    + "and nothing is vaulted. Capture the input before the pause.", keyName);
+        }
+        return scrubbed;
     }
 
     /**
@@ -554,11 +567,16 @@ public class PropertySetterTask implements ILifecycleTask {
         var currentStep = memory.getCurrentStep();
         boolean inputScrubbed = false;
         boolean anythingScrubbed = false;
+        // The resolved value plus every input form replaced below: when the match is
+        // normalization-insensitive, a copy of the differently formatted raw input
+        // elsewhere in the step does not contain the resolved value verbatim.
+        List<String> needles = new ArrayList<>(List.of(plaintext));
 
         // (1) The known input-carrying keys of this step.
         for (String inputKey : List.of(INPUT_INITIAL_IDENTIFIER, INPUT_NORMALIZED_IDENTIFIER)) {
             IData<String> inputData = currentStep.getLatestData(inputKey);
             if (inputData != null && carriesSecret(inputData.getResult(), plaintext)) {
+                needles.add(inputData.getResult());
                 storeScrubbed(currentStep, inputKey, SECRET_INPUT_PLACEHOLDER);
                 inputScrubbed = true;
                 anythingScrubbed = true;
@@ -573,7 +591,7 @@ public class PropertySetterTask implements ILifecycleTask {
             if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
                 continue;
             }
-            Object cleaned = SecretValueScrubber.scrubValue(data.getResult(), plaintext, SECRET_INPUT_PLACEHOLDER);
+            Object cleaned = SecretValueScrubber.scrubAll(data.getResult(), needles, SECRET_INPUT_PLACEHOLDER);
             if (cleaned != null) {
                 storeScrubbed(currentStep, key, cleaned);
                 anythingScrubbed = true;
@@ -585,7 +603,7 @@ public class PropertySetterTask implements ILifecycleTask {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = SecretValueScrubber.scrubValue(outputEntry.getValue(), plaintext, SECRET_INPUT_PLACEHOLDER);
+                Object cleaned = SecretValueScrubber.scrubAll(outputEntry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;

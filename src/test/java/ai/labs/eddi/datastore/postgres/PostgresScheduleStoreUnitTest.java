@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -737,6 +738,73 @@ class PostgresScheduleStoreUnitTest {
                 "paging without a deterministic order skips and repeats rows");
         verify(preparedStatement).setInt(1, 50);
         verify(preparedStatement).setInt(2, 100);
+    }
+
+    /**
+     * The owner scope, like the HITL redaction, belongs in the WHERE clause: a
+     * post-filter counted limit/offset over other users' rows and handed a
+     * non-admin a short page the paging contract reads as the end.
+     */
+    @Test
+    void readAllSchedules_ownerScoped_filtersInTheQueryAndBindsInOrder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 100, true, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String q = sql.getValue();
+        assertTrue(q.contains(" AND (user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ? OR user_id = ?)"),
+                "owner scope must AND onto the HITL redaction: " + q);
+        assertTrue(q.indexOf("user_id IS NULL") < q.indexOf("LIMIT"), "the owner filter must precede LIMIT: " + q);
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(2, "editor-1");
+        order.verify(preparedStatement).setInt(3, 50);
+        order.verify(preparedStatement).setInt(4, 100);
+    }
+
+    @Test
+    void readAllSchedules_ownerScopedWithoutHitlRedaction_introducesTheWhere() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo(null));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("FROM eddi_schedules WHERE (user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?)"),
+                "a caller with no id gets only the shared-owner clause: " + sql.getValue());
+        verify(preparedStatement).setString(1, ScheduleOwnerScope.SHARED_OWNER);
+        verify(preparedStatement).setInt(2, 50);
+        verify(preparedStatement).setInt(3, 0);
+    }
+
+    @Test
+    void readSchedulesByAgentId_ownerScoped_bindsAfterTheAgent() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readSchedulesByAgentId("agent-1", 50, 0, false, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("agent_id = ? AND (user_id IS NULL"), sql.getValue());
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, "agent-1");
+        order.verify(preparedStatement).setString(2, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(3, "editor-1");
+        order.verify(preparedStatement).setInt(4, 50);
+        order.verify(preparedStatement).setInt(5, 0);
+    }
+
+    @Test
+    void readAllSchedules_unrestrictedScope_addsNoOwnerClause() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false, ScheduleOwnerScope.ALL);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("user_id"), "an unrestricted listing must not be owner-filtered: " + sql.getValue());
     }
 
     // ─── deleteSchedule ─────────────────────────────────────────

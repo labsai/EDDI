@@ -173,4 +173,31 @@ describe("MessageBubble", () => {
     expect(container.querySelector(".katex")).toBeNull();
     expect(container.querySelector(".hljs-keyword")).toBeNull();
   });
+
+  it("renders a markdown image as a link, not a live <img> (no zero-click fetch)", () => {
+    const { container } = renderBubble({
+      id: "18",
+      role: "agent",
+      content: "![pixel](https://attacker.example/pixel.png)",
+      timestamp: 0,
+    });
+    // No live image element must be produced.
+    expect(container.querySelector("img")).toBeNull();
+    // The URL is preserved as a click-to-open link instead.
+    const link = screen.getByRole("link", { name: "pixel" });
+    expect(link).toHaveAttribute("href", "https://attacker.example/pixel.png");
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("renders a raw <img> tag as a link, not a live <img>", () => {
+    const { container } = renderBubble({
+      id: "19",
+      role: "agent",
+      content: '<img src="https://attacker.example/beacon.gif" alt="b">',
+      timestamp: 0,
+    });
+    expect(container.querySelector("img")).toBeNull();
+    const link = screen.getByRole("link", { name: "b" });
+    expect(link).toHaveAttribute("href", "https://attacker.example/beacon.gif");
+  });
 });

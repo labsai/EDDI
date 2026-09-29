@@ -974,6 +974,12 @@ public class Conversation implements IConversation {
      * the wizard pattern hands it to a later turn — and {@code scope:"secret"} is
      * how a designer asks for it to be vaulted.
      * <p>
+     * Forms shorter than the floor are searched for too, but only where they stand
+     * as a whole token (no letter or digit directly before or after), and only in
+     * values, never map keys ({@link SecretValueScrubber#scrubDeepTokens}): a PIN
+     * copied into a reply is removed, while the same digits inside a longer number
+     * or a field named like the secret are left alone.
+     * <p>
      * A task that runs after a HITL resume of this turn sees the placeholder, as it
      * does for a secret context value.
      *
@@ -1003,6 +1009,11 @@ public class Conversation implements IConversation {
                 .filter(value -> value.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
+        // Shorter forms: whole tokens only (see above).
+        List<String> tokens = plaintexts.stream()
+                .filter(value -> !value.isBlank() && value.length() < SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
+                .toList();
+        boolean searched = !needles.isEmpty() || !tokens.isEmpty();
 
         // A tool-call pause persists its batch: the transcript the model saw
         // (built from the display input, which the parser had overwritten with
@@ -1010,9 +1021,17 @@ public class Conversation implements IConversation {
         // arguments an approver is shown. A resume replays and executes from it,
         // so it is scrubbed like the step — the resumed turn sees the placeholder.
         PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
-        if (pendingToolCalls != null && !needles.isEmpty()) {
-            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
-                    SECRET_INPUT_PLACEHOLDER);
+        if (pendingToolCalls != null && searched) {
+            PendingToolCallBatch cleaned = needles.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, SECRET_INPUT_PLACEHOLDER);
+            PendingToolCallBatch current = cleaned != null ? cleaned : pendingToolCalls;
+            PendingToolCallBatch tokenCleaned = tokens.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTypedTokens(current, PendingToolCallBatch.class, tokens, SECRET_INPUT_PLACEHOLDER);
+            if (tokenCleaned != null) {
+                cleaned = tokenCleaned;
+            }
             if (cleaned != null) {
                 conversationMemory.setHitlPendingToolCalls(cleaned);
             }
@@ -1032,12 +1051,12 @@ public class Conversation implements IConversation {
                     || MemoryKeys.PROPERTIES_EXTRACTED.key().equals(key)) {
                 writable.setResult(List.of());
                 writable.setPossibleResults(null);
-            } else if (!needles.isEmpty() && !key.startsWith(KEY_PROPERTIES + ":")) {
-                Object cleaned = scrubSecretInputFrom(datum.getResult(), needles);
+            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":")) {
+                Object cleaned = scrubSecretInputFrom(datum.getResult(), needles, tokens);
                 if (cleaned != null) {
                     writable.setResult(cleaned);
                 }
-                if (scrubSecretInputFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+                if (scrubSecretInputFrom(writable.getPossibleResults(), needles, tokens) instanceof List<?> cleanedPossible) {
                     writable.setPossibleResults(castList(cleanedPossible));
                 }
             }
@@ -1046,12 +1065,12 @@ public class Conversation implements IConversation {
         step.removeConversationOutput(KEY_EXPRESSIONS_OUTPUT);
         step.removeConversationOutput(MemoryKeys.INTENTS.key());
         var conversationOutput = step.getConversationOutput();
-        if (conversationOutput != null && !needles.isEmpty()) {
+        if (conversationOutput != null && searched) {
             for (var entry : conversationOutput.entrySet()) {
                 if (INPUT.key().equals(entry.getKey()) || KEY_PROPERTIES.equals(entry.getKey())) {
                     continue;
                 }
-                Object cleaned = scrubSecretInputFrom(entry.getValue(), needles);
+                Object cleaned = scrubSecretInputFrom(entry.getValue(), needles, tokens);
                 if (cleaned != null) {
                     entry.setValue(cleaned);
                 }
@@ -1062,8 +1081,16 @@ public class Conversation implements IConversation {
         return plaintexts;
     }
 
-    private static Object scrubSecretInputFrom(Object value, List<String> needles) {
-        return SecretValueScrubber.scrubDeep(value, needles, SECRET_INPUT_PLACEHOLDER);
+    /**
+     * {@code value} with the secret-input forms removed — {@code needles} verbatim,
+     * {@code tokens} as whole tokens in values only — or {@code null} when it
+     * carries none of them.
+     */
+    private static Object scrubSecretInputFrom(Object value, List<String> needles, List<String> tokens) {
+        Object cleaned = needles.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, needles, SECRET_INPUT_PLACEHOLDER);
+        Object current = cleaned != null ? cleaned : value;
+        Object tokenCleaned = tokens.isEmpty() ? null : SecretValueScrubber.scrubDeepTokens(current, tokens, SECRET_INPUT_PLACEHOLDER);
+        return tokenCleaned != null ? tokenCleaned : cleaned;
     }
 
     /**

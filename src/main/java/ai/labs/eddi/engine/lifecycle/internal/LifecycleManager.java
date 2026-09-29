@@ -380,13 +380,20 @@ public class LifecycleManager implements ILifecycleManager {
                             tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
                 }
 
-                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
-                taskSpan.recordException(e);
-
                 // Classify error for metrics, audit, and admin dashboards
                 String errorType = classifyError(e);
                 String errorSummary = summarizeForAudit(e);
                 long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+
+                // The span carries the REDACTED summary, never the raw exception message:
+                // a task exception can quote a resolved credential (e.g. an upstream API's
+                // "invalid key sk-live-…" echo), and OpenTelemetry spans are exported to
+                // collectors that are not part of the secret-redaction boundary.
+                // recordException
+                // would re-attach the raw message and stack-trace, so it is deliberately not
+                // called — only the exception type is recorded alongside the redacted status.
+                taskSpan.setStatus(StatusCode.ERROR, errorSummary);
+                taskSpan.setAttribute("exception.type", e.getClass().getName());
 
                 // Record error counter for dashboards & alerting (tagged by error.type)
                 String errTaskId = task.getId().name();

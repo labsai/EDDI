@@ -11,13 +11,16 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -279,10 +282,13 @@ class ConversationMemoryUtilitiesTest {
                     assertTrue(json.contains("Stored " + MemoryKeys.SECRET_INPUT_PLACEHOLDER), where + json);
                     if (detailed) {
                         assertTrue(json.contains("\"key\":\"" + MemoryKeys.SECRET_INPUT_PLACEHOLDER + "\""), where + json);
-                        // Properties and their step mirrors are returned as captured.
-                        assertEquals(Map.of("apiKey", "Tok-Aaaa-Bbbb-1111"), simple.getConversationOutputs().getLast().get("properties"));
+                        // Properties and their step mirrors are not masked as part of the
+                        // secret turn (no placeholder); returnDetailed still masks a
+                        // credential-named key such as apiKey, as it does for every turn.
+                        assertEquals(Map.of("apiKey", SecretRedactionFilter.REDACTED), simple.getConversationOutputs().getLast().get("properties"));
                         assertTrue(simple.getConversationSteps().getLast().getConversationStep().stream()
-                                .anyMatch(data -> data.getKey().equals("properties:apiKey") && "Tok-Aaaa-Bbbb-1111".equals(data.getValue())));
+                                .anyMatch(
+                                        data -> data.getKey().equals("properties:apiKey") && SecretRedactionFilter.REDACTED.equals(data.getValue())));
                     }
                     assertEquals("Tok-Aaaa-Bbbb-1111", simple.getConversationProperties().get("apiKey").getValueString());
                 }
@@ -339,6 +345,186 @@ class ConversationMemoryUtilitiesTest {
             var output = simple.getConversationOutputs().getFirst();
             assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, output.get("input"));
             assertFalse(output.containsKey("inputDebug"), "only the exact display key passes, not every input* key");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must drop sensitive internal keys (audit:*, *:trace:*, *Error)")
+        void detailedDropsSensitiveKeys() {
+            var snapshot = buildSnapshotWithOutputs("output", "audit:compiled_prompt", "langchain:trace:1", "httpCallError", "internal:debug");
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertTrue(output.containsKey("output"), "ordinary output must survive");
+            assertTrue(output.containsKey("internal:debug"), "non-sensitive detail must survive");
+            assertFalse(output.containsKey("audit:compiled_prompt"), "audit:* must be withheld");
+            assertFalse(output.containsKey("langchain:trace:1"), "*:trace:* must be withheld");
+            assertFalse(output.containsKey("httpCallError"), "*Error must be withheld");
+
+            var stepKeys = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .map(ConversationStepData::getKey).toList();
+            assertTrue(stepKeys.contains("output"));
+            assertFalse(stepKeys.contains("audit:compiled_prompt"), "audit:* must be withheld from step data");
+            assertFalse(stepKeys.contains("langchain:trace:1"), "*:trace:* must be withheld from step data");
+            assertFalse(stepKeys.contains("httpCallError"), "*Error must be withheld from step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must redact secrets nested inside a structured (Map/List) value")
+        void detailedRedactsStructuredValues() {
+            // A secret embedded in a deserialized httpCall response body (a Map/List under
+            // an agent-chosen, non-denylisted key) must not reach the detailed view raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of("token", secret, "nested", List.of(Map.of("apiKey", secret)));
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-struct");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(secret), "the raw secret must not survive in a structured output value");
+            assertTrue(outStr.contains("<REDACTED>"), "the nested secret must be masked");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            String stepStr = String.valueOf(stepData.getValue());
+            assertFalse(stepStr.contains(secret), "the raw secret must not survive in a structured step value");
+            assertTrue(stepStr.contains("<REDACTED>"), "the nested secret must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true masks a shapeless credential under a credential-named key")
+        void detailedMasksValueUnderCredentialNamedKey() {
+            // "mytenantsecret12345" has no credential SHAPE (no sk-/Bearer prefix), so
+            // only the key says what it is — and walking the Map separates key from
+            // value. The key must be judged before the value is recursed into.
+            String shapeless = "mytenantsecret12345";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("apiKey", shapeless);
+            body.put("auth", Map.of("password", shapeless, "clientSecret", List.of(shapeless)));
+            // a non-credential key nested under a credential key inherits the masking
+            body.put("authorization", Map.of("value", "tenant-credential-9876"));
+            body.put("accessToken", 1234567890123L);
+            body.put("vaultToken", "${vault:tenant-key}");
+            body.put("maxTokens", 4096);
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-shapeless");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("token", shapeless);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            String outStr = String.valueOf(out.get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapeless), "a shapeless credential under a credential key must be masked: " + outStr);
+            assertFalse(outStr.contains("1234567890123"), "a numeric credential under a credential key must be masked");
+            assertFalse(outStr.contains("tenant-credential-9876"), "everything under a credential key is masked, at any depth");
+            assertTrue(outStr.contains("${vault:tenant-key}"), "a vault reference is a pointer, not a secret");
+            assertTrue(outStr.contains("4096"), "a short value under the 8-character floor is kept");
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            assertFalse(String.valueOf(out.get("token")).contains(shapeless), "a top-level credential key is masked too");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapeless),
+                    "a shapeless credential under a credential key must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true masks a credential used as a map KEY beneath a credential-named key")
+        void detailedMasksKeysBeneathCredentialNamedKey() {
+            String shapelessKey = "mytenantcredential123";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("authorization", Map.of(shapelessKey, "value"));
+            body.put("secrets", List.of(Map.of(shapelessKey + "b", "x")));
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapelessKey), "a credential used as a key under a credential key must be masked: " + outStr);
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapelessKey),
+                    "the same key must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must redact secrets in map KEYS and in Object[] elements")
+        void detailedRedactsMapKeysAndArrays() {
+            // A credential can sit in a map key (a token-keyed lookup) or in a String[]
+            // — neither may pass through the detailed projection raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of(secret, "value", "list", new String[]{secret});
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("httpCall:array", new Object[]{secret, List.of(secret)});
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            var map = (Map<?, ?>) out.get("httpCall:myApi");
+            assertFalse(map.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) map.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) out.get("httpCall:array")).contains(secret),
+                    "a secret inside an Object[] output value must be redacted");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            var stepMap = (Map<?, ?>) stepData.getValue();
+            assertFalse(stepMap.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted in step data");
+            assertFalse(Arrays.deepToString((Object[]) stepMap.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted in step data");
         }
 
         @Test

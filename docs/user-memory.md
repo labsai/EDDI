@@ -99,6 +99,8 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `maxValueLength` | `int` | `1000` | Maximum characters for memory values |
 | `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn |
 | `allowedCategories` | `List<String>` | `["preference","fact","context"]` | Allowed memory categories |
+| `allowedVisibilities` | `List<String>` | `["self"]` | Visibilities the `rememberFact` tool may write (`self`, `group`, `global`). By default the model can only store memories private to this agent, so a prompt-injected model cannot broadcast to every agent (`global`) or the group. The configured `defaultVisibility` is always added, so a default can never block every write |
+| `allowGlobalKeyOverwrite` | `boolean` | `false` | Whether a `global` write may replace the value of an existing global key this agent does not provably own — one owned by another agent, or one whose entry records no owning agent (legacy/migrated data). Off by default: such a write is refused with a message suggesting a different key or `self` visibility |
 
 ### Dream Configuration
 
@@ -190,6 +192,11 @@ Returns: "✅ Forgotten: favorite_color"
 ### Group Memory
 
 When agents participate in a [Group Conversation](group-conversations.md), the `groupId` is automatically injected into the conversation context. Memories stored with `group` visibility are visible to all agents in that group.
+
+The group is taken only from that injected context value. A client cannot supply
+`groupId` in its own request context (see [Reserved Context Keys](passing-context-information.md#reserved-context-keys)),
+and a conversation *property* named `groupId` does not select a group scope for the
+`usermemory` tool.
 
 ## REST API
 

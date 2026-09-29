@@ -72,6 +72,14 @@ reference, so a `${vars:…}` the configuration wrote still resolves through to 
 that arrived through conversation data refuses the call — the check runs again after variable
 expansion, against the configured template expanded the same way.
 
+Because agent-secret grants are checked at **deploy** time, a global variable that resolves to a
+secret can be used to redirect a deployed agent's credentials past that check by editing the
+variable after deployment. To close that, **only an `eddi-admin` may store a global variable whose
+value contains a `${vault:…}`, `${eddivault:…}` or `${connection:…}` reference** — a non-admin
+editor writing such a value is refused with `403`. Plain-literal variables are unaffected, and
+callers on a deployment with authentication disabled are out of scope (there is no editor/admin
+distinction to enforce).
+
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
 string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
@@ -311,15 +319,15 @@ When the **client flags input as secret** (via the `secretInput` context key):
    - replaces `input:initial` and `input:normalized` with `<secret input>`;
    - clears the parsed expressions and intents derived from the input;
    - re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn);
-   - removes the raw and normalized text (4+ characters) from every other datum and output of the step, and from the pending tool-call batch of a tool-call pause — the transcript the model saw, the gated call's arguments and the redacted arguments an approver is shown.
+   - removes the raw and normalized text from every other datum and output of the step, and from the pending tool-call batch of a tool-call pause — the transcript the model saw, the gated call's arguments and the redacted arguments an approver is shown. A form of 4+ characters is removed wherever it occurs; a shorter one (a 3-digit PIN) only where it stands as a **whole token** — no letter or digit directly before or after it — so "PIN 739 saved" loses the PIN while "order 17391" keeps its digits. The whole-token pass changes values only, **never map keys**: a short secret is often also a field name (`id`, `to`), and renaming it would corrupt the turn's stored API responses and output items.
 
-   The audit ledger records the placeholder and redacts both forms (4+ characters) from every entry of the turn.
+   This runs in the turn's `finally`, before the audit flush. The audit ledger records the placeholder as the user input and redacts both forms (4+ characters) from every entry of the turn.
 5. So, for turns run on this version, the stored step, the pending approval, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**.
-6. **Turns stored before this version** still hold the raw `input:initial` and the parser's normalized copy in the database. They are masked **on read**: every secret turn carries `context.secretInput == "true"`, and conversation reads (REST, MCP, the `done` frame) replace `input`, `input:initial`, `input:normalized` and `expressions:parsed` for such a turn, and remove the raw and normalized text (4+ characters) from every other step result and output value they return for it — an output item that echoed the input included. Conversation properties are returned as they are (see **Not scrubbed** below). The stored document itself is not rewritten, and the audit entries of those old turns are unchanged.
+6. **Turns stored before this version** still hold the raw `input:initial` and the parser's normalized copy in the database. They are masked **on read**: every secret turn carries `context.secretInput == "true"`, and conversation reads (REST, MCP, the `done` frame) replace `input`, `input:initial`, `input:normalized` and `expressions:parsed` for such a turn, clear its other parser results, and remove the raw and normalized text (4+ characters) from every other step result and output value they return for it — an output item that echoed the input included. A `returnDetailed` read additionally drops internal keys (`audit:*`, `*:trace:*`, `*Error`), runs every value through the secret redaction filter and masks everything under a credential-named key (`apiKey`, `token`, `secret`, `password`, `authorization`), for every turn, secret or not. Conversation properties are not masked as part of a secret turn (see **Not scrubbed** below); in a `returnDetailed` read only that credential-name masking applies to them. The stored document itself is not rewritten, and the audit entries of those old turns are unchanged.
 
-**Why four characters.** Where a form *is* the input (`input:initial`, `input:normalized`, the displayed `input`) it is replaced whatever its length. Elsewhere it has to be found by searching, and every occurrence is replaced — in every value and map key of the turn. A 4-digit PIN or a short password is what a password field carries, so the search starts there; below that, replacing every "ok" or "7" would shred the turn's reply and rename the fields of its stored API responses and output items, for a "secret" that is guessable anyway. Secret *context* values keep their own 8-character floor ([Secret Context Values](passing-context-information.md#secret-context-values)).
+**Why four characters.** Where a form *is* the input (`input:initial`, `input:normalized`, the displayed `input`) it is replaced whatever its length. Elsewhere it has to be found by searching. From four characters every occurrence is replaced — inside longer words too, and in map keys as well as values of the turn. A 4-digit PIN or a short password is what a password field carries, so the substring search starts there; below that, replacing every "ok" or "7" inside other words and numbers would shred the turn's reply and rename the fields of its stored API responses and output items. A shorter form is therefore searched for only as a whole token and only in values, which removes a PIN echoed into the reply without touching "17391" or a field named `id`. The audit ledger and the read-time masking of older turns use the 4-character substring search only. Secret *context* values keep their own 8-character floor ([Secret Context Values](passing-context-information.md#secret-context-values)).
 
-**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern). Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead.
+**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern), and its `properties:*` step mirror — neither at turn end nor on read. Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead.
 
 **HITL resume sees the placeholder.** Everything after a pause of a secret turn — a RULE pause (`PAUSE_CONVERSATION`) or a tool-call pause — runs after the scrub. A tool approved on resume executes with `<secret input>` where the secret was, and a property setter that runs after the resume reads `<secret input>` from `{memory.current.input}`. `PropertySetterTask` does not store or vault that placeholder: it logs a warning and leaves the property unset. Capture a secret input **before** any rule that pauses the turn.
 
@@ -412,7 +420,7 @@ One provider key usually serves many agents, so setup avoids storing it many tim
 | `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
 | `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
 
-Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+Plaintext reuse is matched on the keyed checksum the vault stores per entry — nothing is decrypted to make the decision, and the match is performed by the vault provider (which holds the checksum key) rather than by recomputing a digest in the setup code — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
@@ -476,7 +484,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -508,11 +516,12 @@ It returns the vault reference:
     "tenantId": "default",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
-    "lastAccessedAt": "2026-03-16T14:00:00Z",
-    "checksum": "a1b2c3d4..."
+    "lastAccessedAt": "2026-03-16T14:00:00Z"
   }
 ]
 ```
+
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
 
 **`GET /health`** — returns vault provider status:
 
@@ -686,7 +695,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 ### Features
 
 - **Namespace filtering** — select tenant ID to scope the view
-- **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
+- **Secrets table** — displays `keyName`, `createdAt`, and `lastAccessedAt` (the checksum is internal and not returned over the API)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
 - **Vault Health** — live status badge showing vault online/offline state

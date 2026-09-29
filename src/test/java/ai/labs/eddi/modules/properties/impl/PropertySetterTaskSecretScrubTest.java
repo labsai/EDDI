@@ -193,6 +193,34 @@ class PropertySetterTaskSecretScrubTest {
     }
 
     @Test
+    @DisplayName("a copy of the RAW input elsewhere in the step is scrubbed when the resolved value is the normalized one")
+    void rawInputCopyIsScrubbedWithNormalizedValue() throws Exception {
+        IWritableConversationStep step = stepWithParsedInput();
+        step.storeData(new Data<>("output:text:echo", List.of("you typed " + RAW_INPUT)));
+
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+
+        assertEquals(List.of("you typed " + PLACEHOLDER), step.getData("output:text:echo").getResult());
+        assertNoPlaintextAnywhere(step);
+    }
+
+    @Test
+    @DisplayName("a scrubbed placeholder (e.g. after a RULE approval pause) is never vaulted over the real secret")
+    void placeholderIsNeverVaulted() throws Exception {
+        // After a RULE pause the turn's finally already replaced the input; on resume
+        // {memory.current.input} resolves to the placeholder, not the credential.
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", PLACEHOLDER));
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        task.execute(memory, secretPropertySetter(PLACEHOLDER));
+
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+        assertNull(memory.getConversationProperties().get("apiKey"),
+                "the property must be left unset rather than pointing at a vaulted placeholder");
+    }
+
+    @Test
     @DisplayName("the stored vault reference carries the auto-vault provenance marker")
     void autoVaultedPropertyIsMarked() throws Exception {
         stepWithParsedInput();
@@ -292,22 +320,6 @@ class PropertySetterTaskSecretScrubTest {
 
         assertEquals("ok", step.<String>getData("input:initial").getResult(),
                 "a two-character input must not be wiped because it happens to appear inside the secret");
-    }
-
-    @Test
-    @DisplayName("a value that resolved to the <secret input> placeholder is neither vaulted nor stored")
-    void placeholderIsNotVaulted() throws Exception {
-        // A capture that runs after a HITL resume of a secretInput turn reads the
-        // already-scrubbed input. Vaulting "<secret input>" as the key would
-        // silently misconfigure the agent.
-        IWritableConversationStep step = memory.getCurrentStep();
-        step.storeData(new Data<>("input:initial", PLACEHOLDER));
-        step.storeData(new Data<>("actions", List.of("store_secret")));
-
-        task.execute(memory, secretPropertySetter(PLACEHOLDER));
-
-        verify(secretProvider, never()).store(any(), any(), any(), any());
-        assertNull(memory.getConversationProperties().get("apiKey"));
     }
 
     @Test

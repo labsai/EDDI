@@ -276,13 +276,13 @@ class ConversationSecretClientInputTest {
 
     /**
      * A PIN or short password is below the 8-character floor of secret CONTEXT
-     * values; the client flagged it, so the echo of it is searched for from four
-     * characters (SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH). Shorter
-     * than that it is still replaced where it is the input itself, but not searched
-     * for — replacing every "ab" of the reply would shred it.
+     * values; the client flagged it, so the echo of it is searched for verbatim
+     * from four characters (SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH).
+     * Shorter than that it is replaced where it is the input itself, and elsewhere
+     * only where it stands as a whole token.
      */
     @Test
-    @DisplayName("a short client-flagged secret (4+ chars) is scrubbed from echoes; below four only the input fields are masked")
+    @DisplayName("a short client-flagged secret (4+ chars) is scrubbed from echoes; below four as a whole token only")
     void shortSecretIsScrubbedFromEchoes() throws Exception {
         IInputParser parser = normalizingParser();
         doAnswer(invocation -> {
@@ -305,11 +305,13 @@ class ConversationSecretClientInputTest {
         assertTrue(String.valueOf(step.getConversationOutput().get("output")).contains("Your PIN " + PLACEHOLDER + " is set"));
         assertEquals(Map.of("echo", "pin=" + PLACEHOLDER), step.getLatestData("httpCalls:verify").getResult());
 
-        // Below the floor: the input fields are masked, the reply is not searched.
+        // Below the floor: the input fields are masked, and the reply is scrubbed
+        // where the secret stands as a whole token.
         setUp();
         doAnswer(invocation -> {
             parserTask.execute(memory, parser);
             memory.getCurrentStep().addConversationOutputList("output", List.of(Map.of("type", "text", "text", "ok abc")));
+            memory.getCurrentStep().storeData(new Data<Object>("httpCalls:lookup", Map.of("abc", "abcd xabc")));
             return null;
         }).when(lifecycleManager).executeLifecycle(any(), any());
 
@@ -318,7 +320,10 @@ class ConversationSecretClientInputTest {
         step = memory.getCurrentStep();
         assertEquals(PLACEHOLDER, step.getLatestData(MemoryKeys.INPUT_INITIAL.key()).getResult());
         assertEquals(PLACEHOLDER, step.getConversationOutput().get("input"));
-        assertTrue(String.valueOf(step.getConversationOutput().get("output")).contains("ok abc"), "a sub-floor form is not searched for");
+        assertTrue(String.valueOf(step.getConversationOutput().get("output")).contains("ok " + PLACEHOLDER),
+                "a sub-floor form is removed as a whole token: " + step.getConversationOutput().get("output"));
+        // Not inside longer words, and never from a map key.
+        assertEquals(Map.of("abc", "abcd xabc"), step.getLatestData("httpCalls:lookup").getResult());
     }
 
     private Conversation conversation() {

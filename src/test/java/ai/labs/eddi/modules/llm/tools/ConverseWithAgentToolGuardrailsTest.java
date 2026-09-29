@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -51,6 +52,11 @@ class ConverseWithAgentToolGuardrailsTest {
     @BeforeEach
     void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
+        // A supplied conversationId is ownership-checked before it is driven; these
+        // tests continue conversations the bound user owns.
+        var ownSnapshot = new ConversationMemorySnapshot();
+        ownSnapshot.setUserId("user-1");
+        lenient().when(conversationService.getConversationMemorySnapshot(anyString())).thenReturn(ownSnapshot);
         lenient().when(conversationService.startConversation(any(), anyString(), any(), any()))
                 .thenReturn(new ConversationResult("conv-1", null));
         // say(...) completes immediately with an empty snapshot
