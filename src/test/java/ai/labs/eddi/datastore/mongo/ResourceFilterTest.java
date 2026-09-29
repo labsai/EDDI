@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.bson.types.ObjectId;
 
 import java.util.List;
@@ -103,6 +104,30 @@ class ResourceFilterTest {
 
             assertNotNull(result);
             assertTrue(result.isEmpty());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("should use eq, not a regex, for an exact string filter")
+        void usesEqFilterForExactString() throws Exception {
+            var queryFilters = new QueryFilters(List.of(QueryFilter.exact("originId", "name")));
+
+            FindIterable<Document> iterable = mock(FindIterable.class);
+            when(collection.find(any(BsonDocument.class))).thenReturn(iterable);
+            when(iterable.sort(any(Document.class))).thenReturn(iterable);
+            when(iterable.limit(anyInt())).thenReturn(iterable);
+
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            doReturn(cursor).when(iterable).iterator();
+            when(cursor.hasNext()).thenReturn(false);
+
+            filter.readResources(new QueryFilters[]{queryFilters}, null, 10);
+
+            var query = ArgumentCaptor.forClass(BsonDocument.class);
+            verify(collection).find(query.capture());
+            String json = query.getValue().toJson();
+            assertFalse(json.contains("$regularExpression"), json);
+            assertTrue(json.contains("\"originId\": \"name\""), json);
         }
 
         @SuppressWarnings("unchecked")

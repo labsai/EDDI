@@ -864,8 +864,9 @@ class GroupConversationServiceBranchCoverageTest {
                     new GroupMember("a1", "Alice", 1, null));
             setupStore(cfg);
             stubAgent("a1", "Alice opinion");
+            // Running-leg writes are conditional (updateIfState) on this branch.
             doThrow(new IGroupConversationStore.GroupConversationGoneException("gone", null))
-                    .when(conversationStore).update(any());
+                    .when(conversationStore).updateIfState(any(), any());
             var listener = mock(IGroupConversationService.GroupDiscussionEventListener.class);
 
             var result = assertDoesNotThrow(() -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0, listener));

@@ -38,6 +38,16 @@ public interface IPropertiesHandler {
         return getUserMemoryConfig() != null;
     }
 
+    /**
+     * Verifies a {@code groupId} found only on an earlier step before the
+     * {@code longTerm} boundary scopes group-visible properties to it — see
+     * {@link ConversationGroups#resolveGroupIds(IConversationMemory, ConversationGroups.MembershipCheck)}.
+     * {@code null} (the default) trusts only the current step's {@code groupId}.
+     */
+    default ConversationGroups.MembershipCheck getGroupMembershipCheck() {
+        return null;
+    }
+
     /** The userId this handler is scoped to. */
     String getUserId();
 
