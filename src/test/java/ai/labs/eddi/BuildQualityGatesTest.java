@@ -1553,14 +1553,16 @@ class BuildQualityGatesTest {
     private static Boolean gitIgnores(String path) throws Exception {
         ProcessBuilder builder = new ProcessBuilder("git", "check-ignore", "-q", "--no-index", "--", path);
         builder.directory(Path.of("").toAbsolutePath().toFile());
+        // Only the exit code matters. Discarding the output (rather than reading it
+        // to EOF first) keeps the 60-second timeout below effective.
         builder.redirectErrorStream(true);
+        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
         Process process;
         try {
             process = builder.start();
         } catch (IOException e) {
             return null;
         }
-        process.getInputStream().readAllBytes();
         if (!process.waitFor(60, TimeUnit.SECONDS)) {
             process.destroyForcibly();
             return null;
