@@ -25,7 +25,7 @@
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
              half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.20.0</langchain4j.version>
+        <langchain4j.version>1.20.1</langchain4j.version>
         <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
