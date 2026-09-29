@@ -124,7 +124,9 @@ public class PropertiesMigrationService {
             }
         } else if (value instanceof List<?> list) {
             for (Object item : list) {
-                if (item instanceof Map<?, ?> && hasCredentialName("", item)) {
+                // Every item, lists inside lists included: a name check that stops at
+                // an inner list leaves the scrubber judging the credential by an inner name.
+                if (hasCredentialName("", item)) {
                     return true;
                 }
             }

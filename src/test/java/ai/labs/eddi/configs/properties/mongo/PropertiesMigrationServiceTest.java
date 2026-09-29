@@ -504,6 +504,7 @@ class PropertiesMigrationServiceTest {
                     .append("apiKey", new Document("value", "hunter2"))
                     .append("settings", new Document("integration", new Document("password", new Document("plain", "hunter2"))))
                     .append("accounts", List.of(new Document("token", new Document("v", "hunter2"))))
+                    .append("nested", List.of(List.of(new Document("password", new Document("v", "hunter2")))))
                     .append("lang", "de");
 
             var entries = migrate(service(), legacy);
