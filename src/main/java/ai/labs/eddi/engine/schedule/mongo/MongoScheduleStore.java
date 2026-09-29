@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.schedule.mongo;
 
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -426,9 +427,9 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(ownerScoped(redacted(new Document(), excludeHitlTimeouts), ownerScope), limit, offset);
     }
 
     @Override
@@ -437,9 +438,31 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                              ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(ownerScoped(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), ownerScope), limit, offset);
+    }
+
+    /**
+     * Add the owner restriction of {@code ownerScope} to a listing filter, so
+     * limit/offset count only the rows the caller may see: the caller's own
+     * schedules plus shared ones (no owner, blank owner, or the system placeholder)
+     * — the same set as {@link ScheduleOwnerScope#admits}. {@code eq(field, null)}
+     * also matches documents with no {@code userId} at all.
+     */
+    private static Bson ownerScoped(Bson filter, ScheduleOwnerScope ownerScope) {
+        if (ownerScope == null || ownerScope.unrestricted()) {
+            return filter;
+        }
+        List<Bson> visible = new ArrayList<>(List.of(
+                eq(USER_ID, null),
+                regex(USER_ID, "^\\s*$"),
+                eq(USER_ID, ScheduleOwnerScope.SHARED_OWNER)));
+        if (ownerScope.callerId() != null) {
+            visible.add(eq(USER_ID, ownerScope.callerId()));
+        }
+        return and(filter, or(visible));
     }
 
     /**

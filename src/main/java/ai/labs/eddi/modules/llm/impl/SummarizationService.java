@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -156,18 +157,43 @@ public class SummarizationService {
      * @param inheritedParameters
      *            the calling task's resolved parameters, which must belong to
      *            {@code llmProvider} (see
-     *            {@link #summarize(String, String, String, String, Map)});
-     *            {@code modelName} is overridden with {@code llmModel} and
+     *            {@link #summarize(String, String, String, String, Map)}); the
+     *            provider's model key (see {@link #modelParameterKey}) is
+     *            overridden with {@code llmModel} when one is given, and
      *            {@code responseFormat} is stripped (a summary is plain text, never
      *            JSON)
      */
+    /**
+     * The parameter key under which {@code provider}'s builder reads the model.
+     * <p>
+     * The model used to be written as {@code modelName} for every provider — but
+     * the Ollama builder reads {@code model}, Bedrock, HuggingFace and Vertex read
+     * {@code modelId}, and Azure reads {@code deploymentName}. A Dream cycle on
+     * Ollama therefore failed on every run with {@code "model is required"}, and a
+     * rolling summary with its own {@code llmModel} silently ran on the parent's
+     * model instead. Mirrors the keys {@code AgentSetupService} writes.
+     */
+    static String modelParameterKey(String provider) {
+        if (provider == null) {
+            return "modelName";
+        }
+        return switch (provider) {
+            case LlmModule.LLM_TYPE_OLLAMA -> "model";
+            case LlmModule.LLM_TYPE_BEDROCK, LlmModule.LLM_TYPE_HUGGING_FACE, LlmModule.LLM_TYPE_GEMINI_VERTEX -> "modelId";
+            case LlmModule.LLM_TYPE_AZURE_OPENAI -> "deploymentName";
+            default -> "modelName";
+        };
+    }
+
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
                                                   Map<String, String> inheritedParameters) {
         long start = System.nanoTime();
         try {
             Map<String, String> params = inheritedParameters != null ? new HashMap<>(inheritedParameters) : new HashMap<>();
-            params.put("modelName", llmModel);
+            if (llmModel != null && !llmModel.isBlank()) {
+                params.put(modelParameterKey(llmProvider), llmModel);
+            }
             params.remove("responseFormat");
 
             var model = chatModelRegistry.getOrCreate(llmProvider, params);

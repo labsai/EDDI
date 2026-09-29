@@ -113,10 +113,39 @@ describe("stepsToMessages", () => {
 });
 
 describe("stepsToMessages — secret turns must never be re-rendered in clear", () => {
+  it("masks a turn the backend marks secret, even after a reload", () => {
+    // input:initial is stored raw. The turn output's `input` is the display
+    // copy — "<secret input>" for a secretInput turn — and is the only thing a
+    // fresh page (with no session memory of what was secret) can go by.
+    const msgs = stepsToMessages(
+      [
+        step([{ key: "input:initial", value: "hello" }]),
+        step([{ key: "input:initial", value: "sk-live-123" }]),
+      ],
+      new Set(),
+      [{ input: "hello" }, { input: "<secret input>" }],
+    );
+
+    expect(msgs.map((m) => m.content)).toEqual(["hello", "●●●●●●●●"]);
+  });
+
+  it("renders image output items as images, not text", () => {
+    const msgs = stepsToMessages([
+      step([
+        {
+          key: "output:image:P:1",
+          value: [{ type: "image", uri: "https://cdn.example/x.png", alt: "X" }],
+        },
+      ]),
+    ]);
+
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].images).toEqual([{ uri: "https://cdn.example/x.png", alt: "X" }]);
+  });
+
   it("masks a user input the caller knows was sent as a secret", () => {
-    // The backend stores input:initial as PLAINTEXT unconditionally
-    // (Conversation.java:337); only conversationOutput["input"] is masked, and
-    // that key is filtered off the wire. So the client must mask it itself.
+    // The session's own record still covers a backend that does not send the
+    // turn output's `input` key.
     const msgs = stepsToMessages(
       [step([{ key: "input:initial", value: "hunter2" }])],
       new Set(["hunter2"]),
@@ -126,6 +155,25 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
     expect(msgs.some((m) => m.content.includes("hunter2"))).toBe(false);
   });
 
+  it("does not pair steps with outputs when a drifted snapshot's lists differ in length", () => {
+    // Three steps, two outputs: index 1 of the outputs is not the turn at step
+    // index 1, so its "<secret input>" marker must not mask that ordinary
+    // message. The backend's read-time masking pairs under the same condition.
+    const msgs = stepsToMessages(
+      [
+        step([{ key: "input:initial", value: "hello" }]),
+        step([{ key: "input:initial", value: "what is 2+2" }]),
+        step([{ key: "input:initial", value: "<secret input>" }]),
+      ],
+      new Set(),
+      [{ input: "hello" }, { input: "<secret input>" }],
+    );
+
+    // The secret turn is still masked from its own step: the engine masks
+    // input:initial itself, whatever the pairing.
+    expect(msgs.map((m) => m.content)).toEqual(["hello", "what is 2+2", "●●●●●●●●"]);
+  });
+
   it("leaves ordinary input untouched", () => {
     const msgs = stepsToMessages(
       [step([{ key: "input:initial", value: "what is 2+2" }])],
@@ -133,5 +181,20 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
     );
 
     expect(msgs[0].content).toBe("what is 2+2");
+  });
+
+  it("masks the backend placeholder after a reload, without the session set", () => {
+    // Simulated reload: a fresh page has an empty secretTexts set, but the
+    // backend now persists input:initial as "<secret input>" for a secret turn.
+    // The transcript must show the mask, never the raw placeholder token, and of
+    // course never the secret.
+    const msgs = stepsToMessages(
+      [step([{ key: "input:initial", value: "<secret input>" }])],
+      new Set(),
+    );
+
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ role: "user", content: "●●●●●●●●" });
+    expect(msgs.some((m) => m.content.includes("<secret input>"))).toBe(false);
   });
 });

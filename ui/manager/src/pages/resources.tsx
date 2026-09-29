@@ -3,45 +3,24 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   FileCode,
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck,
-  Brain,
-  Settings,
-  Plug,
   ChevronRight,
 } from "lucide-react";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
 import { useResourceDescriptors } from "@/hooks/use-resources";
 import { cn } from "@/lib/utils";
-import type { LucideIcon } from "lucide-react";
+import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 import { useOnboarding } from "@/hooks/use-onboarding";
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck,
-  Brain,
-  Settings,
-  Plug,
-};
 
 function ResourceTypeCard({
   slug,
-  iconName,
   labelKey,
 }: {
   slug: string;
-  iconName: string;
   labelKey: string;
 }) {
   const { t } = useTranslation();
   const { data: items } = useResourceDescriptors(slug, 1000, 0, "");
-  const Icon = ICON_MAP[iconName] ?? FileCode;
+  const Icon = getResourceTypeIcon(slug);
   const count = items?.length ?? 0;
 
   return (
@@ -115,7 +94,6 @@ export function ResourcesPage() {
           <ResourceTypeCard
             key={rt.slug}
             slug={rt.slug}
-            iconName={rt.icon}
             labelKey={rt.labelKey}
           />
         ))}

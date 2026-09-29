@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -131,6 +132,58 @@ class ConfigReferenceGuardTest {
         Map<String, Property> ownTenant = properties(unmarked("tenantId", "acme"), autoVaulted("apiKey", "${vault:acme/agent1.apiKey}"));
         assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
                 "Bearer ${vault:acme/agent1.apiKey}", "header", DATA, ownTenant));
+    }
+
+    // =================================================================
+    // Per-write slots: <agentId>.u<userHash>.<nonce>.<name> (AutoVaultedSecrets)
+    // =================================================================
+
+    private static final Map<String, Object> DATA_WITH_USER = Map.of("conversationInfo", Map.of("agentId", "agent1"), "userInfo",
+            Map.of("userId", "alice"));
+
+    private static String slotRef(String tenantPrefix, String userId, String name) {
+        return "${vault:" + tenantPrefix + AutoVaultedSecrets.newSlotName("agent1", userId, name) + "}";
+    }
+
+    /**
+     * Without this the per-write slots that fixed the cross-user secret collision
+     * would have been refused here: every HTTP call templating a scope:"secret"
+     * property would have stopped working.
+     */
+    @Test
+    @DisplayName("the conversation's own per-write slot is allowed")
+    void ownPerWriteSlot() {
+        String ref = slotRef("", "alice", "apiKey");
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}", "Bearer " + ref, "header",
+                DATA_WITH_USER, properties(autoVaulted("apiKey", ref))));
+    }
+
+    @Test
+    @DisplayName("another user's slot is refused, even marked and named by the template")
+    void anotherUsersSlotIsRefused() {
+        String ref = slotRef("", "bob", "apiKey");
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer " + ref, "header", DATA_WITH_USER, properties(autoVaulted("apiKey", ref))));
+    }
+
+    @Test
+    @DisplayName("a slot of another property is refused")
+    void anotherPropertysSlotIsRefused() {
+        String ref = slotRef("", "alice", "otherKey");
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer " + ref, "header", DATA_WITH_USER, properties(autoVaulted("apiKey", ref))));
+    }
+
+    @Test
+    @DisplayName("a per-write slot is tenant-pinned like the legacy one")
+    void perWriteSlotTenantIsPinned() {
+        String foreign = slotRef("victim-tenant/", "alice", "apiKey");
+        assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer " + foreign, "header", DATA_WITH_USER, properties(autoVaulted("apiKey", foreign))));
+
+        String own = slotRef("acme/", "alice", "apiKey");
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}", "Bearer " + own, "header",
+                DATA_WITH_USER, properties(unmarked("tenantId", "acme"), autoVaulted("apiKey", own))));
     }
 
     @Test

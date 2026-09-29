@@ -202,7 +202,7 @@ class RestUserMemoryStoreBranchTest {
         @DisplayName("should throw InternalServerErrorException on store error")
         void throwsOnStoreError() throws Exception {
             doThrow(new IResourceStore.ResourceStoreException("db fail"))
-                    .when(store).deleteAllForUser("u1");
+                    .when(store).deleteAllExceptReserved("u1");
 
             assertThrows(InternalServerErrorException.class,
                     () -> rest.deleteAllForUser("u1"));

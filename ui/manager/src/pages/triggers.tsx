@@ -5,7 +5,6 @@ import {
   Zap,
   Plus,
   Trash2,
-  Edit3,
   RefreshCw,
   X,
   Server,
@@ -14,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -236,7 +236,7 @@ function TriggerCard({
           </span>
         </button>
         <button type="button" onClick={() => onEdit()} className="rounded p-1.5 text-muted-foreground hover:text-foreground transition-colors" title={t("common.edit")} aria-label={t("common.edit")}>
-          <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
         <button type="button" onClick={() => onDelete()} className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors" title={t("common.delete")} aria-label={t("common.delete")}>
           <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

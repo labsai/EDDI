@@ -196,6 +196,12 @@ public class IngestionSource {
     /** Crawl configuration for a {@link #TYPE_WEB} source. */
     public static class WebSource {
 
+        /**
+         * Cap on configured sitemaps — the same ceiling the crawler applies to the
+         * sitemaps it reads per run, indexes included.
+         */
+        static final int MAX_SITEMAP_URLS = 20;
+
         private String startUrl;
 
         /** Stay on the seed's site. */
@@ -211,6 +217,15 @@ public class IngestionSource {
         private Integer maxDepth = 3;
         private Integer maxPages = 200;
         private List<String> excludePatterns = new ArrayList<>();
+
+        /**
+         * Sitemaps to seed the crawl from, in addition to any the site's robots.txt
+         * advertises. For a site that publishes a sitemap without listing it in
+         * robots.txt, or a crawl with {@link #respectRobots} off, which reads no
+         * robots.txt at all. Sitemap indexes are followed. The pages they list are held
+         * to the same scope as linked ones.
+         */
+        private List<String> sitemapUrls = new ArrayList<>();
 
         private Integer requestDelayMs = 500;
         private Integer timeoutSeconds = 15;
@@ -231,7 +246,18 @@ public class IngestionSource {
                 throw new IllegalArgumentException(
                         "startUrl of ingestion source '" + sourceName + "' must be http or https, got: " + startUrl);
             }
-            requireRoutableHost(startUrl, sourceName);
+            requireRoutableHost(startUrl, "startUrl", sourceName);
+            if (sitemapUrls.size() > MAX_SITEMAP_URLS) {
+                throw new IllegalArgumentException("sitemapUrls of ingestion source '" + sourceName + "' may list at most "
+                        + MAX_SITEMAP_URLS + " sitemaps, got: " + sitemapUrls.size());
+            }
+            for (String sitemapUrl : sitemapUrls) {
+                if (sitemapUrl == null || !(sitemapUrl.startsWith("http://") || sitemapUrl.startsWith("https://"))) {
+                    throw new IllegalArgumentException(
+                            "sitemapUrls of ingestion source '" + sourceName + "' must be http or https URLs, got: " + sitemapUrl);
+                }
+                requireRoutableHost(sitemapUrl, "sitemapUrls", sourceName);
+            }
             requirePositiveAtMost(maxDepth, 20, "maxDepth", sourceName);
             requirePositiveAtMost(maxPages, 50_000, "maxPages", sourceName);
             requirePositiveAtMost(timeoutSeconds, 300, "timeoutSeconds", sourceName);
@@ -253,17 +279,17 @@ public class IngestionSource {
          * during an outage; the real check runs per request in {@code SafeHttpClient},
          * where it belongs.
          */
-        private static void requireRoutableHost(String startUrl, String sourceName) {
+        private static void requireRoutableHost(String url, String field, String sourceName) {
             String host;
             try {
-                host = URI.create(startUrl).getHost();
+                host = URI.create(url).getHost();
             } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("startUrl of ingestion source '" + sourceName
-                        + "' is not a valid URL: " + startUrl);
+                throw new IllegalArgumentException(field + " of ingestion source '" + sourceName
+                        + "' is not a valid URL: " + url);
             }
             if (host == null || host.isBlank()) {
                 throw new IllegalArgumentException(
-                        "startUrl of ingestion source '" + sourceName + "' has no host: " + startUrl);
+                        field + " of ingestion source '" + sourceName + "' has no host: " + url);
             }
             boolean literal = host.chars().allMatch(c -> c == '.' || (c >= '0' && c <= '9'))
                     || host.startsWith("[") || host.contains(":");
@@ -274,13 +300,13 @@ public class IngestionSource {
                 InetAddress address = InetAddress.getByName(host.replace("[", "").replace("]", ""));
                 if (address.isLoopbackAddress() || address.isLinkLocalAddress() || address.isSiteLocalAddress()
                         || address.isAnyLocalAddress()) {
-                    throw new IllegalArgumentException("startUrl of ingestion source '" + sourceName
+                    throw new IllegalArgumentException(field + " of ingestion source '" + sourceName
                             + "' points at a local or private address (" + host + "), which the crawler refuses "
                             + "on every run");
                 }
             } catch (UnknownHostException e) {
                 throw new IllegalArgumentException(
-                        "startUrl of ingestion source '" + sourceName + "' has an unusable host: " + host);
+                        field + " of ingestion source '" + sourceName + "' has an unusable host: " + host);
             }
         }
 
@@ -347,6 +373,14 @@ public class IngestionSource {
 
         public void setExcludePatterns(List<String> excludePatterns) {
             this.excludePatterns = excludePatterns == null ? new ArrayList<>() : excludePatterns;
+        }
+
+        public List<String> getSitemapUrls() {
+            return sitemapUrls;
+        }
+
+        public void setSitemapUrls(List<String> sitemapUrls) {
+            this.sitemapUrls = sitemapUrls == null ? new ArrayList<>() : sitemapUrls;
         }
 
         public Integer getRequestDelayMs() {

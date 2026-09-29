@@ -17,8 +17,10 @@ import java.util.List;
  *
  * @param seedUrl
  *            where the crawl starts
+ * @param sitemapUrls
+ *            sitemaps to seed from in addition to those robots.txt advertises
  */
-public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politeness politeness) {
+public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politeness politeness, List<String> sitemapUrls) {
 
     public CrawlRequest {
         if (seedUrl == null || seedUrl.isBlank()) {
@@ -27,6 +29,12 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
         scope = scope == null ? Scope.defaults() : scope;
         limits = limits == null ? Limits.defaults() : limits;
         politeness = politeness == null ? Politeness.defaults() : politeness;
+        sitemapUrls = sitemapUrls == null ? List.of() : List.copyOf(sitemapUrls);
+    }
+
+    /** A crawl that discovers sitemaps only through robots.txt. */
+    public CrawlRequest(String seedUrl, Scope scope, Limits limits, Politeness politeness) {
+        this(seedUrl, scope, limits, politeness, List.of());
     }
 
     /** Convenience for a crawl with every default. */

@@ -33,7 +33,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. **Never hand-edit the EDDI release version**: after a stable tag, `post-release.yml` opens a PR that points the docs/manifests at the release and moves `pom.xml` to the next minor; by hand, use `python scripts/bump-version.py` (see [`docs/release-versioning.md`](docs/release-versioning.md#after-a-ga-release)). The Helm chart's *own* `version` is different: any change under `helm/` still bumps it by hand, together with `EXPECTED_CHART_VERSION` in `DeploymentManifestsTest`. Separate security workflows run CodeQL, Trivy, Gitleaks, ZAP, CycloneDX (SBOM), and Jazzer fuzzing.
 
 ### Build & Test Commands
 
@@ -740,7 +740,7 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 
 #### Every rule MUST have an `actionmatcher` on `lastStep`
 
-Behavior rules within a group ALL fire if their conditions match. Rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
 
 ```
 ❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
@@ -835,9 +835,10 @@ Matcher:      "actions" : "ask_for_model"
 When embedding `{properties.x}` in HTTP call body templates, be aware:
 - A missing property renders as an **empty string**, in every profile. This takes *two* settings in `application.properties`, and both are deliberate:
   - `quarkus.qute.strict-rendering=false` stops the render from throwing. There is no `%prod` override — dev, test and production must fail identically. (Earlier releases turned strict rendering **on** in prod only, which meant a missing property rendered blank in dev but leaked the raw `{properties.x}` literal to the end user in production.)
-  - `quarkus.qute.property-not-found-strategy=NOOP` decides what is written instead. Without it a missing value resolves to Qute's NotFound sentinel and the **literal string `NOT_FOUND`** reaches the output — system prompts, HTTP call bodies and user-visible replies alike ("Your favourite programming language is: NOT_FOUND."). Dev mode defaults to throwing instead, so the two did not even agree. This was a live defect, not a hypothetical.
+  - `quarkus.qute.property-not-found-strategy=NOOP` decides what is written instead. Without it a missing value resolves to Qute's NotFound sentinel and the **literal string `NOT_FOUND`** reaches the output — system prompts, HTTP call bodies and user-visible replies alike ("Your favourite programming language is: NOT_FOUND."). Dev mode defaults to throwing instead, so the two did not even agree. This was a live defect, not a hypothetical. The runtime engine now also enforces the empty rendering itself, so it no longer depends on this setting alone.
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`. If you want an explicit fallback in the template itself, the Qute idiom is the elvis operator: `{properties.x ?: 'unknown'}`
-- User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
+- **Only author-written fields are templates; data never is.** A value substituted into a template (`{memory.current.input}`, a property, an API response) is output literally, braces and all — Qute does not re-parse what an expression resolved to. The same holds for values a property instruction reads through `fromObjectPath` (stored verbatim, never rendered) and for output a `postResponse` builds from a response (rendered once, then marked so the templating task does not render it again). Never introduce a code path that passes runtime data as the template *string* to `ITemplatingEngine.processTemplate`; if EDDI must splice generated text into a template's source, wrap it with `TemplateEscaping.unparsedBlock` first.
+- **Runtime templates use a restricted engine** (`RuntimeTemplateEngineFactory`), not the Quarkus-injected one: no `config:`/`inject:`/`cdi:` namespaces, no `{#eval}`/`str:eval`/`{#include}`, reflection limited to reading properties, and per-render caps (`eddi.templating.max-output-chars`, `eddi.templating.max-iterations`). Details in [`docs/security.md`](docs/security.md#runtime-template-engine).
 
 #### Calling an API as the signed-in user
 

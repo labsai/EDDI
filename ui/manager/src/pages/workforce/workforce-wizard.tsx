@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/api-client";
+import { groupSaveProblems } from "@/lib/group-config";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
 import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
@@ -115,6 +116,31 @@ function WorkforceWizard() {
     selectedTemplateObj?.style ??
     savedTemplateConfig?.style ??
     (selectedTemplate === "custom" ? "CUSTOM" : null);
+
+  /**
+   * What the backend would refuse about the group `handleCreate` builds — the
+   * same style and members, with every new advisor counted as assigned (it is
+   * created first). A saved template can carry DEBATE or DEVIL_ADVOCATE without
+   * the roles those presets are built on.
+   */
+  const saveProblems = useMemo(
+    () =>
+      groupSaveProblems(
+        {
+          members: members.map((m) => ({
+            agentId: m.mode === "existing" ? m.agentId : m.createdAgentId,
+            displayName: m.displayName,
+            role: m.role || null,
+            memberType: "AGENT",
+          })),
+          phases: null,
+          style: selectedTemplateObj?.style ?? savedTemplateConfig?.style ?? "CUSTOM",
+          maxRounds: selectedTemplateObj?.maxRounds ?? savedTemplateConfig?.maxRounds ?? 1,
+        },
+        (_member, index) => members[index]?.mode !== "existing",
+      ),
+    [members, selectedTemplateObj, savedTemplateConfig],
+  );
 
   const steps = useMemo(
     () => [
@@ -285,6 +311,9 @@ function WorkforceWizard() {
 
   const handleCreate = useCallback(async () => {
     if (creatingRef.current) return;
+    // Refused up front: the loop below deploys every new advisor before the
+    // group is saved, so a group the backend rejects would strand them.
+    if (saveProblems.length > 0) return;
     creatingRef.current = true;
     setIsCreating(true);
 
@@ -452,6 +481,7 @@ function WorkforceWizard() {
     // Read in the custom build path to reproduce a saved template's style and
     // round count. Omitting it would let this callback close over a stale value.
     savedTemplateConfig,
+    saveProblems,
   ]);
 
   // ─── Render ─────────────────────────────────────────────────────────────
@@ -542,6 +572,7 @@ function WorkforceWizard() {
               isCreating={isCreating}
               creationProgress={creationProgress}
               onCreateClick={handleCreate}
+              saveProblems={saveProblems}
             />
           )}
         </div>
