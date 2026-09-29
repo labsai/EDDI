@@ -10,10 +10,19 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
-import java.net.http.HttpResponse;
+import java.io.IOException;
 import java.net.http.HttpRequest;
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 
 /**
  * Unit tests for {@link WebSearchTool}.
@@ -28,6 +37,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class WebSearchToolTest {
 
     private WebSearchTool webSearchTool;
+
+    /** Stubs the bounded fetch every provider goes through. */
+    private static void answer(SafeHttpClient client, int status, String body) throws Exception {
+        answer(client, status, body, false);
+    }
+
+    private static void answer(SafeHttpClient client, int status, String body, boolean truncated) throws Exception {
+        doReturn(new SafeHttpClient.BoundedResponse(status, body.getBytes(StandardCharsets.UTF_8), truncated)).when(client)
+                .sendBounded(any(HttpRequest.class), anyLong());
+    }
 
     @BeforeEach
     void setUp() {
@@ -501,21 +520,15 @@ class WebSearchToolTest {
             assertTrue(result.contains("Error:"));
         }
 
-        @SuppressWarnings("unchecked")
         @Test
         void searchWeb_duckDuckGoSuccess_returnsResults() throws Exception {
-            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(response.statusCode()).thenReturn(200);
-            org.mockito.Mockito.when(response.body()).thenReturn("""
+            answer(mockedClient, 200, """
                     {
                       "Abstract": "Test abstract answer",
                       "AbstractURL": "https://example.com",
                       "RelatedTopics": []
                     }
                     """);
-            org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.searchWeb("test", 5);
 
@@ -523,21 +536,28 @@ class WebSearchToolTest {
             assertTrue(result.contains("https://example.com"));
         }
 
-        @SuppressWarnings("unchecked")
         @Test
         void searchWeb_duckDuckGoNon200_returnsError() throws Exception {
-            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(response.statusCode()).thenReturn(429);
-            org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            answer(mockedClient, 429, "");
 
             String result = mockedTool.searchWeb("test", 5);
 
             assertTrue(result.contains("Error:"));
         }
 
-        @SuppressWarnings("unchecked")
+        @Test
+        void searchWeb_readsAtMostTheLimitAndRefusesATruncatedAnswer() throws Exception {
+            // A body cut short at the cap (or the read deadline) is a fragment of
+            // JSON; it is reported, not parsed.
+            answer(mockedClient, 200, "{\"Abstract\": \"cut", true);
+
+            String result = mockedTool.searchWeb("test", 5);
+
+            assertTrue(result.contains("Error:"), result);
+            assertTrue(result.contains("exceeded " + WebSearchTool.MAX_RESPONSE_BYTES + " bytes"), result);
+            verify(mockedClient).sendBounded(any(HttpRequest.class), eq(WebSearchTool.MAX_RESPONSE_BYTES));
+        }
+
         @Test
         void searchWeb_googleProvider_success() throws Exception {
             // Configure as Google provider
@@ -553,14 +573,9 @@ class WebSearchToolTest {
             cxField.setAccessible(true);
             cxField.set(mockedTool, Optional.of("test-cx"));
 
-            var response = (HttpResponse<String>) org.mockito.Mockito.mock(HttpResponse.class);
-            org.mockito.Mockito.when(response.statusCode()).thenReturn(200);
-            org.mockito.Mockito.when(response.body()).thenReturn("""
+            answer(mockedClient, 200, """
                     {"items":[{"title":"Google Result","snippet":"Google snippet","link":"https://g.com"}]}
                     """);
-            org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.searchWeb("test", 5);
 
@@ -620,31 +635,20 @@ class WebSearchToolTest {
             mockedTool = new WebSearchTool(mockedClient, new ObjectMapper());
         }
 
-        @SuppressWarnings("unchecked")
         @Test
         void searchWikipedia_success_returnsResults() throws Exception {
-            var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
-            org.mockito.Mockito.when(response.statusCode()).thenReturn(200);
-            org.mockito.Mockito.when(response.body()).thenReturn("""
+            answer(mockedClient, 200, """
                     {"query":{"search":[{"title":"Test Article","snippet":"Test snippet"}]}}
                     """);
-            org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
 
             String result = mockedTool.searchWikipedia("test");
 
             assertTrue(result.contains("Test Article"));
         }
 
-        @SuppressWarnings("unchecked")
         @Test
         void searchWikipedia_non200_returnsError() throws Exception {
-            var response = (java.net.http.HttpResponse<String>) org.mockito.Mockito.mock(java.net.http.HttpResponse.class);
-            org.mockito.Mockito.when(response.statusCode()).thenReturn(500);
-            org.mockito.Mockito.doReturn(response).when(mockedClient).send(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any());
+            answer(mockedClient, 500, "");
 
             String result = mockedTool.searchWikipedia("test");
 
@@ -653,14 +657,59 @@ class WebSearchToolTest {
 
         @Test
         void searchWikipedia_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.when(mockedClient.send(
+            org.mockito.Mockito.when(mockedClient.sendBounded(
                     org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.any())).thenThrow(new java.io.IOException("Network error"));
+                    org.mockito.ArgumentMatchers.anyLong())).thenThrow(new IOException("Network error"));
 
             String result = mockedTool.searchWikipedia("test");
 
             assertTrue(result.contains("Error:"));
             assertTrue(result.contains("Network error"));
+        }
+    }
+
+    // ==================== Google credentials ====================
+
+    @Nested
+    class GoogleCredentials {
+
+        private WebSearchTool googleTool;
+        private SafeHttpClient mockedClient;
+
+        @BeforeEach
+        void setUpGoogle() throws Exception {
+            mockedClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            googleTool = new WebSearchTool(mockedClient, new ObjectMapper());
+            set("searchProvider", "google");
+            set("googleApiKey", Optional.of("SECRET&key 1"));
+            set("googleCx", Optional.of("cx id"));
+        }
+
+        private void set(String field, Object value) throws Exception {
+            var f = WebSearchTool.class.getDeclaredField(field);
+            f.setAccessible(true);
+            f.set(googleTool, value);
+        }
+
+        @Test
+        void keyAndCxAreEncodedIntoTheRequest() throws Exception {
+            answer(mockedClient, 200, "{\"items\":[]}");
+            googleTool.searchWeb("q", 3);
+            var request = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(mockedClient).sendBounded(request.capture(), anyLong());
+            String uri = request.getValue().uri().toString();
+            assertTrue(uri.contains("key=SECRET%26key+1&"), uri);
+            assertTrue(uri.contains("cx=cx+id&"), uri);
+        }
+
+        @Test
+        void aFailureNamingTheUriDoesNotLeakTheKey() throws Exception {
+            doThrow(new IOException(
+                    "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
+                    .when(mockedClient).sendBounded(any(HttpRequest.class), anyLong());
+            String result = googleTool.searchWeb("q", 3);
+            assertFalse(result.contains("SECRETKEY"), result);
+            assertTrue(result.contains("key=[REDACTED]"), result);
         }
     }
 }

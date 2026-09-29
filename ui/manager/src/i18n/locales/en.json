@@ -578,7 +578,10 @@
     "vaultKeyCopied": "Vault reference copied",
     "specTooLarge": "That specification is too large to load here",
     "specUrlInvalid": "That is not a valid URL",
-    "specUrlScheme": "Only http:// and https:// URLs are supported"
+    "specUrlScheme": "Only http:// and https:// URLs are supported",
+    "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
+    "hfToken": "Hugging Face token",
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -776,6 +779,8 @@
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
     "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "sendRejected": "Your message was not sent: {{reason}}",
+    "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
     "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
   },
   "commandPalette": {
@@ -1368,7 +1373,8 @@
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
     "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
-    "paramName": "Parameter name"
+    "paramName": "Parameter name",
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",

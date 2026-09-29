@@ -12,11 +12,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -129,5 +134,46 @@ class ConverseWithAgentToolOwnershipTest {
         verify(conversationService, never()).getConversationMemorySnapshot(anyString());
         verify(conversationService, times(1))
                 .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    // M-A1: the target agent must be one the bound user may use — for a new
+    // conversation and for a continuation of one the user owns alike.
+
+    @Test
+    @DisplayName("a new conversation with an agent the user may not use is refused before it starts")
+    void newConversationRequiresUseAccess() throws Exception {
+        List<String> asked = new ArrayList<>();
+        var tool = new ConverseWithAgentTool(conversationService, "user-A", null, 0, (agentId, principal) -> {
+            asked.add(agentId + "@" + principal);
+            return false;
+        });
+
+        String result = tool.converseWithAgent("other-teams-private-agent", "what do you know?", null);
+
+        assertTrue(result.contains("not available to this user"), result);
+        assertEquals(List.of("other-teams-private-agent@user-A"), asked);
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an agent the user may use is started as before")
+    void newConversationWithUsableAgentStarts() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, "user-A", null, 0, (agentId, principal) -> true);
+
+        tool.converseWithAgent("agent-2", "hi", null);
+
+        verify(conversationService).startConversation(any(), eq("agent-2"), eq("user-A"), any());
+    }
+
+    @Test
+    @DisplayName("continuing the user's own conversation with an agent they may no longer use is refused, without driving it")
+    void continuationRequiresUseAccessToo() throws Exception {
+        lenient().when(conversationService.getConversationMemorySnapshot("conv-own")).thenReturn(snapshotOwnedBy("user-A"));
+        var tool = new ConverseWithAgentTool(conversationService, "user-A", null, 0, (agentId, principal) -> false);
+
+        String result = tool.converseWithAgent("agent-2", "follow-up", "conv-own");
+
+        assertTrue(result.contains("not available to this user"), result);
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 }
