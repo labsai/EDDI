@@ -28,11 +28,21 @@ release yet. Those stay on their current version, and the peer that blocks each 
 | monaco-editor | 0.56 → **0.57** | The `dompurify` override still applies to it |
 | **typescript** | **stays 5.9** | **Blocked by typescript-eslint**: 8.71.0, the latest, declares `typescript: ">=4.8.4 <6.1.0"` for itself and `@typescript-eslint/parser`, and the Manager lints with it |
 
-**Chat (`ui/chat`)**: vite 6 → **8.3**, @vitejs/plugin-react 4 → **6.1**, typescript 5.9 → **7.0**,
-jsdom 26 → **30.0** (`~30.0.1`), @testing-library/jest-dom 6 → **7.0**, @types/node 22 → **24.19**.
-Chat has no ESLint, so nothing blocks TypeScript 7. Its tsconfigs already avoided every option 7
-removes (`baseUrl`, `moduleResolution: node`, a non-composite `tsc -b`). The configs now use
+**Chat (`ui/chat`)**: vite 6 → **8.3**, @vitejs/plugin-react 4 → **6.1**, jsdom 26 → **30.0**
+(`~30.0.1`), @testing-library/jest-dom 6 → **7.0**, @types/node 22 → **24.19**. The configs now use
 `import.meta.dirname` instead of `__dirname`, which Vite's native config loader does not support.
+
+While this PR was open, `main` gave Chat its own ESLint setup. Merging it in, that lint stack takes
+the same majors as the Manager's:
+- eslint and @eslint/js 9 → **10**;
+- eslint-plugin-react-hooks 5 → **7**, with the two classic rules named explicitly instead of
+  spreading `recommended`, exactly as in the Manager;
+- globals 15 → **17**;
+- typescript-eslint → **8.71**.
+
+It also means **Chat stays on TypeScript 5.9**. This branch had moved Chat to 7.0 only because it had
+no ESLint then. typescript-eslint's `typescript: ">=4.8.4 <6.1.0"` now blocks Chat exactly as it
+blocks the Manager.
 
 **jsdom is held at 30.0.x.** jsdom 30.1 moved `Blob`'s implementation object from a symbol-keyed
 property into a private class field. Vitest 5.0.2's jsdom environment still finds that object by
@@ -96,14 +106,16 @@ final lockfiles.
   - `npm run build` passes and still emits the three shells, with all 473 font files kept as files.
   - Playwright `test:e2e` (MSW): 234 of 234 passed. The first run had one failure: the app shell
     missed its 15 s wait while the freshly started Vite 8 dev server was still cold.
-- **Chat:** typecheck (on `tsc` 7.0.2), vitest (15 files, 278 tests) and build pass.
+- **Chat:** typecheck, vitest (15 files, 278 tests) and build pass. After merging `main`'s ESLint
+  setup in: lint (ESLint 10), typecheck on TypeScript 5.9.3, vitest (20 files, 338 tests) and build
+  pass.
 - **`./mvnw package -DskipTests`:** `BUILD SUCCESS`. It ran `npm ci` and the build for both UIs, and
   left no change in either lockfile.
 
 ### Next
 
 - Remove jsdom's `~30.0.1` pin once Vitest ships the fix in vitest-dev/vitest#11370.
-- Move the Manager to TypeScript 7 once typescript-eslint supports it.
+- Move both UIs to TypeScript 7 once typescript-eslint supports it.
 - Adopt the React Compiler lint rules, one at a time.
 
 ```decision-log

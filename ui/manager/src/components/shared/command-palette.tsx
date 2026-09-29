@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   Bot,
   Workflow,
-  Boxes,
   FileCode,
   MessageCircle,
   Sparkles,
@@ -23,6 +22,7 @@ import {
   Keyboard,
   Clock,
   type LucideIcon,
+  UserRoundSearch,
 } from "lucide-react";
 
 // ==================== Navigation Items ====================
@@ -46,14 +46,14 @@ export function CommandPalette() {
     { path: "/manage", label: t("nav.dashboard", "Dashboard"), icon: LayoutDashboard, section: "pages" },
     { path: "/manage/agents", label: t("nav.agents", "Agents"), icon: Bot, section: "pages" },
     { path: "/manage/workflows", label: t("nav.packages", "Workflows"), icon: Workflow, section: "pages" },
-    { path: "/manage/groups", label: t("nav.groups", "Groups"), icon: Boxes, section: "pages" },
+    { path: "/manage/groups", label: t("nav.groups", "Groups"), icon: Users, section: "pages" },
     { path: "/manage/resources", label: t("nav.resources", "Resources"), icon: FileCode, section: "pages" },
     { path: "/manage/chat", label: t("nav.chat", "Chat"), icon: MessageCircle, section: "pages" },
 
     { path: "/manage/conversations", label: t("nav.conversations", "Conversations"), icon: MessagesSquare, section: "pages" },
     { path: "/manage/logs", label: t("nav.logs", "Logs"), icon: ScrollText, section: "pages" },
     { path: "/manage/audit", label: t("nav.audit", "Audit Trail"), icon: ShieldCheck, section: "pages" },
-    { path: "/manage/userdata", label: t("userData.title", "User Data"), icon: Users, section: "pages" },
+    { path: "/manage/userdata", label: t("userData.title", "User Data"), icon: UserRoundSearch, section: "pages" },
     { path: "/manage/connections", label: t("nav.connections", "Connections"), icon: Plug, section: "pages" },
     { path: "/manage/linked-accounts", label: t("pages.linkedAccounts.title", "Linked accounts"), icon: Link2, section: "pages" },
   ];

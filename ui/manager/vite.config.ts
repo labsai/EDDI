@@ -5,7 +5,26 @@ import { fileURLToPath, URL } from "node:url";
 import { readFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 
-const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
+/**
+ * The EDDI version this Manager ships with, read from the repository's pom.xml —
+ * the single source of truth (root AGENTS.md §1). package.json deliberately
+ * carries no version of its own: it used to, and every release had to remember
+ * to move it.
+ *
+ * The Maven build passes EDDI_VERSION=${project.version} (pom.xml, execution
+ * manager-build), which wins. This fallback covers `npm run dev` and the CI
+ * checks that build the Manager outside Maven. It takes the first <version>
+ * element, which is the rule ci.yml uses (`grep -m1 '<version>' pom.xml`), and
+ * answers "dev" when the Manager is built without the rest of the repository.
+ */
+function readPomVersion(): string {
+  try {
+    const pom = readFileSync(fileURLToPath(new URL("../../pom.xml", import.meta.url)), "utf-8");
+    return /<version>([^<]+)<\/version>/.exec(pom)?.[1].trim() ?? "dev";
+  } catch {
+    return "dev";
+  }
+}
 
 const BACKEND = "http://localhost:7070";
 
@@ -63,9 +82,8 @@ function pSSE(target = BACKEND): ProxyOptions {
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
-    // The Maven build passes EDDI_VERSION=${project.version} (pom.xml, execution
-    // manager-build), so the sidebar shows the version of the jar it ships in.
-    __APP_VERSION__: JSON.stringify(process.env.EDDI_VERSION ?? pkg.version),
+    // The sidebar shows the version of the jar it ships in — see readPomVersion.
+    __APP_VERSION__: JSON.stringify(process.env.EDDI_VERSION || readPomVersion()),
   },
   resolve: {
     alias: {

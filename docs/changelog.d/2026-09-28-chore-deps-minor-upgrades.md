@@ -12,9 +12,7 @@ packages, within the same minor). Majors are deliberately left to follow-up bran
 | Artifact | From → To | Note |
 |---|---|---|
 | Quarkus platform BOM | 3.39.4 → **3.39.5** | `3.40.0` exists only as `CR1` for the platform BOM; the `io.quarkus:*` `3.40.0` the versions report lists are core artifacts the BOM manages, not a platform release |
-| Jackson core / databind / csv / xml | 2.22.2 → **2.22.3** | |
-| Jackson `dataformat-yaml` | BOM (2.22.2) → **2.22.3**, newly pinned | Declared by us, so it was left a patch behind its own core — the same reason csv/xml are pinned |
-| `reactor-netty-http` | 1.2.8 → **1.3.7** | The CVE pin moves to the 1.3 line: its pom depends on `reactor-core` 3.8.7, exactly what the build resolves, where 1.2.x is built against 3.7.x |
+| `reactor-netty-http` | 1.2.8 → **1.3.7** | The CVE pin moves to the 1.3 line: its pom depends on `reactor-core` 3.8.7, which is exactly what the Quarkus 3.39.5 BOM manages, whereas 1.2.x is built against 3.7.x |
 | bcprov-lts8on | 2.73.12.1 → **2.73.13** | |
 | classgraph | 4.8.194 → **4.8.196** | |
 | swagger-annotations | 2.2.54 → **2.2.55** | `BuildQualityGatesTest` pins it; its constant and Javadoc moved with it |
@@ -24,10 +22,16 @@ packages, within the same minor). Majors are deliberately left to follow-up bran
 | Maven (wrapper + `mise.toml`) | 3.9.12 → **3.9.16** | New `distributionSha256Sum`, computed from the zip after checking it against Maven Central's published SHA-512 |
 | Node (`node.version` + `mise.toml`) | 22.23.2 → **22.23.3** | |
 
-**Held back on purpose:** langchain4j `1.20.0` → `1.20.2`. `langchain4j-community-oci-genai` was
-never released past `1.20.0-beta30`, and the pom forbids splitting the two langchain4j lines (a split
-surfaces as a runtime `NoSuchMethodError`). That decision is a follow-up of its own. Mockito and
-Caffeine are Quarkus-BOM-managed and move with the platform.
+**Rule for anything Quarkus manages or integrates with: take the version Quarkus has, not a newer one.** The versions report offered Jackson 2.22.3, but the Quarkus 3.39.5 BOM manages the Jackson family at 2.22.2, so Jackson stays at 2.22.2. Everything else above is either not in the Quarkus BOM (bcprov-lts8on, classgraph, swagger, jnats, the Maven plugins and wrapper) or matches it (`reactor-core` 3.8.7). Mockito and Caffeine are Quarkus-BOM-managed and move with the platform.
+
+**Held back on purpose:** langchain4j `1.20.0` → `1.20.2`, for two reasons.
+
+- **Quarkus:** the Quarkus 3.39.5 platform ships langchain4j **1.19.3**, through
+  `quarkus-langchain4j-bom`. EDDI is already ahead of it at 1.20.0, and by the rule above it moves
+  no further until Quarkus does.
+- **OCI GenAI:** `langchain4j-community-oci-genai` was never released past `1.20.0-beta30`, and the
+  pom forbids splitting the two langchain4j lines, since a split surfaces as a runtime
+  `NoSuchMethodError`.
 
 **Manager (`ui/manager`)**: React / React DOM 19.3, `@tanstack/react-query` 5.104,
 `react-router-dom` 7.18.4, dompurify 3.4.16, tailwind-merge 3.7, typescript-eslint 8.70,

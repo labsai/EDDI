@@ -90,6 +90,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_GENERATION = "generation";
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_STARTED_AT = "startedAt";
+    private static final String FIELD_STALE_AFTER = "staleAfter";
     private static final String FIELD_FINISHED_AT = "finishedAt";
     private static final String FIELD_DOCS_SEEN = "documentsSeen";
     private static final String FIELD_DOCS_INGESTED = "documentsIngested";
@@ -275,7 +276,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public Optional<String> startRun(String sourceId) {
+    public Optional<String> startRun(String sourceId, Instant staleAfter) {
         String runId = UUID.randomUUID().toString();
         long generation = nextGeneration(sourceId);
         Document run = new Document(FIELD_RUN_ID, runId)
@@ -283,6 +284,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 .append(FIELD_STATUS, IngestionRun.Status.RUNNING.name())
                 .append(FIELD_GENERATION, generation)
                 .append(FIELD_STARTED_AT, Date.from(Instant.now()));
+        if (staleAfter != null) {
+            run.append(FIELD_STALE_AFTER, Date.from(staleAfter));
+        }
         // Inside translating, like every other operation on this store: only the
         // duplicate-key case is special, and handling it here rather than around
         // the helper means a connection failure, a timeout or a step-down during
@@ -395,10 +399,15 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
      */
     private List<String> doReap(String sourceId, Instant startedBefore) {
         return translating("reap stale runs", () -> {
+            // A run's own deadline decides when it has one; the start-time cut-off only
+            // for runs claimed before deadlines were recorded.
             var stale = Filters.and(
                     Filters.eq(FIELD_SOURCE_ID, sourceId),
                     Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
-                    Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore)));
+                    Filters.or(
+                            Filters.lt(FIELD_STALE_AFTER, Date.from(Instant.now())),
+                            Filters.and(Filters.exists(FIELD_STALE_AFTER, false),
+                                    Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore)))));
             var fail = Updates.combine(
                     Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
                     Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),

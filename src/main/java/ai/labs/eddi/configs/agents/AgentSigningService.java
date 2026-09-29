@@ -57,7 +57,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class AgentSigningService {
     private static final Logger LOGGER = Logger.getLogger(AgentSigningService.class);
     private static final String ALGORITHM = "Ed25519";
-    private static final String VAULT_KEY_PREFIX = "agent-signing-key:";
+    /**
+     * Reserved key-name prefix, defined once in {@link SecretReference} so that the
+     * writer here and the resolution-time refusal in {@code SecretResolver} cannot
+     * drift apart.
+     */
+    private static final String VAULT_KEY_PREFIX = SecretReference.AGENT_SIGNING_KEY_PREFIX;
     /**
      * Maximum key version to scan during deletion cleanup. Package-private so the
      * test can pin the number of vault round trips one agent deletion costs.

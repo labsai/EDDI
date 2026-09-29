@@ -14,6 +14,7 @@ import {
   FileText,
   Clock,
   Bot,
+  NotebookPen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -117,7 +118,7 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10">
-            <Brain className="h-5 w-5 text-teal-500" />
+            <NotebookPen className="h-5 w-5 text-teal-500" />
           </div>
           {t("memories.title", "User Memory")}
         </h1>
@@ -204,7 +205,7 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
       {/* Empty state */}
       {!debouncedUserId && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
-          <Brain className="h-12 w-12 opacity-30" />
+          <NotebookPen className="h-12 w-12 opacity-30" />
           <p className="mt-4 text-sm">{t("memories.enterUserId", "Enter a User ID to browse their memories")}</p>
         </div>
       )}

@@ -199,12 +199,10 @@ class PrePostUtilsJsonInjectionTest {
     @Test
     @DisplayName("a real Qute render round-trips unsafe upstream values and compiles the template once")
     void realQuteRenderRoundTripsUnsafeValuesAndReusesTheCompiledTemplate() throws Exception {
-        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        Engine countingEngine = mock(Engine.class);
-        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
+        var realTemplatingEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
 
         var realPrePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
-                new TemplatingEngine(countingEngine), dataFactory);
+                realTemplatingEngine, dataFactory);
 
         var texts = List.of("say \"hi\"", "line one\nline two", "back\\slash", "eddiRow0000");
         List<Map<String, String>> items = texts.stream().map(text -> Map.of("text", text)).toList();
@@ -226,7 +224,7 @@ class PrePostUtilsJsonInjectionTest {
             assertEquals(texts.get(i), asMap(valueAlternatives.getFirst()).get("text"), "value must round-trip verbatim through a real Qute render");
         }
 
-        verify(countingEngine, times(1)).parse(anyString());
+        assertEquals(1, realTemplatingEngine.compiledTemplateCount(), "the same instruction must reuse its compiled template");
     }
 
     private static PostResponse outputPostResponse() {

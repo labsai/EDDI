@@ -6,14 +6,14 @@
 
 > **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Chat-UI` repository until 2026-09-15; its full history was imported here (`git log -- ui/chat`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
 
-**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
+**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.9, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
 
 ### Tech Stack
 
 | Technology     | Version | Purpose                        |
 | -------------- | ------- | ------------------------------ |
 | React          | 19      | UI framework                   |
-| TypeScript     | 7       | Type safety                    |
+| TypeScript     | 5.9     | Type safety (7 waits on typescript-eslint support) |
 | Vite           | 8       | Build tool + dev server        |
 | Vitest         | 5.x     | Unit testing (jsdom)           |
 | react-markdown | 10.x    | Markdown rendering in messages |
@@ -41,6 +41,8 @@ src/
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 │   ├── MessageBubble.tsx   # User/agent messages with markdown
+│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js loading (rich-math.ts, rich-highlight.ts)
+│   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
@@ -66,7 +68,24 @@ src/
 - **Eight SSE events**: `task_start`, `task_complete`, `task_failed`, `token`,
   `cascade_step_start`, `cascade_escalation`, `done`, `error`. There is **no
   `thinking` event** — the backend never emits one.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string.
+- **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
+  refused BEFORE it ran also carries a `code` (`awaiting_approval`,
+  `conversation_ended`, …, pinned in `UNCONSUMED_STREAM_ERROR_CODES` against
+  `RestAgentEngineStreaming`): treat it like a 409 — withdraw the bubble and
+  restore the draft.
+- **Every `data:` line carries one delimiter space** —
+  `RestAgentEngineStreaming.padDataLines` writes it. Strip exactly one; a
+  token's own leading space follows it.
+- **`inputField` arrives on `done` too.** Read it from every transport, not
+  only the non-streaming snapshot.
+- **The route's environment must be sent** as `?environment=` on start; the
+  backend defaults a missing one to production.
+- **The turn output's `input` is the masked display copy** — `<secret input>`
+  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
+  a secret turn when it ends and masks older stored ones on read, so
+  `input:initial` also reads `<secret input>`; the client-side mask is a
+  second line of defence, not the only one.
+- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
   the snapshot to refresh them.
@@ -114,8 +133,9 @@ src/
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
 4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — `hideUndo`, `hideRedo`, `hideNewConversation`, `hideLogo`, `theme`, `title`, `apiServer`, `token`.
+6. **Query params** — `hideUndo`, `hideRedo`, `hideNewConversation`, `hideLogo`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar).
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in Manager UI (`/agents/pending-approvals`).
+8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 
 ---
 

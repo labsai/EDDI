@@ -47,7 +47,8 @@ public class UserMemoryIT extends BaseIntegrationIT {
                   "key": "favorite_color",
                   "value": "blue",
                   "category": "preference",
-                  "visibility": "self"
+                  "visibility": "self",
+                  "sourceAgentId": "test-agent"
                 }
                 """, TEST_USER);
 
@@ -106,7 +107,8 @@ public class UserMemoryIT extends BaseIntegrationIT {
                   "key": "hometown",
                   "value": "Vienna",
                   "category": "fact",
-                  "visibility": "self"
+                  "visibility": "self",
+                  "sourceAgentId": "test-agent"
                 }
                 """, TEST_USER);
 
@@ -146,10 +148,18 @@ public class UserMemoryIT extends BaseIntegrationIT {
     @Order(8)
     @DisplayName("Get visible memories should respect visibility filtering")
     void getVisibleMemories() {
+        // Both self entries are owned by test-agent, so both are visible to it — a self
+        // entry without an owning agent is rejected at write time (no one could read
+        // it)
         given().get(BASE + TEST_USER + "/visible?agentId=test-agent&order=most_recent&limit=50")
                 .then().assertThat()
                 .statusCode(200)
-                .contentType(ContentType.JSON);
+                .contentType(ContentType.JSON)
+                .body("size()", greaterThanOrEqualTo(2));
+        given().get(BASE + TEST_USER + "/visible?agentId=other-agent&order=most_recent&limit=50")
+                .then().assertThat()
+                .statusCode(200)
+                .body("$", empty());
     }
 
     // ==================== Delete single entry ====================

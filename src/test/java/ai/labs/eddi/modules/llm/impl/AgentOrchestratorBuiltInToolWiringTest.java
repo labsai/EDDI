@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -62,6 +63,11 @@ class AgentOrchestratorBuiltInToolWiringTest {
         agentSetupService = mock(AgentSetupService.class);
         capabilityRegistryService = mock(CapabilityRegistryService.class);
         conversationService = mock(IConversationService.class);
+        // A supplied conversationId is ownership-checked before it is driven; the
+        // follow-up tests continue a conversation owned by the memory's user.
+        var ownSnapshot = new ConversationMemorySnapshot();
+        ownSnapshot.setUserId("user-1");
+        lenient().when(conversationService.getConversationMemorySnapshot(anyString())).thenReturn(ownSnapshot);
         lenient().when(conversationService.startConversation(any(), anyString(), any(), any()))
                 .thenReturn(new ConversationResult("conv-callee", null));
         lenient().doAnswer(invocation -> {

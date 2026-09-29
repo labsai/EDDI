@@ -1,7 +1,6 @@
 {
   "name": "eddi-manager",
   "private": true,
-  "version": "6.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

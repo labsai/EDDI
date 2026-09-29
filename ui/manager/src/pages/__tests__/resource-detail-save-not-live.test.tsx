@@ -94,10 +94,16 @@ function stubCascade(onDeploy?: (url: string) => void) {
         },
       }),
     ),
-    http.get("*/agentstore/agents/:id", () =>
+    // The agent a save produced references the workflow version that save
+    // produced (v2) — the cascade checks the reference before it writes.
+    http.get("*/agentstore/agents/:id", ({ request }) =>
       HttpResponse.json({
         name: "test-agent",
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1"],
+        workflows: [
+          `eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=${
+            new URL(request.url).searchParams.get("version") === "1" ? 1 : 2
+          }`,
+        ],
       }),
     ),
     http.put("*/agentstore/agents/:id", () =>
@@ -125,13 +131,21 @@ async function saveAChange(user: ReturnType<typeof userEvent.setup>) {
 }
 
 const originalConsoleError = console.error;
-afterEach(() => {
+afterEach(async () => {
   console.error = originalConsoleError;
   vi.restoreAllMocks();
   // sonner's toast store is module-global and survives unmount, so with the long
   // duration above a toast from one test is still on screen for the next --
   // "Found multiple elements with the role button and name Deploy". Clear it.
   toast.dismiss();
+  // A dismissed toast is only removed after sonner's 200 ms unmount timer, whose
+  // callback updates React state. Wait for the removal here, while jsdom is still
+  // up: after the file's last test nothing else waits for that timer, and when
+  // it fired after the environment was torn down React read `window` and vitest
+  // reported "ReferenceError: window is not defined" beside a passing suite.
+  await waitFor(() => {
+    expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+  });
 });
 
 describe("ResourceDetailPage — a plain Save says it is not live", () => {

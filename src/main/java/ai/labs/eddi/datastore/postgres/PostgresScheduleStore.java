@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -681,17 +682,20 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // id is the tie-breaker: created_at alone is not unique (bulk-created HITL
         // timeout or cadence schedules share a millisecond), and a non-deterministic
         // order makes paging skip and repeat rows.
-        String sql = "SELECT * FROM eddi_schedules" + hitlRedactionClause(excludeHitlTimeouts, " WHERE ")
+        String hitl = hitlRedactionClause(excludeHitlTimeouts, " WHERE ");
+        String owner = ownerScopeClause(ownerScope, hitl.isEmpty() ? " WHERE " : " AND ");
+        String sql = "SELECT * FROM eddi_schedules" + hitl + owner
                 + " ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            ps.setInt(2, Math.max(0, offset));
+            int i = bindOwnerScope(ps, 1, ownerScope);
+            ps.setInt(i++, limit);
+            ps.setInt(i, Math.max(0, offset));
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read all schedules", e);
@@ -704,19 +708,54 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                              ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT * FROM eddi_schedules WHERE agent_id = ?" + hitlRedactionClause(excludeHitlTimeouts, " AND ")
+                + ownerScopeClause(ownerScope, " AND ")
                 + " ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
-            ps.setInt(2, limit);
-            ps.setInt(3, Math.max(0, offset));
+            int i = bindOwnerScope(ps, 2, ownerScope);
+            ps.setInt(i++, limit);
+            ps.setInt(i, Math.max(0, offset));
             return readScheduleList(ps);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules for agent " + agentId, e);
         }
+    }
+
+    /**
+     * The owner restriction of {@code ownerScope} as a SQL fragment introduced by
+     * {@code keyword}, or an empty string for an unrestricted scope. Pushed into
+     * the query, like {@link #hitlRedactionClause}, so limit/offset count only the
+     * rows the caller may see: shared schedules (no owner, blank owner, the system
+     * placeholder) plus, when the caller has an id, the caller's own, the same set
+     * as {@link ScheduleOwnerScope#admits}. Values are bound by
+     * {@link #bindOwnerScope}; no caller input is concatenated.
+     */
+    private static String ownerScopeClause(ScheduleOwnerScope ownerScope, String keyword) {
+        if (ownerScope == null || ownerScope.unrestricted()) {
+            return "";
+        }
+        return keyword + "(user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?"
+                + (ownerScope.callerId() != null ? " OR user_id = ?" : "") + ")";
+    }
+
+    /**
+     * Binds the parameters of {@link #ownerScopeClause} starting at {@code index};
+     * returns the next free parameter index.
+     */
+    private static int bindOwnerScope(PreparedStatement ps, int index, ScheduleOwnerScope ownerScope) throws SQLException {
+        if (ownerScope == null || ownerScope.unrestricted()) {
+            return index;
+        }
+        ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+        if (ownerScope.callerId() != null) {
+            ps.setString(index++, ownerScope.callerId());
+        }
+        return index;
     }
 
     /**
