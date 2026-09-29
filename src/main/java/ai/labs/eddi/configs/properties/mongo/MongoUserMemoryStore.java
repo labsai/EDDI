@@ -12,11 +12,15 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -70,13 +74,43 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
 
+    /**
+     * Unique index on {@code (userId, key)} over global entries only, the Mongo
+     * counterpart of PostgreSQL's {@code idx_um_upsert_global}. It is what makes
+     * {@link #upsertIfOwnedBy} atomic: an owner-filtered upsert that misses because
+     * another agent holds the key tries to insert a second global entry, and the
+     * index refuses it.
+     */
+    static final String GLOBAL_KEY_INDEX = "idx_um_upsert_global";
+
     private final MongoCollection<Document> memoriesCollection;
+    /**
+     * Whether {@link #GLOBAL_KEY_INDEX} exists. It cannot be built over data that
+     * already holds duplicate global keys; until those are merged, owned writes
+     * fall back to a check-then-write that is not atomic.
+     */
+    private final boolean globalKeyUnique;
 
     @Inject
     public MongoUserMemoryStore(MongoDatabase database) {
         RuntimeUtilities.checkNotNull(database, "database");
         this.memoriesCollection = database.getCollection(COLLECTION_MEMORIES);
         ensureIndexes();
+        this.globalKeyUnique = ensureGlobalKeyIndex();
+    }
+
+    private boolean ensureGlobalKeyIndex() {
+        try {
+            memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.ascending(FIELD_KEY)),
+                    new IndexOptions().name(GLOBAL_KEY_INDEX).unique(true)
+                            .partialFilterExpression(eq(FIELD_VISIBILITY, Visibility.global.name())));
+            return true;
+        } catch (MongoException e) {
+            LOGGER.warnf("[MEMORY] Could not build the unique index on global memory keys (%s). Duplicate global keys probably "
+                    + "exist for some user; until they are merged, an agent's global memory writes are checked for ownership "
+                    + "non-atomically.", LogSanitizer.sanitize(e.getMessage()));
+            return false;
+        }
     }
 
     private void ensureIndexes() {
@@ -147,7 +181,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                     Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
                     Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
-            memoriesCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+            upsertRetryingDuplicate(filter, update);
         }
     }
 
@@ -183,25 +217,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
         Bson filter = buildUpsertFilter(entry);
-        Instant now = Instant.now();
-
-        // A global entry is keyed on (userId, key, visibility) ONLY — it is shared
-        // across agents, so any agent that merely RECALLS it would otherwise rewrite
-        // sourceAgentId to itself and silently steal ownership. setOnInsert pins the
-        // owner to the agent that created the entry; self/group entries are keyed per
-        // agent, so there sourceAgentId is part of the identity and $set is correct.
-        Bson sourceAgentUpdate = entry.visibility() == Visibility.global
-                ? Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId())
-                : Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId());
-
-        Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
-                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
-                Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
-                Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
-                Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
-                Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
-
-        var options = new UpdateOptions().upsert(true);
+        Bson update = buildUpsertUpdate(entry, Instant.now());
 
         // Check for cross-agent global write (value changes, ownership does not)
         if (entry.visibility() == Visibility.global) {
@@ -216,7 +232,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             }
         }
 
-        var result = memoriesCollection.updateOne(filter, update, options);
+        var result = upsertRetryingDuplicate(filter, update);
         if (result.getUpsertedId() != null) {
             return result.getUpsertedId().asObjectId().getValue().toHexString();
         }
@@ -224,6 +240,83 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Existing document updated — return its ID
         Document existing = memoriesCollection.find(filter).first();
         return existing != null ? existing.getObjectId("_id").toHexString() : null;
+    }
+
+    @Override
+    public boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.checkOwnedWrite(entry, agentId);
+        Bson keyFilter = buildUpsertFilter(entry);
+        if (!globalKeyUnique && globalKeyHeldByAnother(keyFilter, agentId)) {
+            return false;
+        }
+
+        // Matches only an entry this agent owns. If the key is free, the upsert
+        // inserts it with this agent as owner. If another agent (or no recorded
+        // owner) holds it, the filter misses, the upsert tries to insert a second
+        // global entry for the key, and GLOBAL_KEY_INDEX refuses it: nothing is
+        // written. Two agents racing for a free key likewise get one insert and one
+        // duplicate-key refusal.
+        Bson ownedFilter = and(keyFilter, eq(FIELD_SOURCE_AGENT_ID, agentId));
+        try {
+            memoriesCollection.updateOne(ownedFilter, buildUpsertUpdate(entry, Instant.now()), new UpdateOptions().upsert(true));
+            return true;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Fallback for {@link #upsertIfOwnedBy} while {@link #GLOBAL_KEY_INDEX} is
+     * missing: whether some global entry for the key has an owner other than
+     * {@code agentId}, a missing or blank owner included. Not atomic.
+     */
+    private boolean globalKeyHeldByAnother(Bson keyFilter, String agentId) {
+        for (Document doc : memoriesCollection.find(keyFilter)) {
+            if (!agentId.equals(doc.getString(FIELD_SOURCE_AGENT_ID))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * An upsert that survives losing an insert race. With {@link #GLOBAL_KEY_INDEX}
+     * in place, two concurrent upserts of a new global key can both miss the filter
+     * and both try to insert; the loser gets a duplicate-key error. The entry now
+     * exists, so running the upsert again updates it, which is what the loser asked
+     * for.
+     */
+    private UpdateResult upsertRetryingDuplicate(Bson filter, Bson update) {
+        var options = new UpdateOptions().upsert(true);
+        try {
+            return memoriesCollection.updateOne(filter, update, options);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw e;
+            }
+            return memoriesCollection.updateOne(filter, update, options);
+        }
+    }
+
+    private static Bson buildUpsertUpdate(UserMemoryEntry entry, Instant now) {
+        // A global entry is keyed on (userId, key, visibility) ONLY — it is shared
+        // across agents, so any agent that merely RECALLS it would otherwise rewrite
+        // sourceAgentId to itself and silently steal ownership. setOnInsert pins the
+        // owner to the agent that created the entry; self/group entries are keyed per
+        // agent, so there sourceAgentId is part of the identity and $set is correct.
+        Bson sourceAgentUpdate = entry.visibility() == Visibility.global
+                ? Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId())
+                : Updates.set(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId());
+
+        return Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
+                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
+                Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
+                Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
+                Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
+                Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
     }
 
     @Override
