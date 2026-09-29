@@ -255,8 +255,8 @@ public class V6QuteMigration {
             return null;
         }
         String migrated = migrator.migrate(value);
-        if (migrator.containsThymeleafSyntax(migrated)) {
-            unconvertible.add(fieldPath + ": Thymeleaf syntax is left after conversion");
+        if (migrator.containsThymeleafDelimiters(migrated)) {
+            unconvertible.add(fieldPath + ": a Thymeleaf expression is left after conversion");
             return null;
         }
         return migrated;

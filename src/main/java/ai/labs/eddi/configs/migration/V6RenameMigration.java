@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
 import static com.mongodb.client.model.Filters.and;
@@ -30,6 +31,7 @@ import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.ne;
 import static com.mongodb.client.model.Filters.nor;
 import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Filters.regex;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -243,6 +245,7 @@ public class V6RenameMigration {
 
         if (migrationLogStore.readMigrationLog(MIGRATION_KEY) != null) {
             LOGGER.info("V6 rename migration already applied — skipping");
+            catchUpManagedConversationMappings();
             return;
         }
 
@@ -968,6 +971,36 @@ public class V6RenameMigration {
         return new Document("$cond", Arrays.asList(condition, then, otherwise));
     }
 
+    /**
+     * Migrates the triggers and user-conversation mappings of a database whose
+     * rename migration an earlier 6.x recorded as complete.
+     *
+     * <p>
+     * Before 6.5 the migration did not touch {@code bottriggers} or
+     * {@code userconversations}. A database migrated then has its triggers under
+     * the v5 name, where the 6.x store never looks, so every managed conversation
+     * by intent still finds none. Both passes are idempotent, and the rename only
+     * happens while {@code bottriggers} holds documents, so on any other database
+     * this costs two counts.
+     * </p>
+     */
+    private void catchUpManagedConversationMappings() {
+        try {
+            if (documentCount("bottriggers") > 0) {
+                if (renameCollectionIfExists("bottriggers", COLLECTION_AGENT_TRIGGERS)) {
+                    LOGGER.info("  Migrating the triggers an earlier 6.x left under 'bottriggers'");
+                } else {
+                    LOGGER.errorf("  The triggers under 'bottriggers' could not be moved to '%s' (logged above); merge them by "
+                            + "hand — managed conversations by intent find no trigger until then", COLLECTION_AGENT_TRIGGERS);
+                }
+            }
+            migrateAgentTriggers();
+            migrateUserConversations();
+        } catch (Exception e) {
+            LOGGER.errorf("  Could not bring triggers and user-conversation mappings to the v6 shape: %s", e.toString());
+        }
+    }
+
     private static final String COLLECTION_AGENT_TRIGGERS = "agenttriggers";
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String FIELD_BOT_ID = "botId";
@@ -1033,7 +1066,9 @@ public class V6RenameMigration {
                     String name = FIELD_BOT_ID.equals(field.getKey()) ? FIELD_AGENT_ID : field.getKey();
                     v6.put(name, field.getValue());
                 }
-                v6.put(FIELD_ENVIRONMENT, v6Environment(v6.get(FIELD_ENVIRONMENT)));
+                if (v6.containsKey(FIELD_ENVIRONMENT)) {
+                    v6.put(FIELD_ENVIRONMENT, v6Environment(v6.get(FIELD_ENVIRONMENT)));
+                }
                 if (deployments.contains(v6)) {
                     duplicates++;
                 } else {
@@ -1060,6 +1095,18 @@ public class V6RenameMigration {
             LOGGER.infof("  %s: migrated %d triggers", COLLECTION_AGENT_TRIGGERS, migrated);
         }
         return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * Matches a document whose {@code environment} is a v5 value, ignoring case as
+     * {@link #ENVIRONMENT_REWRITES} does.
+     */
+    private static Bson v5Environment() {
+        List<String> names = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            names.add(Pattern.quote(mapping[0]));
+        }
+        return regex(FIELD_ENVIRONMENT, "^(" + String.join("|", names) + ")$", "i");
     }
 
     /**
@@ -1114,7 +1161,7 @@ public class V6RenameMigration {
                         v5Environments)),
                 ENVIRONMENT_REWRITES[0][1], "$" + FIELD_ENVIRONMENT);
         Document agentId = new Document("$ifNull", List.of("$" + FIELD_AGENT_ID, "$" + FIELD_BOT_ID));
-        Bson v5Shaped = and(or(exists(FIELD_BOT_ID), new Document(FIELD_ENVIRONMENT, new Document("$in", v5Environments))),
+        Bson v5Shaped = and(or(exists(FIELD_BOT_ID), v5Environment()),
                 or(exists(FIELD_BOT_ID, false), exists(FIELD_AGENT_ID, false)));
 
         long migrated;

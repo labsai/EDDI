@@ -412,6 +412,17 @@ public class TemplateSyntaxMigrator {
     }
 
     /**
+     * Whether a converted string still holds a Thymeleaf expression delimiter — the
+     * check for a conversion that did not happen. Narrower than
+     * {@link #containsThymeleafSyntax(String)} on purpose: a prompt or description
+     * that merely mentions {@code th:if} or {@code #strings.} is text, not a
+     * template left behind.
+     */
+    public boolean containsThymeleafDelimiters(String input) {
+        return input != null && (input.contains("[[${") || input.contains("[(${") || input.contains("[# th:") || input.contains("[#th:"));
+    }
+
+    /**
      * Quick check: does this string contain any Thymeleaf template syntax?
      */
     public boolean containsThymeleafSyntax(String input) {
