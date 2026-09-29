@@ -29,7 +29,15 @@ conversations that could have carried on.
 - **Undeploy counts only conversations that cannot move**, so compatible conversations neither
   block undeploy nor get ended by `endAllActiveConversations`.
 
+- **The generation is a store-owned `AgentConfiguration` field.** Only the latest version can be
+  updated (`HistorizedResourceStore.update`), so the previous version always holds the highest
+  generation and the assignment needs no other lookup.
+- **Two existing gaps found and scheduled as Phase 0**: a Slack thread whose conversation has ended
+  fails on every further message, and a `persistent` schedule whose conversation has ended is
+  retried until it dead-letters. Both will start a fresh conversation instead. Both already happen
+  today (the idle sweep and `endAllActiveConversations` end conversations).
+
 ### Next
 
-Phase 1 of the plan (generation stored and exposed, no behaviour change), after settling where the
-generation is stored (open question 1).
+Phase 0 of the plan (ended-conversation recovery for Slack and persistent schedules), then
+Phase 1 (generation stored and exposed, no behaviour change).

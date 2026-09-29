@@ -71,19 +71,21 @@ Each agent version gets a server-owned integer, the **compatibility generation**
 **Assignment, on every create/update of an agent version, in the store layer** (so every save path goes through it):
 
 ```
-previous = the version being replaced (the version the update was based on)
-highest = highest generation of any version of this agent, or 0
-if request.compatible == true and previous.generation != null and previous.generation == highest:
+previous = the version being updated — always the latest one, because
+           HistorizedResourceStore.update rejects anything else (checkIfFoundAndLatest)
+if request.compatible == true and previous.generation != null:
     new.generation = previous.generation
 else:
-    new.generation = highest + 1                                       // breaking
+    new.generation = (previous.generation, or 0) + 1                   // breaking
 ```
+
+Because only the latest version can be updated, the previous version always carries the agent's highest generation, so this rule keeps generations monotonic without looking at any other version.
 
 - The request's intent arrives as an **explicit parameter** — `PUT /agentstore/agents/{id}?version=N&compatible=true` on REST, a `compatible` argument on the MCP tools — defaulting to `false`. It is never read from the config body.
 - Any `compatibilityGeneration` value in an incoming body is **ignored** and overwritten. ZIP import and agent sync therefore always produce a breaking version on the target instance, which is the only safe reading: the target cannot know what the source's generation meant.
 - Generations only ever go up, so "same generation at both ends" implies "no breaking version in between". No range scan is needed at runtime.
 
-**Where it is stored — open question, see §10.** Recommended: a field on `AgentConfiguration` that the store owns (written by the store, ignored on input, stripped from export and from agent-sync diffs), because the deployed `Agent` is built from the configuration and can expose it as `IAgent.getCompatibilityGeneration()` without another read. The alternative is the version's `DocumentDescriptor`.
+**Where it is stored — decided: `AgentConfiguration.compatibilityGeneration`**, a field the store owns: written by the store, ignored on input, stripped from export and from agent-sync diffs. The deployed `Agent` is built from the configuration, so it exposes the value as `IAgent.getCompatibilityGeneration()` without another read.
 
 **First opt-in on an existing agent.** A version saved as compatible on top of a legacy version (no generation) gets a fresh generation, because the legacy version has none to share. Conversations already running on that legacy version therefore stay pinned — consistent with guarantee 1. From the next compatible save on, the chain links. The Manager says so in the save dialog (§5.1).
 
@@ -173,11 +175,29 @@ The one addition is a **reason**: conversations ended this way carry `endedBy: s
 |---|---|
 | **HITL** | A paused conversation resumes on its pause version (guarantee 6). The first turn after the resume follows. A pending approval is never re-evaluated against a newer version's gates. |
 | **Group conversations** | Members' private conversations go through `say()`, so they follow like any other conversation. The group itself already resolves members with `getLatestReadyAgent`. |
-| **Managed conversations, `/v1`, channels** | Follow automatically; on an ended conversation, managed and `/v1` already start a new one. **Channels: verify** before implementation. |
-| **Schedules** | A schedule with a fixed `agentVersion` stays on it. **Verify** how a schedule with the persistent-conversation strategy resolves its agent before implementation. |
+| **Managed conversations, `/v1`** | Follow automatically. On an ended conversation both already start a new one ([`RestAgentManagement`](../src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java) replaces the user mapping; [`OpenAiConversationBridge`](../src/main/java/ai/labs/eddi/integrations/openai/OpenAiConversationBridge.java) drops the stale mapping and retries once). |
+| **Slack channels** | Follow automatically. **Ended conversations are a dead end today** — see §6.1; fixed in Phase 0. |
+| **Schedules** | `conversationStrategy=new` starts a fresh conversation per fire on the latest version — unaffected. `persistent` follows compatible versions like any conversation, which is the point for heartbeats. **An ended persistent conversation is a dead end today** — see §6.2; fixed in Phase 0. A Dream schedule's `agentVersion` is an explicit operator pin (`0` already means "current version") and is left as is. |
 | **Undo / redo / rerun** | Use `resolveAgentFor`. Undoing past a switch does not move the version back — versions only follow deployment, not history. |
 | **Security fixes** | A pinned conversation keeps its old config, including old HITL gates and tool whitelists. The docs must tell authors: never mark a security fix as breaking unless the old version is undeployed with it. |
 | **`autoDeploy` / restarts** | Unaffected. Resolution only reads what is deployed. |
+
+### 6.1 Slack: an ended conversation strands its thread (existing gap)
+
+[`SlackEventHandler.getOrCreateConversation`](../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java) returns the mapped conversation for a `channel:slack:<channel>:<agent>:<thread>` intent **whatever its state**. Once that conversation is ENDED, every further message in the thread hits `ConversationEndedException` and the thread is unusable for good. This already happens today — the idle sweep in `AgentDeploymentManagement` ends conversations, as does `undeploy …?endAllActiveConversations=true` — and the "end them" option for breaking changes (§4.5) would make it routine.
+
+**Decision:** on `ConversationEndedException`, the Slack path replaces the mapping and starts a fresh conversation in the same thread, **once per incoming message**, then sends the message to it — the same pattern `OpenAiConversationBridge` already uses.
+
+- The mapping is replaced only if it **still points at the ended conversation** (compare-and-replace). Two messages racing on one ended thread must end up on one new conversation, not two; the existing `ResourceAlreadyExistsException` "winner" handling in `getOrCreateConversation` covers the create side.
+- When the end reason is `system:agent-version-retired` (§4.5), the bot posts one short line in the thread first — e.g. *"I've been updated, so I'm starting a fresh conversation here."* For any other end reason it continues silently; the old conversation's messages stay visible in Slack, so nothing is lost for the user.
+- **Not** on `AgentNotReadyException`. That is transient (a deployment in progress, a node that has not swept yet) and must never cost a thread its conversation.
+- Long-term properties are per user, so what the agent remembers about the person carries over; only the conversation-scoped state is fresh, which is what an ended conversation means.
+
+### 6.2 Persistent schedules: an ended conversation dead-letters the schedule (existing gap)
+
+[`ScheduleFireExecutor.resolveOrCreatePersistent`](../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java) treats the stored conversation as valid if it can be read and the owner matches. It does not look at the state, so an ENDED conversation is reused, `say` throws `ConversationEndedException`, the broad catch records FAILED, and the retry/backoff machinery eventually dead-letters the schedule. A heartbeat stops for good because of an idle sweep or an undeploy.
+
+**Decision:** `resolveOrCreatePersistent` treats an ENDED conversation like an unreadable one — it creates a new conversation and records it with the existing single-field `setPersistentConversationId` write. The fire then proceeds normally and is recorded COMPLETED. A log line at INFO names the old and new conversation ids. Only ENDED counts; `AWAITING_HUMAN` keeps its existing SKIPPED handling, and a busy conversation is untouched.
 
 ## 7. Risks
 
@@ -190,6 +210,10 @@ The one addition is a **reason**: conversations ended this way carry `endedBy: s
 ## 8. Implementation Plan
 
 Each phase is one PR and leaves `main` releasable. Phase 1 alone changes no behaviour.
+
+**Phase 0 — ended-conversation recovery (a bug fix that stands on its own)**
+- Slack (§6.1) and persistent schedules (§6.2) replace an ENDED conversation instead of failing forever. Worth shipping first: it fixes stranded threads and dead-lettered heartbeats that already occur today, and Phase 3's `system:agent-version-retired` depends on it to be usable.
+- Tests: Slack — an ended mapped conversation is replaced and the message is delivered to the new one; two concurrent messages on one ended thread converge on one new conversation; `AgentNotReadyException` does **not** replace the mapping; the notice is posted only for the version-retired reason. Schedules — an ended persistent conversation is replaced and the fire completes; `AWAITING_HUMAN` stays SKIPPED; the owner-mismatch path is unchanged. Mutation-check each by reverting the fix.
 
 **Phase 1 — generation, stored and exposed (no behaviour change)**
 - Generation field + assignment in the agent store; `compatible` parameter on REST create/update; ignored on import and sync; stripped from export and sync diffs.
@@ -219,8 +243,14 @@ Each phase is one PR and leaves `main` releasable. Phase 1 alone changes no beha
 - **State migration across a breaking change** — a version declares how to carry a conversation over (e.g. property renames), turning some breaking changes into compatible ones.
 - **Per-agent UI preference** for the checkbox's default, kept in the Manager only, never in the config.
 
-## 10. Open Questions
+## 10. Decisions and Remaining Checks
 
-1. **Where the generation lives** — server-owned `AgentConfiguration` field (recommended, §4.1) or the version's `DocumentDescriptor`. Decide in Phase 1 after checking that every save path (REST, MCP, import, sync, `setup_agent`, `create_api_agent`) reaches the chosen place.
-2. **Channels and schedules** — confirm their behaviour on an ended conversation and how they resolve an agent (§6) before Phase 2.
-3. **"Previous version" on an update of an older version** — if someone updates v3 while v5 exists, is `compatible` relative to v3 (the base of the edit) or v5 (the latest)? Proposed: relative to the base of the edit, and the new version takes v3's generation only if that is still the agent's highest generation; otherwise it is breaking. That keeps generations monotonic (see the assignment rule in §4.1). Confirm in Phase 1.
+**Decided (2026-09-29)**
+
+1. **The generation lives in `AgentConfiguration`**, owned by the store (§4.1).
+2. **Channels and schedules** — Slack and persistent schedules recover from an ENDED conversation by starting a fresh one (§6.1, §6.2, Phase 0). `new`-strategy schedules and Dream schedules need no change.
+3. **Editing an older version is impossible** — `HistorizedResourceStore.update` only accepts the latest version, so "previous" is always the latest and carries the highest generation (§4.1).
+
+**To check in Phase 1:** every path that creates an agent version — REST, MCP (`setup_agent`, `create_api_agent`, `update_agent`, `apply_agent_changes`, `update_resource`), ZIP import, agent sync — goes through the agent store's create/update, so the assignment rule cannot be bypassed.
+
+**To check in Phase 2:** how a group member's private conversation behaves when it has ended (`MemberTurnExecutor` reuses it by id), and whether it needs the same recovery as §6.1.
