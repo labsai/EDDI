@@ -27,6 +27,9 @@ const PRESETS_JAVA = resolve(
 /**
  * The value of a Java text block constant, per JLS 3.10.6.
  *
+ * - Line terminators (CR, LF, CRLF) are normalised to LF first, as the JLS
+ *   does. A Windows checkout with `core.autocrlf=true` hands us CRLF, and a
+ *   leftover `\r` would hide every line-end `\` continuation.
  * - The content starts on the line after the opening `"""`.
  * - The common indentation is computed over the non-blank content lines AND the
  *   closing delimiter's line (when the delimiter sits on a line of its own, its
@@ -39,7 +42,8 @@ const PRESETS_JAVA = resolve(
  * and the template needs none. If one appears, this test fails loudly and the
  * comparison is updated deliberately.
  */
-function javaTextBlock(source: string, name: string): string {
+function javaTextBlock(rawSource: string, name: string): string {
+  const source = rawSource.replace(/\r\n?/g, "\n");
   const start = source.indexOf(`${name} = """`);
   if (start < 0) throw new Error(`${name} not found`);
   const bodyStart = source.indexOf("\n", start) + 1;
@@ -80,6 +84,14 @@ describe("javaTextBlock (the drift test's parser)", () => {
   it("joins a line-end continuation and drops a closing delimiter on the last line", () => {
     const src = 'X = """\n    one \\\n    two""";';
     expect(javaTextBlock(src, "X")).toBe("one two");
+  });
+
+  it("reads a CRLF source exactly like its LF twin", () => {
+    // A Windows checkout (core.autocrlf=true) hands readFileSync CRLF endings.
+    const lf = 'X = """\n    one \\\n    two\n      three\n    """;';
+    const crlf = lf.replace(/\n/g, "\r\n");
+    expect(javaTextBlock(crlf, "X")).toBe("one two\n  three\n");
+    expect(javaTextBlock(crlf, "X")).toBe(javaTextBlock(lf, "X"));
   });
 
   it("refuses an escape it does not decode", () => {
