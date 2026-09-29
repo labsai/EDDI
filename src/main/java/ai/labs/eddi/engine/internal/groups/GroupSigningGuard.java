@@ -237,9 +237,13 @@ public class GroupSigningGuard {
 
                 if (!entry.hasEnvelopeData()) {
                     unsigned++;
-                    LOGGER.warnf("UNSIGNED entry from agent '%s' in group '%s' — "
-                            + "peer verification required but entry has no envelope data",
-                            entry.speakerAgentId(), LogSanitizer.sanitize(gc.getGroupId()));
+                    // A policy violation, not a diagnostic: the receiver's config demands
+                    // peer verification and this prior entry carries no signature to verify,
+                    // so it cannot be trusted. Logged at ERROR so it surfaces to security
+                    // monitoring the same way a failed verification does.
+                    LOGGER.errorf("UNSIGNED entry from agent '%s' in group '%s' — peer verification is REQUIRED for receiver '%s' "
+                            + "but this entry has no envelope data and cannot be trusted", entry.speakerAgentId(),
+                            LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(receivingAgentId));
                     continue;
                 }
 

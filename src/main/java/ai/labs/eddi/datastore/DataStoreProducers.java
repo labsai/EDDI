@@ -60,6 +60,9 @@ import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.MongoSlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.PostgresSlackApprovalRecordStore;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.oauth.IOAuthStateStore;
 import ai.labs.eddi.connections.oauth.MongoOAuthStateStore;
@@ -179,6 +182,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConnectionNameClaimStore connectionNameClaimStore(Instance<MongoConnectionNameClaimStore> mongo,
                                                               Instance<PostgresConnectionNameClaimStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ISlackApprovalRecordStore slackApprovalRecordStore(Instance<MongoSlackApprovalRecordStore> mongo,
+                                                              Instance<PostgresSlackApprovalRecordStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

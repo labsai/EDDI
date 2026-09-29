@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.integrations.slack.hitl.InMemorySlackApprovalRecordStore;
+import java.time.Instant;
 import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -390,10 +392,12 @@ class SlackGroupDiscussionListenerTest {
     @Test
     void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
         // H2/H1: the group approval button value carries
-        // "<integrationName>|group:<gcId>"
-        // so the decision binds to that integration at the interactivity endpoint.
+        // "<integrationName>|group:<gcId>|<cardId>"
+        // so the decision binds to that integration and to this card at the
+        // interactivity endpoint.
+        var records = new InMemorySlackApprovalRecordStore();
         var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
-                "C_APPROVAL", "U1,U2", "acme-int");
+                "C_APPROVAL", "U1,U2", "acme-int", records);
         withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
 
         withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
@@ -409,6 +413,58 @@ class SlackGroupDiscussionListenerTest {
         var parsed = SlackHitlSupport.parseActionValue(value);
         assertEquals("acme-int", parsed.integrationName());
         assertTrue(parsed.isGroup());
+        // The button carries the card id that was recorded for this pause.
+        var recorded = records.findBySubject("acme-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc1");
+        assertEquals(1, recorded.size());
+        assertNotNull(parsed.cardId());
+        assertTrue(recorded.get(0).matchesCard(parsed.cardId()));
+    }
+
+    @Test
+    void onHitlPause_recordsTheCardForThisPause_andPostsItOnce() {
+        var records = new InMemorySlackApprovalRecordStore();
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int", records);
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+        Instant pausedAt = Instant.ofEpochMilli(42_000L);
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase", pausedAt));
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase", pausedAt));
+
+        verify(slackApi, times(1)).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), anyList(), anyString());
+        var recorded = records.findBySubject("acme-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc1");
+        assertEquals(1, recorded.size());
+        assertTrue(recorded.get(0).matchesPause(pausedAt));
+    }
+
+    @Test
+    void onHitlPause_failedDelivery_dropsTheRecord() {
+        var records = new InMemorySlackApprovalRecordStore();
+        doThrow(new SlackDeliveryException("HTTP 503"))
+                .when(slackApi).postBlocksMessage(any(), eq("C_APPROVAL"), any(), anyList(), anyString());
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int", records);
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase",
+                Instant.ofEpochMilli(42_000L)));
+
+        assertEquals(0, records.size(), "an undelivered card must not block a retry, nor be decidable");
+    }
+
+    @Test
+    void onHitlPause_withoutRecordStore_postsNoButtons() {
+        // A card nobody can decide on (no record → every decision refused) must not
+        // offer buttons.
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        assertFalse(blocksCaptor.getValue().toString().contains(SlackHitlSupport.ACTION_APPROVE));
     }
 
     @Test

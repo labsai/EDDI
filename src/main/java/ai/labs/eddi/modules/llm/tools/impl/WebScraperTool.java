@@ -4,12 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -22,7 +20,7 @@ import org.jsoup.select.Elements;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
@@ -37,36 +35,25 @@ public class WebScraperTool {
     /** Cap on what a single extraction hands back to the model. */
     private static final int MAX_EXTRACTED_CHARACTERS = 5000;
 
-    /** Default for {@link #maxResponseBytes}: 5 MiB. */
+    /** Backstop response cap used when no configuration is supplied (5 MiB). */
     static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
 
     private final SafeHttpClient httpClient;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
-
-    /**
-     * Largest page this tool will download. The tool returns a few thousand
-     * characters, but used to buffer whatever the server sent before looking at any
-     * of it — so a URL the model was handed could answer with gigabytes and take
-     * the JVM down with an OutOfMemoryError. Field-injected so the direct
-     * constructor keeps working for tests, with the default in place.
-     */
-    @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes", defaultValue = "5242880")
-    long maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES;
-
-    /**
-     * Fails the deployment at startup on an unusable
-     * {@code eddi.tools.web-scraper.max-response-bytes}, instead of every call at
-     * call time.
-     */
-    @PostConstruct
-    void validateLimits() {
-        BoundedBodyHandlers.requireValidLimit("eddi.tools.web-scraper.max-response-bytes", maxResponseBytes);
-    }
+    private final long maxResponseBytes;
 
     @Inject
-    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
+    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter,
+            @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes",
+                            defaultValue = "5242880") long maxResponseBytes) {
         this.httpClient = httpClient;
         this.htmlToMarkdownConverter = htmlToMarkdownConverter;
+        this.maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES;
+    }
+
+    /** Convenience constructor for tests and callers with no configured cap. */
+    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
+        this(httpClient, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES);
     }
 
     @Tool("Extracts the readable content of a web page URL as Markdown, with navigation, scripts and other page chrome removed.")
@@ -75,14 +62,14 @@ public class WebScraperTool {
         try {
             LOGGER.info("Extracting text from URL: " + url);
 
-            String html = fetchUrl(url);
+            FetchedPage page = fetchUrl(url);
 
             // Delegated rather than re-implemented: this tool used to run its own
             // "script, style, nav, footer, header, aside" strip plus a flat text()
             // dump, which dropped page titles living in <article><header><h1> and
             // merged adjacent blocks into single words. The converter keeps the
             // structure an LLM can actually use — headings, lists, tables, code.
-            return htmlToMarkdownConverter.convert(html, url, MAX_EXTRACTED_CHARACTERS);
+            return page.annotate(htmlToMarkdownConverter.convert(page.html(), url, MAX_EXTRACTED_CHARACTERS));
 
         } catch (Exception e) {
             LOGGER.error("Web page extraction error for " + url + ": " + e.getMessage());
@@ -103,8 +90,8 @@ public class WebScraperTool {
 
             LOGGER.info("Extracting links from URL: " + url);
 
-            String html = fetchUrl(url);
-            Document doc = Jsoup.parse(html);
+            FetchedPage page = fetchUrl(url);
+            Document doc = Jsoup.parse(page.html());
 
             Elements links = doc.select("a[href]");
 
@@ -133,7 +120,7 @@ public class WebScraperTool {
             }
 
             LOGGER.debug("Extracted " + count + " links from " + url);
-            return result.toString();
+            return page.annotate(result.toString());
 
         } catch (Exception e) {
             LOGGER.error("Link extraction error for " + url + ": " + e.getMessage());
@@ -147,8 +134,8 @@ public class WebScraperTool {
         try {
             LOGGER.info("Extracting elements matching '" + cssSelector + "' from " + url);
 
-            String html = fetchUrl(url);
-            Document doc = Jsoup.parse(html);
+            FetchedPage page = fetchUrl(url);
+            Document doc = Jsoup.parse(page.html());
 
             Elements elements = doc.select(cssSelector);
 
@@ -170,7 +157,7 @@ public class WebScraperTool {
             }
 
             LOGGER.debug("Extracted " + count + " elements from " + url);
-            return result.toString();
+            return page.annotate(result.toString());
 
         } catch (Exception e) {
             LOGGER.error("Selector extraction error: " + e.getMessage());
@@ -184,8 +171,8 @@ public class WebScraperTool {
         try {
             LOGGER.info("Extracting metadata from URL: " + url);
 
-            String html = fetchUrl(url);
-            Document doc = Jsoup.parse(html);
+            FetchedPage page = fetchUrl(url);
+            Document doc = Jsoup.parse(page.html());
 
             StringBuilder result = new StringBuilder();
             result.append("Metadata for ").append(url).append(":\n\n");
@@ -227,7 +214,7 @@ public class WebScraperTool {
             }
 
             LOGGER.debug("Metadata extracted from " + url);
-            return result.toString();
+            return page.annotate(result.toString());
 
         } catch (Exception e) {
             LOGGER.error("Metadata extraction error: " + e.getMessage());
@@ -239,7 +226,7 @@ public class WebScraperTool {
      * Fetches the content of a URL using the SSRF-safe SafeHttpClient. The URL is
      * validated (SSRF check) and redirects are handled safely.
      */
-    private String fetchUrl(String url) throws IOException, InterruptedException {
+    private FetchedPage fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -248,13 +235,58 @@ public class WebScraperTool {
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(maxResponseBytes));
+        // Bounded read: an LLM-chosen URL must not be able to stream an unbounded
+        // body into memory. The body is capped as it arrives rather than pulled in
+        // full and measured afterwards.
+        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, maxResponseBytes);
 
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);
         }
 
-        return response.body();
+        if (!response.truncated()) {
+            return new FetchedPage(new String(response.body(), StandardCharsets.UTF_8), null);
+        }
+        // A truncated body is either over the size cap or cut off by the read
+        // deadline; the flag does not say which. Both leave a partial page, so the
+        // caller's output carries an explicit note instead of passing the fragment
+        // off as the whole page, and a multi-byte character split by the cut is
+        // dropped rather than decoded to a replacement character.
+        LOGGER.warnf("Response from %s was truncated (size cap of %d bytes or read deadline); returning partial content", url,
+                maxResponseBytes);
+        byte[] body = response.body();
+        String html = new String(body, 0, completeUtf8Length(body), StandardCharsets.UTF_8);
+        return new FetchedPage(html, "\n\n[Note: the page response was truncated (it exceeded " + maxResponseBytes
+                + " bytes or the read deadline expired); the content above is partial.]");
+    }
+
+    /**
+     * Length of {@code bytes} without a trailing, incomplete UTF-8 sequence — the
+     * part a byte-count cut can leave dangling.
+     */
+    static int completeUtf8Length(byte[] bytes) {
+        int end = bytes.length;
+        int start = end - 1;
+        // Walk back over at most three continuation bytes (10xxxxxx) to the lead byte.
+        while (start >= 0 && end - start <= 4 && (bytes[start] & 0xC0) == 0x80) {
+            start--;
+        }
+        if (start < 0 || end - start > 4) {
+            return end; // no lead byte in reach: not UTF-8 we can repair, leave it
+        }
+        int lead = bytes[start] & 0xFF;
+        int expected = lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+        return end - start < expected ? start : end;
+    }
+
+    /**
+     * A fetched page and, when the body was truncated, the note to append to the
+     * tool's output.
+     */
+    private record FetchedPage(String html, String truncationNote) {
+        String annotate(String output) {
+            return truncationNote == null ? output : output + truncationNote;
+        }
     }
 
 }

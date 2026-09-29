@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
@@ -152,6 +153,23 @@ public class ConverseWithAgentTool {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: maxDelegationsPerTask=%d exhausted",
                         agentId, config.getMaxDelegationsPerTask());
                 return "⚠️ Maximum delegations for this task (%d) reached.".formatted(config.getMaxDelegationsPerTask());
+            }
+
+            // --- Guardrail: cross-user conversation access (IDOR) ---
+            // A model-chosen conversationId must belong to the same user this tool is
+            // bound to (the parent conversation's owner). Without this the LLM could
+            // continue ANOTHER user's conversation by supplying its id: the agent-id
+            // say(...) overload this tool drives checks only that the agentId matches
+            // the conversation, not who owns it. A new conversation (no id) is started
+            // as this user below and needs no check; the target agent itself is already
+            // bounded by the allowDelegation / allowedDelegationTargets guardrails
+            // above. Internal group-orchestrator callers use IConversationService
+            // directly and never pass through this tool.
+            if (conversationId != null && !conversationId.isBlank()) {
+                String ownershipRefusal = refuseIfNotOwnedByBoundUser(conversationId);
+                if (ownershipRefusal != null) {
+                    return ownershipRefusal;
+                }
             }
 
             // Propagate the hop count so the callee's own converse_with_agent knows how
@@ -318,6 +336,59 @@ public class ConverseWithAgentTool {
                 .map(PendingToolCall::getToolName)
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    /**
+     * Refuses when a model-supplied {@code conversationId} belongs to a user other
+     * than the one this tool is bound to.
+     *
+     * <p>
+     * Without a bound identity (the parent conversation records no user) nothing
+     * can be compared, so a supplied id is refused outright: otherwise an anonymous
+     * parent could continue any user's conversation by id. Starting a new
+     * conversation (no id) is unaffected. A conversation that cannot be found is
+     * left to the downstream {@code say(...)} call to surface; any other
+     * verification failure — including a conversation that records no owner — fails
+     * closed: the conversation is not driven unless ownership could be confirmed.
+     *
+     * @return a user-facing refusal string, or {@code null} when the conversation
+     *         may be driven
+     */
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
+    private String refuseIfNotOwnedByBoundUser(String conversationId) {
+        if (userId == null || userId.isBlank()) {
+            // Fail closed: with no bound identity there is nothing to compare the
+            // owner against, and the agent-id say(...) overload checks only the agent
+            // match — so allowing this would let an anonymous parent conversation
+            // continue any user's conversation by id.
+            LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': no bound user to verify ownership against",
+                    conversationId);
+            return OWNERSHIP_UNVERIFIED.formatted(conversationId);
+        }
+        try {
+            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            String owner = snapshot != null ? snapshot.getUserId() : null;
+            if (owner == null || owner.isBlank()) {
+                // Fail closed: the conversation id is model-supplied, and the agent-id
+                // say(...) overload checks only the agent match — so an ownerless
+                // (legacy) conversation would otherwise be drivable by any bound user.
+                LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': ownership could not be established",
+                        conversationId);
+                return OWNERSHIP_UNVERIFIED.formatted(conversationId);
+            }
+            if (!owner.equals(userId)) {
+                LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s' owned by another user", conversationId);
+                return "⚠️ Conversation '%s' does not belong to you and cannot be continued.".formatted(conversationId);
+            }
+            return null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Unknown conversation — let the downstream say(...) path surface it.
+            return null;
+        } catch (Exception e) {
+            LOGGER.warnf("[CONVERSE] Could not verify ownership of conversation '%s': %s", conversationId, e.getMessage());
+            return "⚠️ Could not verify access to conversation '%s'.".formatted(conversationId);
+        }
     }
 
     /**

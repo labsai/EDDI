@@ -5,8 +5,6 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
-import ai.labs.eddi.engine.httpclient.BodyHandlerProbe;
-import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers.ResponseTooLargeException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -29,8 +27,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -44,6 +40,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -377,59 +374,7 @@ class AttachmentForwarderTest {
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
-            verify(httpClient).sendValidated(any(), any());
-        }
-
-        @Test
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        void urlDownload_readsAtMostThePerFileCap() throws Exception {
-            // The cap used to be checked on a body already buffered whole: a URL
-            // answering with gigabytes ended in an OutOfMemoryError first. Now the
-            // handler handed to the client is itself bounded by the cap.
-            AttachmentForwarder small = newForwarder(1000, 20_000);
-            mockAttachments(urlImage());
-            mockDownload("imgbytes".getBytes());
-
-            small.forward(messages(UserMessage.from("Describe")), memory, "gemini", "gemini-2.0-flash");
-
-            ArgumentCaptor<HttpResponse.BodyHandler> handler = ArgumentCaptor.forClass(HttpResponse.BodyHandler.class);
-            verify(httpClient).sendValidated(any(), handler.capture());
-            assertTrue(BodyHandlerProbe.declared(handler.getValue(), 1001).refused(), "a body over the cap must be refused while reading");
-            assertTrue(BodyHandlerProbe.streamed(handler.getValue(), 1001).refused());
-            assertFalse(BodyHandlerProbe.streamed(handler.getValue(), 1000).refused());
-        }
-
-        @Test
-        void unusableForwardLimit_failsAtConstructionNotPerCall() {
-            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> newForwarder(-1, 20_000));
-            assertTrue(e.getMessage().contains("eddi.attachments.max-forward-bytes"), e.getMessage());
-        }
-
-        @Test
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        void urlDownload_getsTheLongDownloadTimeout() throws Exception {
-            mockAttachments(urlImage());
-            mockDownload("imgbytes".getBytes());
-
-            forwarder.forward(messages(UserMessage.from("Describe")), memory, "gemini", "gemini-2.0-flash");
-
-            ArgumentCaptor<HttpRequest> request = ArgumentCaptor.forClass(HttpRequest.class);
-            verify(httpClient).sendValidated(request.capture(), any());
-            assertEquals(Optional.of(AttachmentForwarder.DOWNLOAD_TIMEOUT), request.getValue().timeout());
-        }
-
-        @Test
-        void urlDownload_tooLarge_isTheUsualPerFileNote() throws Exception {
-            AttachmentForwarder small = newForwarder(1000, 20_000);
-            mockAttachments(urlImage());
-            doThrow(new ResponseTooLargeException(1000)).when(httpClient).sendValidated(any(), any());
-            List<ChatMessage> messages = messages(UserMessage.from("Describe"));
-
-            small.forward(messages, memory, "gemini", "gemini-2.0-flash");
-
-            Content c = ((UserMessage) messages.get(0)).contents().get(1);
-            assertInstanceOf(TextContent.class, c);
-            assertTrue(((TextContent) c).text().contains("per-file forward limit of 1000 bytes"), ((TextContent) c).text());
+            verify(httpClient).sendValidatedBounded(any(), anyLong());
         }
 
         @Test
@@ -669,10 +614,8 @@ class AttachmentForwarderTest {
     @Test
     void downloadNon200_addsNote() throws Exception {
         mockAttachments(urlImage());
-        @SuppressWarnings("unchecked")
-        HttpResponse<byte[]> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(500);
-        doReturn(resp).when(httpClient).sendValidated(any(), any());
+        doReturn(new SafeHttpClient.BoundedResponse(500, new byte[0], false))
+                .when(httpClient).sendValidatedBounded(any(), anyLong());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash"); // needs download
@@ -684,7 +627,7 @@ class AttachmentForwarderTest {
     @Test
     void downloadException_addsNote() throws Exception {
         mockAttachments(urlImage());
-        doThrow(new IOException("boom")).when(httpClient).sendValidated(any(), any());
+        doThrow(new IOException("boom")).when(httpClient).sendValidatedBounded(any(), anyLong());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash");
@@ -797,10 +740,8 @@ class AttachmentForwarderTest {
 
     @SuppressWarnings("unchecked")
     private void mockDownload(byte[] bytes) throws Exception {
-        HttpResponse<byte[]> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(200);
-        when(resp.body()).thenReturn(bytes);
-        doReturn(resp).when(httpClient).sendValidated(any(), any());
+        doReturn(new SafeHttpClient.BoundedResponse(200, bytes, false))
+                .when(httpClient).sendValidatedBounded(any(), anyLong());
     }
 
     private static Attachment urlImage() {

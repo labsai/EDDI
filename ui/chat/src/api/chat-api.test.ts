@@ -29,20 +29,35 @@ async function collect(chunks: string[]): Promise<SSEEvent[]> {
 }
 
 describe("sendMessageStreaming — SSE parsing", () => {
-  it("keeps a leading space — RESTEasy writes no delimiter space", async () => {
-    // EDDI's writer is resteasy-reactive SseUtil.serialiseField, which does
-    // `sb.append(field).append(":")` then the value — NO delimiter space
-    // (verified in resteasy-reactive-3.37.1 sources, SseUtil.java:84).
-    // A leading space on the wire therefore belongs to the token, and LLM
-    // streams emit " word" constantly. Stripping one per the SSE spec's
-    // server-side convention deleted it and ran words together.
+  it("strips exactly one delimiter space — the one padDataLines adds", async () => {
+    // RestAgentEngineStreaming.padDataLines prefixes every data line with ONE
+    // space (RESTEasy's SseUtil writes "data:" with none), so the SSE spec's
+    // single optional space is the delimiter, not part of the token. Keeping
+    // it put an extra space before every token ("quota tion").
     const events = await collect(["event: token\ndata: world\n\n"]);
+
+    expect(events).toEqual([{ type: "token", data: "world" }]);
+  });
+
+  it("keeps a token's own leading space after the delimiter", async () => {
+    // LLM streams emit " word" constantly; on the wire that is "data:  word".
+    const events = await collect(["event: token\ndata:  world\n\n"]);
 
     expect(events).toEqual([{ type: "token", data: " world" }]);
   });
 
-  it("preserves deeper indentation verbatim", async () => {
-    const events = await collect(["event: token\ndata:    indented\n\n"]);
+  it("reassembles tokens that split a word without inserting spaces", async () => {
+    const events = await collect([
+      "event: token\ndata: quota\n\n",
+      "event: token\ndata: tion\n\n",
+      "event: token\ndata:  works\n\n",
+    ]);
+
+    expect(events.map((e) => e.data).join("")).toBe("quotation works");
+  });
+
+  it("preserves deeper indentation after the delimiter", async () => {
+    const events = await collect(["event: token\ndata:     indented\n\n"]);
 
     expect(events).toEqual([{ type: "token", data: "    indented" }]);
   });
@@ -55,7 +70,8 @@ describe("sendMessageStreaming — SSE parsing", () => {
 
   it("joins multi-line data with newlines, preserving each line's indentation", async () => {
     const events = await collect([
-      "event: token\ndata:def f():\ndata:    return 1\n\n",
+      // padDataLines pads every continuation line too.
+      "event: token\ndata: def f():\ndata:     return 1\n\n",
     ]);
 
     expect(events).toEqual([
@@ -137,9 +153,19 @@ describe("rerunLastStep", () => {
 
     expect(calls[0].url).toContain("/agents/conv-1/rerun");
     expect(calls[0].init?.method).toBe("POST");
-    // `language` has no @DefaultValue server-side and is checked before any
-    // other work, so omitting it is an unconditional 400.
-    expect(calls[0].url).toContain("language=en");
+    // No language unless one is asked for. A hard-coded "en" became the
+    // conversation's `lang` property, filtering language-specific outputs
+    // for that user and re-running managed conversations on every load.
+    expect(calls[0].url).not.toContain("language");
+  });
+
+  it("forwards a language only when one is given", async () => {
+    setBaseUrl("");
+    const { calls } = captureFetch(200, "{}");
+
+    await rerunLastStep("conv-1", "de");
+
+    expect(calls[0].url).toContain("/agents/conv-1/rerun?language=de");
   });
 
   it("tolerates an empty 200 body", async () => {

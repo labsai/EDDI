@@ -22,10 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * An inline OpenAPI spec may only reference itself. swagger-parser, asked to
- * resolve, fetched any other {@code $ref} on its own — local files relative to
- * the working directory or by absolute path, and http URLs including loopback —
- * and what it read surfaced in the generated httpcalls config.
+ * An inline OpenAPI spec may not point a {@code $ref} at the server's
+ * filesystem. swagger-parser, asked to resolve, read such references on its own
+ * — relative to the working directory or by absolute path — and what it read
+ * surfaced in the generated httpcalls config. The guard itself is
+ * {@link McpApiToolBuilder#rejectUnsafeInlineRefs(String)}; these cases pin the
+ * paths around it that {@code McpApiToolBuilderTest} does not: specs too large
+ * for the YAML loader, unreadable specs, remote specs, and local references
+ * that must keep resolving.
  */
 @DisplayName("McpApiToolBuilder — external $ref in inline specs")
 class McpApiToolBuilderExternalRefTest {
@@ -47,7 +51,7 @@ class McpApiToolBuilderExternalRefTest {
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> McpApiToolBuilder.parseSpec(specReferencing(secret.toAbsolutePath().toString())));
-        assertTrue(e.getMessage().contains("local references"), e.getMessage());
+        assertTrue(e.getMessage().contains("external $ref"), e.getMessage());
     }
 
     @Test
@@ -63,15 +67,29 @@ class McpApiToolBuilderExternalRefTest {
         String big = small.substring(0, small.length() - 1) + ", \"x-pad\": \"" + "a".repeat(3_300_000) + "\"}";
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(big));
-        assertTrue(e.getMessage().contains("local references"), e.getMessage());
+        assertTrue(e.getMessage().contains("external $ref"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an escaped $ref key in a JSON spec too large for the YAML loader is still found")
+    void oversizedJsonSpecWithEscapedKeyIsStillScanned(@TempDir Path dir) throws Exception {
+        // The raw-text pass cannot see an escaped key, so this one rests on the
+        // decoded tree alone — which, past snakeyaml's limit, must still be built.
+        Path secret = dir.resolve("secret.yaml");
+        Files.writeString(secret, "type: object\ndescription: SERVER-FILE-CONTENT\n");
+        String small = specReferencing(secret.toAbsolutePath().toString()).trim().replace("\"$ref\"", "\"\\" + "u0024ref\"");
+        String big = small.substring(0, small.length() - 1) + ", \"x-pad\": \"" + "a".repeat(3_300_000) + "\"}";
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(big));
+        assertTrue(e.getMessage().contains("external $ref"), e.getMessage());
     }
 
     @Test
     @DisplayName("a spec the scan cannot read is refused, not waved through")
     void unreadableSpecFailsClosed() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> McpApiToolBuilder.rejectExternalRefs("{\"openapi\": \"3.0.0\", \"paths\": {"));
-        assertTrue(e.getMessage().contains("could not be read"), e.getMessage());
+                () -> McpApiToolBuilder.rejectUnsafeInlineRefs("{\"openapi\": \"3.0.0\", \"paths\": {"));
+        assertTrue(e.getMessage().contains("could not be parsed"), e.getMessage());
     }
 
     @Test
@@ -108,12 +126,10 @@ class McpApiToolBuilderExternalRefTest {
     }
 
     @Test
-    @DisplayName("relative, file: and http references are refused too")
+    @DisplayName("relative and file: references are refused too")
     void otherExternalFormsRefused() {
         assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(specReferencing("./secret.yaml")));
         assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(specReferencing("file:///etc/passwd")));
-        assertThrows(IllegalArgumentException.class,
-                () -> McpApiToolBuilder.parseSpec(specReferencing("http://127.0.0.1:1/internal.yaml#/Thing")));
     }
 
     @Test
@@ -146,13 +162,5 @@ class McpApiToolBuilderExternalRefTest {
 
         var openAPI = assertDoesNotThrow(() -> McpApiToolBuilder.parseSpec(spec));
         assertEquals("limit", openAPI.getPaths().get("/items").getGet().getParameters().get(0).getName());
-    }
-
-    @Test
-    @DisplayName("a property that merely happens to be called $ref (an object, not a string) is not a reference")
-    void nonTextualRefIgnored() {
-        assertDoesNotThrow(() -> McpApiToolBuilder.rejectExternalRefs("""
-                {"components":{"schemas":{"T":{"properties":{"$ref":{"type":"string"}}}}}}
-                """));
     }
 }

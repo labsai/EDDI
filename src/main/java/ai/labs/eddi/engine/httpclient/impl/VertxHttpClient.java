@@ -6,14 +6,13 @@ package ai.labs.eddi.engine.httpclient.impl;
 
 import io.vertx.core.Vertx;
 import io.vertx.ext.web.client.WebClient;
-import io.vertx.ext.web.client.WebClientSession;
 
 public class VertxHttpClient {
     private final Vertx vertx;
-    private final WebClientSession webClient;
+    private final WebClient webClient;
     private final WebClient underlyingClient;
 
-    public VertxHttpClient(final Vertx vertx, final WebClientSession webClient, final WebClient underlyingClient) {
+    public VertxHttpClient(final Vertx vertx, final WebClient webClient, final WebClient underlyingClient) {
         this.vertx = vertx;
         this.webClient = webClient;
         this.underlyingClient = underlyingClient;
@@ -23,7 +22,7 @@ public class VertxHttpClient {
         return vertx;
     }
 
-    public final WebClientSession getWebClient() {
+    public final WebClient getWebClient() {
         return webClient;
     }
 

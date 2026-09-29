@@ -233,15 +233,45 @@ class DreamServiceExtendedTest {
         }
 
         @Test
-        @DisplayName("truncation applies to long keys and values")
-        void truncation() {
+        @DisplayName("a long key is truncated, a long value is kept whole for mergeDuplicateKeys to refuse")
+        void longKeyTruncatedLongValueKept() {
             String longKey = "k".repeat(200);
             String longVal = "v".repeat(2000);
             var result = dreamService.parseConsolidatedEntries(
                     "[{\"key\": \"" + longKey + "\", \"value\": \"" + longVal + "\"}]");
             assertEquals(1, result.size());
             assertTrue(result.getFirst().key().length() <= DreamService.MAX_KEY_LENGTH);
-            assertTrue(result.getFirst().value().length() <= DreamService.MAX_VALUE_LENGTH);
+            assertEquals(2000, result.getFirst().value().length(), "cutting the value would lose facts once the originals go");
+        }
+
+        @Test
+        @DisplayName("a value over the limit — from the model or from a merge — keeps the originals instead of being cut")
+        void overLongValueKeepsTheOriginals() {
+            String half = "x".repeat(DreamService.MAX_VALUE_LENGTH - 10);
+            var merged = DreamService.mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", half),
+                    new DreamService.ConsolidatedEntry("k", half + "y")));
+            assertTrue(merged.isEmpty(), "two values that fit alone must not be joined and cut");
+
+            var single = DreamService
+                    .mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", "v".repeat(DreamService.MAX_VALUE_LENGTH + 1))));
+            assertTrue(single.isEmpty());
+
+            var fits = DreamService
+                    .mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", "a"), new DreamService.ConsolidatedEntry("k", "b")));
+            assertEquals(List.of(new DreamService.ConsolidatedEntry("k", "a; b")), fits);
+        }
+
+        @Test
+        @DisplayName("a null or blank summarizationPrompt falls back to the built-in prompt, never the text 'null'")
+        void nullPromptUsesTheDefault() {
+            var config = new AgentConfiguration.DreamConfig();
+            config.setSummarizationPrompt(null);
+            String instructions = DreamService.consolidationInstructions(config, 4);
+            assertTrue(instructions.startsWith(AgentConfiguration.DreamConfig.DEFAULT_SUMMARIZATION_PROMPT), instructions);
+            assertFalse(instructions.startsWith("null"));
+
+            config.setSummarizationPrompt("  ");
+            assertTrue(DreamService.consolidationInstructions(config, 4).startsWith(AgentConfiguration.DreamConfig.DEFAULT_SUMMARIZATION_PROMPT));
         }
     }
 
@@ -280,25 +310,25 @@ class DreamServiceExtendedTest {
     class TargetCappingTests {
 
         @Test
-        @DisplayName("consolidated entries capped to target count")
-        void consolidatedCapped() throws Exception {
+        @DisplayName("an answer above the target is kept whole — truncating it would lose facts once the originals are deleted")
+        void consolidatedAboveTargetKeptWhole() throws Exception {
             dreamConfig.setSummarizeTargetEntries(1);
             dreamConfig.setSummarizeGroupBy("all");
             dreamConfig.setPreserveAgentProvenance(false);
 
             var entries = makeEntries(5, "fact", "agent-1");
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
-            // LLM returns 3 entries but target is 1 → should cap to 1
+            // LLM returns 3 entries (target 1, but fewer than the 5 originals) → all 3
+            // written
             String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}, {\"key\": \"s3\", \"value\": \"v3\"}]";
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult(llmResponse, 100, 50));
 
             var result = dreamService.process("user-1", "agent-1", dreamConfig);
             assertTrue(result.isSuccess());
-            // Only 1 upsert should happen (capped to target)
-            verify(store, times(1)).upsert(any(UserMemoryEntry.class));
+            verify(store, times(3)).insertIfAbsent(any(UserMemoryEntry.class));
         }
     }
 
@@ -361,7 +391,7 @@ class DreamServiceExtendedTest {
                             Visibility.self, "agent-2", null, "source", false, 0,
                             Instant.now().minusSeconds(40), Instant.now())));
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             String llmResponse = "[{\"key\": \"consolidated\", \"value\": \"merged\"}]";
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -371,9 +401,9 @@ class DreamServiceExtendedTest {
             assertTrue(result.isSuccess());
 
             // One self-scoped entry per contributing agent; nothing widened
-            verify(store, never()).upsert(argThat(entry -> entry.visibility() != Visibility.self));
-            verify(store).upsert(argThat(entry -> "agent-1".equals(entry.sourceAgentId())));
-            verify(store).upsert(argThat(entry -> "agent-2".equals(entry.sourceAgentId())));
+            verify(store, never()).insertIfAbsent(argThat(entry -> entry.visibility() != Visibility.self));
+            verify(store).insertIfAbsent(argThat(entry -> "agent-1".equals(entry.sourceAgentId())));
+            verify(store).insertIfAbsent(argThat(entry -> "agent-2".equals(entry.sourceAgentId())));
         }
 
         @Test
@@ -392,7 +422,7 @@ class DreamServiceExtendedTest {
                             Visibility.group, "agent-2", List.of("team-a"), "source", false, 0,
                             Instant.now().minusSeconds(50), Instant.now())));
             when(store.getAllEntries("user-1")).thenReturn(entries);
-            when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
             when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                     .thenReturn(new SummarizationResult("[{\"key\": \"c\", \"value\": \"m\"}]", 0, 0));
@@ -401,7 +431,7 @@ class DreamServiceExtendedTest {
             assertTrue(result.isSuccess());
 
             // Already shared → a single merged entry, still group-scoped
-            verify(store, times(1)).upsert(argThat(entry -> entry.visibility() == Visibility.group));
+            verify(store, times(1)).insertIfAbsent(argThat(entry -> entry.visibility() == Visibility.group));
         }
     }
 

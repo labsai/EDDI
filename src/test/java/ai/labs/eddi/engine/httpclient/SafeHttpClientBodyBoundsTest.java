@@ -21,7 +21,6 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -145,13 +144,6 @@ class SafeHttpClientBodyBoundsTest {
         ResponseTooLargeException e = assertThrows(ResponseTooLargeException.class,
                 () -> client.send(request, BoundedBodyHandlers.ofString(256 * 1024)));
         assertEquals(256 * 1024, e.getLimit());
-        // Created on the client's executor: the caller's own frames ride along as a
-        // suppressed exception, so a log shows who made the call.
-        boolean callerFramesAttached = Arrays.stream(e.getSuppressed())
-                .filter(SafeHttpClient.CallerFrames.class::isInstance)
-                .flatMap(s -> Arrays.stream(s.getStackTrace()))
-                .anyMatch(frame -> frame.getClassName().startsWith(SafeHttpClientBodyBoundsTest.class.getName()));
-        assertTrue(callerFramesAttached, "the caller's stack frames must be attached to the rethrown exception");
     }
 
     @Test
@@ -229,18 +221,5 @@ class SafeHttpClientBodyBoundsTest {
         // The server's write fails once the client drops the connection; give its
         // handler thread a moment to observe that.
         assertTrue(redirectBodyCutOff.await(5, TimeUnit.SECONDS), "the redirect body must not be read to the end");
-    }
-
-    @Test
-    @DisplayName("the budget is three connect timeouts, or the request's own timeout when longer")
-    void totalBudget() {
-        SafeHttpClient client = new SafeHttpClient(10_000);
-        URI uri = URI.create("https://example.com/");
-
-        assertEquals(Duration.ofSeconds(30), client.totalBudget(HttpRequest.newBuilder(uri).build()));
-        assertEquals(Duration.ofSeconds(30), client.totalBudget(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).build()));
-        // A caller that asked for a long timeout (an A2A peer configured for 120s)
-        // must not be cut short by the default budget.
-        assertEquals(Duration.ofSeconds(120), client.totalBudget(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(120)).build()));
     }
 }

@@ -44,9 +44,9 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -484,8 +484,17 @@ public class AgentSetupService {
         // Scheme-level check only. Full SSRF validation would reject loopback and
         // private addresses, which is precisely where a local LLM provider lives —
         // the reason this field exists.
-        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
-            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank()) {
+            if (!UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+                throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+            }
+            // A local LLM base URL may point at loopback/private hosts on purpose, but
+            // never at the cloud instance-metadata service (always-on guard).
+            try {
+                UrlValidationUtils.rejectCloudMetadataTarget(request.llmBaseUrl());
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException(e.getMessage(), e);
+            }
         }
         // Validate the HITL config HERE, before a single resource exists.
         // AgentStore.create validates it too, but only at step 7 — so an unusable
@@ -1299,6 +1308,11 @@ public class AgentSetupService {
                     + "' but vaultKeyName says '" + ref.keyName() + "'. Pass one or the other.");
         }
 
+        if (AutoVaultedSecrets.isReservedName(ref.keyName())) {
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' has the reserved shape of an auto-vaulted conversation "
+                    + "secret, which belongs to one user's conversation. Choose another name.");
+        }
+
         if (!secretProvider.isAvailable()) {
             throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
                     + "disabled. Set EDDI_VAULT_MASTER_KEY, or omit vaultKeyName to pass the key through as plaintext.");
@@ -1316,7 +1330,17 @@ public class AgentSetupService {
         boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
 
         if (existing != null) {
-            if (haveNewPlaintext && !EnvelopeCrypto.sha256Hex(key).equals(existing.checksum())) {
+            boolean matches;
+            try {
+                matches = !haveNewPlaintext || secretProvider.matchesChecksum(ref.tenantId(), existing.checksum(), key);
+            } catch (RuntimeException e) {
+                // A keyed checksum needs the checksum key, which may have to be read and
+                // unwrapped first. A failure there means "could not compare", not "does
+                // not match" — so it must not fall through to the mismatch message.
+                throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': "
+                        + e.getClass().getSimpleName(), e);
+            }
+            if (!matches) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
                         + "apiKey supplied. Setup will not overwrite it, because other agents may reference it. Use a different "
                         + "vaultKeyName, omit apiKey to reuse the stored value, or rotate the key through the secrets API first.");
@@ -1368,7 +1392,7 @@ public class AgentSetupService {
     private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
         try {
             SecretMetadata written = secretProvider.getMetadata(ref);
-            if (written.checksum() != null && !EnvelopeCrypto.sha256Hex(expectedPlaintext).equals(written.checksum())) {
+            if (written.checksum() != null && !secretProvider.matchesChecksum(ref.tenantId(), written.checksum(), expectedPlaintext)) {
                 throw new AgentSetupException("Vault key '" + ref.keyName() + "' was written concurrently by another setup and now holds "
                         + "a different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
             }
@@ -1435,9 +1459,12 @@ public class AgentSetupService {
             return null;
         }
         try {
-            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            // The stored checksum may be keyed (only the provider can verify it) or a
+            // legacy bare SHA-256, so match through the provider rather than computing a
+            // digest here — a caller no longer holds the checksum key.
             return secretProvider.listKeys(SecretReference.DEFAULT_TENANT).stream()
-                    .filter(metadata -> checksum.equals(metadata.checksum()))
+                    .filter(metadata -> secretProvider.matchesChecksum(
+                            metadata.tenantId() == null ? SecretReference.DEFAULT_TENANT : metadata.tenantId(), metadata.checksum(), plaintext))
                     .filter(AgentSetupService::isUnrestricted)
                     // Oldest first, key name as tie-break: repeated setups with the same key
                     // must converge on ONE entry, so the choice cannot depend on listing order.

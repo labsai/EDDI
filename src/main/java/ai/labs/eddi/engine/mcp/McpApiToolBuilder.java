@@ -16,12 +16,14 @@ import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.servers.Server;
+import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import io.swagger.v3.parser.util.DeserializationUtils;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -228,43 +230,60 @@ public final class McpApiToolBuilder {
     /**
      * Parse an OpenAPI spec from a JSON/YAML string or URL.
      * <p>
-     * <b>Security:</b> when the input is a location (not inline content), it is
-     * required to be an {@code http}/{@code https} URL via
-     * {@link UrlValidationUtils#isValidHttpUrl(String)} before being fetched. This
-     * prevents the underlying swagger-parser {@code readLocation} from reading
-     * local files (e.g. {@code file:///etc/passwd}) or using other non-http schemes
-     * (classpath:, jar:, ftp:). Private/internal hosts are intentionally still
-     * permitted so internal OpenAPI specs remain discoverable (the calling REST/MCP
-     * surface is {@code eddi-admin}/{@code eddi-editor} gated).
+     * <b>Security:</b> reference resolution ({@code setResolve(true)}) runs with
+     * {@code setSafelyResolveURL(true)}, so any {@code $ref} the parser follows —
+     * whether the input is a URL or inline content that embeds external references
+     * — goes through swagger-parser's blocked-URL resolver
+     * (private/link-local/cloud targets refused) and cannot read local files or use
+     * non-http schemes. On its own that guards the {@code $ref} hops; the spec
+     * location itself is guarded separately below.
      * <p>
-     * Inline JSON/YAML content may only use local references
-     * ({@code $ref: '#/components/...'}); see {@link #rejectExternalRefs(String)}.
-     * With resolution on and no base location, swagger-parser resolves any other
-     * {@code $ref} itself — {@code ./secret.yaml} and {@code /etc/passwd} against
-     * the server's working directory, {@code http://127.0.0.1/...} over the network
-     * — and the content it read surfaced in the generated httpcalls config. So the
-     * reference, not the fetch, is refused.
+     * When the input is a location (not inline content) it must be an
+     * {@code http}/{@code https} URL via
+     * {@link UrlValidationUtils#isValidHttpUrl(String)}, and it is additionally run
+     * through {@link UrlValidationUtils#rejectCloudMetadataTarget(String)} before
+     * being fetched — {@code isValidHttpUrl} alone would let
+     * {@code http://169.254.169.254/...} through to the parser's fetcher, bypassing
+     * the always-on metadata guard. Other private/internal hosts are intentionally
+     * still permitted so internal OpenAPI specs remain discoverable (the calling
+     * REST/MCP surface is {@code eddi-admin}/{@code eddi-editor} gated).
+     * <p>
+     * For inline JSON/YAML content, {@code setSafelyResolveURL(true)} alone is not
+     * enough: it guards only URL-format {@code $ref}s, while swagger-parser
+     * classifies a ref starting with {@code /}, {@code .} or {@code file:} as a
+     * RELATIVE ref and resolves it against the filesystem (base {@code null} → the
+     * process CWD) without the checker — so an inline spec with
+     * {@code $ref: "/etc/passwd"} could read a local file. Inline specs are
+     * therefore scanned up front and any {@code $ref} that is neither an internal
+     * fragment ({@code #/…}) nor an {@code http(s)} URL is rejected.
      */
     public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
+        // Route every $ref the parser fetches through the blocked-URL resolver:
+        // without this, resolution fetches http(s) refs and reads filesystem refs
+        // (relative to the process CWD) on the first request, unguarded.
+        parseOptions.setSafelyResolveURL(true);
 
         SwaggerParseResult result;
         if (looksLikeInlineSpec(specInput)) {
-            // Inline JSON or YAML content. Resolution stays on for the local
-            // references the builder relies on (component parameters, request
-            // bodies); anything pointing outside the document is refused first, so
-            // the resolver has nothing to fetch.
-            rejectExternalRefs(specInput);
+            // Inline JSON or YAML content. The document itself needs no network/file
+            // access; reject any external $ref that is not an http(s) URL, so a
+            // filesystem-relative ref (which setSafelyResolveURL does not guard)
+            // cannot read local files. Internal (#/…) and http(s) refs are allowed.
+            rejectUnsafeInlineRefs(specInput);
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
             // Remote location. Enforce an http(s) scheme so the parser's fetcher
             // cannot read local files (file://), classpath/jar resources, or use
-            // other non-http schemes. Internal/private hosts stay allowed.
+            // other non-http schemes. Internal/private hosts stay allowed, but never
+            // the cloud instance-metadata service (always-on, regardless of the
+            // ssrf-protection toggle).
             String location = specInput.trim();
             if (!UrlValidationUtils.isValidHttpUrl(location)) {
                 throw new IllegalArgumentException("OpenAPI spec location must be an http or https URL");
             }
+            UrlValidationUtils.rejectCloudMetadataTarget(location);
             result = new OpenAPIV3Parser().readLocation(location, null, parseOptions);
         }
 
@@ -281,72 +300,6 @@ public final class McpApiToolBuilder {
     }
 
     /**
-     * Refuses an inline spec containing any {@code $ref} that is not a local JSON
-     * pointer ({@code #/...}).
-     * <p>
-     * Why not simply {@code setResolve(false)}: the builder reads parameters,
-     * request bodies and responses as resolved objects, so a spec declaring
-     * {@code $ref: '#/components/parameters/Limit'} would lose that parameter.
-     * Local references need no I/O; only external ones do, and an inline spec has
-     * no location they could legitimately be relative to.
-     * <p>
-     * The scan reads the document with swagger-parser's own
-     * {@link DeserializationUtils#deserializeIntoTree(String, String)} — the JSON
-     * mapper for {@code {}-prefixed input, the YAML loader otherwise — so it sees
-     * exactly the tree the resolver will walk. It fails <em>closed</em>: a document
-     * the scan cannot read is refused, never waved through. An earlier version read
-     * everything with the YAML mapper and returned quietly on a parse error, and
-     * snakeyaml's 3,145,728-code-point document limit made any larger JSON spec
-     * skip the check entirely while swagger-parser, on its unlimited JSON path,
-     * went on to resolve the file and loopback references it carried.
-     * <p>
-     * {@code $ref} keys under {@code example}/{@code examples}/{@code x-*} are
-     * refused too, although swagger-parser does not dereference those: telling such
-     * a subtree apart from a schema property that happens to be called {@code
-     * example} (which it does dereference) needs the OpenAPI grammar, and guessing
-     * wrong would reopen the hole. Package-private for the test.
-     *
-     * @throws IllegalArgumentException naming the first external reference found,
-     * or when the document cannot be read
-     */
-    static void rejectExternalRefs(String specInput) {
-        JsonNode root;
-        try {
-            root = DeserializationUtils.deserializeIntoTree(specInput, null);
-        } catch (RuntimeException e) {
-            throw unreadable(e);
-        }
-        if (root == null) {
-            throw unreadable(null);
-        }
-        Deque<JsonNode> pending = new ArrayDeque<>();
-        pending.push(root);
-        while (!pending.isEmpty()) {
-            JsonNode node = pending.pop();
-            if (node.isObject()) {
-                JsonNode ref = node.get("$ref");
-                if (ref != null && ref.isTextual() && !ref.asText().startsWith("#")) {
-                    throw new IllegalArgumentException("Inline OpenAPI specs may only use local references (#/...); found external $ref '"
-                            + abbreviate(ref.asText()) + "'. Inline the referenced definition, or import the spec by its http(s) URL.");
-                }
-                node.elements().forEachRemaining(pending::push);
-            } else if (node.isArray()) {
-                node.elements().forEachRemaining(pending::push);
-            }
-        }
-    }
-
-    private static IllegalArgumentException unreadable(RuntimeException cause) {
-        String reason = cause != null && cause.getMessage() != null ? ": " + abbreviate(cause.getMessage().split("\n", 2)[0]) : "";
-        return new IllegalArgumentException("Inline OpenAPI spec could not be read, so it could not be checked for external "
-                + "references" + reason, cause);
-    }
-
-    private static String abbreviate(String value) {
-        return value.length() > 120 ? value.substring(0, 120) + "..." : value;
-    }
-
-    /**
      * Heuristic: does the input look like an inline OpenAPI document (JSON/YAML
      * content) rather than a remote location? A JSON object, an OpenAPI/Swagger
      * marker, or any multi-line content is inline. A single-token string such as
@@ -356,6 +309,88 @@ public final class McpApiToolBuilder {
     static boolean looksLikeInlineSpec(String specInput) {
         String trimmed = specInput.trim();
         return trimmed.startsWith("{") || trimmed.startsWith("openapi") || trimmed.startsWith("swagger") || trimmed.contains("\n");
+    }
+
+    /**
+     * Matches a {@code $ref} value in JSON or YAML: {@code "$ref": "X"} /
+     * {@code $ref: X}.
+     */
+    private static final Pattern REF_VALUE_PATTERN = Pattern.compile("[\"']?\\$ref[\"']?\\s*:\\s*[\"']?([^\"'\\s,}]+)");
+
+    /**
+     * Rejects any {@code $ref} in inline spec content that is neither an internal
+     * fragment ({@code #/…}) nor an {@code http(s)} URL — i.e. a
+     * filesystem-relative or {@code file:}/{@code classpath:} ref that
+     * swagger-parser would resolve against the local filesystem without the
+     * blocked-URL checker.
+     * <p>
+     * Two passes, both must pass. The raw-text scan is a cheap first gate; the
+     * authoritative check walks the <em>decoded</em> tree, built the same way
+     * {@link OpenAPIV3Parser#readContents} builds it, because JSON and YAML escape
+     * sequences (a Unicode- or hex-escaped dollar sign in the key) hide a key from
+     * any text scan while the parser still sees {@code $ref}. Content neither
+     * deserializer accepts is refused rather than passed through unchecked.
+     *
+     * @throws IllegalArgumentException
+     *             if an external, non-http(s) reference is present, or the content
+     *             cannot be deserialized for inspection
+     */
+    static void rejectUnsafeInlineRefs(String specContent) {
+        if (specContent == null) {
+            return;
+        }
+        Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
+        while (matcher.find()) {
+            checkInlineRef(matcher.group(1));
+        }
+
+        JsonNode root = deserializeLikeParser(specContent);
+        Deque<JsonNode> pending = new ArrayDeque<>();
+        if (root != null) {
+            pending.push(root);
+        }
+        while (!pending.isEmpty()) {
+            JsonNode node = pending.pop();
+            if (node.isObject()) {
+                JsonNode ref = node.get("$ref");
+                if (ref != null && ref.isValueNode()) {
+                    checkInlineRef(ref.asText());
+                }
+            }
+            if (node.isContainerNode()) {
+                node.forEach(pending::push);
+            }
+        }
+    }
+
+    /**
+     * Mirrors {@code OpenAPIV3Parser.readContents}: {@link DeserializationUtils}
+     * first, then the plain JSON/YAML mapper it falls back to.
+     */
+    private static JsonNode deserializeLikeParser(String specContent) {
+        try {
+            return DeserializationUtils.deserializeIntoTree(specContent, null, new ParseOptions(), new SwaggerParseResult());
+        } catch (RuntimeException e) {
+            try {
+                var mapper = specContent.trim().startsWith("{") ? ObjectMapperFactory.createJson() : ObjectMapperFactory.createYaml();
+                return mapper.readTree(specContent);
+            } catch (IOException | RuntimeException fallbackError) {
+                throw new IllegalArgumentException("Inline OpenAPI spec could not be parsed for $ref inspection", fallbackError);
+            }
+        }
+    }
+
+    private static void checkInlineRef(String rawRef) {
+        String ref = rawRef.trim();
+        if (ref.isEmpty() || ref.startsWith("#")) {
+            return; // internal fragment reference
+        }
+        String lower = ref.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return; // URL ref — guarded by setSafelyResolveURL
+        }
+        throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
+                + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
     }
 
     /**
@@ -403,11 +438,10 @@ public final class McpApiToolBuilder {
         // context and conversation memory (persisted), and nothing on that path
         // redacts them — RequestRedactor is request-only by construction and
         // SecretRedactionFilter runs on the display copy. Set-Cookie is the case
-        // that matters: HttpClientModule builds a cookie-aware, application-scoped
-        // WebClientSession, so that value is a live session credential EDDI is
-        // actively replaying, and copying it into prompt-injectable context is
-        // exactly what HttpOnly exists to prevent. A plain GET that answers with a
-        // body has nothing to gain from it, so it does not get it.
+        // that matters: it is a session credential, and copying it into
+        // prompt-injectable context is exactly what HttpOnly exists to prevent. A
+        // plain GET that answers with a body has nothing to gain from it, so it does
+        // not get it.
         if (returnsDataInHeaders(operation)) {
             httpCall.setResponseHeaderObjectName(name + "_responseHeaders");
         }
@@ -416,8 +450,13 @@ public final class McpApiToolBuilder {
         var request = new Request();
         request.setMethod(method.toLowerCase());
 
+        // Template variable names for this operation's parameters. A parameter name
+        // comes from a third-party spec and is copied into a {...} placeholder, so it
+        // must be reduced to a plain identifier first — see safeVariableName.
+        Map<String, String> variableNames = variableNamesFor(operation);
+
         // Convert path params to Qute templates: /{petId} → /{petId}
-        String convertedPath = convertPathParams(path);
+        String convertedPath = convertPathParams(path, variableNames);
         request.setPath(convertedPath);
 
         // Headers (auth if provided)
@@ -433,7 +472,11 @@ public final class McpApiToolBuilder {
 
         if (operation.getParameters() != null) {
             for (Parameter param : operation.getParameters()) {
+                if (param == null || param.getName() == null) {
+                    continue;
+                }
                 String paramName = param.getName();
+                String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
                 String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
                 // The description is the model's ONLY view of the value space —
                 // the generated tool schema types every parameter as a plain
@@ -446,10 +489,12 @@ public final class McpApiToolBuilder {
 
                 if ("query".equals(param.getIn())) {
                     // Query params use Qute template for LLM-provided values
-                    queryParams.put(paramName, "{" + paramName + "}");
-                    paramDescriptions.put(paramName, paramDesc);
+                    // The query KEY stays the spec's name; only the placeholder (and so
+                    // the tool parameter the model fills) uses the safe variable name.
+                    queryParams.put(paramName, "{" + variableName + "}");
+                    paramDescriptions.put(variableName, paramDesc);
                 } else if ("path".equals(param.getIn())) {
-                    paramDescriptions.put(paramName, paramDesc);
+                    paramDescriptions.put(variableName, paramDesc);
                 }
                 // header/cookie params are skipped for now
             }
@@ -567,14 +612,94 @@ public final class McpApiToolBuilder {
      * stays as /pets/{petId}/toys (already Qute-compatible)
      */
     static String convertPathParams(String path) {
+        return convertPathParams(path, Map.of());
+    }
+
+    /**
+     * As {@link #convertPathParams(String)}, with every placeholder reduced to a
+     * safe template variable name — the one {@code variableNames} assigned to that
+     * parameter, or {@link #safeVariableName} of it for a placeholder the spec does
+     * not declare as a parameter.
+     * <p>
+     * An undeclared placeholder never takes a name a declared parameter already
+     * holds: {@code {item-id}} next to a declared {@code item_id} would otherwise
+     * reduce to {@code item_id} and silently be filled with that parameter's value,
+     * addressing the wrong resource. It gets a suffixed name instead (reused if the
+     * same placeholder repeats), and stays unfilled as the spec leaves it.
+     */
+    static String convertPathParams(String path, Map<String, String> variableNames) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
         var sb = new StringBuilder();
+        Set<String> taken = new HashSet<>(variableNames.values());
+        Map<String, String> undeclared = new HashMap<>();
         while (matcher.find()) {
             String paramName = matcher.group(1);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + paramName + "}"));
+            String variableName = variableNames.get(paramName);
+            if (variableName == null) {
+                variableName = undeclared.computeIfAbsent(paramName, name -> {
+                    String base = safeVariableName(name);
+                    String candidate = base;
+                    for (int suffix = 2; !taken.add(candidate); suffix++) {
+                        candidate = base + "_" + suffix;
+                    }
+                    return candidate;
+                });
+            }
+            matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + variableName + "}"));
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Reduces a parameter name taken from an OpenAPI spec to a plain template
+     * identifier: ASCII letters, digits and underscores, not starting with a digit.
+     * <p>
+     * The name is copied into a Qute placeholder that EDDI renders on every call,
+     * and a spec is third-party input: a "name" carrying template syntax would
+     * otherwise be evaluated as an expression rather than filled in as a parameter.
+     * Ordinary names ({@code petId}, {@code page_size}) are unchanged; others are
+     * mapped ({@code pet-id} to {@code pet_id}).
+     */
+    static String safeVariableName(String name) {
+        var safe = new StringBuilder(name == null ? 0 : name.length());
+        if (name != null) {
+            for (int i = 0; i < name.length(); i++) {
+                char c = name.charAt(i);
+                boolean allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+                safe.append(allowed ? c : '_');
+            }
+        }
+        if (safe.isEmpty() || Character.isDigit(safe.charAt(0))) {
+            safe.insert(0, "p_");
+        }
+        return safe.toString();
+    }
+
+    /**
+     * Assigns each declared parameter of {@code operation} a distinct safe variable
+     * name, in declaration order. Two names that reduce to the same identifier (a
+     * {@code pet-id} and a {@code pet_id}) get distinct suffixes, so neither
+     * silently takes the other's value.
+     */
+    static Map<String, String> variableNamesFor(Operation operation) {
+        Map<String, String> names = new LinkedHashMap<>();
+        if (operation.getParameters() == null) {
+            return names;
+        }
+        Set<String> taken = new HashSet<>();
+        for (Parameter param : operation.getParameters()) {
+            if (param == null || param.getName() == null || names.containsKey(param.getName())) {
+                continue;
+            }
+            String base = safeVariableName(param.getName());
+            String candidate = base;
+            for (int suffix = 2; !taken.add(candidate); suffix++) {
+                candidate = base + "_" + suffix;
+            }
+            names.put(param.getName(), candidate);
+        }
+        return names;
     }
 
     /**
