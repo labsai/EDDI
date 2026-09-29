@@ -12,11 +12,13 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -99,6 +101,32 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // in-memory sort over every entry of the user on every conversation init.
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_ACCESS_COUNT)),
                 new IndexOptions().name("idx_user_access_count").background(true));
+
+        // The upsert identities of buildUpsertFilter, made unique — merges any
+        // duplicates an earlier release let concurrent first writes create.
+        UserMemoryIdentityIndexes.ensure(memoriesCollection);
+    }
+
+    /**
+     * An upsert that retries once when it loses a first-insert race.
+     * <p>
+     * Two writers can both miss {@code filter} and both try to insert; the unique
+     * identity index lets one through and fails the other with a duplicate key. The
+     * server does not retry that itself unless the filter is a plain equality on
+     * exactly the index keys, which neither identity filter is. Retried, the
+     * loser's filter now matches the winner's document and the write becomes an
+     * ordinary update — last writer wins, as for any two sequential upserts.
+     */
+    private UpdateResult upsertOne(Bson filter, Bson update) {
+        var options = new UpdateOptions().upsert(true);
+        try {
+            return memoriesCollection.updateOne(filter, update, options);
+        } catch (MongoWriteException e) {
+            if (!UserMemoryIdentityIndexes.isDuplicateKey(e)) {
+                throw e;
+            }
+            return memoriesCollection.updateOne(filter, update, options);
+        }
     }
 
     // === Flat property view (reads/writes global entries in usermemories) ===
@@ -147,7 +175,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                     Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
                     Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
-            memoriesCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+            upsertOne(filter, update);
         }
     }
 
@@ -201,8 +229,6 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
-        var options = new UpdateOptions().upsert(true);
-
         // Check for cross-agent global write (value changes, ownership does not)
         if (entry.visibility() == Visibility.global) {
             Document existing = memoriesCollection.find(filter).first();
@@ -216,7 +242,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             }
         }
 
-        var result = memoriesCollection.updateOne(filter, update, options);
+        var result = upsertOne(filter, update);
         if (result.getUpsertedId() != null) {
             return result.getUpsertedId().asObjectId().getValue().toHexString();
         }
@@ -454,8 +480,17 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
                 Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
-        var upserted = memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId();
-        return upserted != null ? upserted.asObjectId().getValue().toHexString() : null;
+        try {
+            var upserted = memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId();
+            return upserted != null ? upserted.asObjectId().getValue().toHexString() : null;
+        } catch (MongoWriteException e) {
+            // Lost a first-insert race: the identity now exists, which is exactly the
+            // "already present" answer — no retry needed.
+            if (UserMemoryIdentityIndexes.isDuplicateKey(e)) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     /**
