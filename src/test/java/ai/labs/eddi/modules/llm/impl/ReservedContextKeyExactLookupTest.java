@@ -4,8 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.groups.model.GroupConversation;
-import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
@@ -26,11 +25,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code IConversationStep#getLatestData} and
  * {@code IConversationStepStack#getAllLatestData} match by <em>prefix</em>. A
  * client-sent context key such as {@code groupIdSuffix} is not reserved by
- * name, so {@code ReservedContextKeys.stripFromExternal} used to let it
- * through, and {@code Conversation} stores it as {@code context:groupIdSuffix}
- * — which a prefix lookup of {@code context:groupId} then returned as this
- * conversation's group (CodeRabbit on PR #831, CWE-863). The same held for
- * every other reserved key.
+ * name, so an exact-name {@code ClientContextGuard} let it through, and
+ * {@code Conversation} stores it as {@code context:groupIdSuffix} — which a
+ * prefix lookup of {@code context:groupId} then returned as this conversation's
+ * group (CodeRabbit on PR #831, CWE-863). The same held for every other
+ * reserved key. The guard now drops such keys too; these tests pin the second
+ * layer, the readers, as if one had got through (a conversation stored before
+ * the guard, or an operator-permitted key).
  * <p>
  * These tests run against a real {@link ConversationMemory}, not mocks, so they
  * exercise the real lookup semantics: stubbing {@code getLatestData} with the
@@ -52,7 +53,7 @@ class ReservedContextKeyExactLookupTest {
         var memory = memory();
         putContext(memory, "groupIdSuffix", "another-teams-group");
 
-        assertEquals(List.of(), ContextualToolsProvider.resolveGroupIds(memory));
+        assertEquals(List.of(), ConversationGroups.resolveGroupIds(memory));
     }
 
     @Test
@@ -62,29 +63,31 @@ class ReservedContextKeyExactLookupTest {
         putContext(memory, "groupId", "my-group");
         putContext(memory, "groupIdSuffix", "another-teams-group");
 
-        assertEquals(List.of("my-group"), ContextualToolsProvider.resolveGroupIds(memory));
+        assertEquals(List.of("my-group"), ConversationGroups.resolveGroupIds(memory));
     }
 
     @Test
-    @DisplayName("an earlier step's groupIdSuffix is not paired with a real discussion")
+    @DisplayName("an earlier step's groupIdSuffix does not shadow that step's groupId")
     void groupIdSuffix_onAnEarlierStep_isIgnored() {
         var memory = memory();
-        // Earlier step: the verified pair the orchestrator wrote, then a forged
-        // suffix key stored after it — a prefix lookup would return the forgery and
-        // the registry check would compare it against gc-1's group.
+        // Earlier step: the pair the orchestrator wrote, then a forged suffix key
+        // stored after it — a prefix lookup would return the forgery.
         putContext(memory, "groupId", "my-group");
         putContext(memory, "groupConversationId", "gc-1");
         putContext(memory, "groupIdSuffix", "another-teams-group");
         memory.startNextStep();
 
-        var registry = new LiveDiscussionRegistry();
-        var gc = new GroupConversation();
-        gc.setId("gc-1");
-        gc.setGroupId("my-group");
-        gc.getMemberConversationIds().put("agent-1", "conv-1");
-        registry.register(gc);
+        assertEquals(List.of("my-group"), ConversationGroups.resolveGroupIds(memory));
+    }
 
-        assertEquals(List.of("my-group"), ContextualToolsProvider.resolveGroupIds(memory));
+    @Test
+    @DisplayName("an earlier step's dynamicAgentConfigX is not a carried-over group policy")
+    void dynamicAgentConfigX_onAnEarlierStep_isNotAGroupPolicy() {
+        var memory = memory();
+        putContext(memory, "dynamicAgentConfigX", Map.of("enabled", true, "allowCreation", true));
+        memory.startNextStep();
+
+        assertFalse(DynamicAgentToolsProvider.hasGroupPolicy(memory));
     }
 
     @Test

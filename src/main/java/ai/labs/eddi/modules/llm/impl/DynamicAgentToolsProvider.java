@@ -496,18 +496,23 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * driving the turn. Once a conversation has been governed by a group, the most
      * recent policy it received keeps governing it. (A client cannot supply this
      * key itself — see {@code ClientContextGuard}.)
+     * <p>
+     * Both reads are exact ({@code getData} / {@code getExactDataPerStep}): the
+     * prefix-matching lookups would also return a client-sent
+     * {@code context:dynamicAgentConfigX} and hand a standalone agent a policy of
+     * the client's choosing.
      */
     private static Context groupPolicyContext(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            Context current = policyEntry(currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+            Context current = policyEntry(currentStep.getData(CONTEXT_DYNAMIC_AGENT_CONFIG));
             if (current != null) {
                 return current;
             }
         }
         var allSteps = memory.getAllSteps();
         if (allSteps != null) {
-            List<IData<Object>> entries = allSteps.getAllLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            List<IData<Object>> entries = allSteps.getExactDataPerStep(CONTEXT_DYNAMIC_AGENT_CONFIG);
             if (entries != null) {
                 // Oldest step first — walk backwards for the most recent policy.
                 for (int i = entries.size() - 1; i >= 0; i--) {

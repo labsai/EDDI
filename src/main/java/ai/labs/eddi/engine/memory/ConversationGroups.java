@@ -37,10 +37,16 @@ public final class ConversationGroups {
     private ConversationGroups() {
     }
 
+    /**
+     * Exact-key reads throughout ({@code getData} / {@code getExactDataPerStep}):
+     * the prefix-matching {@code getLatestData} / {@code getAllLatestData} would
+     * also return a client-sent {@code context:groupIdSuffix} as this
+     * conversation's group.
+     */
     public static List<String> resolveGroupIds(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            String fromCurrent = contextValueAsString(currentStep.getLatestData(CONTEXT_KEY));
+            String fromCurrent = contextValueAsString(currentStep.getData(CONTEXT_KEY));
             if (fromCurrent != null) {
                 return List.of(fromCurrent);
             }
@@ -48,7 +54,7 @@ public final class ConversationGroups {
 
         var allSteps = memory.getAllSteps();
         if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(CONTEXT_KEY);
+            List<IData<Object>> priorEntries = allSteps.getExactDataPerStep(CONTEXT_KEY);
             if (priorEntries != null) {
                 for (IData<Object> entry : priorEntries) {
                     String value = contextValueAsString(entry);
