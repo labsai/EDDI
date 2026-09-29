@@ -298,6 +298,45 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("an old secret turn's short secret is masked on read where it stands as a whole token, never in map keys")
+        void oldStoredShortSecretIsMaskedAsWholeTokenOnRead() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("context", Map.of("secretInput", "true"));
+            output.put("input", "739");
+            output.put("output", List.of(Map.of("type", "text", "text", "PIN 739 saved, order 17391")));
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var run = new WorkflowRunSnapshot();
+            run.getLifecycleTasks().add(new ResultSnapshot("context:secretInput", new Context(Context.ContextType.string, "true"), null,
+                    new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:initial", "739", null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("httpCalls:save", Map.of("739", "PIN 739"), null, new Date(), null, false));
+            step.getWorkflows().add(run);
+            snapshot.getConversationSteps().add(step);
+
+            for (boolean detailed : List.of(false, true)) {
+                var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, false);
+                var item = (Map<?, ?>) ((List<?>) simple.getConversationOutputs().getFirst().get("output")).getFirst();
+                assertEquals("PIN " + MemoryKeys.SECRET_INPUT_PLACEHOLDER + " saved, order 17391", item.get("text"),
+                        "detailed=" + detailed);
+                if (detailed) {
+                    var saved = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                            .filter(data -> data.getKey().equals("httpCalls:save"))
+                            .findFirst().orElseThrow().getValue();
+                    assertEquals(Map.of("739", "PIN " + MemoryKeys.SECRET_INPUT_PLACEHOLDER), saved,
+                            "the value is masked, the map key is not renamed");
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals("PIN 739 saved, order 17391",
+                    ((Map<?, ?>) ((List<?>) output.get("output")).getFirst()).get("text"));
+        }
+
+        @Test
         @DisplayName("an old secret turn's parser results are cleared on read, even when they hold the secret tokenized")
         void oldStoredSecretTurnParserResultsAreClearedOnRead() throws Exception {
             var mapper = new ObjectMapper();

@@ -460,10 +460,12 @@ public class ConversationMemoryUtilities {
      * The plaintext forms a stored secret turn may still carry — the raw
      * {@code input:initial} and the parser's normalized copy (in
      * {@code input:normalized}, and in the output's {@code input}, which the parser
-     * overwrote) — as searchable needles: placeholders dropped, shorter forms than
-     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} dropped (they
-     * are still replaced wholesale where they are the input itself), longest first.
-     * Either side may be {@code null} when the turn's other half cannot be paired.
+     * overwrote) — as searchable needles: placeholders and blank forms dropped,
+     * longest first. Forms of at least
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters are
+     * searched for as substrings, shorter ones only as whole tokens in values (see
+     * {@link #scrubbedSecretTurnValue}), as the turn-end scrub does. Either side
+     * may be {@code null} when the turn's other half cannot be paired.
      */
     static List<String> secretTurnNeedles(Map<String, Object> conversationOutput, ConversationStepSnapshot step) {
         Set<String> forms = new LinkedHashSet<>();
@@ -484,7 +486,7 @@ public class ConversationMemoryUtilities {
             }
         }
         return forms.stream()
-                .filter(form -> form.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
+                .filter(form -> !form.isBlank())
                 .sorted(Comparator.comparingInt(String::length).reversed())
                 .toList();
     }
@@ -545,9 +547,33 @@ public class ConversationMemoryUtilities {
         return scrubbedSecretTurnValue(value, needles);
     }
 
+    /**
+     * {@code value} with the turn's plaintext forms removed, by the same rule as
+     * the turn-end scrub: forms of at least
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters
+     * wherever they occur, shorter ones only where they stand as a whole token and
+     * never in map keys.
+     */
     private static Object scrubbedSecretTurnValue(Object value, List<String> needles) {
-        Object cleaned = needles.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, needles, SECRET_INPUT_PLACEHOLDER);
-        return cleaned != null ? cleaned : value;
+        List<String> substrings = new ArrayList<>();
+        List<String> tokens = new ArrayList<>();
+        for (String needle : needles) {
+            (needle.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH ? substrings : tokens).add(needle);
+        }
+        Object current = value;
+        if (!substrings.isEmpty()) {
+            Object cleaned = SecretValueScrubber.scrubDeep(current, substrings, SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                current = cleaned;
+            }
+        }
+        if (!tokens.isEmpty()) {
+            Object cleaned = SecretValueScrubber.scrubDeepTokens(current, tokens, SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                current = cleaned;
+            }
+        }
+        return current;
     }
 
     private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
