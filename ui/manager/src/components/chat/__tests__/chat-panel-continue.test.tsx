@@ -13,6 +13,14 @@ import { useChatStore } from "@/hooks/use-chat";
  * reopened the agent's MOST RECENT conversation instead of the one the user was
  * looking at.
  */
+
+/**
+ * The `/agents/:conversationId` handlers also match `GET /agentstore/agents/descriptors`,
+ * which the panel reads to list deployed agents — and a deep link now waits for
+ * that list before it acts. Let that request fall through to the default mock.
+ */
+const DESCRIPTORS = "descriptors";
+
 function snapshot(conversationId: string, text: string) {
   return {
     agentId: "agent1",
@@ -41,9 +49,15 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
 
   it("loads the conversationId from the URL, not the agent's most recent one", async () => {
     const reads: string[] = [];
+    let started = false;
     server.use(
+      http.post("*/agents/:agentId/start", () => {
+        started = true;
+        return new HttpResponse(null, { status: 201 });
+      }),
       http.get("*/agents/:conversationId", ({ params }) => {
         const id = String(params.conversationId);
+        if (id === DESCRIPTORS) return;
         reads.push(id);
         return HttpResponse.json(snapshot(id, `answer from ${id}`));
       }),
@@ -56,6 +70,8 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
     await waitFor(() => expect(useChatStore.getState().conversationId).toBe("conv-older"));
     expect(await screen.findByText("answer from conv-older")).toBeInTheDocument();
     expect(reads).toContain("conv-older");
+    // Reading the named conversation is all a deep link does: nothing is started.
+    expect(started).toBe(false);
     expect(useChatStore.getState().selectedAgentId).toBe("agent1");
   });
 
@@ -64,7 +80,9 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
     useChatStore.getState().setConversationId("conv-current");
     server.use(
       http.get("*/agents/:conversationId", ({ params }) =>
-        HttpResponse.json(snapshot(String(params.conversationId), "the older one")),
+        params.conversationId === DESCRIPTORS
+          ? undefined
+          : HttpResponse.json(snapshot(String(params.conversationId), "the older one")),
       ),
     );
 
@@ -95,6 +113,7 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
     const says: string[] = [];
     server.use(
       http.get("*/agents/:conversationId", async ({ params }) => {
+        if (params.conversationId === DESCRIPTORS) return;
         await released;
         return HttpResponse.json(snapshot(String(params.conversationId), "the older one"));
       }),

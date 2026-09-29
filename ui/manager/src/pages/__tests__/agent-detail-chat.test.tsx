@@ -44,6 +44,10 @@ describe("AgentDetailPage — Chat opens the drawer in the agent's environment",
       http.get("*/administration/:env/deploymentstatus/:agentId", ({ params }) =>
         HttpResponse.json({ status: params.env === "test" ? "READY" : "NOT_FOUND" }),
       ),
+      // The per-environment listing is consulted for every NOT_FOUND (an agent
+      // still live at an older version counts as live there). Test-only means
+      // no other version is deployed anywhere either.
+      http.get("*/administration/:env/deploymentstatus", () => HttpResponse.json([])),
       http.post("*/agents/:agentId/start", ({ request }) => {
         startedIn = new URL(request.url).searchParams.get("environment");
         return HttpResponse.json({ location: "/agents/conv-test" });
