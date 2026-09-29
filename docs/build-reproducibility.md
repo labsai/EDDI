@@ -83,7 +83,7 @@ cosign verify \
 
 The identity regexp is the load-bearing part: it pins the signature to the `ci.yml` workflow on `main` or a tag, so a signature produced by any other workflow, branch, or repository fails verification.
 
-Once verified, resolve and pin the digest in your deployment manifests (`k8s/base/eddi-deployment.yaml`, or `eddi.image.digest` in the Helm chart) so the kubelet can never pull different bits under the same tag:
+Once verified, resolve and pin the digest in your deployment manifests (a `digest:` on the `labsai/eddi` entry under `images:` in `k8s/base/kustomization.yaml`, or `eddi.image.digest` in the Helm chart) so the kubelet can never pull different bits under the same tag:
 
 ```bash
 crane digest labsai/eddi:6.4.0

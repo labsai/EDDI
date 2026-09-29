@@ -37,6 +37,7 @@ jobs:
       code: ${{ steps.result.outputs.code }}
       scripts: ${{ steps.result.outputs.scripts }}
       operator_docs: ${{ steps.result.outputs.operator_docs }}
+      release_pointers: ${{ steps.result.outputs.release_pointers }}
       ui: ${{ steps.result.outputs.ui }}
       backend: ${{ steps.result.outputs.backend }}
       # JSON list consumed by e2e-fullstack's matrix; see "Resolve E2E databases".
@@ -184,6 +185,26 @@ jobs:
               - 'docs/changelog.md'
               - 'docs/changelog.d/**'
               - 'docs/changelog/**'
+              # BumpVersionScriptTest grades the script that post-release.yml runs
+              # unattended after every release, and ReleaseVersionSourceTest reads
+              # the pointer definition both of them share. `scripts/**` alone only
+              # triggers Shell Lint, which cannot run either test.
+              - 'scripts/bump-version.py'
+              - 'scripts/release-pointers.json'
+            # Every root scripts/release-pointers.json sweeps. ReleaseVersionSourceTest
+            # checks that each pointer names the chart's appVersion, but it runs in
+            # Build & Test, which a docs-only PR skips — so a doc that pastes
+            # `docker pull labsai/eddi:<old>` would merge and turn main red on the
+            # next unrelated PR. The release-pointers job runs the same check in
+            # seconds, with no Java build. ReleaseVersionSourceTest keeps this list
+            # covering every root in the JSON.
+            release_pointers:
+              - 'README.md'
+              - 'docs/**'
+              - 'k8s/**'
+              - 'helm/**'
+              - 'scripts/bump-version.py'
+              - 'scripts/release-pointers.json'
             # Gates the ui-* jobs. The workflow is listed so that a CI-only change
             # still runs the UI jobs it may have broken. pom.xml is deliberately not:
             # the ui-* jobs never run Maven, and the pom's UI wiring (node.version,
@@ -205,12 +226,14 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "scripts=true" >> "$GITHUB_OUTPUT"
             echo "operator_docs=true" >> "$GITHUB_OUTPUT"
+            echo "release_pointers=true" >> "$GITHUB_OUTPUT"
             echo "ui=true" >> "$GITHUB_OUTPUT"
             echo "backend=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
             echo "operator_docs=${{ steps.filter.outputs.operator_docs }}" >> "$GITHUB_OUTPUT"
+            echo "release_pointers=${{ steps.filter.outputs.release_pointers }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
           fi
@@ -329,6 +352,24 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
+
+  # ─── Job 0a3: Release Pointers ──────────────────────────────────
+  # Every place outside pom.xml that names the published release — the Helm
+  # appVersion, the k8s manifests, the docs' copy-pasteable commands — must name
+  # the same one (scripts/release-pointers.json). ReleaseVersionSourceTest
+  # enforces that too, but only where Build & Test runs; this covers the
+  # docs-only PR that skips it, in seconds.
+  release-pointers:
+    name: Release Pointers
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.release_pointers == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Every release pointer names the chart's appVersion
+        run: python3 scripts/bump-version.py check
 
   # ─── Job 0b: Shell Lint ─────────────────────────────────────────
   # install.sh is 55 KB, install.ps1 is 40 KB, and they are what the README tells
@@ -2683,13 +2724,30 @@ jobs:
       submit: "true"
     secrets: inherit
 
+  # ─── Job 6c: Post-Release Version Bump ─────────────────────────
+  # Opens the PR that points the docs and manifests at the release just published
+  # and moves pom.xml to the next minor (scripts/bump-version.py post-release).
+  # Stable tags only, and only once the image exists and passed its smoke test —
+  # the PR is what sends readers to it.
+  post-release:
+    name: Post-Release Version Bump
+    needs: [docker, smoke-test, release]
+    if: startsWith(github.ref, 'refs/tags/') && needs.docker.outputs.is-stable == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/post-release.yml
+    with:
+      version: ${{ needs.docker.outputs.primary-tag }}
+    secrets: inherit
+
   # ─── Job 7: Slack Notification ─────────────────────────────────
   notify-slack:
     name: Slack Notification
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
 
     steps:
       - name: Send build notification
@@ -2731,6 +2789,10 @@ jobs:
           TRIVY="${{ needs.trivy-scan.result }}"
           PREFLIGHT_PR="${{ needs.preflight-check.result }}"
           PREFLIGHT_PUSH="${{ needs.preflight-push.result }}"
+          # Runs only after a stable tag is published. A failure here means the
+          # release shipped but main still points its docs at the previous one and
+          # its pom at the released version — worth a ping, not silence.
+          POST_RELEASE="${{ needs.post-release.result }}"
           # Merge: whichever preflight job actually ran wins (the other is "skipped")
           if [ "$PREFLIGHT_PUSH" != "skipped" ]; then
             PREFLIGHT="$PREFLIGHT_PUSH"
@@ -2774,7 +2836,7 @@ jobs:
           # posting anything - so the one signal saying the image would not pass
           # Red Hat certification never left GitHub. On a tag it did post, with
           # "Build Passed" in the header beside a red Red Hat Preflight field.
-          if [ "$BUILD_OK" = "true" ] && [ "$IT" != "failure" ] && [ "$UI" != "failure" ] && [ "$IMAGE" != "failure" ] && [ "$E2E" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ] && [ "$PREFLIGHT" != "failure" ]; then
+          if [ "$BUILD_OK" = "true" ] && [ "$IT" != "failure" ] && [ "$UI" != "failure" ] && [ "$IMAGE" != "failure" ] && [ "$E2E" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ] && [ "$CODEQL" != "failure" ] && [ "$PREFLIGHT" != "failure" ] && [ "$POST_RELEASE" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else
@@ -2820,6 +2882,7 @@ jobs:
             --arg trivy_icon "$(status_icon $TRIVY)" \
             --arg codeql_icon "$(status_icon $CODEQL)" \
             --arg preflight_icon "$(status_icon $PREFLIGHT)" \
+            --arg post_release_icon "$(status_icon "$POST_RELEASE")" \
             --arg run_url "$RUN_URL" \
             --arg run_number "$RUN_NUMBER" \
             '{
@@ -2853,7 +2916,8 @@ jobs:
                     { type: "mrkdwn", text: ($codeql_icon + " CodeQL SAST") },
                     { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
                     { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
-                    { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
+                    { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") },
+                    { type: "mrkdwn", text: ($post_release_icon + " Post-release bump") }
                   ]
                 },
                 {
