@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
@@ -33,6 +32,12 @@ import java.util.Optional;
 @ApplicationScoped
 public class WebSearchTool {
     private static final Logger LOGGER = Logger.getLogger(WebSearchTool.class);
+
+    /**
+     * Ceiling on a search provider's answer. A results page is tens of kilobytes;
+     * the limit only has to stop a misbehaving endpoint from filling the heap.
+     */
+    static final long MAX_RESPONSE_BYTES = 2L * 1024 * 1024;
     private final SafeHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -76,25 +81,31 @@ public class WebSearchTool {
             return results;
 
         } catch (Exception e) {
-            LOGGER.error("Web search error for query '" + query + "': " + e.getMessage(), e);
-            return "Error: Could not perform web search - " + e.getMessage();
+            // The message can name the request URI, and Google's carries the API key.
+            String error = redactApiKey(String.valueOf(e.getMessage()));
+            LOGGER.error("Web search error for query '" + query + "': " + error);
+            return "Error: Could not perform web search - " + error;
         }
+    }
+
+    /**
+     * Replaces the value of every {@code key=} query parameter in {@code message}.
+     */
+    static String redactApiKey(String message) {
+        return message.replaceAll("(?i)(key=)[^&\\s]+", "$1[REDACTED]");
     }
 
     private String searchWithGoogle(String query, int maxResults) throws IOException, InterruptedException {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d", googleApiKey.get(), googleCx.get(),
+        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d",
+                URLEncoder.encode(googleApiKey.get(), StandardCharsets.UTF_8), URLEncoder.encode(googleCx.get(), StandardCharsets.UTF_8),
                 encodedQuery, maxResults);
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        String body = fetch(request, "Google search");
 
-        if (response.statusCode() != 200) {
-            throw new IOException("Google search returned status: " + response.statusCode());
-        }
-
-        return formatGoogleResults(response.body(), query);
+        return formatGoogleResults(body, query);
     }
 
     private String searchWithDuckDuckGo(String query, int maxResults) throws IOException, InterruptedException {
@@ -105,13 +116,25 @@ public class WebSearchTool {
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        String body = fetch(request, "DuckDuckGo search");
 
+        return formatDuckDuckGoResults(body, query, maxResults);
+    }
+
+    /**
+     * Sends {@code request} through {@link SafeHttpClient#sendBounded} and returns
+     * the body of a 200 answer. A body cut short at {@link #MAX_RESPONSE_BYTES} or
+     * the read deadline is refused rather than parsed as a fragment.
+     */
+    private String fetch(HttpRequest request, String source) throws IOException, InterruptedException {
+        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
         if (response.statusCode() != 200) {
-            throw new IOException("DuckDuckGo search returned status: " + response.statusCode());
+            throw new IOException(source + " returned status: " + response.statusCode());
         }
-
-        return formatDuckDuckGoResults(response.body(), query, maxResults);
+        if (response.truncated()) {
+            throw new IOException(source + " response exceeded " + MAX_RESPONSE_BYTES + " bytes or its read deadline");
+        }
+        return new String(response.body(), StandardCharsets.UTF_8);
     }
 
     /**
@@ -223,13 +246,9 @@ public class WebSearchTool {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                     .GET().build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String body = fetch(request, "Wikipedia search");
 
-            if (response.statusCode() != 200) {
-                throw new IOException("Wikipedia search returned status: " + response.statusCode());
-            }
-
-            return formatWikipediaResults(response.body(), query);
+            return formatWikipediaResults(body, query);
 
         } catch (Exception e) {
             LOGGER.error("Wikipedia search error: " + e.getMessage(), e);
