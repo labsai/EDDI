@@ -149,6 +149,15 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   ended" as a body without a length, but a bodyless GET is not ended yet when a filter runs either, so
   it answered 411 — with `Connection: close`, which HTTP/2 forbids, so the client discarded the
   response as malformed. The HTTP/2 inference is gone, and the header is sent on HTTP/1.x only.
+- **A rename during a run no longer leaves pages a newer run calls "unchanged" (CodeRabbit).** The
+  rename's purge frees the source, so a new run can claim it while the old one is between its
+  ownership check and recording a page it just embedded into the old store; that insert has no row to
+  be fenced by, the new run reads its hash as unchanged, and the page never reaches the store the new
+  name addresses. `cleanUpAfterRun` then found its purge refused (the new run holds the source) and
+  ignored that. It now calls the new `IIngestionStateStore.invalidateContent`, which nulls every row's
+  content hash, ETag and Last-Modified for the source — unfenced, since the other run owns the rows,
+  and not a tombstone, which would stop that run from ever removing vectors it did write — and logs a
+  WARN. Implemented in the Mongo, PostgreSQL and in-memory stores and pinned by a contract test.
 
 ### Not in this branch
 

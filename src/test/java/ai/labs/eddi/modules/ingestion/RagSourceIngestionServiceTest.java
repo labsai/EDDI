@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -1178,6 +1179,38 @@ class RagSourceIngestionServiceTest {
 
             assertTrue(stateStore.lookup(key, "late.md").isEmpty());
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a run across a rename leaves nothing another run can call unchanged, even when that run holds the source")
+        void aRunAcrossARenameIsSettledWhenANewerRunHoldsTheSource() throws Exception {
+            // The rename's purge took the running row with it, so the source was free:
+            // a new run claimed it while the old one was between its ownership check
+            // and recording a document it had just embedded into the OLD store. That
+            // insert has no row to be fenced by, so it lands — and the new run reads
+            // its hash as "unchanged" and never embeds the page where retrieval now
+            // looks. The purge that used to settle this is refused, because the new
+            // run holds the source, and its refusal was ignored.
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String oldRun = stateStore.startRun(key).orElseThrow();
+            service.forgetStateAfterRename(KB_ID, source);
+            String newRun = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "late.md", "hash", "\"etag\"", null, oldRun);
+            var renamed = knowledgeBase(uploadSource("src-files"));
+            renamed.setName("new-name");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            var state = stateStore.lookup(key, "late.md").orElseThrow();
+            assertTrue(state.hasChanged("hash"), "the next look at the page must embed it into the renamed store");
+            assertNull(state.etag(), "nor may a conditional request earn a 304 that skips it");
+            // The newer run noting the page as seen must not restore the old verdict.
+            stateStore.recordSeen(key, "late.md", newRun);
+            assertTrue(stateStore.lookup(key, "late.md").orElseThrow().hasChanged("hash"));
+            assertEquals(newRun, stateStore.activeRun(key).orElseThrow().runId(), "the newer run keeps its claim");
         }
 
         private IResourceStore.IResourceId resourceId(int version) {

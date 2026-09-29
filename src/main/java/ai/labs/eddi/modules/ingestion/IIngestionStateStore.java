@@ -213,6 +213,21 @@ public interface IIngestionStateStore {
      */
     void markTombstoned(String sourceId, List<String> documentIds);
 
+    /**
+     * Forgets what every document of a source was last embedded as — its content
+     * hash and its validators — so the next run embeds each one again. Nothing else
+     * changes: not ownership, not the miss counter, not the tombstone.
+     *
+     * <p>
+     * For a source whose rows may describe vectors that are not in the store the
+     * knowledge base now addresses, when {@link #purgeSource} cannot be used
+     * because another run holds the source. Deliberately not fenced, like
+     * {@link #markTombstoned}: the rows belong to that run. And not a tombstone,
+     * which would stop the owning run from ever removing vectors it did write,
+     * should the page later disappear.
+     */
+    void invalidateContent(String sourceId);
+
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
 

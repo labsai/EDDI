@@ -332,6 +332,21 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void invalidateContent(String sourceId) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET content_hash = NULL, etag = NULL, last_modified = NULL
+                 WHERE source_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to invalidate a source's content", e);
+        }
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         List<DocumentState> states = new ArrayList<>();
         String sql = "SELECT * FROM rag_ingestion_documents WHERE source_id = ? LIMIT ?";

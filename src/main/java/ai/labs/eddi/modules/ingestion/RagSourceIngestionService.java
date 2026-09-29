@@ -278,11 +278,20 @@ public class RagSourceIngestionService {
             discardSourceContent(ragConfigId, ranWith, source);
             return;
         }
-        if (ranWith.getName() != null && !ranWith.getName().equals(current.getName())) {
-            // Under the run claim, so a run that has started since is not purged from
-            // under it; it would find nothing stale anyway, having started after the
-            // rename.
-            purge(ragConfigId, source);
+        if (ranWith.getName() != null && !ranWith.getName().equals(current.getName())
+                && !purge(ragConfigId, source)) {
+            // Refused: another run holds the source — the rename's purge freed it while
+            // this one was still going. That run can already have read a row this one
+            // wrote into the old store and called the page "unchanged"; its inserts
+            // are the one write the fence cannot stop. So every row's hash and
+            // validators are forgotten instead, which makes the next look at each page
+            // embed it where the new name points. Unfenced, since that run owns the
+            // rows; not a tombstone, which would keep it from removing vectors it did
+            // write should the page later disappear.
+            stateStore.invalidateContent(IngestionPipeline.stateKey(ragConfigId, source));
+            LOGGER.warnf("Source '%s' of knowledge base %s was renamed while a run was in flight, and another run "
+                    + "holds it now; its documents will be embedded again rather than purged",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
     }
 

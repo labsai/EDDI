@@ -204,6 +204,18 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public synchronized void invalidateContent(String sourceId) {
+        for (Map.Entry<String, DocumentState> entry : documents.entrySet()) {
+            DocumentState state = entry.getValue();
+            if (state.sourceId().equals(sourceId)) {
+                entry.setValue(new DocumentState(state.sourceId(), state.documentId(), null, null, null,
+                        state.firstIngestedAt(), state.lastIngestedAt(), state.lastRunId(), state.missedRuns(),
+                        state.tombstoned()));
+            }
+        }
+    }
+
+    @Override
     public synchronized List<DocumentState> listDocuments(String sourceId, int limit) {
         return documents.values().stream()
                 .filter(state -> state.sourceId().equals(sourceId))

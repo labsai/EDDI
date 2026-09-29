@@ -269,6 +269,16 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void invalidateContent(String sourceId) {
+        translating("invalidate a source's content", () -> documents.updateMany(
+                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                Updates.combine(
+                        Updates.set(FIELD_CONTENT_HASH, null),
+                        Updates.set(FIELD_ETAG, null),
+                        Updates.set(FIELD_LAST_MODIFIED, null))));
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         return translating("list a source's documents", () -> {
             List<DocumentState> states = new ArrayList<>();

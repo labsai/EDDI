@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -819,6 +820,38 @@ public interface IngestionStateStoreContract {
         store().recordIngested(SOURCE, DOC, "hash-2", null, null, next);
 
         assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash());
+    }
+
+    // === invalidating content ===
+
+    @Test
+    @DisplayName("invalidating a source's content makes every document re-embed, whichever run owns it")
+    default void invalidatedContentIsReEmbedded() {
+        // How a run that wrote into a renamed knowledge base's old store is settled
+        // when another run already holds the source and the purge is refused. It
+        // must land on rows that run owns — hence unfenced — and must survive that
+        // run noting the page as seen, or its verdict "unchanged" comes back.
+        String owner = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", "Mon, 01 Jan 2024 00:00:00 GMT", owner);
+        String otherRun = openRun(OTHER_SOURCE);
+        store().recordIngested(OTHER_SOURCE, DOC, "hash-2", "\"v2\"", null, otherRun);
+
+        store().invalidateContent(SOURCE);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertTrue(state.hasChanged("hash-1"), "the next run must embed the document again");
+        assertNull(state.etag(), "a conditional request would earn a 304 and skip it");
+        assertNull(state.lastModified());
+        assertFalse(state.tombstoned(), "its vectors may still be there; a tombstone would hide them from the reaper");
+        assertEquals("hash-2", store().lookup(OTHER_SOURCE, DOC).orElseThrow().contentHash(),
+                "another source is untouched");
+
+        store().recordSeen(SOURCE, DOC, owner);
+        assertTrue(store().lookup(SOURCE, DOC).orElseThrow().hasChanged("hash-1"));
+
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, owner);
+        assertFalse(store().lookup(SOURCE, DOC).orElseThrow().hasChanged("hash-1"),
+                "embedding it again settles it");
     }
 
     // === purge ===

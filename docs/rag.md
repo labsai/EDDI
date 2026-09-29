@@ -496,7 +496,11 @@ configured for hours.
 removed, or the knowledge base renamed — or the run is reaped, it notices before its next embedding
 and stops, instead of carrying on to the end of its crawl writing chunks and state rows for a source
 that has just been cleared. When it has stopped, what it wrote in the meantime is settled: a removed
-source's content is removed again, and a renamed knowledge base's state is cleared again.
+source's content is removed again, and a renamed knowledge base's state is cleared again. The rename
+frees the source, so a new run may already hold it by then and may have read a row the old run wrote
+as "unchanged"; the state cannot be purged from under that run, so every document's content hash and
+validators are forgotten instead, and the next run embeds each page into the store the new name
+addresses.
 
 **A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
 Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
