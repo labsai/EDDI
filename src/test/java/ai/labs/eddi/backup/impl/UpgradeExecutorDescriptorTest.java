@@ -247,7 +247,7 @@ class UpgradeExecutorDescriptorTest {
     @DisplayName("workflows and extensions are not counted when the agent that would load them could not be written")
     void extensionsNotCountedWhenTheAgentWriteIsRefused() throws Exception {
         givenTargetAt(3);
-        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any())).thenReturn(Response.status(409).build());
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), eq(false))).thenReturn(Response.status(409).build());
 
         UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
 
