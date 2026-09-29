@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -98,11 +99,6 @@ public class UserMemoryTool {
                                @P("The value to remember") String value, @P("Category: 'preference', 'fact', or 'context'") String category,
                                @P("Visibility: 'self', 'group', or 'global'. Default: 'self'") String visibility) {
 
-        // Guardrail: write-rate limit
-        if (writesThisTurn >= guardrails.getMaxWritesPerTurn()) {
-            return "⚠️ Maximum writes per turn (%d) reached. Try again in the next turn.".formatted(guardrails.getMaxWritesPerTurn());
-        }
-
         // Guardrail: key length
         if (key == null || key.isBlank()) {
             return "⚠️ Key must not be empty.";
@@ -154,6 +150,23 @@ public class UserMemoryTool {
         }
 
         try {
+            String trimmedKey = key.trim();
+            // The entry this write would land on, resolved with the stores' upsert
+            // identity. Knowing it up front answers two questions the write used to get
+            // wrong: is this a no-op, and does it add a row?
+            UserMemoryEntry existing = findUpsertTarget(trimmedKey, vis);
+
+            // Re-stating a fact that is already stored, unchanged, is not a write. Models
+            // do it constantly — they do not see their earlier tool calls, so they save
+            // the same facts again each turn — and counting it spent the whole
+            // maxWritesPerTurn budget on re-saves, refusing the one new fact the user had
+            // just shared.
+            if (existing != null && Objects.equals(existing.value(), value) && Objects.equals(existing.category(), normalizedCategory)
+                    && existing.visibility() == vis
+                    && (vis != Visibility.group || Set.copyOf(existing.groupIds()).equals(Set.copyOf(groupIds)))) {
+                return "✅ Already remembered (unchanged): %s = %s [%s, %s]".formatted(trimmedKey, value, normalizedCategory, vis);
+            }
+
             // Guardrail: a 'global' write must not silently overwrite the value of a
             // global memory another agent owns. The store preserves the original owner
             // but still applies the new value, so refuse here unless configured to
@@ -167,14 +180,21 @@ public class UserMemoryTool {
                 }
             }
 
+            // Guardrail: write-rate limit
+            if (writesThisTurn >= guardrails.getMaxWritesPerTurn()) {
+                return ("⚠️ Maximum writes per turn (%d) reached. Do not retry this turn — tell the user which facts were not "
+                        + "saved; they can be saved in the next turn.").formatted(guardrails.getMaxWritesPerTurn());
+            }
+
             // Check capacity — returns a user-facing message when the write must not
-            // proceed, null when there is room (possibly after evicting).
-            String capacityRefusal = enforceCapacity(key.trim());
+            // proceed, null when there is room (possibly after evicting). An update of an
+            // existing entry adds no row and always has room.
+            String capacityRefusal = existing != null ? null : enforceCapacity();
             if (capacityRefusal != null) {
                 return capacityRefusal;
             }
 
-            UserMemoryEntry entry = UserMemoryEntry.fromToolCall(userId, agentId, conversationId, groupIds, key.trim(), value, normalizedCategory,
+            UserMemoryEntry entry = UserMemoryEntry.fromToolCall(userId, agentId, conversationId, groupIds, trimmedKey, value, normalizedCategory,
                     vis);
             store.upsert(entry);
             writesThisTurn++;
@@ -341,6 +361,29 @@ public class UserMemoryTool {
     }
 
     /**
+     * The stored entry an upsert of {@code key} with {@code visibility} by this
+     * agent would overwrite, or {@code null} when it would insert. Mirrors the
+     * stores' identity: one shared document per {@code (userId, key)} for
+     * {@code global}; one per {@code (userId, key, sourceAgentId)} among the
+     * agent's non-global entries otherwise.
+     */
+    private UserMemoryEntry findUpsertTarget(String key, Visibility visibility) throws IResourceStore.ResourceStoreException {
+        for (UserMemoryEntry entry : store.getAllEntries(userId)) {
+            if (!key.equals(entry.key())) {
+                continue;
+            }
+            boolean entryIsGlobal = entry.visibility() == Visibility.global;
+            boolean sameIdentity = visibility == Visibility.global
+                    ? entryIsGlobal
+                    : !entryIsGlobal && agentId != null && agentId.equals(entry.sourceAgentId());
+            if (sameIdentity) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether this agent may see the given entry. Mirrors the store-side recall
      * scoping ({@code self(agentId) OR group(groupIds) OR global}) and additionally
      * always admits entries this agent itself created.
@@ -372,7 +415,7 @@ public class UserMemoryTool {
      * @return a user-facing refusal message when the write must not proceed, or
      *         {@code null} when there is room (possibly after evicting)
      */
-    private String enforceCapacity(String key) throws IResourceStore.ResourceStoreException {
+    private String enforceCapacity() throws IResourceStore.ResourceStoreException {
         int cap = config.getMaxEntriesPerUser();
         long count = store.countEntries(userId);
         if (count < cap) {
@@ -381,7 +424,8 @@ public class UserMemoryTool {
 
         String onCap = config.getOnCapReached();
         if (ON_CAP_REJECT.equals(onCap)) {
-            return "⚠️ Memory capacity reached (%d/%d). Cannot store more facts.".formatted(count, cap);
+            return ("⚠️ Memory capacity reached (%d/%d). Cannot store NEW facts — existing ones can still be updated, or removed "
+                    + "with forgetFact.").formatted(count, cap);
         }
         if (!ON_CAP_EVICT_OLDEST.equals(onCap)) {
             return ("⚠️ Memory capacity reached (%d/%d) and onCapReached='%s' is not a known mode "
@@ -389,11 +433,6 @@ public class UserMemoryTool {
         }
 
         List<UserMemoryEntry> evictable = evictableEntries();
-        if (evictable.stream().anyMatch(entry -> key.equals(entry.key()))) {
-            // Updating an entry this agent already owns — no new row, so the cap is
-            // untouched and nothing needs to be evicted.
-            return null;
-        }
 
         long required = count - cap + 1;
         int evicted = 0;

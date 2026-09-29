@@ -211,6 +211,52 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         return write(entry);
     }
 
+    private static final String INSERT_IF_ABSENT_GLOBAL = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key) WHERE visibility = 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    private static final String INSERT_IF_ABSENT_SCOPED = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    /**
+     * Atomic: {@code ON CONFLICT ... DO NOTHING} against the same unique partial
+     * indexes {@link #upsert} targets, so an entry another writer created in the
+     * meantime is left exactly as it is and no row comes back.
+     */
+    @Override
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        ensureSchema();
+        String sql = entry.visibility() == Visibility.global ? INSERT_IF_ABSENT_GLOBAL : INSERT_IF_ABSENT_SCOPED;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, entry.userId());
+            ps.setString(2, entry.key());
+            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(4, entry.category());
+            ps.setString(5, entry.visibility() != null ? entry.visibility().name() : "self");
+            ps.setString(6, entry.sourceAgentId());
+            ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(8, entry.sourceConversationId());
+            ps.setBoolean(9, entry.conflicted());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString("id") : null;
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to insert memory entry", e);
+        }
+    }
+
     private String write(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String visibility = entry.visibility() != null ? entry.visibility().name() : "self";

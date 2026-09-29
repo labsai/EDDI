@@ -265,31 +265,31 @@ class McpMemoryToolsBranchCoverageTest {
         @Test
         @DisplayName("null userId returns error")
         void nullUserId() {
-            assertTrue(tools.upsertUserMemory(null, "k", "v", "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory(null, "k", "v", "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null key returns error")
         void nullKey() {
-            assertTrue(tools.upsertUserMemory("u", null, "v", "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", null, "v", "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null value returns error")
         void nullValue() {
-            assertTrue(tools.upsertUserMemory("u", "k", null, "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", null, "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null agentId returns error")
         void nullAgentId() {
-            assertTrue(tools.upsertUserMemory("u", "k", "v", null, null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", "v", null, null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("blank agentId returns error")
         void blankAgentId() {
-            assertTrue(tools.upsertUserMemory("u", "k", "v", "  ", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", "v", "  ", null, null, null).contains("error"));
         }
 
         @Test
@@ -298,7 +298,7 @@ class McpMemoryToolsBranchCoverageTest {
             when(userMemoryStore.upsert(any())).thenReturn("entry-id");
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
 
-            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", "fact", null);
+            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", "fact", null, null);
             assertTrue(result.contains("upserted"));
         }
 
@@ -308,14 +308,14 @@ class McpMemoryToolsBranchCoverageTest {
             when(userMemoryStore.upsert(any())).thenReturn("entry-id");
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
 
-            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", null, "global");
+            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", null, "global", null);
             assertTrue(result.contains("upserted"));
         }
 
         @Test
         @DisplayName("invalid visibility returns error")
         void invalidVisibility() {
-            String result = tools.upsertUserMemory("u", "k", "v", "a", null, "INVALID");
+            String result = tools.upsertUserMemory("u", "k", "v", "a", null, "INVALID", null);
             assertTrue(result.contains("error"));
         }
 
@@ -323,7 +323,7 @@ class McpMemoryToolsBranchCoverageTest {
         @DisplayName("store exception returns error")
         void storeException() throws Exception {
             when(userMemoryStore.upsert(any())).thenThrow(new RuntimeException("fail"));
-            String result = tools.upsertUserMemory("u", "k", "v", "a", null, null);
+            String result = tools.upsertUserMemory("u", "k", "v", "a", null, null, null);
             assertTrue(result.contains("error"));
         }
     }

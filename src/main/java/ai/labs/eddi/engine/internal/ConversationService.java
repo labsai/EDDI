@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.memory.ConversationGroups;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -425,7 +430,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             bindCallerIdentity(startCaller);
             try {
                 conversation = latestAgent.startConversation(userId, context,
-                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
+                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig(), latestAgent.isMemoryToolsEnabled()), null);
             } finally {
                 // Restore rather than clear — this can be a sub-agent conversation
                 // started from inside a parent's pipeline turn, whose bindings must
@@ -715,7 +720,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                    returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -924,7 +930,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
+                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                    returnConversationMemory -> {
                         SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                 returnDetailed, returnCurrentStepOnly, returningFields);
                         memorySnapshot.setEnvironment(environment);
@@ -1037,6 +1044,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversationId, loadedStateForUndo);
                     return false;
                 }
+                // The undone step is now on top of the redo cache.
+                applyAgentMemoryConfig(environment, conversationMemory);
+                syncLongTermChanges(conversationMemory, conversationMemory.getRedoCache().peek(), true);
                 return true;
             } else {
                 return false;
@@ -1083,6 +1093,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversationId, loadedStateForRedo);
                     return false;
                 }
+                applyAgentMemoryConfig(environment, conversationMemory);
+                syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
                 return true;
             } else {
                 return false;
@@ -1309,7 +1321,155 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     // --- Internal helpers ---
 
+    /**
+     * Carries an undo ({@code revert}) or redo of {@code step}'s {@code longTerm}
+     * property changes into the user memory store, which the conversation-memory
+     * undo cannot reach: a slot the undone turn filled stayed filled in every later
+     * conversation.
+     * <p>
+     * Deliberately conservative. The store is shared with the user's other
+     * conversations and agents, so only the entry this step wrote is rewritten: the
+     * one at the identity the turn persisted it under (the shared {@code global}
+     * row, or this agent's own row — the two can coexist for one key), still
+     * holding this step's value, and last written by this conversation. Anything
+     * else is left alone, including when that cannot be told apart. The replacement
+     * is persisted the way a turn persists it
+     * ({@link ConversationGroups#persistedVisibility}), so an undo that reverts a
+     * visibility change reverts it in the store too. An entry is only recreated
+     * when none exists for the key. Best effort: a store failure is logged, the
+     * undo itself stands.
+     */
+    void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
+        if (userMemoryStore == null || step == null) {
+            return;
+        }
+        var changes = ConversationMemory.propertyChanges(step);
+        if (changes.isEmpty()) {
+            return;
+        }
+        String userId = memory.getUserId();
+        String agentId = memory.getAgentId();
+        String conversationId = memory.getConversationId();
+        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+        List<String> groupIds = ConversationGroups.resolveGroupIds(memory);
+        changes.forEach((key, beforeAfter) -> {
+            Property stored = revert ? beforeAfter[1] : beforeAfter[0];
+            Property target = revert ? beforeAfter[0] : beforeAfter[1];
+            boolean storedIsLongTerm = stored != null && stored.getScope() == Property.Scope.longTerm;
+            boolean targetIsLongTerm = target != null && target.getScope() == Property.Scope.longTerm;
+            if (!storedIsLongTerm && !targetIsLongTerm) {
+                return;
+            }
+            // GDPR bookkeeping is never written from a conversation — the store refuses
+            // it, as the turn boundary does (Conversation.storePropertiesPermanently).
+            if (IUserMemoryStore.isReservedKey(key)) {
+                return;
+            }
+            try {
+                List<UserMemoryEntry> sameKey = userMemoryStore.getAllEntries(userId).stream()
+                        .filter(e -> key.equals(e.key()))
+                        .filter(e -> e.visibility() == Visibility.global || Objects.equals(agentId, e.sourceAgentId()))
+                        .toList();
+                if (storedIsLongTerm) {
+                    UserMemoryEntry current = entryWrittenByStep(sameKey, stored, userId, agentId, conversationId, config, groupIds);
+                    if (current == null) {
+                        return; // changed since this step, or not distinguishable — not ours to rewrite
+                    }
+                    if (!targetIsLongTerm) {
+                        userMemoryStore.deleteEntry(current.id());
+                        return;
+                    }
+                    Visibility visibility = restoredVisibility(target, config, groupIds, current.visibility());
+                    List<String> groups = visibility == Visibility.group ? groupIds : List.of();
+                    boolean sameIdentity = (visibility == Visibility.global) == (current.visibility() == Visibility.global);
+                    if (sameIdentity) {
+                        Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
+                        userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), visibility,
+                                current.sourceAgentId(), groups, conversationId, false, current.accessCount(), current.createdAt(),
+                                current.updatedAt()));
+                    } else if (sameKey.stream().noneMatch(e -> (e.visibility() == Visibility.global) == (visibility == Visibility.global))) {
+                        // The entry moves between the shared global row and this agent's
+                        // row, which are different documents.
+                        userMemoryStore.deleteEntry(current.id());
+                        userMemoryStore.upsert(UserMemoryEntry.fromProperty(target, userId, agentId, conversationId, visibility, groups));
+                    }
+                    // else: an entry this step did not write already sits where the value
+                    // would go — leave both rather than overwrite it.
+                } else if (sameKey.isEmpty()) {
+                    // The step removed (or never stored) the key; recreate it only when
+                    // nothing has taken its place.
+                    Visibility visibility = restoredVisibility(target, config, groupIds, Visibility.self);
+                    userMemoryStore.upsert(UserMemoryEntry.fromProperty(target, userId, agentId, conversationId, visibility,
+                            visibility == Visibility.group ? groupIds : List.of()));
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Could not %s long-term property '%s' for conversation %s: %s", revert ? "revert" : "re-apply",
+                        sanitize(key), sanitize(conversationId), e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * The entry {@code step} left for {@code stored}: its value, last written by
+     * this conversation, at the identity the turn persisted it under. {@code null}
+     * when there is none — or when the identity is unknown (no visibility on the
+     * property, no agent config to read the default from) and both rows qualify.
+     */
+    private static UserMemoryEntry entryWrittenByStep(List<UserMemoryEntry> sameKey, Property stored, String userId, String agentId,
+                                                      String conversationId, AgentConfiguration.UserMemoryConfig config,
+                                                      List<String> groupIds) {
+        Object expected = UserMemoryEntry.fromProperty(stored, userId, agentId, null, Visibility.self).value();
+        List<UserMemoryEntry> candidates = sameKey.stream()
+                .filter(e -> Objects.equals(e.value(), expected))
+                .filter(e -> Objects.equals(conversationId, e.sourceConversationId()))
+                .toList();
+        if (stored.getVisibility() != null || config != null) {
+            boolean global = ConversationGroups.persistedVisibility(stored, config, groupIds) == Visibility.global;
+            return candidates.stream().filter(e -> (e.visibility() == Visibility.global) == global).findFirst().orElse(null);
+        }
+        return candidates.size() == 1 ? candidates.get(0) : null;
+    }
+
+    /**
+     * Where {@code target} is persisted: as a turn would, when its visibility is
+     * known. A property without one follows the agent's default — and when that
+     * config is unavailable, {@code fallback} is used rather than a guess: the
+     * scope the entry already has, or {@code self} for a new one, which never
+     * widens who can read it.
+     */
+    private static Visibility restoredVisibility(Property target, AgentConfiguration.UserMemoryConfig config, List<String> groupIds,
+                                                 Visibility fallback) {
+        if (target.getVisibility() == null && config == null) {
+            return fallback == Visibility.group && groupIds.isEmpty() ? Visibility.self : fallback;
+        }
+        return ConversationGroups.persistedVisibility(target, config, groupIds);
+    }
+
+    /**
+     * Undo and redo run outside a turn, so the loaded memory has no
+     * {@code userMemoryConfig} (it is applied per turn and never persisted). Reads
+     * it from the deployed agent so {@link #syncLongTermChanges} can persist the
+     * way the turn did. Without a deployed agent it stays unset and the sync falls
+     * back to never widening a scope.
+     */
+    private void applyAgentMemoryConfig(Environment environment, IConversationMemory memory) {
+        try {
+            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+            if (agent != null) {
+                memory.setUserMemoryConfig(agent.getUserMemoryConfig());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Agent config for conversation %s unavailable for the long-term undo sync: %s",
+                    sanitize(memory.getConversationId()), e.getMessage());
+        }
+    }
+
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
+        return createPropertiesHandler(userId, memoryConfig, memoryConfig != null);
+    }
+
+    IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig,
+                                               final boolean memoryToolsEnabled) {
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
@@ -1319,6 +1479,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             @Override
             public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
                 return memoryConfig;
+            }
+
+            @Override
+            public boolean isMemoryToolsEnabled() {
+                return memoryToolsEnabled;
             }
 
             @Override

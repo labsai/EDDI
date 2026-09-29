@@ -314,6 +314,12 @@ class ConversationSecretInputTest {
 
             var currentStep = memory.getCurrentStep();
             for (var datum : currentStep.getAllElements()) {
+                // properties:* data (the property mirrors and the properties:changes undo
+                // log) records the conversation properties, which keep a captured input
+                // (see below) — undo must restore the value the designer captured.
+                if (datum.getKey().startsWith("properties:")) {
+                    continue;
+                }
                 assertFalse(String.valueOf(datum.getResult()).contains("pw-Rendered-99"),
                         "secret survived in step data '" + datum.getKey() + "'");
             }
