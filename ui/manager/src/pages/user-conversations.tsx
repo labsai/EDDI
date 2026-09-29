@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import {
-  Link2,
   Search,
   Trash2,
   Plus,
@@ -13,6 +12,8 @@ import {
   Bot,
   RefreshCw,
   AlertCircle,
+  MessagesSquare,
+  Target,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -57,7 +58,7 @@ export function UserConversationsPage({ embedded }: { embedded?: boolean } = {})
         <div>
           <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
-              <Link2 className="h-5 w-5 text-blue-500" />
+              <MessagesSquare className="h-5 w-5 text-blue-500" />
             </div>
             {t("userConversations.title", "User Conversations")}
           </h1>
@@ -174,7 +175,7 @@ export function UserConversationsPage({ embedded }: { embedded?: boolean } = {})
           <div className="space-y-3 px-5 py-4">
             <div className="cq-stat-grid">
               <InfoItem
-                icon={<Link2 className="h-3.5 w-3.5" />}
+                icon={<Target className="h-3.5 w-3.5" />}
                 label={t("userConversations.intent", "Intent")}
                 value={result.intent}
               />

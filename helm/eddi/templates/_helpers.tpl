@@ -26,6 +26,16 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
+The EDDI image tag: eddi.image.tag when set, otherwise the chart's appVersion.
+Chart.yaml is then the one place a release has to move, and the image and the
+app.kubernetes.io/version label cannot disagree unless an operator overrides
+the tag on purpose.
+*/}}
+{{- define "eddi.imageTag" -}}
+{{- .Values.eddi.image.tag | default .Chart.AppVersion -}}
+{{- end }}
+
+{{/*
 Common labels.
 
 helm.sh/chart carries the chart NAME AND VERSION. It used to render just the

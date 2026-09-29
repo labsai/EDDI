@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -89,6 +90,14 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** Mirrors QuotaExceededExceptionMapper; jakarta.ws.rs has no 429 constant. */
     private static final int TOO_MANY_REQUESTS = 429;
 
+    /**
+     * Removes the engine-reserved keys from client-supplied context. Field-injected
+     * with the strict default so directly constructed unit tests keep it non-null
+     * (CDI overwrites it with the configured bean in production).
+     */
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
     @Inject
     public RestAgentEngine(IConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -124,7 +133,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // no interactive caller and must not be gated on one.
             resourceAccessGuard.requireAgentUseAccess(agentId);
             String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
-            var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
+            var result = conversationService.startConversation(environment, agentId, resolvedUserId, clientContextGuard.strip(context));
             return Response.created(result.conversationUri()).build();
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());
@@ -216,7 +225,8 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(inputData.getInput(), "inputData.input");
         validateConversationOwnership(conversationId);
 
-        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, response);
+        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
+                response);
     }
 
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
@@ -720,9 +730,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * Validates that the caller owns the conversation identified by
      * {@code conversationId}. Admin role bypasses the check. If the descriptor
-     * cannot be loaded due to a store error, access is denied (fail-closed). If the
-     * descriptor is not found, the check is skipped and the actual operation will
-     * handle the 404.
+     * cannot be loaded due to a store error, access is denied (fail-closed). A
+     * soft-deleted conversation is checked against its archived descriptor; one
+     * with no descriptor at all is a 404 for everyone but an admin (see
+     * {@link ConversationAccessGuard#requireConversationOwner}).
      */
     private void validateConversationOwnership(String conversationId) {
         validateConversationOwnership(conversationId, false);
@@ -731,8 +742,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * @param hitlOperation
      *            if true, uses strict ownership + approver role check
-     * @return the conversation owner's userId, or {@code null} if the descriptor
-     *         was not found (the actual operation handles the 404)
+     * @return the conversation owner's userId; {@code null} for a legacy unowned
+     *         conversation or for an admin addressing one without a descriptor (the
+     *         actual operation then handles the 404)
      */
     private String validateConversationOwnership(String conversationId, boolean hitlOperation) {
         if (hitlOperation) {
@@ -755,6 +767,10 @@ public class RestAgentEngine implements IRestAgentEngine {
         }
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null) {
+                // The store answers null for an unknown id; dereferencing it was a 500.
+                throw new NotFoundException("Conversation not found");
+            }
             var currentState = snapshot.getConversationState();
             if (currentState == ConversationState.IN_PROGRESS) {
                 return Response.status(Response.Status.CONFLICT)

@@ -16,9 +16,11 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -111,6 +113,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
+        validateUniqueName(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
         return response;
@@ -121,6 +124,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
+        validateUniqueName(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
         if (location != null) {
@@ -145,7 +149,13 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             platformConfig.remove("channelId");
             config.setPlatformConfig(platformConfig);
         }
+        // Names are globally unique per channel type, so a copy cannot reuse the
+        // source name. Suffix it and let validateUniqueName below confirm the result.
+        if (config.getName() != null && !config.getName().isBlank()) {
+            config.setName(deriveUniqueDuplicateName(config.getName(), config.getChannelType()));
+        }
         validateConfiguration(config);
+        validateUniqueName(config, null);
         Response response = restVersionInfo.create(config);
         URI location = response.getLocation();
         if (location != null) {
@@ -223,12 +233,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     void validateConfiguration(ChannelIntegrationConfiguration config) {
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
-        }
-        // '|' separates the integration name from the subject in a Slack approval
-        // button value; a name containing it would be split wrongly and bind the
-        // decision to a different integration name.
-        if (config.getName().contains("|")) {
-            throw new BadRequestException("Channel integration name must not contain '|'.");
         }
 
         warnOnPlaintextSecrets(config);
@@ -413,22 +417,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                                 "Another channel integration already uses channelId '" + channelId
                                         + "' for type '" + channelType + "'.");
                     }
-                    // The name is what a Slack approval card binds its decision to, so two
-                    // routed integrations of one type sharing a name would let either's
-                    // signing secret and approver list govern the other's pauses. Only
-                    // integrations with a channelId are routed — a duplicate (which has
-                    // its channelId cleared) may keep the name until it is activated.
-                    if (existing != null
-                            && existing.getPlatformConfig() != null
-                            && channelType.equalsIgnoreCase(existing.getChannelType())
-                            && config.getName() != null
-                            && config.getName().equals(existing.getName())
-                            && existing.getPlatformConfig().get("channelId") != null
-                            && !existing.getPlatformConfig().get("channelId").isBlank()) {
-                        throw new BadRequestException(
-                                "This channel integration name is not available — choose a different name. "
-                                        + "(Names must be unique; which integration holds it is not disclosed.)");
-                    }
                 } catch (BadRequestException e) {
                     throw e; // re-throw validation errors
                 } catch (Exception e) {
@@ -440,6 +428,147 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         } catch (Exception e) {
             LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
         }
+    }
+
+    // ─── Name uniqueness ───────────────────────────────────────────────────────
+
+    /**
+     * Reject create/update when another non-deleted integration of the same channel
+     * type already uses this (case-insensitive) name.
+     * <p>
+     * Names bind HITL approval decisions to an owning integration (the approval
+     * button value and the approval-record store key on the name, and
+     * {@code ChannelTargetRouter.getIntegrationByName} resolves by name). If two
+     * integrations shared a name, a decision could authorize against one while the
+     * record belonged to the other — so the name must be unique, and an ambiguous
+     * lookup already refuses fail-closed (Finding C). A scan that cannot run at all
+     * refuses the save (503) rather than skipping the check; a single unreadable
+     * entry is skipped, so one corrupt document cannot block every channel write.
+     *
+     * @param excludeId
+     *            the resource id being updated (null on create)
+     */
+    void validateUniqueName(ChannelIntegrationConfiguration config, String excludeId) {
+        String name = config.getName();
+        String channelType = config.getChannelType();
+        if (name == null || name.isBlank() || channelType == null) {
+            return;
+        }
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resId == null || resId.getId() == null || resId.getId().equals(excludeId)) {
+                        continue;
+                    }
+                    var existing = channelStore.read(resId.getId(), resId.getVersion());
+                    if (existing != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())
+                            && name.equalsIgnoreCase(existing.getName())) {
+                        // Do not name the conflicting integration — a uniqueness check must
+                        // not become an enumeration oracle for other people's integrations.
+                        throw new BadRequestException(
+                                "Another channel integration of type '" + channelType
+                                        + "' already uses the name '" + name + "'.");
+                    }
+                } catch (BadRequestException e) {
+                    throw e;
+                } catch (IResourceStore.ResourceNotFoundException e) {
+                    // The descriptor points at an integration that no longer exists — it
+                    // cannot hold the name, so it is not a conflict.
+                    LOG.debugf("Skipping a missing channel integration during the name uniqueness check: %s",
+                            sanitize(e.getMessage()));
+                } catch (Exception e) {
+                    if (!isUnreadableDocument(e)) {
+                        // A transient store failure: this entry may carry the very name being
+                        // saved, so the check is inconclusive — the outer handler fails closed.
+                        throw e;
+                    }
+                    // A stored document that cannot be deserialised is skipped, so one corrupt
+                    // entry cannot block every channel write on the instance. A duplicate that
+                    // slips past it still cannot be used: the router refuses an ambiguous name.
+                    LOG.warnf("Skipping an unreadable channel integration during the name uniqueness check: %s",
+                            sanitize(e.getMessage()));
+                }
+            }
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            // Fail closed: a save that skipped the check could create a duplicate name,
+            // and the router then refuses to resolve either integration by it.
+            LOG.warn("Failed to check channel name uniqueness — refusing save", e);
+            throw new ServiceUnavailableException(
+                    "Could not verify that the channel integration name is unique. Please retry.");
+        }
+    }
+
+    /**
+     * Whether a read failure means the stored document itself is unreadable (it no
+     * longer deserialises) rather than that the store could not be reached. Only
+     * the former is safe to skip in the uniqueness scan.
+     */
+    private static boolean isUnreadableDocument(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof JsonProcessingException) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A copy name that does not collide with an existing one: "{name} (copy)", then
+     * "{name} (copy 2)", "{name} (copy 3)", … until one is free. The names in use
+     * are read in ONE scan; the caller's {@link #validateUniqueName} stays the
+     * authoritative check.
+     */
+    private String deriveUniqueDuplicateName(String baseName, String channelType) {
+        Set<String> used = namesInUseLowerCase(channelType);
+        String candidate = baseName + " (copy)";
+        for (int n = 2; used.contains(candidate.toLowerCase(Locale.ROOT)) && n < 1000; n++) {
+            candidate = baseName + " (copy " + n + ")";
+        }
+        return candidate;
+    }
+
+    /**
+     * The lower-cased names of every integration of {@code channelType}. Best
+     * effort: an entry that cannot be read is skipped and a failed scan yields what
+     * was read so far — {@link #validateUniqueName} stays the authoritative check
+     * and fails closed on a transient read failure.
+     */
+    private Set<String> namesInUseLowerCase(String channelType) {
+        Set<String> used = new HashSet<>();
+        if (channelType == null) {
+            return used;
+        }
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resId == null || resId.getId() == null) {
+                        continue;
+                    }
+                    var existing = channelStore.read(resId.getId(), resId.getVersion());
+                    if (existing != null && existing.getName() != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())) {
+                        used.add(existing.getName().toLowerCase(Locale.ROOT));
+                    }
+                } catch (Exception e) {
+                    LOG.debugf("Skipping descriptor while collecting channel names: %s", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to collect channel names for the duplicate's name", e);
+        }
+        return used;
     }
 
     // ─── Descriptor sync ───────────────────────────────────────────────────────

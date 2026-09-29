@@ -2,6 +2,8 @@
    ScrollToBottom — Floating button
    ────────────────────────────────────────────── */
 
+import { ArrowDown } from "lucide-react";
+
 interface ScrollToBottomProps {
   visible: boolean;
   onClick: () => void;
@@ -17,7 +19,7 @@ export function ScrollToBottom({ visible, onClick }: ScrollToBottomProps) {
       aria-label="Scroll to bottom"
       data-testid="scroll-to-bottom"
     >
-      ↓
+      <ArrowDown size="1em" />
     </button>
   );
 }

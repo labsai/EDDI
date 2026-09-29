@@ -3,6 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { configure } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
+import { drainToasts } from "./drain-toasts";
 
 // Increase default waitFor timeout to handle parallel test load. The suite is
 // large (~3.7k tests) and page tests do async data loading; under full-parallel
@@ -75,7 +76,10 @@ import "@/i18n/config";
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 
 // Reset handlers after each test
-afterEach(() => {
+afterEach(async () => {
+  // Before cleanup(): sonner's timers must finish while its Toaster is mounted.
+  // See drain-toasts.ts.
+  await drainToasts();
   cleanup();
   localStorage.clear();
   server.resetHandlers();

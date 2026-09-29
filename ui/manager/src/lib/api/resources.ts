@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
+import { getDescriptorVersions } from "./descriptors";
 
 export { parseResourceUri } from "./agents";
 export type { AgentDescriptor as ResourceDescriptor };
@@ -12,7 +13,8 @@ export interface ResourceTypeConfig {
   /** The backend extension type used in eddi:// URI schemes (e.g. "ai.labs.property") */
   extension: string;
   labelKey: string;
-  icon: string;
+  // No icon here: resolve it with getResourceTypeIcon(slug) from
+  // lib/resource-type-icons.ts, the one table every surface shares.
 }
 
 /** All supported resource types */
@@ -23,7 +25,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "rulesets",
     extension: "ai.labs.rules",
     labelKey: "resources.types.rules",
-    icon: "GitBranch",
   },
   {
     slug: "apicalls",
@@ -31,7 +32,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "apicalls",
     extension: "ai.labs.apicalls",
     labelKey: "resources.types.apicalls",
-    icon: "Globe",
   },
   {
     slug: "output",
@@ -39,7 +39,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "outputsets",
     extension: "ai.labs.output",
     labelKey: "resources.types.output",
-    icon: "MessageSquareText",
   },
   {
     slug: "dictionary",
@@ -47,7 +46,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "dictionaries",
     extension: "ai.labs.dictionary",
     labelKey: "resources.types.dictionary",
-    icon: "BookOpen",
   },
   {
     slug: "llm",
@@ -55,7 +53,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "llms",
     extension: "ai.labs.llm",
     labelKey: "resources.types.llm",
-    icon: "Brain",
   },
   {
     slug: "propertysetter",
@@ -63,7 +60,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "propertysetters",
     extension: "ai.labs.property",
     labelKey: "resources.types.propertysetter",
-    icon: "Settings",
   },
   {
     slug: "mcpcalls",
@@ -71,7 +67,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "mcpcalls",
     extension: "ai.labs.mcpcalls",
     labelKey: "resources.types.mcpcalls",
-    icon: "Plug",
   },
   {
     slug: "rag",
@@ -79,7 +74,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "rags",
     extension: "ai.labs.rag",
     labelKey: "resources.types.rag",
-    icon: "BookOpenCheck",
   },
   {
     slug: "snippets",
@@ -87,7 +81,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "snippets",
     extension: "ai.labs.snippet",
     labelKey: "resources.types.snippets",
-    icon: "Puzzle",
   },
   {
     slug: "parser",
@@ -95,7 +88,6 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "parsers",
     extension: "ai.labs.parser",
     labelKey: "resources.types.parser",
-    icon: "FileText",
   },
 ];
 
@@ -175,10 +167,11 @@ export function duplicateResource(
 /**
  * Get all versions of a specific resource.
  *
- * The GET descriptors endpoint does NOT support includePreviousVersions;
- * that parameter only works on POST (containingResourceUri lookup).
- * Instead, we resolve the current (latest) version via the backend's
- * `currentversion` endpoint and return descriptors for all versions 1..N.
+ * The GET descriptors endpoint does NOT support includePreviousVersions (that
+ * parameter only works on POST, for the containingResourceUri lookup) and has no
+ * `version` parameter at all. So we resolve the current (latest) version via the
+ * backend's `currentversion` endpoint and read each version's descriptor by id
+ * and version — see `getDescriptorVersions`.
  */
 export async function getResourceVersions(
   rt: ResourceTypeConfig,
@@ -188,7 +181,7 @@ export async function getResourceVersions(
   let latest: number | null = null;
   try {
     const currentVersion = await api.get<number>(
-      `${basePath(rt)}/${id}/currentversion`
+      `${basePath(rt)}/${encodeURIComponent(id)}/currentversion`
     );
     latest = currentVersion ?? null;
   } catch {
@@ -197,21 +190,7 @@ export async function getResourceVersions(
   }
 
   if (latest !== null && latest > 0) {
-    // Fetch descriptor for each version in parallel
-    const descriptors = await Promise.all(
-      Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-        try {
-          const results = await api.get<AgentDescriptor[]>(
-            `${basePath(rt)}/descriptors?filter=${id}&version=${v}`
-          );
-          return results;
-        } catch {
-          return [];
-        }
-      })
-    );
-
-    const flat = descriptors.flat();
+    const flat = await getDescriptorVersions(id, latest);
     if (flat.length > 0) {
       return flat;
     }

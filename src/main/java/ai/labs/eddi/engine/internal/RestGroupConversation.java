@@ -709,7 +709,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (IGroupConversationService.GroupDiscussionException e) {
             LOGGER.infof("Close of %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("Close not possible: the conversation must be COMPLETED, FAILED or CANCELLED "
+                    .entity("Close not possible: the conversation must be COMPLETED, FAILED, REJECTED or CANCELLED "
                             + "(it may still be running or already closed), and no other operation may be in progress.")
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {

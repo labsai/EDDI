@@ -190,10 +190,19 @@ ChannelTargetRouter (60s cache refresh)
   ├─ channelType:channelId → resolved config + targets
   └─ allSigningSecrets set (for webhook verification)
         │
-        ├──→ RestSlackWebhook: matchingSecret(signature, allSigningSecrets)
-        └──→ SlackEventHandler: route only to integrations of the matching secret,
-                                postMessage(resolvedBotToken, ...)
+        ├──→ RestSlackWebhook: verify(signature, allSigningSecrets)
+        │      then verify(signature, secret of the integration that owns event.channel)
+        └──→ SlackEventHandler: postMessage(resolvedBotToken, ...)
 ```
+
+**Signatures are bound to the channel's owner.** The pooled check only proves that
+*some* configured Slack app signed the request. Once the body is parsed, an event
+for a configured channel must also verify against the signing secret of the
+integration (or legacy connector) that owns that channel, otherwise it is rejected
+with HTTP 403 — so the holder of one integration's secret cannot drive another
+integration's agents. An owned channel whose owner has no signing secret is
+rejected rather than re-admitted through the pool. An event in a channel nobody
+owns (a DM) is attributed to the integration whose secret actually signed it.
 
 ---
 
@@ -217,7 +226,7 @@ Send a message directly to the bot — no @mention needed:
 Hello, what can you do?
 ```
 
-DMs are automatically routed to the default agent of the Slack integration that belongs to the app the user is messaging. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration — EDDI picks the integration whose signing secret verified the DM (and whose optional `teamId` / `appId`, if set, match the event). When several integrations share one Slack app, one that pins `teamId`/`appId` wins over one that does not, then the alphabetically first name — the same choice on every pod. A DM signed by an app no integration belongs to gets no reply.
+DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. (Only when a legacy per-agent connector signed the DM does EDDI fall back to the first available integration's default target.)
 
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
@@ -439,19 +448,54 @@ Agent responses often contain standard Markdown. The `SlackWebApiClient` automat
 
 ### Multi-Workspace Support
 
-Each `ChannelIntegrationConfiguration` can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces. The `ChannelTargetRouter` caches all credentials and the `SlackSignatureVerifier` tries all known signing secrets during webhook verification — and remembers **which** one matched. An event only ever acts on integrations whose own signing secret verified it: a body signed with integration A's secret that names integration B's channel is dropped, so holding one integration's secret never lets anyone drive another integration's agents or reply with its bot token. For an extra check, set `platformConfig.teamId` and/or `platformConfig.appId`; the event envelope's `team_id` / `api_app_id` (and an interactivity payload's `team.id` / `api_app_id`) must then match.
+Each `ChannelIntegrationConfiguration` can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces. The `ChannelTargetRouter` caches all credentials; the webhook first checks the signature against all known signing secrets, then against the secret of the integration that owns the event's channel.
 
-#### Slack user ids across workspaces
+### Slack User Identity
 
-By default EDDI identifies a Slack user by the bare Slack id (`U…`): that is the `userId` of their conversations, the key of their long-term memories, `{userInfo.userId}` in templates and the id a GDPR request names. Slack ids are unique **within a workspace only**, so a deployment serving several workspaces can map two different people onto one EDDI user — sharing conversations and long-term memory. EDDI logs a startup warning when more than one Slack app is configured while this is the case.
+A Slack user is stored in EDDI as `slack:<team_id>:<user_id>` (for example
+`slack:T024BE7LD:U0ALICE`) — the id that owns their conversations, long-term
+memories and GDPR records. Earlier releases used the raw Slack user id
+(`U0ALICE`), which shares a namespace with OIDC principals and REST callers: a
+Keycloak user whose principal equalled a Slack id shared that Slack user's
+memories and passed ownership checks on their conversations. Slack ids are also
+only unique per workspace.
 
-Set `eddi.slack.namespace-user-ids=true` to identify Slack users as `slack:<teamId>:<userId>` instead. The team is the event's `user_team` (Slack Connect users from another org), else `team`, else the envelope's `team_id`. Those fields are signed by the sending app but not otherwise verified, so namespacing prevents *accidental* collisions between workspaces — it does not authenticate a user's workspace.
+The `team_id` comes **only** from the integration's declared
+`platformConfig.teamId`, never from the event payload: a signing secret proves
+which integration signed the event, not which workspace it came from, so its
+holder could otherwise put any `team_id` in the payload and reach another
+workspace's users. An event whose `team_id` (or `event.team`) disagrees with the
+declared `teamId` is rejected with HTTP 403. An integration that declares no
+`teamId` gets team-less ids (`slack:<user_id>`) for its users, in owned channels
+and DMs alike. Team-less ids never equal a `slack:<team_id>:<user_id>`, but every
+team-less integration on the instance shares that one namespace — **declare
+`teamId` on every Slack integration** of a multi-workspace or multi-tenant
+deployment.
 
-Turning it on for an existing deployment changes every Slack user's EDDI id:
+Data stored under the raw id keeps working, without a migration step:
 
-- **Templates** — `{userInfo.userId}` (and anything that passes the user id on, e.g. an HTTP call to Slack's `users.info` or a CRM keyed by Slack id) now receives `slack:T…:U…`. Every Slack-started conversation also carries the raw ids as start context — `{context.slackUserId}` and `{context.slackTeamId}` — whichever scheme is in force, so templates can use those.
-- **Long-term memory** — for the deployment's *legacy team* only, the bare-id memories are copied to the namespaced id the first time the namespaced id is seen (only while it has no memories yet; copied, not moved, so threads still running under the bare id keep theirs), and a thread that was running under the bare id keeps its conversation. The legacy team is `eddi.slack.legacy-team-id`, or — when that is unset — the one `teamId` every routed Slack integration pins, provided no legacy agent-level Slack connector is routed (a legacy connector pins no workspace, so its users' bare ids could be from any team, and no team is derived while one exists). The derived team reflects only the **current** configuration: an integration removed earlier may also have written bare ids from another workspace, so an operator who needs certainty sets `eddi.slack.legacy-team-id` explicitly. With no legacy team (a genuinely multi-workspace deployment) **nothing is aliased**: a bare id there may already hold two people's data, and copying it to either would leak it.
-- **GDPR** — until the bare-id data is erased, one person has data under **two** ids. An export or erasure for a legacy-team user must name both `U…` and `slack:T…:U…`; erasing only the namespaced id lets the carry-over copy the bare-id memories back on their next new thread.
+- **Ongoing threads** — the thread's conversation mapping is found under the raw
+  id, re-keyed to the namespaced id, and the thread keeps its conversation. That
+  conversation still carries the raw id as its owner (it is not rewritten), so it
+  keeps loading the memories it always did.
+- **New conversations** — are owned by the namespaced id and do **not**
+  inherit long-term memories stored under the raw id. Those entries are not
+  moved: the raw id carries no workspace and shares a namespace with every other
+  identity source, so a move keyed on an event's claims could relocate another
+  user's memories. They stay under the raw id, where the legacy conversations
+  that own them keep loading them.
+
+For **GDPR erasure or export** of a Slack user, address the namespaced id; until
+their legacy conversations have ended, also address the raw id. Group
+discussions started from Slack are owned by the namespaced id. The audit label
+`decidedBy: slack:<userId>` for Slack HITL decisions is unchanged.
+
+Slack HITL approval buttons are bound to the card they were posted on: each
+card's buttons carry a random card id that is recorded with the card, and a
+click is accepted only from the card recorded for the conversation's (or
+group's) current pause. An older card of the same conversation cannot approve a
+newer pause, and a button without a card id — a card posted before this
+binding — is refused. See [HITL → Slack Integration](hitl.md#slack-integration).
 
 ### Retry Logic
 
@@ -522,9 +566,7 @@ When running EDDI as a multi-instance cluster behind a load balancer:
 | `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
 | `platformConfig.botToken` | ✅ | Bot User OAuth Token. Use vault reference. |
 | `platformConfig.signingSecret` | ✅ | Slack Signing Secret. Use vault reference. |
-| `platformConfig.teamId` | ❌ | Slack workspace id (`T…`). When set, events and approval clicks must carry this `team_id`. |
-| `platformConfig.appId` | ❌ | Slack app id (`A…`). When set, events and approval clicks must carry this `api_app_id`. |
-| `name` | ✅ | Integration name. Must be unique among integrations of the type that have a `channelId`, and must not contain `\|` — approval buttons bind decisions to it. |
+| `platformConfig.teamId` | ❌ (recommended) | Slack workspace id (`T…`). The only source of the workspace in user ids; events claiming another workspace are rejected. Without it, users get team-less ids — see [Slack User Identity](#slack-user-identity). |
 | `defaultTargetName` | ✅ | Name of the target used when no trigger keyword matches |
 | `targets[].name` | ✅ | Target name (must match `defaultTargetName` for the default) |
 | `targets[].type` | ✅ | `AGENT` or `GROUP` |
@@ -609,7 +651,7 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 | `message.im` subscribed? | Add `message.im` to Bot Events in Slack app settings |
 | `im:history` scope? | Add `im:history` to Bot Token Scopes and reinstall the app |
 | `im:write` scope? | Add `im:write` to Bot Token Scopes and reinstall the app |
-| Does an integration belong to this Slack app? | DMs go to the default target of the integration whose signing secret verified the DM (and whose `teamId`/`appId`, if set, match) — an app with no integration of its own gets no reply |
+| Any Slack integration configured? | DMs route to the default target of the integration whose signing secret signed them |
 
 ### Signature verification fails (HTTP 403)
 
@@ -619,6 +661,7 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 | Clock drift? | Timestamp validation uses 5-minute window — sync clocks |
 | Reverse proxy stripping body? | The raw body must reach EDDI unchanged for HMAC verification |
 | No agents configured? | At least one deployed agent must have a Slack integration with `signingSecret` |
+| Event in a configured channel? | It must be signed with **that channel's** integration secret. Two integrations on the same channel id, or a channel configured under a different Slack app than the one sending the events, are rejected — the log reads "not signed by the integration that owns it" |
 
 ### Messages appear duplicated
 

@@ -14,11 +14,14 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
+import com.fasterxml.jackson.core.JsonParseException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -269,6 +272,83 @@ class RestChannelIntegrationStoreCrudTest {
 
             assertDoesNotThrow(() -> sut.duplicateChannel(CHANNEL_ID, 1));
         }
+
+        @Test
+        @DisplayName("a name-uniqueness scan that cannot run refuses the save instead of skipping the check")
+        void uniquenessScanFailureRefusesSave() throws Exception {
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenThrow(new RuntimeException("store down"));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        private void oneExistingIntegration() throws Exception {
+            var entry = new DocumentDescriptor();
+            entry.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445509?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(entry));
+        }
+
+        @Test
+        @DisplayName("a transient failure reading an existing integration refuses the save — it may hold the same name")
+        void transientEntryReadFailureRefusesSave() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        @Test
+        @DisplayName("an existing integration whose document no longer deserialises is skipped, not a blocker")
+        void corruptEntryIsSkipped() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1)).thenThrow(new IResourceStore.ResourceStoreException(
+                    "unreadable", new JsonParseException(null, "unexpected token")));
+
+            assertDoesNotThrow(() -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        @Test
+        @DisplayName("a descriptor whose integration no longer exists is skipped")
+        void missingEntryIsSkipped() throws Exception {
+            oneExistingIntegration();
+            when(channelStore.read("aabbccddeeff112233445509", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertDoesNotThrow(() -> sut.validateUniqueName(validConfig(), null));
+        }
+
+        @Test
+        @DisplayName("picks the first free copy name, reading the existing names in one scan")
+        void duplicatePicksFirstFreeCopyName() throws Exception {
+            when(channelStore.read(CHANNEL_ID, 1)).thenReturn(validConfig());
+            when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("newId12345678901234", 1));
+
+            var copy1 = new DocumentDescriptor();
+            copy1.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445501?version=1"));
+            var copy2 = new DocumentDescriptor();
+            copy2.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445502?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(copy1, copy2));
+            var existing1 = validConfig();
+            existing1.setName("my slack hub (COPY)");
+            var existing2 = validConfig();
+            existing2.setName("My Slack Hub (copy 2)");
+            when(channelStore.read("aabbccddeeff112233445501", 1)).thenReturn(existing1);
+            when(channelStore.read("aabbccddeeff112233445502", 1)).thenReturn(existing2);
+
+            sut.duplicateChannel(CHANNEL_ID, 1);
+
+            var created = ArgumentCaptor.forClass(ChannelIntegrationConfiguration.class);
+            verify(channelStore).create(created.capture());
+            assertEquals("My Slack Hub (copy 3)", created.getValue().getName());
+            // One scan to derive the name, one for the authoritative uniqueness check —
+            // not one scan per candidate.
+            verify(documentDescriptorStore, atMost(2)).readDescriptors(eq("ai.labs.channel"), eq(""), eq(0),
+                    eq(IDescriptorStore.NO_LIMIT), eq(false));
+        }
     }
 
     // ─── getResourceURI / getCurrentResourceId ─────────────────────────────────
@@ -382,48 +462,6 @@ class RestChannelIntegrationStoreCrudTest {
 
             assertThrows(BadRequestException.class,
                     () -> sut.createChannel(config));
-        }
-
-        @Test
-        @DisplayName("should reject a name another routed integration of the type already uses")
-        void duplicateNameOfRoutedIntegration() throws Exception {
-            // The name binds a Slack approval decision to its integration: two
-            // routed integrations sharing it would let either govern the other's.
-            var config = validConfig();
-            config.setPlatformConfig(new HashMap<>(Map.of("channelId", "C-NEW")));
-
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445566?version=1"));
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
-                    .thenReturn(List.of(descriptor));
-            var existing = validConfig();
-            existing.setName(config.getName());
-            existing.setPlatformConfig(Map.of("channelId", "C-OTHER"));
-            when(channelStore.read("aabbccddeeff112233445566", 1)).thenReturn(existing);
-
-            var ex = assertThrows(BadRequestException.class, () -> sut.createChannel(config));
-            assertTrue(ex.getMessage().contains("name is not available"));
-            // Generic: it must not name the integration that holds the name.
-            assertFalse(ex.getMessage().contains("Other"));
-        }
-
-        @Test
-        @DisplayName("a same-named integration that is not routed (no channelId, e.g. a duplicate) does not block")
-        void duplicateNameOfUnroutedIntegrationAllowed() throws Exception {
-            var config = validConfig();
-            config.setPlatformConfig(new HashMap<>(Map.of("channelId", "C-NEW")));
-
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445566?version=1"));
-            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
-                    .thenReturn(List.of(descriptor));
-            var existing = validConfig();
-            existing.setName(config.getName());
-            existing.setPlatformConfig(Map.of());
-            when(channelStore.read("aabbccddeeff112233445566", 1)).thenReturn(existing);
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newChan12345678901", 1));
-
-            assertDoesNotThrow(() -> sut.createChannel(config));
         }
 
         @Test

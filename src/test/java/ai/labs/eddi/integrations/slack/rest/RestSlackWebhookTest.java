@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack.rest;
 
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
@@ -15,6 +16,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -57,8 +61,8 @@ class RestSlackWebhookTest {
         @DisplayName("returns 403 when signature verification fails")
         void returns403OnBadSignature() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(eq("ts"), eq("{}"), eq("bad-sig"), any()))
-                    .thenReturn(null);
+            when(signatureVerifier.verify(eq("ts"), eq("{}"), eq("bad-sig"), any()))
+                    .thenReturn(false);
 
             Response response = webhook.handleEvents("{}", "bad-sig", "ts");
 
@@ -77,7 +81,7 @@ class RestSlackWebhookTest {
         @DisplayName("echoes challenge for url_verification type")
         void echoesChallenge() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"url_verification\",\"challenge\":\"abc123\"}";
 
@@ -92,7 +96,7 @@ class RestSlackWebhookTest {
         @DisplayName("handles null challenge gracefully")
         void handleNullChallenge() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"url_verification\"}";
 
@@ -112,7 +116,7 @@ class RestSlackWebhookTest {
         @DisplayName("delegates event_callback to eventHandler")
         void delegatesEventCallback() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-1\",\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
 
@@ -121,7 +125,7 @@ class RestSlackWebhookTest {
             assertEquals(200, response.getStatus());
             // No `authorizations` on this envelope, so the bot id is unknown and
             // the handler is told so rather than being given a guess.
-            verify(eventHandler).handleEventAsync(eq("evt-1"), any(), argThat(env -> env.botUserId() == null));
+            verify(eventHandler).handleEventAsync(eq("evt-1"), any(), isNull(), any());
         }
 
         @Test
@@ -131,7 +135,7 @@ class RestSlackWebhookTest {
             // message addressed to THIS bot from one that mentions somebody else
             // — without an auth.test round trip or a cache to invalidate.
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-2\","
                     + "\"authorizations\":[{\"is_bot\":false,\"user_id\":\"U-human\"},"
@@ -140,32 +144,14 @@ class RestSlackWebhookTest {
 
             webhook.handleEvents(body, "sig", "ts");
 
-            verify(eventHandler).handleEventAsync(eq("evt-2"), any(), argThat(env -> "U-bot".equals(env.botUserId())));
-        }
-
-        @Test
-        @DisplayName("H4a: hands the handler WHICH secret verified the request, plus team_id and api_app_id")
-        void passesVerifiedSecretAndEnvelopeIds() {
-            // A boolean "some secret matched" let one integration's secret address
-            // every other integration's channels; the handler binds each route to
-            // the secret that actually verified the body.
-            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret-a", "secret-b"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret-b");
-
-            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-9\",\"team_id\":\"T1\","
-                    + "\"api_app_id\":\"A1\",\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
-
-            webhook.handleEvents(body, "sig", "ts");
-
-            verify(eventHandler).handleEventAsync(eq("evt-9"), any(), argThat(env -> "secret-b".equals(env.verifiedSigningSecret())
-                    && "T1".equals(env.teamId()) && "A1".equals(env.apiAppId())));
+            verify(eventHandler).handleEventAsync(eq("evt-2"), any(), eq("U-bot"), any());
         }
 
         @Test
         @DisplayName("a user-token authorization yields no bot id")
         void nonBotAuthorizationIsNotABotId() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-3\","
                     + "\"authorizations\":[{\"is_bot\":false,\"user_id\":\"U-human\"}],"
@@ -173,14 +159,171 @@ class RestSlackWebhookTest {
 
             webhook.handleEvents(body, "sig", "ts");
 
-            verify(eventHandler).handleEventAsync(eq("evt-3"), any(), argThat(env -> env.botUserId() == null));
+            verify(eventHandler).handleEventAsync(eq("evt-3"), any(), isNull(), any());
+        }
+
+        // ─── Channel-bound verification (the pooled secret set is not enough) ───
+
+        private static final String CHANNEL_EVENT = "{\"type\":\"event_callback\",\"event_id\":\"evt-9\","
+                + "\"team_id\":\"T1\",\"event\":{\"type\":\"app_mention\",\"channel\":\"C_OWNED\","
+                + "\"user\":\"U1\",\"text\":\"hi\"}}";
+
+        private static final String DM_EVENT = "{\"type\":\"event_callback\",\"event_id\":\"evt-10\","
+                + "\"team_id\":\"T1\",\"event\":{\"type\":\"message\",\"channel_type\":\"im\","
+                + "\"channel\":\"D123\",\"user\":\"U1\",\"text\":\"hi\"}}";
+
+        private void pooledCheckPasses() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret-a", "secret-b"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("an event in an owned channel signed with ANOTHER integration's secret is rejected")
+        void ownedChannelSignedByOtherIntegrationIsRejected() {
+            pooledCheckPasses();
+            when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.of("secret-b"));
+            // The request was signed with secret-a — valid for the pool, not for the owner.
+            when(signatureVerifier.verifyWithSecret("ts", CHANNEL_EVENT, "sig", "secret-b")).thenReturn(false);
+
+            Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
+        }
+
+        @Test
+        @DisplayName("an event in an owned channel signed by its owner is dispatched with the DECLARED workspace")
+        void ownedChannelSignedByOwnerIsDispatched() {
+            pooledCheckPasses();
+            when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.of("secret-b"));
+            when(signatureVerifier.verifyWithSecret("ts", CHANNEL_EVENT, "sig", "secret-b")).thenReturn(true);
+            when(channelTargetRouter.getIntegration("slack", "C_OWNED")).thenReturn(Optional.of(withTeam("T1")));
+
+            Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin("T1", null)));
+        }
+
+        @Test
+        @DisplayName("an owned channel whose owner declares no teamId does not trust the payload team")
+        void ownedChannelOnTeamlessIntegrationIgnoresPayloadTeam() {
+            pooledCheckPasses();
+            when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.of("secret-b"));
+            when(signatureVerifier.verifyWithSecret("ts", CHANNEL_EVENT, "sig", "secret-b")).thenReturn(true);
+            // The owner declares no teamId. Its secret signs the event, but that proves
+            // the integration, not the workspace: team_id=T1 may be forged by the secret's
+            // holder to reach slack:T1:U1. The identity must be team-less.
+            when(channelTargetRouter.getIntegration("slack", "C_OWNED")).thenReturn(Optional.of(withTeam(null)));
+
+            Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin(null, null)));
+        }
+
+        @Test
+        @DisplayName("an owned channel whose owner has no secret is rejected, not re-admitted via the pool")
+        void ownedChannelWithoutSecretIsRejected() {
+            pooledCheckPasses();
+            when(channelTargetRouter.isChannelOwned("slack", "C_OWNED")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecretForChannel("slack", "C_OWNED")).thenReturn(Optional.empty());
+
+            Response response = webhook.handleEvents(CHANNEL_EVENT, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
+        }
+
+        private ChannelIntegrationConfiguration withTeam(String teamId) {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setName("int-b");
+            cfg.setChannelType("slack");
+            var pc = new HashMap<String, String>();
+            if (teamId != null) {
+                pc.put("teamId", teamId);
+            }
+            cfg.setPlatformConfig(pc);
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("a DM is attributed to the signing integration and its DECLARED workspace")
+        void dmIsAttributedToTheSigningIntegration() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-a", "secret-a"),
+                    new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-a")).thenReturn(false);
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b declares workspace T1 and the payload agrees → dispatched as T1.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam("T1")));
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin("T1", "int-b")));
+        }
+
+        @Test
+        @DisplayName("residual #1: a forged team that disagrees with the integration's declared workspace is rejected")
+        void dmForgedTeamAgainstDeclaredWorkspaceIsRejected() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b really serves workspace T-REAL; the event forges team_id=T1.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam("T-REAL")));
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
+        }
+
+        @Test
+        @DisplayName("residual #1: a forged team on a teamId-less integration resolves to no victim workspace")
+        void dmForgedTeamOnTeamlessIntegrationResolvesToNoVictim() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-b", "secret-b")));
+            when(signatureVerifier.verifyWithSecret("ts", DM_EVENT, "sig", "secret-b")).thenReturn(true);
+            // int-b declares no teamId; the event's team_id=T1 (the victim's) must NOT
+            // be trusted — the identity is team-less, so slack:T1:U1 is never reached.
+            when(channelTargetRouter.getIntegrationByName("slack", "int-b")).thenReturn(Optional.of(withTeam(null)));
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
+                    eq(new SlackEventHandler.EventOrigin(null, "int-b")));
+        }
+
+        @Test
+        @DisplayName("a DM matching no signing identity is rejected")
+        void dmMatchingNoIdentityIsRejected() {
+            pooledCheckPasses();
+            when(channelTargetRouter.getSigningIdentities("slack")).thenReturn(List.of(
+                    new ChannelTargetRouter.SigningIdentity("int-a", "secret-a")));
+            when(signatureVerifier.verifyWithSecret(any(), any(), any(), any())).thenReturn(false);
+
+            Response response = webhook.handleEvents(DM_EVENT, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
         }
 
         @Test
         @DisplayName("returns 200 even when event is null")
         void nullEvent() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-1\"}";
 
@@ -194,7 +337,7 @@ class RestSlackWebhookTest {
         @DisplayName("unknown type returns 200 (Slack expects it)")
         void unknownType() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             String body = "{\"type\":\"something_else\"}";
 
@@ -214,7 +357,7 @@ class RestSlackWebhookTest {
         @DisplayName("returns 400 for invalid JSON")
         void invalidJson() {
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.matchingSecret(any(), any(), any(), any())).thenReturn("secret");
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
             Response response = webhook.handleEvents("not json", "sig", "ts");
 

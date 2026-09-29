@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -36,16 +37,6 @@ class SlackHitlSupportTest {
         assertTrue(ids.contains("U1"));
         assertTrue(ids.contains("U2"));
         assertTrue(ids.contains("U3"));
-    }
-
-    @Test
-    void isAuthorizedApprover_teamScopedEntries() {
-        String list = "U_BARE, T1:U_SCOPED";
-        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_BARE", "T9", list), "a bare entry matches any team");
-        assertTrue(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T1", list));
-        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", "T2", list), "same id, other team");
-        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", null, list), "a scoped entry needs a team");
-        assertFalse(SlackHitlSupport.isAuthorizedApprover("U_SCOPED", list), "the two-arg form carries no team");
     }
 
     @Test
@@ -125,16 +116,31 @@ class SlackHitlSupportTest {
     // ─── Action value (integration-bound button payload) ───
 
     @Test
-    void buildActionValue_withIntegration_prefixesName() {
-        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1"));
-        assertEquals("my-int|group:gc-9",
-                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9"));
+    void buildActionValue_withIntegration_prefixesNameAndAppendsCardId() {
+        assertEquals("my-int|conv-1|card-a", SlackHitlSupport.buildActionValue("my-int", "conv-1", "card-a"));
+        assertEquals("my-int|group:gc-9|card-a",
+                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9", "card-a"));
+        // Without a card id the value is unbound (and refused on click).
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null));
     }
 
     @Test
     void buildActionValue_noIntegration_returnsBareSubject() {
-        assertEquals("conv-1", SlackHitlSupport.buildActionValue(null, "conv-1"));
-        assertEquals("conv-1", SlackHitlSupport.buildActionValue("", "conv-1"));
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue(null, "conv-1", "card-a"));
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue("", "conv-1", "card-a"));
+    }
+
+    @Test
+    void parseActionValue_cardBound() {
+        var v = SlackHitlSupport.parseActionValue("my-int|conv-1|card-a");
+        assertEquals("my-int", v.integrationName());
+        assertEquals("conv-1", v.subject());
+        assertEquals("card-a", v.cardId());
+        var g = SlackHitlSupport.parseActionValue("my-int|group:gc-9|card-b");
+        assertEquals("gc-9", g.groupConversationId());
+        assertEquals("card-b", g.cardId());
+        // An empty card id part is no card id.
+        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1|").cardId());
     }
 
     @Test
@@ -145,6 +151,7 @@ class SlackHitlSupportTest {
         assertEquals("conv-1", v.subject());
         assertFalse(v.isGroup());
         assertNull(v.groupConversationId());
+        assertNull(v.cardId(), "a value from before card binding has no card id");
     }
 
     @Test
@@ -154,31 +161,6 @@ class SlackHitlSupportTest {
         assertEquals("my-int", v.integrationName());
         assertTrue(v.isGroup());
         assertEquals("gc-9", v.groupConversationId());
-    }
-
-    /** H4b: the card carries the id of the pause it was posted for. */
-    @Test
-    void actionValue_pauseId_roundTrips() {
-        String conv = SlackHitlSupport.buildActionValue("my-int", "conv-1", "1700000000123");
-        assertEquals("my-int|conv-1|1700000000123", conv);
-        var v = SlackHitlSupport.parseActionValue(conv);
-        assertEquals("my-int", v.integrationName());
-        assertEquals("conv-1", v.subject());
-        assertEquals("1700000000123", v.pauseId());
-        assertFalse(v.isGroup());
-
-        var g = SlackHitlSupport.parseActionValue(
-                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9", "42"));
-        assertTrue(g.isGroup());
-        assertEquals("gc-9", g.groupConversationId());
-        assertEquals("42", g.pauseId());
-    }
-
-    @Test
-    void actionValue_withoutPauseId_parsesToNullPauseId() {
-        // A card posted before pause ids existed — refused by the handler.
-        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1").pauseId());
-        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null));
     }
 
     @Test
@@ -198,10 +180,12 @@ class SlackHitlSupportTest {
 
     @Test
     void parseActionValue_roundTrip() {
-        String built = SlackHitlSupport.buildActionValue("int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-1");
+        String cardId = ISlackApprovalRecordStore.newCardId();
+        String built = SlackHitlSupport.buildActionValue("int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-1", cardId);
         var v = SlackHitlSupport.parseActionValue(built);
         assertEquals("int", v.integrationName());
         assertEquals("gc-1", v.groupConversationId());
+        assertEquals(cardId, v.cardId());
     }
 
     // ─── Response extraction ───

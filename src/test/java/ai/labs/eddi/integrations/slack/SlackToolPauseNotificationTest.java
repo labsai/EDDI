@@ -16,11 +16,12 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.slack.hitl.InMemorySlackApprovalRecordStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.integrations.channels.ObserveGate;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
@@ -356,10 +357,11 @@ class SlackToolPauseNotificationTest {
                 mock(IConversationService.class),
                 mock(IGroupConversationService.class),
                 mock(IUserConversationStore.class),
-                mock(IUserMemoryStore.class),
                 cacheFactory,
                 new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
-                        SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS));
+                        SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS),
+                new InMemorySlackApprovalRecordStore(),
+                mock(IUserMemoryStore.class));
     }
 
     private static ResolvedTarget resolvedWithApprovalChannel() {

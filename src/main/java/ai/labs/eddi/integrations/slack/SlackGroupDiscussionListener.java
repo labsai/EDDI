@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionRecord;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
-import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -61,6 +61,13 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * {@code null} (e.g. no integration context), yielding a legacy bare value.
      */
     private final String integrationName;
+    /**
+     * Where approval cards are recorded, so a decision can be checked against the
+     * card this integration actually posted for the pause. {@code null} only for
+     * callers that predate it — their cards carry no buttons, since a decision on
+     * an unrecorded card is always refused.
+     */
+    private final ISlackApprovalRecordStore approvalRecords;
 
     /** agentId → Slack message ts of their first contribution (for threading). */
     private final Map<String, String> agentMessageTs = new ConcurrentHashMap<>();
@@ -117,6 +124,20 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
             String channelId, String userThreadTs,
             String hitlApprovalChannel, String hitlApproverUserIds, String integrationName) {
+        this(slackApi, authToken, channelId, userThreadTs, hitlApprovalChannel, hitlApproverUserIds,
+                integrationName, null);
+    }
+
+    /**
+     * Full constructor: additionally records every approval card in
+     * {@code approvalRecords}, which is what lets the interactivity endpoint accept
+     * a decision on it.
+     */
+    public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
+            String channelId, String userThreadTs,
+            String hitlApprovalChannel, String hitlApproverUserIds, String integrationName,
+            ISlackApprovalRecordStore approvalRecords) {
+        this.approvalRecords = approvalRecords;
         this.slackApi = slackApi;
         this.authToken = authToken;
         this.channelId = channelId;
@@ -420,28 +441,51 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
                 return;
             }
-            boolean hasApprovers = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
-            // The pause id binds a click to THIS pause, so a card left in the channel
-            // cannot approve a later one. Without it the buttons could only be bound
-            // to "whatever is paused now" — so none are rendered.
-            String pauseId = HitlDecision.pauseIdOf(event.pausedAt());
-            boolean includeButtons = hasApprovers && pauseId != null;
+            boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
             String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
-            // The button value carries the owning integration name so the group
-            // decision is bound to THIS integration at the interactivity endpoint.
-            String actionValue = SlackHitlSupport.buildActionValue(integrationName,
-                    SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId, pauseId);
+            // The button value carries the owning integration name and this card's id,
+            // so the group decision is bound to THIS integration and THIS card — an
+            // older card for the same discussion cannot approve a later phase.
+            String subject = SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId;
+            String cardId = ISlackApprovalRecordStore.newCardId();
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId);
+
+            // Record the card BEFORE posting it, keyed by this pause's identity: the
+            // interactivity endpoint refuses a decision on a subject this integration
+            // never posted a card for, or on a card from an earlier pause. Without a
+            // record the card is notification-only — buttons nobody can use would
+            // only produce refusals.
+            String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(event.pausedAt());
+            boolean recorded = false;
+            if (includeButtons) {
+                if (approvalRecords == null || integrationName == null || integrationName.isBlank()) {
+                    includeButtons = false;
+                } else {
+                    try {
+                        if (!approvalRecords.tryRecord(integrationName, subject, pauseEpoch, cardId, hitlApprovalChannel)) {
+                            return; // a card for this pause was already posted
+                        }
+                        recorded = true;
+                    } catch (RuntimeException e) {
+                        LOGGER.errorf("Could not record the group HITL approval card for %s — posting it without buttons: %s",
+                                LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
+                        includeButtons = false;
+                    }
+                }
+            }
             var blocks = SlackHitlSupport.buildApprovalBlocks(
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
-                    actionValue, includeButtons, null, null,
-                    hasApprovers ? SlackHitlSupport.PAUSE_UNIDENTIFIED_NOTICE : SlackHitlSupport.NO_APPROVERS_NOTICE);
+                    actionValue, includeButtons);
             String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
             try {
                 slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
             } catch (SlackDeliveryException e) {
                 LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
                         LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
+                if (recorded) {
+                    forgetRecord(subject, pauseEpoch);
+                }
             }
         } finally {
             // A HITL pause is TERMINAL for this listener's lifecycle: the discussion
@@ -452,6 +496,18 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // (leaking a virtual thread), and follow-up routing for the agents that
             // already spoke stays unregistered for that whole window.
             completionLatch.countDown();
+        }
+    }
+
+    /**
+     * Drop the record of a card that never reached Slack, so a retry may post it.
+     */
+    private void forgetRecord(String subject, String pauseEpoch) {
+        try {
+            approvalRecords.delete(integrationName, subject, pauseEpoch);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not delete the record of an undelivered group HITL card for %s: %s",
+                    LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));
         }
     }
 

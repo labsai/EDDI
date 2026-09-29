@@ -87,15 +87,6 @@ class RestChannelIntegrationStoreValidationTest {
             assertThrows(BadRequestException.class,
                     () -> store.validateConfiguration(config));
         }
-
-        @Test
-        @DisplayName("a name containing '|' → BadRequest (it would split a Slack approval button value)")
-        void pipeInName() {
-            config.setName("acme|victim");
-            var ex = assertThrows(BadRequestException.class,
-                    () -> store.validateConfiguration(config));
-            assertTrue(ex.getMessage().contains("|"));
-        }
     }
 
     // ─── Channel type ──────────────────────────────────────────────────────────

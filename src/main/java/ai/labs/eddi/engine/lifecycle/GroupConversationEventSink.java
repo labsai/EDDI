@@ -155,13 +155,13 @@ public final class GroupConversationEventSink {
 
     /**
      * @param pausedAt
-     *            when the pause started — its identity (see
-     *            {@code HitlDecision.pauseIdOf}); an approval surface binds a
-     *            decision to it. {@code null} when unknown.
+     *            the pause identity ({@code GroupConversation.pausedAt}) — lets a
+     *            channel that posts an approval card bind the card to THIS pause,
+     *            so a stale card cannot resolve a later one. {@code null} when not
+     *            known.
      */
     public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
 
-        /** A pause event whose start time is unknown. */
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
             this(phaseIndex, phaseName, reason, granularity, null);
         }
