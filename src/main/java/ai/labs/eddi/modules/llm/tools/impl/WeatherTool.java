@@ -5,7 +5,6 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.langchain4j.agent.tool.P;
@@ -19,7 +18,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
@@ -84,17 +82,13 @@ public class WeatherTool {
 
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
 
-            HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
+            SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
 
             if (response.statusCode() == 404) {
                 return "Error: City '" + city + "' not found. Please check the city name.";
             }
 
-            if (response.statusCode() != 200) {
-                throw new IOException("Weather API returned status: " + response.statusCode());
-            }
-
-            return formatWeatherResponse(response.body(), city, units);
+            return formatWeatherResponse(bodyOf(response), city, units);
 
         } catch (Exception e) {
             // No throwable in the log call: its message and stack trace are exactly
@@ -132,17 +126,13 @@ public class WeatherTool {
 
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
 
-            HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
+            SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
 
             if (response.statusCode() == 404) {
                 return "Error: City '" + city + "' not found.";
             }
 
-            if (response.statusCode() != 200) {
-                throw new IOException("Weather API returned status: " + response.statusCode());
-            }
-
-            return formatForecastResponse(response.body(), city, days, units);
+            return formatForecastResponse(bodyOf(response), city, days, units);
 
         } catch (Exception e) {
             String reason = redact(e.getMessage());
@@ -191,6 +181,21 @@ public class WeatherTool {
             case "standard" -> " K";
             default -> "°C";
         };
+    }
+
+    /**
+     * The body of a 200 answer, read through {@link SafeHttpClient#sendBounded}. A
+     * body cut short at {@link #MAX_RESPONSE_BYTES} or the read deadline is refused
+     * rather than parsed as a fragment.
+     */
+    private static String bodyOf(SafeHttpClient.BoundedResponse response) throws IOException {
+        if (response.statusCode() != 200) {
+            throw new IOException("Weather API returned status: " + response.statusCode());
+        }
+        if (response.truncated()) {
+            throw new IOException("Weather API response exceeded " + MAX_RESPONSE_BYTES + " bytes or its read deadline");
+        }
+        return new String(response.body(), StandardCharsets.UTF_8);
     }
 
     private static String encode(String value) {

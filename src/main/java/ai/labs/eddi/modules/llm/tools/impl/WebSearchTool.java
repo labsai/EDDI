@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.BoundedBodyHandlers;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +18,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
@@ -95,13 +93,9 @@ public class WebSearchTool {
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
+        String body = fetch(request, "Google search");
 
-        if (response.statusCode() != 200) {
-            throw new IOException("Google search returned status: " + response.statusCode());
-        }
-
-        return formatGoogleResults(response.body(), query);
+        return formatGoogleResults(body, query);
     }
 
     private String searchWithDuckDuckGo(String query, int maxResults) throws IOException, InterruptedException {
@@ -112,13 +106,25 @@ public class WebSearchTool {
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                 .GET().build();
 
-        HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
+        String body = fetch(request, "DuckDuckGo search");
 
+        return formatDuckDuckGoResults(body, query, maxResults);
+    }
+
+    /**
+     * Sends {@code request} through {@link SafeHttpClient#sendBounded} and returns
+     * the body of a 200 answer. A body cut short at {@link #MAX_RESPONSE_BYTES} or
+     * the read deadline is refused rather than parsed as a fragment.
+     */
+    private String fetch(HttpRequest request, String source) throws IOException, InterruptedException {
+        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
         if (response.statusCode() != 200) {
-            throw new IOException("DuckDuckGo search returned status: " + response.statusCode());
+            throw new IOException(source + " returned status: " + response.statusCode());
         }
-
-        return formatDuckDuckGoResults(response.body(), query, maxResults);
+        if (response.truncated()) {
+            throw new IOException(source + " response exceeded " + MAX_RESPONSE_BYTES + " bytes or its read deadline");
+        }
+        return new String(response.body(), StandardCharsets.UTF_8);
     }
 
     /**
@@ -230,13 +236,9 @@ public class WebSearchTool {
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
                     .GET().build();
 
-            HttpResponse<String> response = httpClient.send(request, BoundedBodyHandlers.ofString(MAX_RESPONSE_BYTES));
+            String body = fetch(request, "Wikipedia search");
 
-            if (response.statusCode() != 200) {
-                throw new IOException("Wikipedia search returned status: " + response.statusCode());
-            }
-
-            return formatWikipediaResults(response.body(), query);
+            return formatWikipediaResults(body, query);
 
         } catch (Exception e) {
             LOGGER.error("Wikipedia search error: " + e.getMessage(), e);

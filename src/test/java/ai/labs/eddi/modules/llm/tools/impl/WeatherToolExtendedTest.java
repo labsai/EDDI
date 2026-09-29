@@ -16,11 +16,12 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -72,12 +73,13 @@ class WeatherToolExtendedTest {
         apiKeyField.set(weatherTool, Optional.of("test-api-key"));
     }
 
-    @SuppressWarnings("unchecked")
     private void mockResponse(int statusCode, String body) throws IOException, InterruptedException {
-        HttpResponse<String> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(statusCode);
-        when(response.body()).thenReturn(body);
-        when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+        mockResponse(statusCode, body, false);
+    }
+
+    private void mockResponse(int statusCode, String body, boolean truncated) throws IOException, InterruptedException {
+        when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+                .thenReturn(new SafeHttpClient.BoundedResponse(statusCode, body.getBytes(StandardCharsets.UTF_8), truncated));
     }
 
     // ==================== getCurrentWeather ====================
@@ -230,7 +232,7 @@ class WeatherToolExtendedTest {
         @Test
         @DisplayName("should handle IOException from HTTP client")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Connection refused"));
 
             String result = weatherTool.getCurrentWeather("London", "metric");
@@ -369,7 +371,7 @@ class WeatherToolExtendedTest {
             assertFalse(current.contains(KEY), current);
             assertFalse(forecast.contains(KEY), forecast);
             assertTrue(current.contains("units must be one of"), current);
-            verify(mockHttpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            verify(mockHttpClient, never()).sendBounded(any(HttpRequest.class), anyLong());
         }
 
         @Test
@@ -386,7 +388,7 @@ class WeatherToolExtendedTest {
         @Test
         @DisplayName("an exception quoting the request URL is redacted in the answer")
         void exceptionMessagesAreRedacted() throws Exception {
-            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("failed: https://api.openweathermap.org/data/2.5/weather?q=London&appid=" + KEY + "&units=metric"));
 
             String current = weatherTool.getCurrentWeather("London", "metric");
@@ -408,8 +410,19 @@ class WeatherToolExtendedTest {
             weatherTool.getCurrentWeather("London", "metric");
 
             ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
-            verify(mockHttpClient).send(captor.capture(), any(HttpResponse.BodyHandler.class));
+            verify(mockHttpClient).sendBounded(captor.capture(), anyLong());
             assertTrue(captor.getValue().uri().getRawQuery().contains("appid=a+b%26c"), captor.getValue().uri().getRawQuery());
+        }
+
+        @Test
+        @DisplayName("the answer is read through the bounded fetch, and a truncated one is refused")
+        void answerIsBounded() throws Exception {
+            mockResponse(200, "{\"main\": {\"temp\": 2", true);
+
+            String result = weatherTool.getCurrentWeather("London", "metric");
+
+            assertTrue(result.contains("exceeded " + WeatherTool.MAX_RESPONSE_BYTES + " bytes"), result);
+            verify(mockHttpClient).sendBounded(any(HttpRequest.class), eq(WeatherTool.MAX_RESPONSE_BYTES));
         }
 
         @Test
