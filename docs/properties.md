@@ -287,6 +287,8 @@ Instead of storing entire API responses, extract only what you need:
 }
 ```
 
+A value read through `fromObjectPath` is stored **exactly as found** — it is data, not a template, so braces in a user's message or an API response are kept literally and never evaluated. Only `valueString` (and the property `name`) are rendered as templates; to combine a navigated value with text, reference it from a `valueString`, e.g. `"valueString": "Temperature: {memory.current.httpCalls.weatherApi.current.temperature}"`.
+
 ### 3. Use Visibility for Multi-Agent Scenarios
 
 ```json
