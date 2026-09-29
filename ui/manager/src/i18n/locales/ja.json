@@ -748,7 +748,8 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -2037,6 +2038,7 @@
     "ingestion": "ドキュメントの取り込み",
     "dropFiles": "ここに取り込むドキュメントをドロップします",
     "dropHint": "テキスト、Markdown、または任意のテキストベースのファイル",
+    "replaceSameName": "同じファイル名で以前に取り込んだドキュメントを置き換える",
     "browse": "参照",
     "pasteText": "またはテキストを貼り付けます",
     "pastePlaceholder": "ここにドキュメントのテキストを貼り付けてください...",
@@ -2068,6 +2070,8 @@
       "includeSubdomains": "サブドメインを含める",
       "excludePatterns": "除外パターン",
       "excludePatternsHint": "URL パスに対するグロブをカンマ区切りで指定 — * は 1 つのセグメント内、** はセグメントをまたぎます",
+      "sitemapUrls": "サイトマップ",
+      "sitemapUrlsHint": "ページ検出に使うサイトマップのURL（カンマ区切り）。robots.txt に記載がない場合のみ必要です。サイトマップインデックスもたどります",
       "saveFirst": "このソースの実行・プレビュー・履歴表示には、ナレッジベースの保存が必要です。",
       "run": "今すぐ実行",
       "runFailed": "実行を開始できませんでした。すでに実行中の可能性があります。",

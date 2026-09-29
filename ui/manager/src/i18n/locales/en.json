@@ -775,7 +775,8 @@
     "errorConversationEnded": "This conversation has ended.",
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
-    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment."
+    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -2117,6 +2118,7 @@
     "ingestion": "Document Ingestion",
     "dropFiles": "Drop documents here to ingest",
     "dropHint": "Text, Markdown, or any text-based file",
+    "replaceSameName": "Replace a previously ingested document with the same file name",
     "browse": "Browse",
     "pasteText": "Or paste text content",
     "pastePlaceholder": "Paste document text here...",
@@ -2148,6 +2150,8 @@
       "includeSubdomains": "Include subdomains",
       "excludePatterns": "Exclude patterns",
       "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
       "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
       "run": "Run now",
       "runFailed": "Could not start the run. A run may already be in flight.",

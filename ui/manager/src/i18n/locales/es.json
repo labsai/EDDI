@@ -758,7 +758,8 @@
     "errorConversationEnded": "Esta conversación ha terminado.",
     "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
     "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
-    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento."
+    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento.",
+    "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo."
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -2059,6 +2060,7 @@
     "ingestion": "Ingesta de documentos",
     "dropFiles": "Arrastre documentos aquí para ingerir",
     "dropHint": "Texto, Markdown o cualquier archivo de texto",
+    "replaceSameName": "Reemplazar un documento ingerido previamente con el mismo nombre de archivo",
     "browse": "Buscar",
     "pasteText": "O pegue el contenido del texto",
     "pastePlaceholder": "Pegue el texto del documento aquí...",
@@ -2090,6 +2092,8 @@
       "includeSubdomains": "Incluir subdominios",
       "excludePatterns": "Patrones de exclusión",
       "excludePatternsHint": "Globs sobre la ruta de la URL, separados por comas — * permanece en un segmento, ** los cruza",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps para descubrir páginas, separadas por comas. Solo si robots.txt no las incluye; se siguen los índices de sitemaps",
       "saveFirst": "Guarde la base de conocimiento para ejecutar esta fuente, previsualizarla o ver su historial.",
       "run": "Ejecutar ahora",
       "runFailed": "No se pudo iniciar la ejecución. Puede que ya haya una en curso.",

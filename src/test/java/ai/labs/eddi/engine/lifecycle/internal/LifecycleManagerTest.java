@@ -468,6 +468,94 @@ class LifecycleManagerTest {
     }
 
     @Nested
+    @DisplayName("A failed task is reported to the caller")
+    class CallerFailureReport {
+
+        private ConversationStep failingTurn(Exception failure, AgentConfiguration.MemoryPolicy memoryPolicy) throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn("langchain");
+            doThrow(failure).when(task).execute(any(), any());
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new HashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
+            return currentStep;
+        }
+
+        /**
+         * The default. The turn used to come back as ERROR with an empty output: no
+         * reply and no reason, on the plain and the streaming path alike.
+         */
+        @Test
+        @DisplayName("without strict write, the output carries the failure and its actual reason")
+        @SuppressWarnings("unchecked")
+        void reportedWithoutStrictWrite() throws Exception {
+            var providerRejection = new RuntimeException("{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+                    + "\"message\":\"`temperature` is deprecated for this model.\"},\"request_id\":\"req_1\"}");
+            var failure = new LifecycleException("Streaming chat failed", new RuntimeException("wrapped", providerRejection));
+
+            ConversationStep step = failingTurn(failure, null);
+
+            var reported = ArgumentCaptor.forClass(List.class);
+            verify(step).addConversationOutputList(eq("taskErrors"), reported.capture());
+            var entry = (Map<String, Object>) reported.getValue().getFirst();
+            assertEquals("errorDigest", entry.get("type"));
+            assertEquals("langchain", entry.get("taskType"));
+            assertEquals("Task 'eddi://ai.labs.llm' failed: Streaming chat failed: `temperature` is deprecated for this model.",
+                    entry.get("text"));
+        }
+
+        @Test
+        @DisplayName("without strict write, nothing the model reads is touched — only the output is")
+        void reportDoesNotReachTheModel() throws Exception {
+            ConversationStep step = failingTurn(new LifecycleException("boom"), null);
+
+            verify(step, never()).storeData(any(Data.class));
+            verify(step, never()).set(eq(ACTIONS), anyList());
+        }
+
+        @Test
+        @DisplayName("strict write with exclude_all still reports nothing")
+        void excludeAllStaysSilent() throws Exception {
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("exclude_all");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+
+            ConversationStep step = failingTurn(new LifecycleException("boom"), memoryPolicy);
+
+            verify(step, never()).addConversationOutputList(eq("taskErrors"), anyList());
+        }
+
+        @Test
+        @DisplayName("the report is redacted — it leaves the server")
+        @SuppressWarnings("unchecked")
+        void reportIsRedacted() throws Exception {
+            ConversationStep step = failingTurn(
+                    new LifecycleException("rejected key sk-abcdefghijklmnopqrstuvwxyz123456 at https://internal.example/v1"), null);
+
+            var reported = ArgumentCaptor.forClass(List.class);
+            verify(step).addConversationOutputList(eq("taskErrors"), reported.capture());
+            String text = (String) ((Map<String, Object>) reported.getValue().getFirst()).get("text");
+            assertFalse(text.contains("sk-abcdefghijklmnopqrstuvwxyz123456"), text);
+            assertFalse(text.contains("internal.example"), text);
+        }
+    }
+
+    @Nested
     @DisplayName("Event Sink Integration")
     class EventSinkTests {
 

@@ -359,8 +359,11 @@ public class ConversationMemoryUtilities {
                 // (Conversation scrubs such a turn, input:initial included, when it
                 // ends). A client rebuilding a transcript after a reload, undo or
                 // rerun uses it to mask that turn.
+                // TASK_ERRORS: a failed turn's reason. Left off this list, it was
+                // written and then stripped from every default (non-detailed)
+                // response, so the caller got ERROR with nothing to say why.
                 if (key.startsWith(INPUT_INITIAL.key()) || key.equals(INPUT.key()) || key.startsWith(ACTIONS.key())
-                        || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX)) {
+                        || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX) || key.equals(TASK_ERRORS)) {
                     newConversationOutput.put(key,
                             secretTurn ? maskedSecretTurnOutputValue(key, conversationOutput.get(key), needles) : conversationOutput.get(key));
                 }
