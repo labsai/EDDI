@@ -32,6 +32,7 @@ import { Link } from "react-router-dom";
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
 
+/** The workflows list page: search, sort, card/table view, create and delete. */
 export function WorkflowsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");

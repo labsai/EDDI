@@ -477,6 +477,10 @@ const CHAPTER_ROUTES: Record<TourChapterId, string> = {
   orphans: "/manage/orphans",
 };
 
+/**
+ * Sidebar "Help & Tour" popover: replays one onboarding chapter (jumping to
+ * its page) or resets them all. Closes on an outside click or Escape.
+ */
 function HelpMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();

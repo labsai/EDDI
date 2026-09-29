@@ -41,6 +41,10 @@ interface DebugDrawerProps {
   agentId: string | null;
 }
 
+/**
+ * Bottom drawer with the conversation debugger's tabs for the current chat.
+ * Open state and active tab come from the debug store.
+ */
 export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const { t } = useTranslation();
   const isOpen = useDebugStore((s) => s.isDebugOpen);

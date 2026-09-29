@@ -31,6 +31,7 @@ import { ShareDialog } from "@/components/workspaces/share-dialog";
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
 
+/** The agents list page: search, sort, card/table view, create, import and share. */
 export function AgentsPage() {
   const { t } = useTranslation();
   const { activeSpace, setActiveSpace, enabled: workspacesEnabled } = useSpaces();

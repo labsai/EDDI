@@ -51,6 +51,7 @@ function setStoredSort(field: SortField, dir: SortDir) {
   } catch { /* ignore */ }
 }
 
+/** The group conversations list page: search, sort, card/table view, create and delete. */
 export function GroupsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();

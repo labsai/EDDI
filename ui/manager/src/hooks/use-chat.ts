@@ -713,6 +713,12 @@ export function translateStreamError(
   }
 }
 
+/**
+ * Applies one streamed SSE event to the chat and debug stores.
+ *
+ * @returns `true` when the event ends the turn (`done` or `error`), so the
+ *   caller stops reading the stream; `false` otherwise.
+ */
 function handleSSEEvent(
   event: SSEEvent,
   store: typeof useChatStore,
