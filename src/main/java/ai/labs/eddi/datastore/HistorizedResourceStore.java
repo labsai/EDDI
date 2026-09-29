@@ -95,8 +95,10 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
         var historyResource = resourceStorage.newHistoryResourceFor(resource, true);
         // One unit of work — otherwise a crash in between leaves the resource
-        // archived as deleted while the live row is still there.
-        resourceStorage.storeHistoryAndRemove(historyResource, id);
+        // archived as deleted while the live row is still there. Version-checked, so
+        // an update that committed after the read above is refused rather than
+        // erased (see IResourceStorage.storeHistoryAndRemove).
+        resourceStorage.storeHistoryAndRemove(historyResource, id, version);
     }
 
     private void checkIfFoundAndLatest(String id, Integer version, IResourceStorage.IResource<?> resource)

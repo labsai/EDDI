@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -161,6 +162,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     ConversationAccessGuard conversationAccessGuard;
+
+    /**
+     * Verifies a {@code groupId} found only on an earlier step before group memory
+     * is scoped to it (see {@code ConversationGroups}). Field-injected, so directly
+     * constructed tests see {@code null} and only the current step's value counts.
+     */
+    @Inject
+    LiveDiscussionRegistry liveDiscussionRegistry;
 
     /**
      * Graceful-shutdown gate (B3). New turns are refused once a
@@ -1400,7 +1409,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         String agentId = memory.getAgentId();
         String conversationId = memory.getConversationId();
         AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        List<String> groupIds = ConversationGroups.resolveGroupIds(memory);
+        List<String> groupIds = ConversationGroups.resolveGroupIds(memory, groupMembershipCheck());
         changes.forEach((key, beforeAfter) -> {
             Property stored = revert ? beforeAfter[1] : beforeAfter[0];
             Property target = revert ? beforeAfter[0] : beforeAfter[1];
@@ -1556,7 +1565,22 @@ public class ConversationService implements IConversationService, UserErasurePar
             public int getMaxAttachmentsPerTurn() {
                 return maxAttachmentsPerTurn;
             }
+
+            @Override
+            public ConversationGroups.MembershipCheck getGroupMembershipCheck() {
+                return groupMembershipCheck();
+            }
         };
+    }
+
+    /**
+     * Confirms an earlier step's {@code groupId} against the running discussion, or
+     * {@code null} when no registry is wired (direct construction in tests), in
+     * which case only the current step's {@code groupId} counts.
+     */
+    private ConversationGroups.MembershipCheck groupMembershipCheck() {
+        LiveDiscussionRegistry registry = liveDiscussionRegistry;
+        return registry != null ? registry::isLiveMember : null;
     }
 
     /**

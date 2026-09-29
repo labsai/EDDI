@@ -202,6 +202,13 @@ The group is taken only from that injected context value. A client cannot supply
 and a conversation *property* named `groupId` does not select a group scope for the
 `usermemory` tool.
 
+A `groupId` found only on an earlier step of the conversation — a turn the owner sends
+into a member conversation directly carries no group context — is used, by the
+`usermemory` tool and when `longTerm` properties are persisted alike, only while the
+discussion named on that step is running on this instance, this conversation is one of its
+members, and it belongs to that group. Otherwise the turn is self-scoped, so a value a
+client forged before reserved keys were filtered does not keep working.
+
 ## REST API
 
 Base path: `/usermemorystore/memories`

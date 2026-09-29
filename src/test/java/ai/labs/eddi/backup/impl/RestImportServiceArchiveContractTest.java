@@ -1103,7 +1103,8 @@ class RestImportServiceArchiveContractTest {
             var restWorkflowStore = mock(IRestWorkflowStore.class);
             when(restWorkflowStore.updateWorkflow(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
 
-            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore)) {
+            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore,
+                    IWorkflowStore.class, readableWorkflowStore())) {
                 Response response = importService.importAgent(
                         new ByteArrayInputStream(new byte[0]), "merge", workflowId, null, null);
 
@@ -1167,7 +1168,8 @@ class RestImportServiceArchiveContractTest {
             var restWorkflowStore = mock(IRestWorkflowStore.class);
             when(restWorkflowStore.updateWorkflow(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
 
-            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore)) {
+            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore,
+                    IWorkflowStore.class, readableWorkflowStore())) {
                 Response response = importService.importAgent(
                         new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
 
@@ -1239,7 +1241,8 @@ class RestImportServiceArchiveContractTest {
             // workflow row, and the SKIP row for the config the archive omits.
             String everyTickedRow = AGENT_ORIGIN_ID + "," + workflowId + "," + llmId;
 
-            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore)) {
+            try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestWorkflowStore.class, restWorkflowStore,
+                    IWorkflowStore.class, readableWorkflowStore())) {
                 Response response = importService.importAgent(
                         new ByteArrayInputStream(new byte[0]), "merge", everyTickedRow, null, null);
 
@@ -1323,7 +1326,18 @@ class RestImportServiceArchiveContractTest {
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + NEW_AGENT_ID + "?version=1"));
         when(documentDescriptorStore.readDescriptor(NEW_AGENT_ID, 1)).thenReturn(descriptor);
+        // A merge snapshots what it overwrites and refuses a target it cannot read.
+        when(agentStore.read(anyString(), anyInt())).thenReturn(new AgentConfiguration());
         return agentStore;
+    }
+
+    /**
+     * The target's workflow, readable so a merge can snapshot it before updating.
+     */
+    private static IWorkflowStore readableWorkflowStore() throws Exception {
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.read(anyString(), anyInt())).thenReturn(new WorkflowConfiguration());
+        return workflowStore;
     }
 
     private <T> AutoCloseable stubCdi(Class<T> storeClass, T store) {
