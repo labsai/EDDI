@@ -14,6 +14,7 @@ import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.util.regex.Pattern;
 
@@ -38,6 +39,13 @@ import java.util.regex.Pattern;
  * base64-encoded into a JSON body (four thirds, plus a megabyte for the rest of
  * the message) — so an operator raising the attachment limit, as its
  * validator's message tells them to, is not then refused here with a bare 413.
+ *
+ * <p>
+ * Never above {@code quarkus.http.limits.max-body-size}, though, which refuses
+ * a larger request before this filter or any validator sees it. An attachment
+ * limit whose base64 body needs more than that ceiling cannot be honoured by
+ * this filter alone, so it is reported at startup with a WARN naming both
+ * settings and the ceiling it needs — a 60 MiB attachment needs about 81 MB.
  *
  * <h2>Bodies without a length</h2>
  * <p>
@@ -64,6 +72,8 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class RequestBodyLimitGuard {
 
+    private static final Logger LOGGER = Logger.getLogger(RequestBodyLimitGuard.class);
+
     /** Below {@link HttpMethodGuard}, which refuses whole methods first. */
     static final int PRIORITY = 19_000;
 
@@ -73,11 +83,20 @@ public class RequestBodyLimitGuard {
      */
     static final Pattern LARGE_BODY_PATHS = Pattern.compile("^/ragstore/rags/[^/]+/sources/[^/]+/files/?$");
 
+    private static final long MEGABYTE = 1024L * 1024;
+
     /** Room for the rest of a JSON message around a base64-encoded attachment. */
-    private static final long ENVELOPE_BYTES = 1024L * 1024;
+    private static final long ENVELOPE_BYTES = MEGABYTE;
 
     @ConfigProperty(name = "eddi.http.limits.default-max-body-size", defaultValue = "25M")
     MemorySize defaultMaxBodySize;
+
+    /**
+     * The HTTP layer's absolute ceiling, which refuses a larger body before this
+     * filter runs. Read, not set: the effective limit is capped by it.
+     */
+    @ConfigProperty(name = "quarkus.http.limits.max-body-size", defaultValue = "10240K")
+    MemorySize globalMaxBodySize;
 
     @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520")
     long attachmentMaxBytes = 20_971_520L;
@@ -91,6 +110,10 @@ public class RequestBodyLimitGuard {
 
     void register(@Observes Filters filters) {
         filters.register(this::handle, PRIORITY);
+        String conflict = ceilingConflict();
+        if (conflict != null) {
+            LOGGER.warn(conflict);
+        }
     }
 
     void handle(RoutingContext context) {
@@ -115,11 +138,40 @@ public class RequestBodyLimitGuard {
 
     /**
      * The configured limit, or what the largest allowed attachment needs, whichever
-     * is more.
+     * is more — but never more than the HTTP layer's ceiling lets through.
      */
     long effectiveLimit() {
-        long attachment = attachmentMaxBytes <= 0 ? 0 : (attachmentMaxBytes / 3 + 1) * 4 + ENVELOPE_BYTES;
-        return Math.max(defaultMaxBodySize.asLongValue(), attachment);
+        long wanted = Math.max(defaultMaxBodySize.asLongValue(), attachmentBodyBytes());
+        return Math.min(wanted, ceiling());
+    }
+
+    /**
+     * Why an attachment at the configured limit cannot arrive inline, or null when
+     * it can: its base64 body needs more than {@code
+     * quarkus.http.limits.max-body-size}, which refuses the request before this
+     * filter — or the attachment validator and its advice — ever sees it.
+     */
+    String ceilingConflict() {
+        long needed = attachmentBodyBytes();
+        long ceiling = ceiling();
+        if (needed <= ceiling) {
+            return null;
+        }
+        long neededMb = (needed + MEGABYTE - 1) / MEGABYTE;
+        return "eddi.attachments.max-size-bytes=" + attachmentMaxBytes + " allows attachments whose base64 JSON "
+                + "body needs about " + neededMb + " MB, but quarkus.http.limits.max-body-size is "
+                + ceiling / MEGABYTE + " MB: such requests are refused with a bare 413 before any endpoint "
+                + "sees them. Raise quarkus.http.limits.max-body-size to at least " + neededMb
+                + "M, or lower eddi.attachments.max-size-bytes.";
+    }
+
+    /** What an attachment at the limit takes base64-encoded in a JSON body. */
+    private long attachmentBodyBytes() {
+        return attachmentMaxBytes <= 0 ? 0 : (attachmentMaxBytes / 3 + 1) * 4 + ENVELOPE_BYTES;
+    }
+
+    private long ceiling() {
+        return globalMaxBodySize == null ? Long.MAX_VALUE : globalMaxBodySize.asLongValue();
     }
 
     /**

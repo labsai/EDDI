@@ -23,6 +23,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,6 +44,7 @@ class RequestBodyLimitGuardTest {
     private static RequestBodyLimitGuard guard() {
         var guard = new RequestBodyLimitGuard();
         guard.defaultMaxBodySize = new MemorySize(BigInteger.valueOf(25 * MB));
+        guard.globalMaxBodySize = new MemorySize(BigInteger.valueOf(60 * MB));
         return guard;
     }
 
@@ -165,9 +168,29 @@ class RequestBodyLimitGuardTest {
         long base64Of20MiB = (20L * MB / 3 + 1) * 4;
 
         assertTrue(guard.effectiveLimit() > base64Of20MiB, "limit " + guard.effectiveLimit());
+        assertTrue(guard.effectiveLimit() <= guard.globalMaxBodySize.asLongValue(),
+                "and the HTTP layer's own ceiling lets it through");
+        assertNull(guard.ceilingConflict(), "the shipped settings agree");
+    }
 
+    @Test
+    @DisplayName("an attachment limit the HTTP ceiling cannot carry is reported, naming both settings")
+    void anAttachmentLimitAboveTheCeilingIsReported() {
+        // 60 MiB base64-encoded is over 80 MB, and quarkus.http.limits.max-body-size
+        // (60M) refuses the request before this guard, or the attachment validator
+        // with its advice, is ever reached: raising the attachment limit alone buys
+        // a bare 413.
+        var guard = guard();
         guard.attachmentMaxBytes = 60 * MB;
-        assertTrue(guard.effectiveLimit() > (60L * MB / 3) * 4, "an operator raising the attachment limit is not refused");
+
+        String conflict = guard.ceilingConflict();
+
+        assertNotNull(conflict);
+        assertTrue(conflict.contains("eddi.attachments.max-size-bytes"), conflict);
+        assertTrue(conflict.contains("quarkus.http.limits.max-body-size"), conflict);
+        assertTrue(conflict.contains("at least 82M"), "the ceiling it would take: " + conflict);
+        assertEquals(guard.globalMaxBodySize.asLongValue(), guard.effectiveLimit(),
+                "the guard never claims more than the ceiling lets through");
     }
 
     @Test

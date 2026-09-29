@@ -149,6 +149,13 @@ by one uploaded file. This fixes them. Every behaviour below is documented in
   ended" as a body without a length, but a bodyless GET is not ended yet when a filter runs either, so
   it answered 411 — with `Connection: close`, which HTTP/2 forbids, so the client discarded the
   response as malformed. The HTTP/2 inference is gone, and the header is sent on HTTP/1.x only.
+- **The guard's attachment allowance is capped by the HTTP ceiling (CodeRabbit).** Raising
+  `eddi.attachments.max-size-bytes` raised the guard's limit past `quarkus.http.limits.max-body-size`
+  (60M), which refuses the request first — a 60 MiB attachment needs about 81 MB base64-encoded — so
+  the docs' "the two settings cannot disagree" was wrong past about 44 MB. `RequestBodyLimitGuard`
+  now caps its limit at that ceiling and, at startup, logs a WARN naming both properties and the
+  ceiling needed (not a startup failure: multipart attachment uploads, which are not base64, still
+  fit). Documented in `application.properties`, `configuration-reference.md` and `attachments-guide.md`.
 - **A rename during a run no longer leaves pages a newer run calls "unchanged" (CodeRabbit).** The
   rename's purge frees the source, so a new run can claim it while the old one is between its
   ownership check and recording a page it just embedded into the old store; that insert has no row to
