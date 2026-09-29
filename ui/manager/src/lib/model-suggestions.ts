@@ -9,7 +9,7 @@
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6).
-    // claude-sonnet-5 leads because it is the app-wide default model — a
+    // claude-sonnet-5-5 leads because it is the app-wide default model — a
     // datalist's first entry is what an admin sees before typing, so it should
     // match the placeholder they were already shown.
     "claude-sonnet-5-5",
