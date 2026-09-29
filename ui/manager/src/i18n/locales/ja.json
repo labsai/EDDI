@@ -1317,7 +1317,9 @@
     "streamingTimeoutSeconds": "ストリーミングタイムアウト（秒）",
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
-    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。"
+    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "unknownType": "{{type}}（カスタム）",
+    "compatibleEndpoint": "エンドポイント: {{url}} — 上書きするには baseUrl または region パラメーターを追加します"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -4988,5 +4990,22 @@
     "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
     "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
     "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "モデル開発元",
+      "compatible": "OpenAI 互換プロバイダー",
+      "cloud": "クラウドプラットフォーム",
+      "local": "ローカル / セルフホスト"
+    },
+    "region": {
+      "label": "リージョン",
+      "intl": "国際",
+      "cn": "中国本土",
+      "us": "米国",
+      "custom": "カスタム URL"
+    },
+    "compatibleNote": "プロバイダーの OpenAI 互換 API（{{url}}）経由で接続します。プロキシや別のリージョンを使う場合のみ変更してください。",
+    "keyHint": "API キーは {{url}} で取得できます"
   }
 }

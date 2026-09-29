@@ -1331,7 +1331,9 @@
     "streamingTimeoutSeconds": "Délai d'attente du streaming (secondes)",
     "streamingTimeoutSecondsHint": "Remplace la valeur par défaut du moteur (120s). S'applique uniquement au streaming ; vide = utiliser la valeur par défaut.",
     "taskPricing": "Tarification des appels simples",
-    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $."
+    "taskPricingDesc": "Tarifie les appels de modèle ordinaires (hors cascade) de cette tâche pour le suivi des coûts et les plafonds de coût du groupe. Sans prix (vide), la contribution est de 0 $.",
+    "unknownType": "{{type}} (personnalisé)",
+    "compatibleEndpoint": "Point d'accès : {{url}} — ajoutez un paramètre baseUrl ou region pour le remplacer"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -5040,5 +5042,22 @@
     "workflowMissingResource": "Le workflow {{workflowId}} (version {{version}}) ne référence pas {{resource}} ; l'enregistrer ici ne modifierait donc pas l'agent. Rien n'a été enregistré.",
     "agentWorkflowMismatch": "L'agent {{agentId}} (version {{version}}) référence le workflow {{workflowId}} en version {{found}}, et non en version {{expected}}. L'agent a changé depuis l'ouverture de cette page. Rechargez-la. Rien n'a été enregistré.",
     "agentMissingWorkflow": "L'agent {{agentId}} (version {{version}}) ne référence pas le workflow {{workflowId}}. Rien n'a été enregistré."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratoires de modèles",
+      "compatible": "Fournisseurs compatibles OpenAI",
+      "cloud": "Plateformes cloud",
+      "local": "Local / auto-hébergé"
+    },
+    "region": {
+      "label": "Région",
+      "intl": "International",
+      "cn": "Chine continentale",
+      "us": "États-Unis",
+      "custom": "URL personnalisée"
+    },
+    "compatibleNote": "Se connecte via l'API compatible OpenAI du fournisseur ({{url}}). Ne modifiez que pour un proxy ou une autre région.",
+    "keyHint": "Obtenir une clé API sur {{url}}"
   }
 }

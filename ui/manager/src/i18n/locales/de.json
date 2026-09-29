@@ -1317,7 +1317,9 @@
     "streamingTimeoutSeconds": "Streaming-Timeout (Sekunden)",
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
-    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet."
+    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "unknownType": "{{type}} (benutzerdefiniert)",
+    "compatibleEndpoint": "Endpunkt: {{url}} — zum Überschreiben einen Parameter baseUrl oder region hinzufügen"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -4988,5 +4990,22 @@
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
     "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "KI-Labore",
+      "compatible": "OpenAI-kompatible Anbieter",
+      "cloud": "Cloud-Plattformen",
+      "local": "Lokal / selbst gehostet"
+    },
+    "region": {
+      "label": "Region",
+      "intl": "International",
+      "cn": "Festland-China",
+      "us": "Vereinigte Staaten",
+      "custom": "Eigene URL"
+    },
+    "compatibleNote": "Verbindet über die OpenAI-kompatible API des Anbieters ({{url}}). Nur für einen Proxy oder eine andere Region überschreiben.",
+    "keyHint": "API-Schlüssel erhalten unter {{url}}"
   }
 }

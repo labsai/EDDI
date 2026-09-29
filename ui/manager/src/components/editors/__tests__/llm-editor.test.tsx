@@ -1075,4 +1075,44 @@ describe("LlmEditor", () => {
     );
     expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
   });
+
+  // ── Provider select ──────────────────────────────────────────────────────
+
+  it("labels named compatible providers by display name", () => {
+    renderWithProviders(
+      <LlmEditor
+        data={{ tasks: [{ type: "xai", actions: [], parameters: {} }] }}
+        onChange={onChange}
+      />
+    );
+    const select = screen.getByTestId("model-type-select") as HTMLSelectElement;
+    expect(select.value).toBe("xai");
+    expect(select.selectedOptions[0]?.text).toBe("xAI Grok");
+    expect(screen.getByTestId("compatible-endpoint-hint")).toHaveTextContent(
+      "https://api.x.ai/v1",
+    );
+  });
+
+  it("keeps an unknown type as a custom option instead of rewriting it", () => {
+    renderWithProviders(
+      <LlmEditor
+        data={{ tasks: [{ type: "acme-llm", actions: [], parameters: {} }] }}
+        onChange={onChange}
+      />
+    );
+    const select = screen.getByTestId("model-type-select") as HTMLSelectElement;
+    expect(select.value).toBe("acme-llm");
+    expect(select.selectedOptions[0]?.text).toContain("acme-llm");
+    expect(screen.queryByTestId("compatible-endpoint-hint")).not.toBeInTheDocument();
+  });
+
+  it("changing the type does not rewrite the task parameters", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={populatedConfig} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("model-type-select"), "deepseek");
+    const calls = onChange.mock.calls;
+    const updated = calls[calls.length - 1]?.[0] as LlmConfig;
+    expect(updated.tasks[0]?.type).toBe("deepseek");
+    expect(updated.tasks[0]?.parameters).toEqual(populatedConfig.tasks[0]?.parameters);
+  });
 });

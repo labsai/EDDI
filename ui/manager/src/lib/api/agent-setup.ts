@@ -1,3 +1,4 @@
+import type { ProviderGroup } from "../llm-provider-catalog";
 import { api } from "../api-client";
 
 // ---------- Request types ----------
@@ -116,21 +117,39 @@ export interface SetupResult {
 // ---------- Provider helpers ----------
 
 export const LLM_PROVIDERS = [
-  { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-5", needsKey: true },
-  { id: "openai", name: "OpenAI", defaultModel: "gpt-5.4", needsKey: true },
-  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-3.5-flash", needsKey: true },
-  { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-3.5-flash", needsKey: false },
-  { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true },
-  { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true },
-  { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true },
-  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-5", needsKey: false },
-  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false },
-  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false },
+  { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-5", needsKey: true, group: "frontier" },
+  { id: "openai", name: "OpenAI", defaultModel: "gpt-5.4", needsKey: true, group: "frontier" },
+  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-3.5-flash", needsKey: true, group: "frontier" },
+  { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true, group: "frontier" },
+  // Named OpenAI-compatible providers. Endpoints, regions and suggestions live in
+  // `llm-provider-catalog.ts`, which mirrors the backend catalog.
+  { id: "xai", name: "xAI Grok", defaultModel: "grok-4.7", needsKey: true, group: "compatible" },
+  { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-v4-pro", needsKey: true, group: "compatible" },
+  { id: "moonshot", name: "Moonshot Kimi", defaultModel: "kimi-k3", needsKey: true, group: "compatible" },
+  { id: "qwen", name: "Alibaba Qwen", defaultModel: "qwen3.7-plus", needsKey: true, group: "compatible" },
+  { id: "zhipu", name: "Z.ai GLM (Zhipu)", defaultModel: "glm-5.3", needsKey: true, group: "compatible" },
+  { id: "minimax", name: "MiniMax", defaultModel: "MiniMax-M3", needsKey: true, group: "compatible" },
+  { id: "openrouter", name: "OpenRouter", defaultModel: "openrouter/auto", needsKey: true, group: "compatible" },
+  { id: "groq", name: "Groq", defaultModel: "openai/gpt-oss-120b", needsKey: true, group: "compatible" },
+  { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-3.5-flash", needsKey: false, group: "cloud" },
+  { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true, group: "cloud" },
+  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-5", needsKey: false, group: "cloud" },
+  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false, group: "cloud" },
+  { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true, group: "cloud" },
+  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false, group: "local" },
   // Jlama loads from Hugging Face, so the default has to be a real `owner/name`
   // repo id — it is shown as the model placeholder and seeds the operator
   // activation form. See MODEL_SUGGESTIONS.jlama.
-  { id: "jlama", name: "Jlama (In-Process)", defaultModel: "tjake/Llama-3.2-1B-Instruct-JQ4", needsKey: false },
+  { id: "jlama", name: "Jlama (In-Process)", defaultModel: "tjake/Llama-3.2-1B-Instruct-JQ4", needsKey: false, group: "local" },
 ] as const;
+
+/** Display order of the provider groups, with the i18n key of each heading. */
+export const LLM_PROVIDER_GROUPS: readonly { id: ProviderGroup; labelKey: string; fallback: string }[] = [
+  { id: "frontier", labelKey: "llmProviders.group.frontier", fallback: "Model labs" },
+  { id: "compatible", labelKey: "llmProviders.group.compatible", fallback: "OpenAI-compatible providers" },
+  { id: "cloud", labelKey: "llmProviders.group.cloud", fallback: "Cloud platforms" },
+  { id: "local", labelKey: "llmProviders.group.local", fallback: "Local / self-hosted" },
+];
 
 export type ProviderId = (typeof LLM_PROVIDERS)[number]["id"];
 

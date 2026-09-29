@@ -10,7 +10,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { MODEL_TYPES, type CascadeStep } from "../types";
+import { ProviderSelect } from "@/components/shared/provider-select";
+import { type CascadeStep } from "../types";
 import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
 import { parseNum as num, nextParamKey } from "./cascade-utils";
@@ -80,18 +81,13 @@ export function CascadeStepCard({
         <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
           {index + 1}
         </span>
-        <select
+        <ProviderSelect
           value={step.type ?? "openai"}
-          onChange={(e) => onChange({ type: e.target.value })}
+          onChange={(type) => onChange({ type })}
           disabled={readOnly}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-        >
-          {MODEL_TYPES.map((mt) => (
-            <option key={mt} value={mt}>
-              {mt}
-            </option>
-          ))}
-        </select>
+          testId="cascade-step-type"
+        />
         <input
           type="text"
           value={params.model ?? ""}

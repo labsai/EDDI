@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
+import { getProviderConfig } from "@/lib/api/agent-setup";
+import { getDefaultBaseUrl } from "@/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
@@ -202,7 +204,7 @@ export function OperatorActivation({
     // The field only renders for a provider that needs one, so a URL carried
     // across a switch would be sent invisibly — and for an in-process provider
     // it would be sent to something that has no endpoint to begin with.
-    if (!supportsBaseUrl(next)) setBaseUrl("");
+    if (!supportsBaseUrl(next) || getDefaultBaseUrl(provider) !== undefined || getDefaultBaseUrl(next) !== undefined) setBaseUrl("");
     // A key is provider-specific, so carrying it across a provider switch would
     // silently send the wrong credential.
     setApiKey(next === initial.provider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "");
@@ -258,20 +260,21 @@ export function OperatorActivation({
           </CardHeader>
           <CardContent className="space-y-5">
             <Field label={t("operator.activation.provider", "Provider")} htmlFor="operator-provider">
-              <select
+              <ProviderSelect
                 value={provider}
-                onChange={(e) => handleProviderChange(e.target.value)}
+                onChange={handleProviderChange}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 id="operator-provider"
-                data-testid="operator-provider"
-              >
-                {LLM_PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                testId="operator-provider"
+              />
             </Field>
+
+            <ProviderRegionSelect
+              provider={provider}
+              baseUrl={baseUrl}
+              onBaseUrlChange={setBaseUrl}
+              testId="operator-region"
+            />
 
             <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
               <input

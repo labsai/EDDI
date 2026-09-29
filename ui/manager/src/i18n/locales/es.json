@@ -1331,7 +1331,9 @@
     "streamingTimeoutSeconds": "Tiempo de espera de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
-    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0."
+    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -5040,5 +5042,22 @@
     "workflowMissingResource": "El flujo de trabajo {{workflowId}} (versión {{version}}) no hace referencia a {{resource}}, por lo que guardarlo aquí no cambiaría el agente. No se guardó nada.",
     "agentWorkflowMismatch": "El agente {{agentId}} (versión {{version}}) hace referencia al flujo de trabajo {{workflowId}} en la versión {{found}}, no en la versión {{expected}}. El agente cambió desde que se abrió esta página. Recárgala. No se guardó nada.",
     "agentMissingWorkflow": "El agente {{agentId}} (versión {{version}}) no hace referencia al flujo de trabajo {{workflowId}}. No se guardó nada."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratorios de modelos",
+      "compatible": "Proveedores compatibles con OpenAI",
+      "cloud": "Plataformas en la nube",
+      "local": "Local / autoalojado"
+    },
+    "region": {
+      "label": "Región",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada"
+    },
+    "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
+    "keyHint": "Obtén una clave de API en {{url}}"
   }
 }

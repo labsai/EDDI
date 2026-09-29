@@ -966,5 +966,89 @@ describe("AgentWizardPage", () => {
       expect(screen.getByText(/5 API endpoints parsed/)).toBeInTheDocument();
     });
   });
-});
 
+  // ── Named OpenAI-compatible providers ─────────────────────────────
+
+  async function openLlmStep(user: ReturnType<typeof userEvent.setup>) {
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Compat Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Be helpful");
+    await user.click(screen.getByTestId("wizard-next"));
+  }
+
+  it("qwen shows a region select and cn fills the base URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    expect(screen.queryByTestId("wizard-region")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+
+    const region = screen.getByTestId("wizard-region");
+    expect(region).toHaveValue("intl");
+    // The default region needs no URL: the backend applies the preset.
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+
+    await user.selectOptions(region, "cn");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue(
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    );
+
+    await user.selectOptions(region, "intl");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+  });
+
+  it("switching to xai hides the region control and clears the base URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    await user.selectOptions(screen.getByTestId("wizard-region"), "cn");
+    expect(screen.getByTestId("wizard-baseurl")).not.toHaveValue("");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "xai");
+    expect(screen.queryByTestId("wizard-region")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveAttribute(
+      "placeholder",
+      "https://api.x.ai/v1",
+    );
+    expect(screen.getByTestId("wizard-compatible-note")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-key-hint")).toBeInTheDocument();
+  });
+
+  it("sends the compatible provider and its regional base URL", async () => {
+    let sent: { provider?: string; baseUrl?: string; model?: string } = {};
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        sent = (await request.json()) as typeof sent;
+        return HttpResponse.json({
+          agentId: "qwen-agent-1",
+          agentName: "Compat Agent",
+          provider: "qwen",
+          model: "qwen3.7-plus",
+          deployed: false,
+          deploymentStatus: null,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    await user.selectOptions(screen.getByTestId("wizard-region"), "cn");
+    await user.type(screen.getByTestId("wizard-model"), "qwen3.7-plus");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+
+    await waitFor(() => {
+      expect(sent.provider).toBe("qwen");
+    });
+    expect(sent.baseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
+  });
+});

@@ -1317,7 +1317,9 @@
     "streamingTimeoutSeconds": "流式传输超时（秒）",
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
-    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。"
+    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "unknownType": "{{type}}（自定义）",
+    "compatibleEndpoint": "端点：{{url}} — 添加 baseUrl 或 region 参数即可覆盖"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -4988,5 +4990,22 @@
     "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
     "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
     "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "模型实验室",
+      "compatible": "兼容 OpenAI 的提供商",
+      "cloud": "云平台",
+      "local": "本地 / 自托管"
+    },
+    "region": {
+      "label": "区域",
+      "intl": "国际",
+      "cn": "中国大陆",
+      "us": "美国",
+      "custom": "自定义 URL"
+    },
+    "compatibleNote": "通过提供商兼容 OpenAI 的 API（{{url}}）连接。仅在使用代理或其他区域时才需要覆盖。",
+    "keyHint": "在 {{url}} 获取 API 密钥"
   }
 }

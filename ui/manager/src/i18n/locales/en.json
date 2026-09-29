@@ -1357,7 +1357,9 @@
     "streamingTimeoutSeconds": "Streaming Timeout (seconds)",
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
-    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0."
+    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "unknownType": "{{type}} (custom)",
+    "compatibleEndpoint": "Endpoint: {{url}} — add a baseUrl or region parameter to override"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -4988,5 +4990,22 @@
     "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
     "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
     "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Model labs",
+      "compatible": "OpenAI-compatible providers",
+      "cloud": "Cloud platforms",
+      "local": "Local / self-hosted"
+    },
+    "region": {
+      "label": "Region",
+      "intl": "International",
+      "cn": "China mainland",
+      "us": "United States",
+      "custom": "Custom URL"
+    },
+    "compatibleNote": "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
+    "keyHint": "Get an API key at {{url}}"
   }
 }

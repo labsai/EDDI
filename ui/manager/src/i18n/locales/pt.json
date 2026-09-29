@@ -1331,7 +1331,9 @@
     "streamingTimeoutSeconds": "Tempo limite de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Substitui o padrão do mecanismo (120s). Aplica-se apenas durante o streaming; vazio = usar o padrão.",
     "taskPricing": "Preços de chamadas simples",
-    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0."
+    "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — adicione um parâmetro baseUrl ou region para substituir"
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -5040,5 +5042,22 @@
     "workflowMissingResource": "O fluxo de trabalho {{workflowId}} (versão {{version}}) não referencia {{resource}}, pelo que guardá-lo aqui não alteraria o agente. Nada foi guardado.",
     "agentWorkflowMismatch": "O agente {{agentId}} (versão {{version}}) referencia o fluxo de trabalho {{workflowId}} na versão {{found}}, não na versão {{expected}}. O agente mudou desde que esta página foi aberta. Recarregue-a. Nada foi guardado.",
     "agentMissingWorkflow": "O agente {{agentId}} (versão {{version}}) não referencia o fluxo de trabalho {{workflowId}}. Nada foi guardado."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratórios de modelos",
+      "compatible": "Provedores compatíveis com OpenAI",
+      "cloud": "Plataformas de nuvem",
+      "local": "Local / auto-hospedado"
+    },
+    "region": {
+      "label": "Região",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada"
+    },
+    "compatibleNote": "Conecta pela API compatível com OpenAI do provedor ({{url}}). Altere apenas para um proxy ou outra região.",
+    "keyHint": "Obtenha uma chave de API em {{url}}"
   }
 }

@@ -5,8 +5,12 @@
  * the agent wizard offer the same suggestions from one source.
  */
 
+import { COMPATIBLE_PROVIDERS } from "@/lib/llm-provider-catalog";
+
 /** Popular model suggestions per provider — users can still type any custom model */
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  // Named OpenAI-compatible providers, from the mirror of the backend catalog.
+  ...Object.fromEntries(COMPATIBLE_PROVIDERS.map((p) => [p.id, [...p.suggestions]])),
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6).
     // claude-sonnet-5 leads because it is the app-wide default model — a

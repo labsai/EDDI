@@ -6,7 +6,9 @@ import {
   createApiAgent,
   getProviderConfig,
   LLM_PROVIDERS,
+  LLM_PROVIDER_GROUPS,
 } from "../agent-setup";
+import { MODEL_TYPES } from "@/components/editors/llm/types";
 
 describe("agent-setup API", () => {
   // ─── Pure function tests ────────────────────────────────────────
@@ -33,6 +35,26 @@ describe("agent-setup API", () => {
   describe("LLM_PROVIDERS", () => {
     it("has at least 10 providers", () => {
       expect(LLM_PROVIDERS.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it("every provider has a valid group and ids are unique", () => {
+      const groups = new Set(LLM_PROVIDER_GROUPS.map((g) => g.id));
+      const ids = new Set<string>();
+      for (const provider of LLM_PROVIDERS) {
+        expect(groups.has(provider.group)).toBe(true);
+        expect(ids.has(provider.id)).toBe(false);
+        ids.add(provider.id);
+      }
+    });
+
+    it("every group has at least one provider", () => {
+      for (const group of LLM_PROVIDER_GROUPS) {
+        expect(LLM_PROVIDERS.some((p) => p.group === group.id)).toBe(true);
+      }
+    });
+
+    it("the LLM editor's MODEL_TYPES are exactly the provider ids", () => {
+      expect([...MODEL_TYPES]).toEqual(LLM_PROVIDERS.map((p) => p.id));
     });
 
     it("every provider has required fields", () => {

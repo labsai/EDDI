@@ -30,6 +30,16 @@ that was discoverable in the Manager or the setup tools.
   `deepseek-flash` only). `AgentSetupService.resolveParams` no longer defaults these providers to
   `claude-sonnet-4-6`; it uses the provider's own default model. The `setup_agent` and
   `create_api_agent` MCP tools name the eight ids, and their model example is now `deepseek-v4-pro`.
+- **Manager.** A grouped provider picker (model labs, OpenAI-compatible providers, cloud platforms,
+  local) replaces the flat lists in the agent wizard, the operator activation form and the LLM
+  editor (task type, cascade steps and judge, summary provider). Providers with more than one
+  endpoint get a region select in the wizard and operator form: a non-default region fills the
+  base URL, the default region clears it, and the backend `region` parameter stays for
+  hand-written configs. A type the Manager does not know renders as "<type> (custom)" instead
+  of being rewritten. `llm-provider-catalog.ts` mirrors the backend JSON, and
+  `llm-provider-catalog.test.ts` reads that JSON and fails on any drift. The group wizard and team
+  builder keep their flat selects, which now simply include the new providers. Twelve i18n keys in
+  all 11 locales.
 - No new dependencies and no migration: existing `type: openai` + `baseUrl` configs behave as before.
 
 ### Verification
