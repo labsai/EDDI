@@ -328,6 +328,60 @@ class PropertySetterTaskSecretScrubTest {
                 "a two-character input must not be wiped because it happens to appear inside the secret");
     }
 
+    @Test
+    @DisplayName("the same holds for a non-secret scope: the literal placeholder is not stored as the value")
+    void placeholderIsNotStoredAsConversationValue() throws Exception {
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+        var instruction = new PropertyInstruction();
+        instruction.setName("apiKey");
+        instruction.setValueString(PLACEHOLDER);
+        instruction.setScope(Scope.conversation);
+        instruction.setOverride(true);
+        var setOnActions = new SetOnActions();
+        setOnActions.setActions(List.of("store_secret"));
+        setOnActions.setSetProperties(List.of(instruction));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+        task.execute(memory, propertySetter);
+
+        assertNull(memory.getConversationProperties().get("apiKey"));
+    }
+
+    /**
+     * Runs the task for a turn whose previous step emitted
+     * {@code CATCH_ANY_INPUT_AS_PROPERTY}, with {@code input:initial} as given.
+     */
+    private void runCatchAnyInput(String initialInput) throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("CATCH_ANY_INPUT_AS_PROPERTY")));
+        memory.startNextStep();
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", initialInput));
+        step.storeData(new Data<>("expressions:parsed", ""));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of());
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+        task.execute(memory, propertySetter);
+    }
+
+    @Test
+    @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY does not store the <secret input> placeholder as user_input")
+    void catchAnyInputSkipsThePlaceholder() throws Exception {
+        runCatchAnyInput(PLACEHOLDER);
+
+        assertNull(memory.getConversationProperties().get("user_input"));
+    }
+
+    @Test
+    @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY still stores an ordinary input as user_input")
+    void catchAnyInputStoresOrdinaryInput() throws Exception {
+        runCatchAnyInput("John");
+
+        assertEquals("John", memory.getConversationProperties().get("user_input").getValueString());
+    }
+
     // =================================================================
     // Slot isolation — the slot used to be <agentId>.<name>, shared by every
     // user and conversation of the agent: the last writer's secret was what

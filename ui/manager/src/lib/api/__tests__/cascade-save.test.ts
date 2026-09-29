@@ -53,7 +53,6 @@ const RT: ResourceTypeConfig = {
   plural: "rulesets",
   extension: "ai.labs.rules",
   labelKey: "resources.types.rules",
-  icon: "GitBranch",
 };
 
 const CONTEXT: CascadeContext = {
@@ -270,7 +269,6 @@ describe("cascadeSaveResource", () => {
         plural: "propertysetters",
         extension: "ai.labs.property",
         labelKey: "resources.types.propertysetter",
-        icon: "Settings",
       };
 
       vi.mocked(updateResource).mockResolvedValue({
@@ -311,7 +309,6 @@ describe("cascadeSaveResource", () => {
         plural: "snippets",
         extension: "ai.labs.snippet",
         labelKey: "resources.types.snippets",
-        icon: "Puzzle",
       };
 
       vi.mocked(updateResource).mockResolvedValue({

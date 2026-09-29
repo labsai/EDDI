@@ -22,7 +22,6 @@ describe("schemas API", () => {
         store: "rulestore",
         plural: "rulesets",
         extension: "ai.labs.rules",
-        icon: "BookOpen",
       };
       server.use(
         http.get("*/rulestore/rulesets/jsonSchema", () =>
@@ -46,7 +45,6 @@ describe("schemas API", () => {
         store: "teststore",
         plural: "tests",
         extension: "ai.labs.test",
-        icon: "Settings",
       };
       server.use(
         http.get("*/teststore/tests/jsonSchema", () =>

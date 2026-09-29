@@ -5,10 +5,10 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  CheckCircle,
   AlertCircle,
   ArrowRightLeft,
   Sparkles,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
@@ -453,7 +453,7 @@ function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
           </>
         ) : (
           <>
-            <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             <span className="text-emerald-600 dark:text-emerald-400">
               {wrote > 0
                 ? t("syncPage.syncSuccess", "Sync complete")

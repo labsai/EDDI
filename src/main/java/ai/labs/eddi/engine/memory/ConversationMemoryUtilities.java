@@ -37,6 +37,9 @@ public class ConversationMemoryUtilities {
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_CONVERSATION_PROPERTIES = "conversationProperties";
+    private static final String KEY_PROPERTIES = "properties";
+    /** The parser's conversation-output entry for the matched expressions. */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
 
     public static ConversationMemorySnapshot convertConversationMemory(IConversationMemory conversationMemory) {
         var snapshot = getMemorySnapshot(conversationMemory);
@@ -312,52 +315,74 @@ public class ConversationMemoryUtilities {
         var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
         newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
 
-        var conversationOutputs = conversationMemorySnapshot.getConversationOutputs();
-        conversationOutputs = returnCurrentStepOnly ? List.of(conversationOutputs.getLast()) : conversationOutputs;
-        if (returnDetailed) {
-            // returnDetailed is caller-controlled and reachable by any chatting user, so
-            // the detailed projection must not leak internal step data: drop denylisted
-            // keys (audit:*, *:trace:*, *Error) and run every value through the current
-            // SecretRedactionFilter — the same discipline the SSE path already applies.
-            // Without this a plain user could read the compiled system prompt, the raw
-            // model trace and raw error bodies by setting returnDetailed=true. Admin
-            // debugging still has the owner/admin-gated raw endpoint for full fidelity.
-            var newConversationOutputs = newSnapshot.getConversationOutputs();
-            for (var conversationOutput : conversationOutputs) {
+        var allOutputs = conversationMemorySnapshot.getConversationOutputs();
+        var allSteps = conversationMemorySnapshot.getConversationSteps();
+        // A secret turn is masked with the forms found in its output AND its step, so
+        // each side can be paired with the other — but only when the two lists agree:
+        // on a drifted document an index names different turns on each side.
+        boolean paired = allOutputs.size() == allSteps.size();
+
+        var conversationOutputs = returnCurrentStepOnly ? List.of(allOutputs.getLast()) : allOutputs;
+        int outputOffset = returnCurrentStepOnly ? allOutputs.size() - 1 : 0;
+        var newConversationOutputs = newSnapshot.getConversationOutputs();
+        for (int index = 0; index < conversationOutputs.size(); index++) {
+            var conversationOutput = conversationOutputs.get(index);
+            boolean secretTurn = isSecretTurnOutput(conversationOutput);
+            List<String> needles = secretTurn
+                    ? secretTurnNeedles(conversationOutput, paired ? allSteps.get(outputOffset + index) : null)
+                    : List.of();
+            if (returnDetailed) {
+                // returnDetailed is caller-controlled and reachable by any chatting user, so
+                // the detailed projection must not leak internal step data: drop denylisted
+                // keys (audit:*, *:trace:*, *Error) and run every value through the current
+                // SecretRedactionFilter — the same discipline the SSE path already applies.
+                // Without this a plain user could read the compiled system prompt, the raw
+                // model trace and raw error bodies by setting returnDetailed=true. Admin
+                // debugging still has the owner/admin-gated raw endpoint for full fidelity.
+                // A secret turn is masked first, so the redaction sees the masked values.
+                var source = secretTurn ? maskSecretTurnOutput(conversationOutput, needles) : conversationOutput;
                 var newConversationOutput = new ConversationOutput();
-                for (var key : conversationOutput.keySet()) {
+                for (var key : source.keySet()) {
                     if (isSensitiveDetailedKey(key)) {
                         continue;
                     }
-                    newConversationOutput.put(key,
-                            redactDetailedValue(conversationOutput.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
+                    newConversationOutput.put(key, redactDetailedValue(source.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
                 }
                 newConversationOutputs.add(newConversationOutput);
+                continue;
             }
-        } else {
-            var newConversationOutputs = newSnapshot.getConversationOutputs();
-            for (int index = 0; index < conversationOutputs.size(); index++) {
-                newConversationOutputs.add(new ConversationOutput());
-                var conversationOutput = conversationOutputs.get(index);
-                var newConversationOutput = newConversationOutputs.get(index);
-
-                for (var key : conversationOutput.keySet()) {
-                    // TASK_ERRORS: a failed turn's reason. Left off this list, it was
-                    // written and then stripped from every default (non-detailed)
-                    // response, so the caller got ERROR with nothing to say why.
-                    if (key.startsWith(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
-                            || key.startsWith(QUICK_REPLIES_PREFIX) || key.equals(TASK_ERRORS)) {
-                        newConversationOutput.put(key, conversationOutput.get(key));
-                    }
+            var newConversationOutput = new ConversationOutput();
+            newConversationOutputs.add(newConversationOutput);
+            for (var key : conversationOutput.keySet()) {
+                // "input" is the masked DISPLAY copy of the user's message:
+                // "<secret input>" for a turn the client flagged secretInput
+                // (Conversation scrubs such a turn, input:initial included, when it
+                // ends). A client rebuilding a transcript after a reload, undo or
+                // rerun uses it to mask that turn.
+                // TASK_ERRORS: a failed turn's reason. Left off this list, it was
+                // written and then stripped from every default (non-detailed)
+                // response, so the caller got ERROR with nothing to say why.
+                if (key.startsWith(INPUT_INITIAL.key()) || key.equals(INPUT.key()) || key.startsWith(ACTIONS.key())
+                        || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX) || key.equals(TASK_ERRORS)) {
+                    newConversationOutput.put(key,
+                            secretTurn ? maskedSecretTurnOutputValue(key, conversationOutput.get(key), needles) : conversationOutput.get(key));
                 }
             }
         }
 
-        var conversationSteps = conversationMemorySnapshot.getConversationSteps();
-        conversationSteps = returnCurrentStepOnly ? List.of(conversationSteps.getLast()) : conversationSteps;
-        for (var conversationStepSnapshot : conversationSteps) {
+        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
+        int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
+        for (int index = 0; index < conversationSteps.size(); index++) {
+            var conversationStepSnapshot = conversationSteps.get(index);
             var simpleConversationStep = new SimpleConversationStep();
             newSnapshot.getConversationSteps().add(simpleConversationStep);
+            // Judged from the step's own context datum, so a drifted document (steps
+            // and outputs of different lengths) cannot mis-pair a step with the flag
+            // of another turn's output.
+            boolean secretTurn = isSecretTurnStep(conversationStepSnapshot);
+            List<String> needles = secretTurn
+                    ? secretTurnNeedles(paired ? allOutputs.get(stepOffset + index) : null, conversationStepSnapshot)
+                    : List.of();
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
@@ -365,7 +390,8 @@ public class ConversationMemoryUtilities {
                             || key.startsWith(QUICK_REPLIES_PREFIX);
                     // returnDetailed exposes every step datum; denylist the sensitive
                     // internal keys and redact detailed values (see the outputs branch
-                    // above). The non-detailed whitelist is returned verbatim as before.
+                    // above). The non-detailed whitelist is returned as before, masked
+                    // for a secret turn.
                     if (returnDetailed) {
                         if (isSensitiveDetailedKey(key)) {
                             continue;
@@ -374,9 +400,10 @@ public class ConversationMemoryUtilities {
                         continue;
                     }
 
-                    var result = returnDetailed
-                            ? redactDetailedValue(resultSnapshot.getResult(), SecretRedactionFilter.isCredentialFieldName(key))
-                            : resultSnapshot.getResult();
+                    var result = secretTurn ? maskedSecretTurnValue(key, resultSnapshot.getResult(), needles) : resultSnapshot.getResult();
+                    if (returnDetailed) {
+                        result = redactDetailedValue(result, SecretRedactionFilter.isCredentialFieldName(key));
+                    }
                     simpleConversationStep.getConversationStep()
                             .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
@@ -386,6 +413,170 @@ public class ConversationMemoryUtilities {
         }
 
         return newSnapshot;
+    }
+
+    /**
+     * Read-time masking of a turn the client sent with {@code secretInput}.
+     * Conversation scrubs such a turn when it ends, but turns stored before that
+     * scrub existed still hold the raw {@code input:initial} and the parser's
+     * normalized copy in {@code input} / {@code input:normalized}. Every secret
+     * turn — old or new — carries {@code context.secretInput == "true"} in its
+     * output and a {@code context:secretInput} datum in its step, so masking on
+     * read closes the exposure for stored history without a data migration. The
+     * input fields are replaced wholesale, and every other returned step result and
+     * output value of the turn is scrubbed of the raw and normalized forms (see
+     * {@link #secretTurnNeedles}), because a template may have echoed the input.
+     * Conversation properties and their step mirrors are left as they are. The
+     * stored document itself is not changed.
+     */
+    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
+    private static final String CONTEXT_OUTPUT_KEY = "context";
+    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
+
+    static boolean isSecretTurnOutput(Map<String, Object> conversationOutput) {
+        return conversationOutput != null && conversationOutput.get(CONTEXT_OUTPUT_KEY) instanceof Map<?, ?> context
+                && isTrue(context.get(SECRET_INPUT_CONTEXT_KEY));
+    }
+
+    static boolean isSecretTurnStep(ConversationStepSnapshot step) {
+        for (var workflow : step.getWorkflows()) {
+            for (var result : workflow.getLifecycleTasks()) {
+                if (CONTEXT_SECRET_INPUT_DATUM.equals(result.getKey())) {
+                    Object value = result.getResult();
+                    if (value instanceof Context context) {
+                        value = context.getValue();
+                    } else if (value instanceof Map<?, ?> map) {
+                        value = map.get("value");
+                    }
+                    return isTrue(value);
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTrue(Object value) {
+        return value != null && "true".equals(String.valueOf(value));
+    }
+
+    /**
+     * The plaintext forms a stored secret turn may still carry — the raw
+     * {@code input:initial} and the parser's normalized copy (in
+     * {@code input:normalized}, and in the output's {@code input}, which the parser
+     * overwrote) — as searchable needles: placeholders and blank forms dropped,
+     * longest first. Forms of at least
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters are
+     * searched for as substrings, shorter ones only as whole tokens in values (see
+     * {@link #scrubbedSecretTurnValue}), as the turn-end scrub does. Either side
+     * may be {@code null} when the turn's other half cannot be paired.
+     */
+    static List<String> secretTurnNeedles(Map<String, Object> conversationOutput, ConversationStepSnapshot step) {
+        Set<String> forms = new LinkedHashSet<>();
+        if (conversationOutput != null) {
+            conversationOutput.forEach((key, value) -> {
+                if (key.equals(INPUT.key()) || key.startsWith(INPUT_INITIAL.key())) {
+                    addSecretForm(forms, value);
+                }
+            });
+        }
+        if (step != null) {
+            for (var workflow : step.getWorkflows()) {
+                for (var result : workflow.getLifecycleTasks()) {
+                    if (INPUT_INITIAL.key().equals(result.getKey()) || INPUT_NORMALIZED.key().equals(result.getKey())) {
+                        addSecretForm(forms, result.getResult());
+                    }
+                }
+            }
+        }
+        return forms.stream()
+                .filter(form -> !form.isBlank())
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+    }
+
+    private static void addSecretForm(Set<String> forms, Object value) {
+        if (value instanceof String text && !text.isEmpty() && !SECRET_INPUT_PLACEHOLDER.equals(text)) {
+            forms.add(text);
+            forms.add(text.trim());
+        }
+    }
+
+    /**
+     * A copy of a secret turn's output with the display {@code input} masked and
+     * every other value scrubbed of the turn's plaintext forms — a template may
+     * have echoed the input into an output item. The {@code properties} entry is
+     * left as it is: a property that captured the input is the agent designer's
+     * choice (see {@code docs/secrets-vault.md}).
+     */
+    private static ConversationOutput maskSecretTurnOutput(ConversationOutput conversationOutput, List<String> needles) {
+        var masked = new ConversationOutput();
+        conversationOutput.forEach((key, value) -> {
+            // The parser's expressions and intents are dropped, as Conversation does at
+            // turn end: they can hold the secret tokenized, which no needle matches.
+            if (!KEY_EXPRESSIONS_OUTPUT.equals(key) && !INTENTS.key().equals(key)) {
+                masked.put(key, maskedSecretTurnOutputValue(key, value, needles));
+            }
+        });
+        return masked;
+    }
+
+    private static Object maskedSecretTurnOutputValue(String key, Object value, List<String> needles) {
+        if (INPUT.key().equals(key) || key.startsWith(INPUT_INITIAL.key())) {
+            return value == null ? null : SECRET_INPUT_PLACEHOLDER;
+        }
+        if (KEY_PROPERTIES.equals(key)) {
+            return value;
+        }
+        return scrubbedSecretTurnValue(value, needles);
+    }
+
+    private static Object maskedSecretTurnValue(String key, Object value, List<String> needles) {
+        if (INPUT_INITIAL.key().equals(key) || INPUT_NORMALIZED.key().equals(key)) {
+            return value == null ? null : SECRET_INPUT_PLACEHOLDER;
+        }
+        if (EXPRESSIONS_PARSED.key().equals(key)) {
+            return value == null ? null : "";
+        }
+        // Cleared wholesale, as Conversation does at turn end: the parser may have
+        // tokenized the secret, so no stored value need contain it whole.
+        if (EXPRESSIONS_MATCHES.key().equals(key) || INTENTS.key().equals(key) || PROPERTIES_EXTRACTED.key().equals(key)) {
+            return value == null ? null : List.of();
+        }
+        // Property mirrors stay as they are, like the conversation properties they
+        // copy.
+        if (key.startsWith(KEY_PROPERTIES + ":")) {
+            return value;
+        }
+        return scrubbedSecretTurnValue(value, needles);
+    }
+
+    /**
+     * {@code value} with the turn's plaintext forms removed, by the same rule as
+     * the turn-end scrub: forms of at least
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters
+     * wherever they occur, shorter ones only where they stand as a whole token and
+     * never in map keys.
+     */
+    private static Object scrubbedSecretTurnValue(Object value, List<String> needles) {
+        List<String> substrings = new ArrayList<>();
+        List<String> tokens = new ArrayList<>();
+        for (String needle : needles) {
+            (needle.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH ? substrings : tokens).add(needle);
+        }
+        Object current = value;
+        if (!substrings.isEmpty()) {
+            Object cleaned = SecretValueScrubber.scrubDeep(current, substrings, SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                current = cleaned;
+            }
+        }
+        if (!tokens.isEmpty()) {
+            Object cleaned = SecretValueScrubber.scrubDeepTokens(current, tokens, SECRET_INPUT_PLACEHOLDER);
+            if (cleaned != null) {
+                current = cleaned;
+            }
+        }
+        return current;
     }
 
     private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
