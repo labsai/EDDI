@@ -9,13 +9,14 @@ test fix that Node 24 required.
 
 | Tool | From → To | Where |
 |---|---|---|
-| Node | 22.23.3 → **24.21.0** (LTS "Krypton") | `pom.xml` `node.version`, `mise.toml`, all eight `setup-node` steps in `ci.yml`, and the docs that name the vendored Node (`AGENTS.md`, `README.md`, both UI READMEs) |
+| Node | 22.23.3 → **24.21.0** (LTS "Krypton") | `pom.xml` `node.version`, `mise.toml`, `ci.yml`'s `NODE_VERSION` and `NODE_SHA256_LINUX_X64` (linux-x64 `.tar.gz` line of nodejs.org's `SHASUMS256.txt` for v24.21.0), and the docs that name the vendored Node (`AGENTS.md`, `README.md`, both UI READMEs) |
 | frontend-maven-plugin | 1.15.1 → **2.0.2** | `pom.xml` |
 | JDK (mise) | `temurin-25.0.3+9.0.LTS` → **`temurin-25.0.4+101.0.LTS`** | `mise.toml` |
 
 **Node 24.** Node 22 leaves LTS on 2027-04-30; Node 24 is supported until 2028-04-30. CI used
-to take `node-version: 22`, the newest 22.x, while the pom pinned an exact version. Every
-`setup-node` step now names `24.21.0`, so the UI jobs, the Build Image job's Maven build and
+to take `node-version: 22`, the newest 22.x, while the pom pinned an exact version. Main has
+since moved every `setup-node` step onto one `env.NODE_VERSION` with a checksum the Build Image job
+verifies the archive against; this branch sets that pin to `24.21.0`, so the UI jobs, the Build Image job's Maven build and
 `mise` run the same Node. The UI packages' own floor is unchanged at 22.18, so a contributor still
 on Node 22 can run `npm run dev`. No `package.json` changed: neither UI declares `engines`, and
 `@types/node` belongs to the UI-majors branch.

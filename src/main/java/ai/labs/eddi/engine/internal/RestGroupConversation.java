@@ -304,17 +304,22 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
         try {
-            List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, index, limit);
-            // Filter to owned conversations unless admin
+            // Owned conversations only, unless admin — and restricted IN THE QUERY, so
+            // index/limit page through the caller's own conversations. Filtering the
+            // fetched page afterwards gave a non-admin short or empty pages while their
+            // conversations sat further back (the Workforce history's missing rows).
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
-                conversations = conversations.stream()
-                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
+                if (callerId == null) {
+                    return List.of();
+                }
+                return groupConversationService.listGroupConversations(groupId, callerId, index, limit).stream()
+                        .filter(gc -> callerId.equals(gc.getUserId()))
                         .toList();
             }
-            return conversations;
+            return groupConversationService.listGroupConversations(groupId, index, limit);
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -413,6 +418,8 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
+    private static final String PAUSE_CHANGED_MESSAGE = "The pending approval changed since this decision was made "
+            + "(pauseId no longer current) — re-read approval-status and decide again.";
 
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
@@ -444,6 +451,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer current: the
+            // discussion is still awaiting approval, but on something the reviewer
+            // never saw. Same 409 as the conversation resume endpoint.
+            LOGGER.infof("Approve of group conversation %s rejected (pause changed)", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity(PAUSE_CHANGED_MESSAGE).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // #12: wrong-state (e.g., double-approve) → 409, not 500. The current state
             // is discoverable via the approval-status endpoint.
@@ -675,6 +689,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
             closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // Still awaiting approval, but not the pause this decision was made for.
+            sendErrorEvent(eventSink, sse, PAUSE_CHANGED_MESSAGE);
+            closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // wrong-state (e.g., double-approve) — the current state is discoverable
             // via the approval-status endpoint.
@@ -780,6 +798,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("groupConversationId", gcId);
             summary.put("state", gc.getState() != null ? gc.getState().name() : "");
             summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");

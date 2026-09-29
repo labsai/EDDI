@@ -273,12 +273,11 @@ describe("RAG Knowledge Base Editor", () => {
       expect(screen.getByTestId("chunk-strategy")).toBeInTheDocument();
     });
 
+    // Only recursive splitting is implemented; paragraph and sentence were
+    // offered, always split recursively, and are rewritten on save.
     const select = screen.getByTestId("chunk-strategy") as HTMLSelectElement;
-    await user.selectOptions(select, "sentence");
-
-    await waitFor(() => {
-      expect(select.value).toBe("sentence");
-    });
+    expect([...select.options].map((o) => o.value)).toEqual(["recursive"]);
+    expect(select.value).toBe("recursive");
   });
 
   // ─── JSON Tab Switch ──────────────────────────────────────

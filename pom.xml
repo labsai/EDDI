@@ -52,11 +52,16 @@
              as [ERROR] - their warnings included - so read BUILD SUCCESS/FAILURE, not
              the [ERROR] count. -->
         <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
-        <!-- Node 24 (LTS "Krypton") matches CI (every setup-node step in ci.yml) and
-             mise.toml; change all three together. Node 24 is LTS until 2028-04-30,
+        <!-- Node 24 (LTS "Krypton") matches CI (ci.yml NODE_VERSION) and mise.toml;
+             change all three together, and ci.yml's NODE_SHA256_LINUX_X64 with them. Node 24 is LTS until 2028-04-30,
              Node 22 only until 2027-04-30. The UIs' own floor is lower - 22.18: Vitest 5
              needs 22.12, and Stryker 10's Babel 8 declares `^22.18.0 || >=24.11.0` -
-             so a contributor still on Node 22 can run `npm run dev`. -->
+             so a contributor still on Node 22 can run `npm run dev`.
+             frontend-maven-plugin checks no checksum on the archive it downloads. CI's
+             Build Image job (the build that ships) places and verifies it first against
+             NODE_SHA256_LINUX_X64 in ci.yml, whose NODE_VERSION must equal this value
+             (BuildQualityGatesTest). A local build, and src/main/docker/Dockerfile.demo, still
+             download it unverified and trust nodejs.org over TLS alone. -->
         <node.version>v24.21.0</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the

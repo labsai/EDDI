@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -57,13 +58,26 @@ import java.util.zip.GZIPInputStream;
  *
  * <h2>Conditional requests and link discovery</h2>
  * <p>
- * When the sink supplies an ETag or Last-Modified for a document, the fetch is
- * conditional and an unchanged page comes back as a 304 with no body. That
- * saves the download but means the page's links are not re-read on that run, so
- * a new page linked <em>only</em> from an unchanged page is discovered on the
- * next run that sees the parent change — or immediately, if the site publishes
- * a sitemap, which is why sitemap seeding is preferred over relying on link
- * discovery alone.
+ * A 304 has no body, so a page revalidated that way contributes no links. That
+ * is harmless for a page whose links the crawl would not follow anyway — one at
+ * {@code maxDepth} — and destructive for any other: its children are never
+ * reached, a crawl that otherwise covered the site calls them missing, and
+ * after {@code tombstoneAfterMissedRuns} runs every page below an unchanged
+ * parent loses its vectors. So validators are sent only for pages at the depth
+ * limit. A page above it is downloaded in full and its links read; whether it
+ * is re-embedded is still decided by its content hash, so an unchanged page
+ * costs a download, never an embedding.
+ *
+ * <h2>Identity</h2>
+ * <p>
+ * A page is stored under the URL that served it (after redirects), never under
+ * the URL its {@code <link rel="canonical">} names. The canonical link is a
+ * de-duplication hint: a page naming another page as canonical defers to it —
+ * that page is fetched and stored under its own URL, with its own content — and
+ * is stored itself only when the page it names produced nothing. Using the
+ * canonical as the identity let any page on the host write its content under
+ * another page's id, and dropped a paginated listing's links along with its
+ * content.
  */
 @ApplicationScoped
 public class WebCrawler {
@@ -155,13 +169,9 @@ public class WebCrawler {
                 : RobotsPolicy.allowAll();
         Duration delay = effectiveDelay(request, robots);
 
-        Set<String> visited = new HashSet<>();
-        // Separate from `visited`: a URL is queued long before it is polled, and
-        // without this a page linked from 200 others is enqueued 200 times. At
-        // maxPages 50,000 with typical navigation that is millions of entries.
-        Set<String> queued = new HashSet<>();
-        Queue<Candidate> queue = new ArrayDeque<>();
-        enqueueSeeds(request, sink, robots, delay, deadline, counters, queue, queued, seedHost, excludes);
+        Frontier frontier = new Frontier();
+        enqueueSeeds(request, sink, robots, delay, deadline, counters, frontier, seedHost, excludes);
+        Queue<Candidate> queue = frontier.queue;
 
         StopReason stopReason = StopReason.COMPLETED;
         // robots.txt and sitemap requests count: the seed page waits out the delay
@@ -184,12 +194,16 @@ public class WebCrawler {
             // 200 requests, 200 errors, and a fetch budget exhausted so completely
             // that the crawl never reported full coverage — which silently disabled
             // deletion reconciliation for that site on every run.
-            if (!visited.add(candidate.canonicalId())) {
+            //
+            // A page released from deferring to its canonical was already polled once,
+            // so it is the one candidate the mark must not turn away.
+            if (!frontier.visited.add(candidate.canonicalId()) && !candidate.ignoreCanonical()) {
                 continue;
             }
             if (request.politeness().respectRobots()
                     && !candidateRobots.isAllowed(CrawlUrls.pathAndQuery(candidate.fetchUrl()))) {
                 counters.skipped++;
+                frontier.releaseDeferred(candidate.canonicalId());
                 continue;
             }
 
@@ -212,19 +226,38 @@ public class WebCrawler {
                 break;
             }
 
-            processCandidate(request, sink, candidate, seedHost, excludes, queue, queued, visited, counters);
+            processCandidate(request, sink, candidate, seedHost, excludes, frontier, counters);
+            // Whatever became of this URL, pages that deferred to it as their
+            // canonical are owed a decision: if it produced no document of its own,
+            // they are stored after all.
+            frontier.releaseDeferred(candidate.canonicalId());
         }
 
+        if (stopReason == StopReason.PAGE_LIMIT && counters.sitemapPages > 0) {
+            // Sitemap pages are queued at depth 0, so maxDepth does not narrow them. A
+            // source that stayed under maxPages by depth alone can now run into it —
+            // and a crawl that stops at a limit concludes nothing about deletions.
+            LOGGER.warnf("Crawl of %s stopped at maxPages (%d) with %d pages queued from its sitemap; deletions "
+                    + "are not reconciled for a crawl that stops at a limit. Raise maxPages, or narrow the scope "
+                    + "with pathPrefix or excludePatterns", LogSanitizer.sanitize(request.seedUrl()),
+                    request.limits().maxPages(), counters.sitemapPages);
+        }
         CrawlSummary summary = counters.summarize(start, stopReason);
         LOGGER.debugf("Crawl of %s finished: %s", LogSanitizer.sanitize(request.seedUrl()), summary);
         return summary;
     }
 
     private void processCandidate(CrawlRequest request, CrawlSink sink, Candidate candidate, String seedHost,
-                                  List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued, Set<String> visited,
-                                  Counters counters) {
+                                  List<UrlPattern> excludes, Frontier frontier, Counters counters) {
 
-        ConditionalHeaders conditional = sink.conditionalFor(candidate.canonicalId());
+        // Revalidated only where a 304 costs nothing but the download: a page whose
+        // links this crawl would not follow anyway. Above the depth limit a 304 hides
+        // the page's links, and every page reachable only through it is reported
+        // missing and, a couple of runs later, deleted.
+        boolean linksWanted = candidate.depth() < request.scope().maxDepth();
+        ConditionalHeaders conditional = linksWanted
+                ? ConditionalHeaders.none()
+                : sink.conditionalFor(candidate.canonicalId());
         FetchCommand command = new FetchCommand(
                 candidate.fetchUrl(),
                 request.politeness().userAgent(),
@@ -252,7 +285,8 @@ public class WebCrawler {
 
         if (page.isNotModified()) {
             counters.unchanged++;
-            visited.add(candidate.canonicalId());
+            frontier.visited.add(candidate.canonicalId());
+            frontier.delivered.add(candidate.canonicalId());
             sink.onUnchanged(candidate.canonicalId());
             return;
         }
@@ -286,7 +320,10 @@ public class WebCrawler {
             return;
         }
 
-        String documentId = CrawlUrls.canonicalize(canonicalUrlOf(document, finalUrl));
+        // The page's identity is the URL that served it. Never its canonical link:
+        // that is the page's word about another page, and taking it as the identity
+        // let any page on the host store its content under someone else's id.
+        String documentId = CrawlUrls.canonicalize(finalUrl);
 
         // A redirect can leave the scope the operator asked for; re-check rather
         // than trusting the pre-redirect decision.
@@ -294,28 +331,56 @@ public class WebCrawler {
             counters.skipped++;
             return;
         }
+
+        // Links first, whatever the page turns out to be. A duplicate, or a page
+        // that defers to its canonical, still links to the rest of the site: the
+        // second page of a listing that names the first as canonical is exactly
+        // where the listing's later entries are linked from, and returning before
+        // this made them unreachable.
+        if (linksWanted) {
+            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, frontier);
+        }
+
+        String canonical = candidate.ignoreCanonical()
+                ? null
+                : canonicalTarget(document, finalUrl, documentId, seedHost, request, excludes);
+        if (canonical != null) {
+            if (frontier.delivered.contains(canonical)) {
+                // The page it names is already in: this is its duplicate.
+                counters.skipped++;
+                return;
+            }
+            if (!frontier.visited.contains(canonical)) {
+                // Let the page it names speak for itself, under its own URL. If that
+                // produces nothing, this page is re-queued and stored after all.
+                frontier.defer(canonical, candidate);
+                counters.skipped++;
+                return;
+            }
+            // The page it names was fetched and produced no document — gone, broken,
+            // or a redirect somewhere else. This page is the content, so it stays.
+        }
+
         // The requested URL was marked visited when it was polled, so only a
-        // documentId that DIFFERS from it — a redirect or a canonical link landing on
-        // a page another URL already produced — can be a duplicate here.
-        if (!documentId.equals(candidate.canonicalId()) && !visited.add(documentId)) {
+        // documentId that DIFFERS from it — a redirect landing on a page another URL
+        // already produced — can be a duplicate here.
+        if (!frontier.delivered.add(documentId)) {
             counters.skipped++;
             return;
         }
-        visited.add(documentId);
+        frontier.visited.add(documentId);
 
         counters.pagesFetched++;
         sink.onPage(new CrawledPage(documentId, finalUrl, document.title(), document.outerHtml(),
                 page.etag(), page.lastModified(), candidate.depth(), page.truncated()));
-
-        if (candidate.depth() < request.scope().maxDepth()) {
-            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, queue, queued, visited);
-        }
     }
 
     private void enqueueLinks(Document document, int depth, String seedHost, CrawlRequest request,
-                              List<UrlPattern> excludes, Queue<Candidate> queue, Set<String> queued,
-                              Set<String> visited) {
+                              List<UrlPattern> excludes, Frontier frontier) {
 
+        Queue<Candidate> queue = frontier.queue;
+        Set<String> queued = frontier.queued;
+        Set<String> visited = frontier.visited;
         for (Element link : document.select("a[href]")) {
             if (!hasQueueRoom(queue)) {
                 // Deduplication bounds repeats, not breadth. Every distinct in-scope
@@ -340,7 +405,7 @@ public class WebCrawler {
                 continue;
             }
             queued.add(canonical);
-            queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth));
+            queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth, false));
         }
     }
 
@@ -365,13 +430,22 @@ public class WebCrawler {
 
     /**
      * Queues the seed and whatever the site's sitemaps list.
+     *
+     * <p>
+     * The sitemaps are the configured ones, then the ones robots.txt names or, when
+     * there are none, the conventional {@code /sitemap.xml} on the seed's host. A
+     * sitemap index is followed to the same-host sitemaps it lists rather than
+     * having those queued as pages, which is how a site with more than one sitemap
+     * publishes them. Every sitemap read, index or not, counts against the same
+     * cap.
      */
     private void enqueueSeeds(CrawlRequest request, CrawlSink sink, RobotsPolicy robots, Duration delay,
-                              Instant deadline, Counters counters, Queue<Candidate> queue, Set<String> queued,
-                              String seedHost, List<UrlPattern> excludes) {
+                              Instant deadline, Counters counters, Frontier frontier, String seedHost,
+                              List<UrlPattern> excludes) {
 
-        queue.add(new Candidate(CrawlUrls.stripFragment(request.seedUrl()),
-                CrawlUrls.canonicalize(request.seedUrl()), 0));
+        String seedId = CrawlUrls.canonicalize(request.seedUrl());
+        frontier.queued.add(seedId);
+        frontier.queue.add(new Candidate(CrawlUrls.stripFragment(request.seedUrl()), seedId, 0, false));
 
         // Sitemaps are the cheapest and most reliable discovery there is: the site
         // lists its own pages, so nothing depends on link structure or on a page
@@ -402,9 +476,13 @@ public class WebCrawler {
         // Nothing configured and nothing advertised: try the conventional location.
         // Plenty of sites publish /sitemap.xml without listing it in robots.txt, and
         // the cost where there is none is a single 404.
+        // A disallowed conventional location is not fetched: nothing named it, so the
+        // site's own robots rules are all there is to go on.
         if (sitemapQueue.isEmpty() && robotsUrl != null) {
             String conventional = resolve(robotsUrl, "/sitemap.xml");
-            if (conventional != null && sitemapsSeen.add(conventional)) {
+            if (conventional != null && (!request.politeness().respectRobots()
+                    || robots.isAllowed(CrawlUrls.pathAndQuery(conventional)))
+                    && sitemapsSeen.add(conventional)) {
                 sitemapQueue.add(conventional);
             }
         }
@@ -444,10 +522,11 @@ public class WebCrawler {
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list
                 // anything at all — so it earns no exemption from the scope.
-                if (!canonical.isEmpty() && queued.add(canonical)
+                if (!canonical.isEmpty() && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
-                    queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0));
+                    frontier.queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0, false));
                     pagesFromSitemaps++;
+                    counters.sitemapPages++;
                 }
             }
         }
@@ -522,22 +601,34 @@ public class WebCrawler {
     }
 
     /**
-     * {@code <link rel="canonical">} is the site telling us which URL is the real
-     * one. Honoured only when it stays on the same host, so a third-party canonical
-     * cannot redirect a document's identity off-site.
+     * The page this one names as canonical, when it is a different page this crawl
+     * could fetch — or null to treat the page as its own.
+     *
+     * <p>
+     * Honoured only on the same host, so a third-party canonical cannot pull the
+     * crawl off-site, and only inside the operator's scope: deferring to a page the
+     * crawl will never fetch would lose this page's content for nothing.
      */
-    private static String canonicalUrlOf(Document document, String fallbackUrl) {
+    private String canonicalTarget(Document document, String finalUrl, String documentId, String seedHost,
+                                   CrawlRequest request, List<UrlPattern> excludes) {
         Element canonical = document.selectFirst("link[rel=canonical][href]");
         if (canonical == null) {
-            return fallbackUrl;
+            return null;
         }
         String href = canonical.attr("abs:href");
         if (href == null || href.isBlank() || !CrawlUrls.isHttpScheme(href)) {
-            return fallbackUrl;
+            return null;
         }
         String canonicalHost = CrawlUrls.host(href).orElse(null);
-        String actualHost = CrawlUrls.host(fallbackUrl).orElse(null);
-        return canonicalHost != null && canonicalHost.equals(actualHost) ? href : fallbackUrl;
+        String actualHost = CrawlUrls.host(finalUrl).orElse(null);
+        if (canonicalHost == null || !canonicalHost.equals(actualHost)) {
+            return null;
+        }
+        String target = CrawlUrls.canonicalize(href);
+        if (target.isEmpty() || target.equals(documentId) || !isInScope(target, seedHost, request, excludes)) {
+            return null;
+        }
+        return target;
     }
 
     /**
@@ -858,14 +949,16 @@ public class WebCrawler {
     }
 
     private static String robotsUrlFor(String seedUrl) {
+        return rootResourceUrl(seedUrl, "/robots.txt");
+    }
+
+    private static String rootResourceUrl(String url, String path) {
         try {
-            URI uri = new URI(seedUrl);
+            URI uri = new URI(url);
             if (uri.getHost() == null) {
                 return null;
             }
-            URI robots = new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(),
-                    "/robots.txt", null, null);
-            return robots.toString();
+            return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), path, null, null).toString();
         } catch (URISyntaxException e) {
             return null;
         }
@@ -894,8 +987,53 @@ public class WebCrawler {
      * @param canonicalId
      *            the identity used for the visited set, so two spellings of one
      *            page are not both crawled
+     * @param ignoreCanonical
+     *            the page deferred to its canonical once and the page it named
+     *            produced nothing, so this time it is stored as itself
      */
-    private record Candidate(String fetchUrl, String canonicalId, int depth) {
+    private record Candidate(String fetchUrl, String canonicalId, int depth, boolean ignoreCanonical) {
+    }
+
+    /**
+     * What one crawl knows about URLs: what is queued, what has been polled, which
+     * documents it has handed to the sink, and which pages are waiting on the page
+     * they named as canonical.
+     */
+    private static final class Frontier {
+        private final Queue<Candidate> queue = new ArrayDeque<>();
+        /**
+         * Separate from {@code visited}: a URL is queued long before it is polled, and
+         * without this a page linked from 200 others is enqueued 200 times. At maxPages
+         * 50,000 with typical navigation that is millions of entries.
+         */
+        private final Set<String> queued = new HashSet<>();
+        private final Set<String> visited = new HashSet<>();
+        /** Document ids this crawl has reported, as a page or as unchanged. */
+        private final Set<String> delivered = new HashSet<>();
+        private final Map<String, List<Candidate>> deferredTo = new HashMap<>();
+
+        /** Holds a page back until the page it names as canonical has been tried. */
+        void defer(String canonical, Candidate candidate) {
+            deferredTo.computeIfAbsent(canonical, ignored -> new ArrayList<>()).add(candidate);
+            if (queued.add(canonical)) {
+                queue.add(new Candidate(canonical, canonical, candidate.depth(), false));
+            }
+        }
+
+        /**
+         * Once a canonical target has been tried: the pages that deferred to it are
+         * duplicates if it produced a document, and are re-queued to be stored as
+         * themselves if it did not.
+         */
+        void releaseDeferred(String polledId) {
+            List<Candidate> waiting = deferredTo.remove(polledId);
+            if (waiting == null || delivered.contains(polledId)) {
+                return;
+            }
+            for (Candidate candidate : waiting) {
+                queue.add(new Candidate(candidate.fetchUrl(), candidate.canonicalId(), candidate.depth(), true));
+            }
+        }
     }
 
     /** Why a crawl stopped. */
@@ -978,6 +1116,8 @@ public class WebCrawler {
         private int errors;
         private int unreachable;
         private int fetchAttempts;
+        /** In-scope pages queued from sitemaps, for the page-limit warning. */
+        private int sitemapPages;
         private long bytesDownloaded;
         /**
          * A sitemap was cut short or left unread, so the queue was never the whole

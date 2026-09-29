@@ -31,7 +31,7 @@ silently. If the work is stacked, retarget once the parent merges, or accept tha
 build is the only gate and say so. Rebase onto `origin/main` only if the branch was never
 pushed — otherwise merge `origin/main` in, since a rebase would need a banned force-push.
 
-**Changelog — a fragment, never the live file.** AGENTS.md §2 rule 8 changed: write a **new
+**Changelog — a fragment, never the live file.** AGENTS.md §2 rule 8: write a **new
 file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` (today's date, slug unique to your branch) and
 commit it on the *same branch* as the work.
 
@@ -40,7 +40,7 @@ commit it on the *same branch* as the work.
 > `^\+## .*\(YYYY-MM-DD\)` or a dated register row `^\+\| YYYY-MM-DD \|`. Editing the header
 > or fixing a typo in a past entry is still fine — adding an *entry in place* is the one thing
 > it rejects, because every open PR inserting at the same point in the same file is a conflict
-> git cannot merge. That is not hypothetical: two entries collided on this very branch earlier.
+> git cannot merge.
 
 Inside the fragment, write exactly what used to go at the top of the live file — one or more
 `## <title> (YYYY-MM-DD)` entries — but give every relative link **one extra `../`**, since a
@@ -363,8 +363,7 @@ a reviewer reads.
 
 > **The trap: a bot resolves its own thread the moment your push makes it outdated.** So the
 > threads you actually fixed are exactly the ones most likely to end up closed *and* silent,
-> and the unresolved count goes to zero while three findings sit there unanswered. This
-> happened on gnowbe-frontend#373 and is why this paragraph exists.
+> and the unresolved count goes to zero while three findings sit there unanswered.
 >
 > The audit tags every such line **`[NO-REPLY]`** and totals them as
 > `N with no reply from you`, judged by comment *authorship* rather than count — the bot

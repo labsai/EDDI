@@ -62,8 +62,8 @@ DAY = r"(0[1-9]|[12]\d|3[01])"
 # The closing parenthesis is deliberately NOT required: fourteen entries already
 # in the live file and its archives are headed "(2026-07-02, session 2)" and
 # "(2026-04-08 cont.)", and demanding ')' would stop split_sections recognising
-# them as entries at all. Anything matching this must therefore also be caught
-# by ci.yml's Changelog Discipline job, which grades the same headings.
+# them as entries at all. (ci.yml's Changelog Discipline job no longer depends on
+# this pattern: it counts every '## ' heading added to the live file, dated or not.)
 DATE = re.compile(r"\((\d{4})-" + MONTH + "-" + DAY)
 
 # Date-shaped but not a date. Matched only to tell an author that their heading

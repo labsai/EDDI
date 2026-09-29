@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "./number-input";
 import {
   ChevronDown,
   ChevronRight,
@@ -163,7 +164,7 @@ function OutputItemEditor({
           <input type="text" value={item.text ?? ""} onChange={(e) => onChange({ ...item, text: e.target.value })}
             readOnly={readOnly} placeholder={t("outputEditor.textPlaceholder", "Output text...")}
             className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-          <input type="number" value={item.delay ?? 0} onChange={(e) => onChange({ ...item, delay: parseInt(e.target.value, 10) || 0 })}
+          <NumberInput placeholder="0" integer value={item.delay} onChange={(v) => onChange({ ...item, delay: v })}
             readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-text-delay"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
@@ -184,7 +185,7 @@ function OutputItemEditor({
           <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
             readOnly={readOnly} placeholder={t("outputEditor.labelPlaceholder", "Link label...")} data-testid="output-link-label"
             className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-          <input type="number" value={item.delay ?? 0} onChange={(e) => onChange({ ...item, delay: parseInt(e.target.value, 10) || 0 })}
+          <NumberInput placeholder="0" integer value={item.delay} onChange={(v) => onChange({ ...item, delay: v })}
             readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-link-delay"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
@@ -295,8 +296,8 @@ function OutputConfigEditor({
           data-testid="output-action-input" />
         <div className="flex items-center gap-1">
           <label className="text-xs text-muted-foreground whitespace-nowrap">{t("outputEditor.timesOccurred", "×")}</label>
-          <input type="number" value={config.timesOccurred}
-            onChange={(e) => onChange({ ...config, timesOccurred: parseInt(e.target.value, 10) || 0 })}
+          <NumberInput emptyValue={0} integer value={config.timesOccurred}
+            onChange={(v) => onChange({ ...config, timesOccurred: v ?? 0 })}
             readOnly={readOnly} className="h-8 w-14 rounded-md border border-input bg-background px-2 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </div>
         {!readOnly && (
@@ -316,27 +317,27 @@ function OutputConfigEditor({
               {t("outputEditor.outputs", "Outputs")}
             </h5>
             <div className="space-y-3">
-              {config.outputs.map((output, oi) => (
+              {(config.outputs ?? []).map((output, oi) => (
                 <div key={oi} className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {t("outputEditor.alternativeGroup", "Alternative Group")} {oi + 1}
                     </span>
                     {!readOnly && (
-                      <button type="button" onClick={() => onChange({ ...config, outputs: config.outputs.filter((_, j) => j !== oi) })}
+                      <button type="button" onClick={() => onChange({ ...config, outputs: (config.outputs ?? []).filter((_, j) => j !== oi) })}
                         className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors">
                         <Trash2 className="h-3 w-3" />
                       </button>
                     )}
                   </div>
-                  {output.valueAlternatives.map((item, ii) => (
+                  {(output.valueAlternatives ?? []).map((item, ii) => (
                     <OutputItemEditor key={ii} item={item}
-                      onChange={(updated) => { const outputs = [...config.outputs]; const alts = [...output.valueAlternatives]; alts[ii] = updated; outputs[oi] = { ...output, valueAlternatives: alts }; onChange({ ...config, outputs }); }}
-                      onRemove={() => { const outputs = [...config.outputs]; outputs[oi] = { ...output, valueAlternatives: output.valueAlternatives.filter((_, j) => j !== ii) }; onChange({ ...config, outputs }); }}
+                      onChange={(updated) => { const outputs = [...(config.outputs ?? [])]; const alts = [...(output.valueAlternatives ?? [])]; alts[ii] = updated; outputs[oi] = { ...output, valueAlternatives: alts }; onChange({ ...config, outputs }); }}
+                      onRemove={() => { const outputs = [...(config.outputs ?? [])]; outputs[oi] = { ...output, valueAlternatives: (output.valueAlternatives ?? []).filter((_, j) => j !== ii) }; onChange({ ...config, outputs }); }}
                       readOnly={readOnly} />
                   ))}
                   {!readOnly && (
-                    <button type="button" onClick={() => { const outputs = [...config.outputs]; outputs[oi] = { ...output, valueAlternatives: [...output.valueAlternatives, { type: "text", text: "" }] }; onChange({ ...config, outputs }); }}
+                    <button type="button" onClick={() => { const outputs = [...(config.outputs ?? [])]; outputs[oi] = { ...output, valueAlternatives: [...(output.valueAlternatives ?? []), { type: "text", text: "" }] }; onChange({ ...config, outputs }); }}
                       className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
                       <Plus className="h-3 w-3" />{t("outputEditor.addAlternative", "Add Alternative")}
                     </button>
@@ -344,7 +345,7 @@ function OutputConfigEditor({
                 </div>
               ))}
               {!readOnly && (
-                <button type="button" onClick={() => onChange({ ...config, outputs: [...config.outputs, { valueAlternatives: [{ type: "text", text: "" }] }] })}
+                <button type="button" onClick={() => onChange({ ...config, outputs: [...(config.outputs ?? []), { valueAlternatives: [{ type: "text", text: "" }] }] })}
                   className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-muted-foreground/40 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary">
                   <Plus className="h-3.5 w-3.5" />{t("outputEditor.addOutputGroup", "Add Output Group")}
                 </button>
