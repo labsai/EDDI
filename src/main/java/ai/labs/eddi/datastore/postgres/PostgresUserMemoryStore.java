@@ -39,6 +39,18 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     private static final Logger LOGGER = Logger.getLogger(PostgresUserMemoryStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * SQL predicate excluding {@linkplain IUserMemoryStore#isReservedKey reserved
+     * keys}. The underscores are escaped because {@code _} is LIKE's
+     * single-character wildcard: the unescaped {@code '_gdpr_%'} this replaced also
+     * matched any key whose second to fifth characters spell "gdpr" (say
+     * {@code agdpr1}), so the retention sweep silently never pruned those. The
+     * escape character is {@code !}, not a backslash: a backslash inside a string
+     * literal means something else again under
+     * {@code standard_conforming_strings=off}.
+     */
+    static final String NOT_RESERVED_KEY = "key NOT LIKE '!_gdpr!_%' ESCAPE '!'";
+
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS usermemories (
                 id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -142,6 +154,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public void mergeProperties(String userId, Properties properties) throws IResourceStore.ResourceStoreException {
         if (properties == null || properties.isEmpty())
             return;
+        // Refused before the batch is built, so a rejected call writes nothing.
+        properties.keySet().forEach(IUserMemoryStore::rejectReservedKey);
         ensureSchema();
 
         // Upsert each key-value pair as a global entry
@@ -170,7 +184,9 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "DELETE FROM usermemories WHERE user_id = ? AND visibility = 'global'";
+        // GDPR bookkeeping keys are kept: only the admin unrestrict path and the
+        // erasure cascade may remove them.
+        String sql = "DELETE FROM usermemories WHERE user_id = ? AND visibility = 'global' AND " + NOT_RESERVED_KEY;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.executeUpdate();
@@ -183,6 +199,65 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     @Override
     public String upsert(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        return write(entry);
+    }
+
+    @Override
+    public String upsertReserved(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        if (!IUserMemoryStore.isReservedKey(entry.key())) {
+            throw new IllegalArgumentException("upsertReserved accepts only reserved keys, got '" + entry.key() + "'");
+        }
+        return write(entry);
+    }
+
+    private static final String INSERT_IF_ABSENT_GLOBAL = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key) WHERE visibility = 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    private static final String INSERT_IF_ABSENT_SCOPED = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    /**
+     * Atomic: {@code ON CONFLICT ... DO NOTHING} against the same unique partial
+     * indexes {@link #upsert} targets, so an entry another writer created in the
+     * meantime is left exactly as it is and no row comes back.
+     */
+    @Override
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        ensureSchema();
+        String sql = entry.visibility() == Visibility.global ? INSERT_IF_ABSENT_GLOBAL : INSERT_IF_ABSENT_SCOPED;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, entry.userId());
+            ps.setString(2, entry.key());
+            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(4, entry.category());
+            ps.setString(5, entry.visibility() != null ? entry.visibility().name() : "self");
+            ps.setString(6, entry.sourceAgentId());
+            ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(8, entry.sourceConversationId());
+            ps.setBoolean(9, entry.conflicted());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString("id") : null;
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to insert memory entry", e);
+        }
+    }
+
+    private String write(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String visibility = entry.visibility() != null ? entry.visibility().name() : "self";
 
@@ -603,7 +678,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         ensureSchema();
         // Exclude GDPR system keys (e.g. _gdpr_processing_restricted) from retention
         // cleanup
-        String sql = "DELETE FROM usermemories WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '1 day' * ? AND key NOT LIKE '_gdpr_%'";
+        String sql = "DELETE FROM usermemories WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '1 day' * ? AND " + NOT_RESERVED_KEY;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, olderThanDays);
             return ps.executeUpdate();

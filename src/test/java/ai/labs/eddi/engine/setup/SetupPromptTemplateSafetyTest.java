@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.setup;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.DisplayName;
@@ -87,6 +88,18 @@ class SetupPromptTemplateSafetyTest {
         return templatingEngine.processTemplate(template, Map.of("context", Map.of("screen", "Agents")), TemplateMode.TEXT);
     }
 
+    /**
+     * Strictness is a setting of the runtime engine TemplatingEngine builds, not of
+     * the engine it takes its resolvers from.
+     */
+    private static String renderStrict(Engine engine, String template) throws Exception {
+        var defaults = RuntimeTemplateEngineFactory.Settings.defaults();
+        var strict = new RuntimeTemplateEngineFactory.Settings(defaults.maxOutputChars(), defaults.maxIterations(), true,
+                defaults.removeStandaloneLines(), defaults.iterationMetadataPrefix(), defaults.timeoutMillis());
+        ITemplatingEngine templatingEngine = new TemplatingEngine(engine, strict);
+        return templatingEngine.processTemplate(template, Map.of("context", Map.of("screen", "Agents")), TemplateMode.TEXT);
+    }
+
     @Test
     @DisplayName("the generated summary really does carry Qute-significant braces")
     void summaryContainsPathParameters() {
@@ -111,7 +124,7 @@ class SetupPromptTemplateSafetyTest {
         @DisplayName("raw concatenation aborts the render — the shipped defect")
         void rawConcatenationThrows() {
             String unescaped = CALLER_PROMPT + "\n\n" + apiSummary();
-            var e = assertThrows(ITemplatingEngine.TemplateEngineException.class, () -> render(engine, unescaped));
+            var e = assertThrows(ITemplatingEngine.TemplateEngineException.class, () -> renderStrict(engine, unescaped));
             // Assert on the CAUSE, not the whole message: the message appends a preview
             // of the template, which itself contains the literal "{name}" — so a bare
             // contains("name") would pass for any failure at all.
@@ -122,7 +135,7 @@ class SetupPromptTemplateSafetyTest {
         @Test
         @DisplayName("the enriched prompt renders, keeping the paths literal and the caller's template live")
         void enrichedPromptRenders() throws Exception {
-            String rendered = assertDoesNotThrow(() -> render(engine, AgentSetupService.enrichSystemPrompt(CALLER_PROMPT, apiSummary())));
+            String rendered = assertDoesNotThrow(() -> renderStrict(engine, AgentSetupService.enrichSystemPrompt(CALLER_PROMPT, apiSummary())));
 
             assertTrue(rendered.contains("/administration/docs/{name}"), rendered);
             assertTrue(rendered.contains("/groupstore/groups/{id}"), rendered);

@@ -42,7 +42,7 @@ class WorkspaceAccessIndexMigrationTest {
 
         // The v6 names. Each of these has a v5 near-miss that reads plausibly and
         // matches nothing: behavior/rules, httpcalls/apicalls, langchain/llm,
-        // regulardictionary/dictionary (AGENTS.md §5.5).
+        // regulardictionary/dictionary (docs/agent-config-authoring.md).
         assertTrue(types.contains("ai.labs.rules"), "rule sets are listed under ai.labs.rules");
         assertTrue(types.contains("ai.labs.apicalls"), "api calls are listed under ai.labs.apicalls");
         assertTrue(types.contains("ai.labs.llm"), "LLM configs are listed under ai.labs.llm");

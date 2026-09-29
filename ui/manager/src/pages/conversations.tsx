@@ -14,10 +14,11 @@ import {
   AlertTriangle,
   Filter,
   Bot,
-  HandMetal,
   ChevronLeft,
   ChevronRight,
-  Activity,
+  Radio,
+  Hand,
+  MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
@@ -50,7 +51,7 @@ const stateIcons: Record<
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
   EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
-  AWAITING_HUMAN: { icon: HandMetal, color: "text-orange-500", bg: "bg-orange-500/10" },
+  AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
 const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
@@ -168,7 +169,7 @@ export function ConversationsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <MessageSquare className="h-8 w-8 text-primary" />
+            <MessagesSquare className="h-8 w-8 text-primary" />
             {t("pages.conversations.title")}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -180,7 +181,7 @@ export function ConversationsPage() {
           className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
           data-testid="monitor-active-link"
         >
-          <Activity className="h-4 w-4 text-primary" />
+          <Radio className="h-4 w-4 text-primary" />
           {t("conversations.monitorActive", "Monitor active")}
         </Link>
       </div>

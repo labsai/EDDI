@@ -23,9 +23,11 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Async document ingestion into knowledge base vector stores. Uses virtual
@@ -50,10 +52,44 @@ public class RagIngestionService {
      */
     private final Cache<String, String> ingestionStatus = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
 
+    /**
+     * One lock per document being replaced, so two replacements of one name cannot
+     * delete each other. Each stores its chunks and then removes every other
+     * ingestion's under that name — run concurrently, both can store before either
+     * deletes, each deletion then matches the other's new chunks, and the document
+     * is left with none. Weak values: an entry lives only while a replacement holds
+     * or waits for its lock. Per instance: replacements of one name arriving at two
+     * instances at once are not serialized.
+     */
+    private final Cache<ReplaceKey, ReentrantLock> replaceLocks = Caffeine.newBuilder().weakValues().build();
+
+    private record ReplaceKey(String kbId, String documentName) {
+    }
+
+    /** Caveats on completed ingestions, kept exactly as long as their status. */
+    private final Cache<String, String> ingestionWarnings = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
+
+    /** Chunk metadata: the document name the chunk was ingested under. */
+    static final String METADATA_SOURCE = "source";
+    /** Chunk metadata: the knowledge base the chunk belongs to. */
+    static final String METADATA_KB_ID = "kbId";
+    /** Chunk metadata: the ingestion that wrote the chunk. */
+    static final String METADATA_INGESTION_ID = "ingestionId";
+
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory) {
         this.embeddingModelFactory = embeddingModelFactory;
         this.embeddingStoreFactory = embeddingStoreFactory;
+    }
+
+    /**
+     * Ingest a document into a knowledge base, adding to whatever is already stored
+     * under its name. Runs on a virtual thread.
+     *
+     * @see #ingest(String, String, String, RagConfiguration, boolean)
+     */
+    public String ingest(String kbId, String documentContent, String documentName, RagConfiguration ragConfig) {
+        return ingest(kbId, documentContent, documentName, ragConfig, false);
     }
 
     /**
@@ -67,24 +103,35 @@ public class RagIngestionService {
      *            display name / source of the document
      * @param ragConfig
      *            the RAG configuration defining embedding + store
+     * @param replace
+     *            whether this document supersedes what was previously ingested
+     *            under the same {@code documentName} in this knowledge base. Off,
+     *            ingesting a name twice stores both copies and retrieval returns
+     *            both
      * @return ingestion ID for status polling
      */
-    public String ingest(String kbId, String documentContent, String documentName, RagConfiguration ragConfig) {
+    public String ingest(String kbId, String documentContent, String documentName, RagConfiguration ragConfig, boolean replace) {
         String ingestionId = UUID.randomUUID().toString();
         ingestionStatus.put(ingestionId, "pending");
 
-        Thread.startVirtualThread(() -> processIngestion(kbId, ingestionId, documentContent, documentName, ragConfig));
+        Thread.startVirtualThread(() -> processIngestion(kbId, ingestionId, documentContent, documentName, ragConfig, replace));
 
         return ingestionId;
     }
 
-    private void processIngestion(String kbId, String ingestionId, String documentContent, String documentName, RagConfiguration ragConfig) {
+    private void processIngestion(String kbId, String ingestionId, String documentContent, String documentName, RagConfiguration ragConfig,
+                                  boolean replace) {
         try {
             ingestionStatus.put(ingestionId, "processing");
-            LOGGER.infof("Starting ingestion %s for KB '%s', document '%s'", ingestionId, sanitize(kbId), sanitize(documentName));
+            LOGGER.infof("Starting ingestion %s for KB '%s', document '%s' (replace=%b)", ingestionId, sanitize(kbId), sanitize(documentName),
+                    replace);
 
-            // 1. Parse document
-            Document document = Document.from(documentContent, Metadata.from("source", documentName).put("kbId", kbId));
+            // 1. Parse document. Every chunk carries the ingestion that wrote it, which
+            // is what lets a replacing ingestion tell its own chunks from the ones it
+            // supersedes.
+            Document document = Document.from(documentContent, Metadata.from(METADATA_SOURCE, documentName)
+                    .put(METADATA_KB_ID, kbId)
+                    .put(METADATA_INGESTION_ID, ingestionId));
 
             // 2. Chunk
             DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.getChunkSize(), ragConfig.getChunkOverlap());
@@ -98,7 +145,17 @@ public class RagIngestionService {
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();
 
-            ingestor.ingest(document);
+            if (replace) {
+                ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock());
+                replaceLock.lock();
+                try {
+                    storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, true);
+                } finally {
+                    replaceLock.unlock();
+                }
+            } else {
+                storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, false);
+            }
 
             ingestionStatus.put(ingestionId, "completed");
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
@@ -107,6 +164,46 @@ public class RagIngestionService {
             ingestionStatus.put(ingestionId, "failed: " + e.getMessage());
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
+    }
+
+    private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String kbId,
+                                 String documentName, String ingestionId, boolean replace) {
+        ingestor.ingest(document);
+
+        // 4. Replace: remove what the document had before, AFTER the new version is
+        // stored — a failure above leaves the previous version retrievable rather
+        // than leaving the document with no vectors at all. Chunks written before
+        // chunks were tagged with an ingestion id carry no such key, and
+        // isNotEqualTo matches them too, so they are superseded as well.
+        if (replace) {
+            try {
+                store.removeAll(metadataKey(METADATA_SOURCE).isEqualTo(documentName)
+                        .and(metadataKey(METADATA_KB_ID).isEqualTo(kbId))
+                        .and(metadataKey(METADATA_INGESTION_ID).isNotEqualTo(ingestionId)));
+            } catch (UnsupportedOperationException e) {
+                String warning = "The new version is stored, but this knowledge base's vector store cannot delete by metadata, "
+                        + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
+                ingestionWarnings.put(ingestionId, warning);
+                LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
+            } catch (RuntimeException e) {
+                // The new chunks are already stored, so a failed delete (pgvector wraps
+                // its SQLException in a RuntimeException) leaves both versions
+                // retrievable. Still a failure — the operator should retry, and a retry
+                // removes every version but its own — but the status says what state it
+                // left, rather than a bare "failed".
+                ingestionWarnings.put(ingestionId, "The new version of '" + documentName + "' is stored, but removing the previous "
+                        + "version failed, so both may be retrievable until the replacement is retried.");
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * A caveat on an ingestion that completed, or {@code null} when there is none —
+     * currently only a replacement the vector store could not carry out.
+     */
+    public String getWarning(String ingestionId) {
+        return ingestionWarnings.getIfPresent(ingestionId);
     }
 
     /**

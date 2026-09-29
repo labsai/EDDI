@@ -41,6 +41,12 @@ public interface IRestRagIngestion {
                                        description = "Display name for the document")
                             @QueryParam("documentName")
                             @DefaultValue("unnamed") String documentName,
+                            @Parameter(name = "replace",
+                                       description = "Supersede what was previously ingested under this documentName: the new "
+                                               + "chunks are stored, then the old ones are removed. Requires an explicit "
+                                               + "documentName. Off by default, so ingesting a name twice keeps both copies")
+                            @QueryParam("replace")
+                            @DefaultValue("false") Boolean replace,
                             String documentContent);
 
     @GET

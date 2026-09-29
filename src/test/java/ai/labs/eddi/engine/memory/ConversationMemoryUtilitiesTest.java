@@ -4,19 +4,25 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -179,6 +185,385 @@ class ConversationMemoryUtilitiesTest {
             assertTrue(output.containsKey("actions"));
             assertTrue(output.containsKey("output"));
             assertFalse(output.containsKey("internal:debug"));
+        }
+
+        /**
+         * A secret turn stored before Conversation scrubbed at turn end: raw
+         * input:initial, the parser's normalized copy in input / input:normalized, and
+         * the secretInput flag in both the step's context datum and the output.
+         */
+        private ConversationMemorySnapshot oldShapeSecretTurn(Object stepFlag) {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+
+            var greeting = new ConversationOutput();
+            greeting.put("input", "hello there");
+            greeting.put("output", List.of("hi"));
+            snapshot.getConversationOutputs().add(greeting);
+            var greetingStep = new ConversationStepSnapshot();
+            var greetingRun = new WorkflowRunSnapshot();
+            greetingRun.getLifecycleTasks().add(new ResultSnapshot("input:initial", "hello there", null, new Date(), null, true));
+            greetingStep.getWorkflows().add(greetingRun);
+            snapshot.getConversationSteps().add(greetingStep);
+
+            var secret = new ConversationOutput();
+            secret.put("context", Map.of("secretInput", "true"));
+            secret.put("input", "tok-aaaa-bbbb-1111");
+            secret.put("output", List.of("saved"));
+            snapshot.getConversationOutputs().add(secret);
+            var step = new ConversationStepSnapshot();
+            var run = new WorkflowRunSnapshot();
+            run.getLifecycleTasks().add(new ResultSnapshot("context:secretInput", stepFlag, null, new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:initial", "Tok-Aaaa-Bbbb-1111", null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:normalized", "tok-aaaa-bbbb-1111", null, new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("expressions:parsed", "unknown(tok-aaaa-bbbb-1111)", null, new Date(), null, false));
+            step.getWorkflows().add(run);
+            snapshot.getConversationSteps().add(step);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("a secret turn stored before the turn-end scrub is masked on read, in both detail levels")
+        void oldStoredSecretTurnIsMaskedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            for (Object stepFlag : List.of(new Context(Context.ContextType.string, "true"), Map.of("type", "string", "value", "true"))) {
+                var snapshot = oldShapeSecretTurn(stepFlag);
+                for (boolean detailed : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, false);
+                    String json = mapper.writeValueAsString(simple.getConversationOutputs())
+                            + mapper.writeValueAsString(simple.getConversationSteps());
+                    assertFalse(json.toLowerCase().contains("tok-aaaa-bbbb-1111"), "detailed=" + detailed + " leaks: " + json);
+                    assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, simple.getConversationOutputs().get(1).get("input"));
+                    assertEquals("hello there", simple.getConversationOutputs().get(0).get("input"), "an ordinary turn is untouched");
+                    assertTrue(json.contains("hello there"));
+                }
+                // returnCurrentStepOnly — what the streaming done frame and most reads use.
+                var last = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, true);
+                assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, last.getConversationOutputs().getFirst().get("input"));
+                // The stored document is read, never rewritten.
+                assertEquals("tok-aaaa-bbbb-1111", snapshot.getConversationOutputs().get(1).get("input"));
+            }
+        }
+
+        @Test
+        @DisplayName("an old secret turn's echoes in outputs and other step results are scrubbed on read; properties are not")
+        void oldStoredSecretTurnEchoesAreScrubbedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            var snapshot = oldShapeSecretTurn(new Context(Context.ContextType.string, "true"));
+            var secretOutput = snapshot.getConversationOutputs().get(1);
+            secretOutput.put("output", List.of(Map.of("type", "text", "text", "Stored Tok-Aaaa-Bbbb-1111")));
+            secretOutput.put("quickReplies", List.of(Map.of("value", "use tok-aaaa-bbbb-1111", "expressions", "ok")));
+            secretOutput.put("properties", Map.of("apiKey", "Tok-Aaaa-Bbbb-1111"));
+            var run = snapshot.getConversationSteps().get(1).getWorkflows().getFirst();
+            run.getLifecycleTasks().add(new ResultSnapshot("output:text:saved", "Stored Tok-Aaaa-Bbbb-1111", null, new Date(), null, true));
+            run.getLifecycleTasks()
+                    .add(new ResultSnapshot("httpCalls:create", Map.of("request", Map.of("key", "tok-aaaa-bbbb-1111")), null, new Date(), null,
+                            false));
+            run.getLifecycleTasks().add(new ResultSnapshot("properties:apiKey", "Tok-Aaaa-Bbbb-1111", null, new Date(), null, false));
+            snapshot.getConversationProperties().put("apiKey", new Property("apiKey", "Tok-Aaaa-Bbbb-1111", Property.Scope.conversation));
+
+            for (boolean detailed : List.of(false, true)) {
+                for (boolean currentOnly : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, currentOnly);
+                    var outputs = simple.getConversationOutputs().stream().map(output -> {
+                        Map<String, Object> copy = new LinkedHashMap<>(output);
+                        copy.remove("properties");
+                        return copy;
+                    }).toList();
+                    var steps = simple.getConversationSteps().stream()
+                            .flatMap(step -> step.getConversationStep().stream())
+                            .filter(data -> !data.getKey().equals("properties:apiKey"))
+                            .toList();
+                    String json = mapper.writeValueAsString(outputs) + mapper.writeValueAsString(steps);
+                    String where = "detailed=" + detailed + " currentOnly=" + currentOnly + ": ";
+                    assertFalse(json.toLowerCase().contains("tok-aaaa-bbbb-1111"), where + json);
+                    assertTrue(json.contains("Stored " + MemoryKeys.SECRET_INPUT_PLACEHOLDER), where + json);
+                    if (detailed) {
+                        assertTrue(json.contains("\"key\":\"" + MemoryKeys.SECRET_INPUT_PLACEHOLDER + "\""), where + json);
+                        // Properties and their step mirrors are not masked as part of the
+                        // secret turn (no placeholder); returnDetailed still masks a
+                        // credential-named key such as apiKey, as it does for every turn.
+                        assertEquals(Map.of("apiKey", SecretRedactionFilter.REDACTED), simple.getConversationOutputs().getLast().get("properties"));
+                        assertTrue(simple.getConversationSteps().getLast().getConversationStep().stream()
+                                .anyMatch(
+                                        data -> data.getKey().equals("properties:apiKey") && SecretRedactionFilter.REDACTED.equals(data.getValue())));
+                    }
+                    assertEquals("Tok-Aaaa-Bbbb-1111", simple.getConversationProperties().get("apiKey").getValueString());
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals("Stored Tok-Aaaa-Bbbb-1111", ((Map<?, ?>) ((List<?>) secretOutput.get("output")).getFirst()).get("text"));
+        }
+
+        @Test
+        @DisplayName("an old secret turn's short secret is masked on read where it stands as a whole token, never in map keys")
+        void oldStoredShortSecretIsMaskedAsWholeTokenOnRead() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-1");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("context", Map.of("secretInput", "true"));
+            output.put("input", "739");
+            output.put("output", List.of(Map.of("type", "text", "text", "PIN 739 saved, order 17391")));
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var run = new WorkflowRunSnapshot();
+            run.getLifecycleTasks().add(new ResultSnapshot("context:secretInput", new Context(Context.ContextType.string, "true"), null,
+                    new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("input:initial", "739", null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("httpCalls:save", Map.of("739", "PIN 739"), null, new Date(), null, false));
+            step.getWorkflows().add(run);
+            snapshot.getConversationSteps().add(step);
+
+            for (boolean detailed : List.of(false, true)) {
+                var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, false);
+                var item = (Map<?, ?>) ((List<?>) simple.getConversationOutputs().getFirst().get("output")).getFirst();
+                assertEquals("PIN " + MemoryKeys.SECRET_INPUT_PLACEHOLDER + " saved, order 17391", item.get("text"),
+                        "detailed=" + detailed);
+                if (detailed) {
+                    var saved = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                            .filter(data -> data.getKey().equals("httpCalls:save"))
+                            .findFirst().orElseThrow().getValue();
+                    assertEquals(Map.of("739", "PIN " + MemoryKeys.SECRET_INPUT_PLACEHOLDER), saved,
+                            "the value is masked, the map key is not renamed");
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals("PIN 739 saved, order 17391",
+                    ((Map<?, ?>) ((List<?>) output.get("output")).getFirst()).get("text"));
+        }
+
+        @Test
+        @DisplayName("an old secret turn's parser results are cleared on read, even when they hold the secret tokenized")
+        void oldStoredSecretTurnParserResultsAreClearedOnRead() throws Exception {
+            var mapper = new ObjectMapper();
+            var snapshot = oldShapeSecretTurn(new Context(Context.ContextType.string, "true"));
+            // The parser split the secret: no stored value carries it whole, so no needle
+            // matches.
+            var run = snapshot.getConversationSteps().get(1).getWorkflows().getFirst();
+            run.getLifecycleTasks().add(new ResultSnapshot("expressions:matches", List.of("unknown(tok-aaaa)", "unknown(bbbb-1111)"), null,
+                    new Date(), null, false));
+            run.getLifecycleTasks().add(new ResultSnapshot("intents", List.of("tok-aaaa", "bbbb-1111"), null, new Date(), null, true));
+            run.getLifecycleTasks().add(new ResultSnapshot("properties:extracted", List.of(Map.of("name", "bbbb-1111")), null, new Date(), null,
+                    true));
+            var secretOutput = snapshot.getConversationOutputs().get(1);
+            secretOutput.put("expressions", "unknown(tok-aaaa),unknown(bbbb-1111)");
+            secretOutput.put("intents", List.of("tok-aaaa", "bbbb-1111"));
+
+            for (boolean detailed : List.of(false, true)) {
+                for (boolean currentOnly : List.of(false, true)) {
+                    var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, detailed, currentOnly);
+                    String json = mapper.writeValueAsString(simple.getConversationOutputs())
+                            + mapper.writeValueAsString(simple.getConversationSteps());
+                    String where = "detailed=" + detailed + " currentOnly=" + currentOnly + ": ";
+                    assertFalse(json.contains("tok-aaaa"), where + json);
+                    assertFalse(json.contains("bbbb-1111"), where + json);
+                    var output = simple.getConversationOutputs().getLast();
+                    assertFalse(output.containsKey("expressions"), where + output);
+                    assertFalse(output.containsKey("intents"), where + output);
+                }
+            }
+            // The stored document is read, never rewritten.
+            assertEquals(List.of("tok-aaaa", "bbbb-1111"), secretOutput.get("intents"));
+        }
+
+        @Test
+        @DisplayName("returnDetailed=false keeps the display input, which masks a secret turn")
+        void nonDetailedKeepsDisplayInput() {
+            // Conversation writes the placeholder under "input" for a secretInput turn
+            // while input:initial stays raw; a client rebuilding the transcript needs
+            // the masked copy or it can only print the plaintext.
+            var snapshot = buildSnapshotWithOutputs("input:initial", "input", "inputDebug", "output");
+            snapshot.getConversationOutputs().getFirst().put("input", MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, output.get("input"));
+            assertFalse(output.containsKey("inputDebug"), "only the exact display key passes, not every input* key");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must drop sensitive internal keys (audit:*, *:trace:*, *Error)")
+        void detailedDropsSensitiveKeys() {
+            var snapshot = buildSnapshotWithOutputs("output", "audit:compiled_prompt", "langchain:trace:1", "httpCallError", "internal:debug");
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var output = simple.getConversationOutputs().getFirst();
+            assertTrue(output.containsKey("output"), "ordinary output must survive");
+            assertTrue(output.containsKey("internal:debug"), "non-sensitive detail must survive");
+            assertFalse(output.containsKey("audit:compiled_prompt"), "audit:* must be withheld");
+            assertFalse(output.containsKey("langchain:trace:1"), "*:trace:* must be withheld");
+            assertFalse(output.containsKey("httpCallError"), "*Error must be withheld");
+
+            var stepKeys = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .map(ConversationStepData::getKey).toList();
+            assertTrue(stepKeys.contains("output"));
+            assertFalse(stepKeys.contains("audit:compiled_prompt"), "audit:* must be withheld from step data");
+            assertFalse(stepKeys.contains("langchain:trace:1"), "*:trace:* must be withheld from step data");
+            assertFalse(stepKeys.contains("httpCallError"), "*Error must be withheld from step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must redact secrets nested inside a structured (Map/List) value")
+        void detailedRedactsStructuredValues() {
+            // A secret embedded in a deserialized httpCall response body (a Map/List under
+            // an agent-chosen, non-denylisted key) must not reach the detailed view raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of("token", secret, "nested", List.of(Map.of("apiKey", secret)));
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-struct");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(secret), "the raw secret must not survive in a structured output value");
+            assertTrue(outStr.contains("<REDACTED>"), "the nested secret must be masked");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            String stepStr = String.valueOf(stepData.getValue());
+            assertFalse(stepStr.contains(secret), "the raw secret must not survive in a structured step value");
+            assertTrue(stepStr.contains("<REDACTED>"), "the nested secret must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true masks a shapeless credential under a credential-named key")
+        void detailedMasksValueUnderCredentialNamedKey() {
+            // "mytenantsecret12345" has no credential SHAPE (no sk-/Bearer prefix), so
+            // only the key says what it is — and walking the Map separates key from
+            // value. The key must be judged before the value is recursed into.
+            String shapeless = "mytenantsecret12345";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("apiKey", shapeless);
+            body.put("auth", Map.of("password", shapeless, "clientSecret", List.of(shapeless)));
+            // a non-credential key nested under a credential key inherits the masking
+            body.put("authorization", Map.of("value", "tenant-credential-9876"));
+            body.put("accessToken", 1234567890123L);
+            body.put("vaultToken", "${vault:tenant-key}");
+            body.put("maxTokens", 4096);
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-shapeless");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("token", shapeless);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            String outStr = String.valueOf(out.get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapeless), "a shapeless credential under a credential key must be masked: " + outStr);
+            assertFalse(outStr.contains("1234567890123"), "a numeric credential under a credential key must be masked");
+            assertFalse(outStr.contains("tenant-credential-9876"), "everything under a credential key is masked, at any depth");
+            assertTrue(outStr.contains("${vault:tenant-key}"), "a vault reference is a pointer, not a secret");
+            assertTrue(outStr.contains("4096"), "a short value under the 8-character floor is kept");
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            assertFalse(String.valueOf(out.get("token")).contains(shapeless), "a top-level credential key is masked too");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapeless),
+                    "a shapeless credential under a credential key must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true masks a credential used as a map KEY beneath a credential-named key")
+        void detailedMasksKeysBeneathCredentialNamedKey() {
+            String shapelessKey = "mytenantcredential123";
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("authorization", Map.of(shapelessKey, "value"));
+            body.put("secrets", List.of(Map.of(shapelessKey + "b", "x")));
+            body.put("name", "ordinary-value-kept");
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            String outStr = String.valueOf(simple.getConversationOutputs().getFirst().get("httpCall:myApi"));
+            assertFalse(outStr.contains(shapelessKey), "a credential used as a key under a credential key must be masked: " + outStr);
+            assertTrue(outStr.contains("ordinary-value-kept"), "a non-credential key is not masked");
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            assertFalse(String.valueOf(stepData.getValue()).contains(shapelessKey),
+                    "the same key must be masked in step data");
+        }
+
+        @Test
+        @DisplayName("returnDetailed=true must redact secrets in map KEYS and in Object[] elements")
+        void detailedRedactsMapKeysAndArrays() {
+            // A credential can sit in a map key (a token-keyed lookup) or in a String[]
+            // — neither may pass through the detailed projection raw.
+            String secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+            Object body = Map.of(secret, "value", "list", new String[]{secret});
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-keys");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put("httpCall:myApi", body);
+            output.put("httpCall:array", new Object[]{secret, List.of(secret)});
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("httpCall:myApi", body, null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var out = simple.getConversationOutputs().getFirst();
+            var map = (Map<?, ?>) out.get("httpCall:myApi");
+            assertFalse(map.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) map.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted");
+            assertFalse(Arrays.deepToString((Object[]) out.get("httpCall:array")).contains(secret),
+                    "a secret inside an Object[] output value must be redacted");
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep().stream()
+                    .filter(d -> "httpCall:myApi".equals(d.getKey())).findFirst().orElseThrow();
+            var stepMap = (Map<?, ?>) stepData.getValue();
+            assertFalse(stepMap.keySet().stream().anyMatch(k -> String.valueOf(k).contains(secret)),
+                    "a secret map key must be redacted in step data");
+            assertFalse(Arrays.deepToString((Object[]) stepMap.get("list")).contains(secret),
+                    "a secret inside a String[] must be redacted in step data");
         }
 
         @Test

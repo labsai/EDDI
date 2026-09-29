@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  Boxes, ClipboardList, Plus, Trash2, RefreshCw, Users2, DollarSign, CheckCircle2, Clock,
+  SquareKanban, ClipboardList, Plus, Trash2, RefreshCw, Users, DollarSign, CheckCircle2, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -215,7 +215,7 @@ export function GroupWorkspacePage() {
       <div className="space-y-2">
         <BackLink to={`/manage/groups/${groupId}?version=${version}`} label={groupConfig?.name || t("groupWorkspace.backToGroup", "Back to group")} />
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-          <Boxes className="h-8 w-8 text-primary" />
+          <SquareKanban className="h-8 w-8 text-primary" />
           {t("groupWorkspace.title", "Standing Team Workspace")}
         </h1>
         <p className="text-muted-foreground">
@@ -251,7 +251,7 @@ export function GroupWorkspacePage() {
       {Object.keys(workspace.metrics.perMemberStats).length > 0 && (
         <div className="rounded-xl border border-border bg-card p-4">
           <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-            <Users2 className="h-4 w-4" />
+            <Users className="h-4 w-4" />
             {t("groupWorkspace.perMemberStats", "Per-member reliability")}
           </h3>
           <table className="w-full text-sm">

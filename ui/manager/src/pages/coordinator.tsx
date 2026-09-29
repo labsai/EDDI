@@ -3,7 +3,6 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
-  Activity,
   Trash2,
   RotateCcw,
   Server,
@@ -18,6 +17,7 @@ import {
   Clock,
   TrendingUp,
   ExternalLink,
+  Network,
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -184,7 +184,7 @@ export function CoordinatorPage() {
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex items-center gap-3">
-        <Activity className="h-7 w-7 text-accent" />
+        <Network className="h-7 w-7 text-accent" />
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-foreground">
             {t("coordinator.title", "Coordinator Dashboard")}
@@ -325,7 +325,7 @@ export function CoordinatorPage() {
         </>
       ) : (
         <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <Activity className="h-12 w-12 text-muted-foreground/40" />
+          <Network className="h-12 w-12 text-muted-foreground/40" />
           <p className="mt-4 text-lg font-medium text-muted-foreground">
             {t("coordinator.empty", "No coordinator data available")}
           </p>

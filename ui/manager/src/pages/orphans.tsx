@@ -6,11 +6,11 @@ import {
   Trash2,
   Search,
   AlertTriangle,
-  CheckCircle,
   Loader2,
   ScanSearch,
   Copy,
   Link2Off,
+  CheckCircle2,
 } from "lucide-react";
 import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
 import { isScanComplete, type OrphanInfo } from "@/lib/api/orphans";
@@ -231,7 +231,7 @@ export function OrphansPage() {
               <div className="flex items-center gap-3">
                 {report.totalOrphans === 0 ? (
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-                    <CheckCircle className="h-5 w-5 text-green-500" />
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
                   </div>
                 ) : (
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">

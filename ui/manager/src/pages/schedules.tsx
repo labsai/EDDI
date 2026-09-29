@@ -19,12 +19,12 @@ import {
   ChevronRight,
   Zap,
   Pause,
-  HandMetal,
   Pencil,
   Globe,
   X,
   Inbox,
   Ban,
+  Hand,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueries } from "@tanstack/react-query";
@@ -1656,7 +1656,7 @@ export function SchedulesPage() {
                                 )}
                                 data-testid={`hitl-schedule-badge-${s.id}`}
                               >
-                                <HandMetal className="h-3 w-3" />{" "}
+                                <Hand className="h-3 w-3" />{" "}
                                 {t("schedules.hitlTimeout", "HITL timeout")}
                               </span>
                             )}

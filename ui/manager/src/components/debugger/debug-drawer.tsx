@@ -8,13 +8,13 @@ import { LiveLogViewer } from "./live-log-viewer";
 import { PromptViewer } from "./prompt-viewer";
 import { cn } from "@/lib/utils";
 import {
-  GitBranch,
   Coins,
   Database,
   ScrollText,
   MessageSquareCode,
   ChevronUp,
   ChevronDown,
+  Workflow,
 } from "lucide-react";
 
 // ==================== Tab Configuration ====================
@@ -27,7 +27,7 @@ interface TabConfig {
 }
 
 const TABS: TabConfig[] = [
-  { id: "pipeline", labelKey: "debugDrawer.tabPipeline", fallback: "Pipeline", icon: <GitBranch className="h-3.5 w-3.5" /> },
+  { id: "pipeline", labelKey: "debugDrawer.tabPipeline", fallback: "Pipeline", icon: <Workflow className="h-3.5 w-3.5" /> },
   { id: "costs", labelKey: "debugDrawer.tabCosts", fallback: "Costs", icon: <Coins className="h-3.5 w-3.5" /> },
   { id: "memory", labelKey: "debugDrawer.tabMemory", fallback: "Memory", icon: <Database className="h-3.5 w-3.5" /> },
   { id: "logs", labelKey: "debugDrawer.tabLogs", fallback: "Logs", icon: <ScrollText className="h-3.5 w-3.5" /> },

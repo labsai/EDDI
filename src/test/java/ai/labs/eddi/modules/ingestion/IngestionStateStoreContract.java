@@ -464,6 +464,27 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a run is judged by the deadline recorded at its claim, not by a later cut-off")
+    default void recordedDeadlineGoverns() {
+        // The cut-off a budget lowered mid-run produces: everything started before a
+        // minute from now. Judged by it, the live run below would be reaped and its
+        // worker fenced while still working.
+        store().startRun(SOURCE, Instant.now().plusSeconds(3600)).orElseThrow();
+
+        assertEquals(0, store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60)));
+        assertTrue(store().activeRun(SOURCE).isPresent());
+    }
+
+    @Test
+    @DisplayName("a run whose recorded deadline has passed is reaped, whatever the cut-off")
+    default void passedDeadlineIsReaped() {
+        store().startRun(SOURCE, Instant.now().minusSeconds(1)).orElseThrow();
+
+        assertEquals(1, store().reapStaleRuns(SOURCE, Instant.now().minusSeconds(3600)));
+        assertTrue(store().activeRun(SOURCE).isEmpty());
+    }
+
+    @Test
     @DisplayName("a healthy run is not reaped")
     default void healthyRunSurvivesReaping() {
         openRun(SOURCE);

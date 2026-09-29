@@ -79,9 +79,36 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         }
     }
 
+    /**
+     * Requires USE access on the agents the <em>currently stored</em> trigger
+     * routes to, before it may be re-pointed or removed. Triggers carry no owner
+     * field, so "who may edit this trigger" is derived from the agents it already
+     * commands: re-pointing or deleting a trigger redirects (or drops) the managed
+     * conversations of everyone it routes for, which is exactly the act the USE
+     * gate governs on {@code /agents/{id}/start}. A trigger that is genuinely
+     * absent, or that references no agent, imposes no constraint here — the store's
+     * own not-found handling and the new-config guard cover those.
+     */
+    private void requireUseOnStoredReferencedAgents(String intent) {
+        AgentTriggerConfiguration stored;
+        try {
+            stored = agentTriggerStore.readAgentTrigger(intent);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return; // nothing stored to protect — downstream op surfaces the 404
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+        requireUseOnReferencedAgents(stored);
+    }
+
     @Override
     public Response updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
+            // Guard BOTH the agents the trigger currently routes to (may I edit this
+            // trigger at all?) and the agents the new config would route to (may I
+            // aim it there?). Guarding only the new config let any editor re-point
+            // another team's trigger — a standing bypass of the USE gate.
+            requireUseOnStoredReferencedAgents(intent);
             requireUseOnReferencedAgents(agentTriggerConfiguration);
             agentTriggerStore.updateAgentTrigger(intent, agentTriggerConfiguration);
             agentTriggersCache.put(intent, agentTriggerConfiguration);
@@ -106,6 +133,10 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     @Override
     public Response deleteAgentTrigger(String intent) {
         try {
+            // Deleting a trigger stops routing for everyone it serves — gate it on USE
+            // of the agents it currently commands, so a foreign editor cannot remove
+            // another team's trigger.
+            requireUseOnStoredReferencedAgents(intent);
             agentTriggerStore.deleteAgentTrigger(intent);
             agentTriggersCache.remove(intent);
             return Response.ok().build();

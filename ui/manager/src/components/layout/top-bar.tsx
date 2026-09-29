@@ -6,12 +6,12 @@ import {
   Moon,
   Sun,
   Monitor,
-  Globe,
   Menu,
   ChevronRight,
   Link2,
   LogOut,
   UserRound,
+  Languages,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
@@ -274,7 +274,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           {/* Language selector — hidden on phones (reachable via settings);
               keeping it inflated the bar past the viewport at 375px. */}
           <div className="relative hidden items-center gap-1 sm:flex">
-            <Globe className="h-4 w-4 text-muted-foreground" />
+            <Languages className="h-4 w-4 text-muted-foreground" />
             <select
               value={i18n.language}
               onChange={(e) => void handleLanguageChange(e.target.value)}
