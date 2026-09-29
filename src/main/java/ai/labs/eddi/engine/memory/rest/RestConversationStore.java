@@ -137,11 +137,12 @@ public class RestConversationStore implements IRestConversationStore {
     Instance<V6RenameMigration> v6RenameMigrationInstance;
 
     /**
-     * Lets the retention sweep run on the boot that migrates an EDDI 5 database;
-     * see {@link #retentionHeldForV5Migration()}.
+     * The operator's confirmation that 6.x's retention may delete ended
+     * conversations of a database that came from EDDI 5; see
+     * {@link #retentionHeldForV5Migration()}.
      */
-    @ConfigProperty(name = "eddi.migration.v6-rename.allow-retention-on-first-boot", defaultValue = "false")
-    boolean allowRetentionOnMigrationBoot;
+    @ConfigProperty(name = "eddi.migration.v6-rename.retention-confirmed", defaultValue = "false")
+    boolean retentionConfirmed;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -559,15 +560,14 @@ public class RestConversationStore implements IRestConversationStore {
             runtime.submitCallable(() -> {
                 try {
                     long eligible = countEndedConversationsOlderThan(deleteEndedConversationsOnceOlderThanDays);
-                    log.warnf("Ended-conversation retention sweep skipped: this is the boot that migrates an EDDI 5 database. "
-                            + "EDDI 5 kept ended conversations for ever; with deleteEndedConversationsOnceOlderThanDays=%d this "
-                            + "sweep would now permanently delete %d ended conversation(s). To keep them, set "
-                            + "EDDI_CONVERSATIONS_DELETEENDEDCONVERSATIONSONCEOLDERTHANDAYS=-1. Otherwise the sweep runs from the "
-                            + "next restart on — or now, with EDDI_MIGRATION_V6_RENAME_ALLOW_RETENTION_ON_FIRST_BOOT=true.",
-                            deleteEndedConversationsOnceOlderThanDays, eligible);
+                    log.warnf("Ended-conversation retention sweep held: this database comes from EDDI 5, which kept ended "
+                            + "conversations for ever. With deleteEndedConversationsOnceOlderThanDays=%d the sweep would "
+                            + "permanently delete %d ended conversation(s). It deletes nothing until you decide: keep them with "
+                            + "EDDI_CONVERSATIONS_DELETEENDEDCONVERSATIONSONCEOLDERTHANDAYS=-1, or let the retention apply with "
+                            + "EDDI_MIGRATION_V6_RENAME_RETENTION_CONFIRMED=true.", deleteEndedConversationsOnceOlderThanDays, eligible);
                 } catch (Exception e) {
-                    log.warnf("Ended-conversation retention sweep skipped on the EDDI 5 migration boot; could not count what it "
-                            + "would delete: %s", e.toString());
+                    log.warnf("Ended-conversation retention sweep held for a database from EDDI 5; could not count what it would "
+                            + "delete: %s", e.toString());
                 }
                 return null;
             }, ThreadContext.getResources());
@@ -590,26 +590,26 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * Whether the retention sweep must delete nothing because this process is
-     * migrating an EDDI 5 database.
+     * Whether the retention sweep must delete nothing because the database comes
+     * from EDDI 5 and the operator has not confirmed 6.x's retention.
      *
      * <p>
      * EDDI 5 shipped {@code deleteEndedConversationsOnceOlderThanDays=-1}; 6.x
      * ships 365, and this sweep has no initial delay. So the first boot on 6.x
      * permanently deleted every ended conversation older than a year, before anyone
-     * had a chance to notice the default had changed. It now holds off for as long
-     * as the rename migration is pending or was started by this process, and logs
-     * how much it would delete — unless the operator allows it with
-     * {@code eddi.migration.v6-rename.allow-retention-on-first-boot=true}. From the
-     * next restart on the sweep runs as configured.
+     * had a chance to notice the default had changed. A hold that lasted only for
+     * the process that migrated was not enough: a second replica, or the same pod
+     * rescheduled minutes later, is a boot nobody decided on. The hold therefore
+     * lasts until {@code eddi.migration.v6-rename.retention-confirmed=true} (or the
+     * retention is switched off with -1); see
+     * {@link V6RenameMigration#holdsRetention()}.
      * </p>
      */
     boolean retentionHeldForV5Migration() {
-        if (allowRetentionOnMigrationBoot || v6RenameMigrationInstance == null || !v6RenameMigrationInstance.isResolvable()) {
+        if (retentionConfirmed || v6RenameMigrationInstance == null || !v6RenameMigrationInstance.isResolvable()) {
             return false;
         }
-        V6RenameMigration migration = v6RenameMigrationInstance.get();
-        return migration.isPending() || migration.ranInThisProcess();
+        return v6RenameMigrationInstance.get().holdsRetention();
     }
 
     /**

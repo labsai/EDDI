@@ -53,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -199,7 +200,7 @@ class V6RenameMigrationFirstBootTest {
 
         runMigration();
 
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         Document stored = conversations().find().first();
         assertNotNull(stored);
         for (String array : List.of("conversationSteps", "redoCache")) {
@@ -262,7 +263,7 @@ class V6RenameMigrationFirstBootTest {
 
         runMigration();
 
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         List<Document> stored = conversations().find().first().getList("conversationSteps", Document.class);
         assertEquals(new Document("conversationOutput", new Document()), stored.get(2));
         assertTrue(stored.get(0).containsKey("workflows"));
@@ -278,6 +279,9 @@ class V6RenameMigrationFirstBootTest {
         conversations().insertOne(conversation);
 
         runMigration();
+        Document afterFirst = conversations().find().first();
+        runMigration();
+        assertEquals(afterFirst, conversations().find().first(), "a re-run neither rewrites it nor bumps its revision again");
 
         Document step = conversations().find().first().getList("conversationSteps", Document.class).getFirst();
         assertTrue(step.containsKey("packages"));
@@ -350,22 +354,33 @@ class V6RenameMigrationFirstBootTest {
         Document stored = conversations().find().first();
         assertEquals("0000000000000000000000d3", stored.getString("botId"));
         assertEquals("0000000000000000000000d9", stored.getString("agentId"));
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
     }
 
+    /**
+     * The retention hold must outlast the process that migrated: a second replica
+     * or a rescheduled pod is a boot nobody decided on. So it rests on a marker in
+     * the migration log, and on the v5 collections for a database whose migration
+     * has not run at all.
+     */
     @Test
-    @DisplayName("the migration knows it ran in this process; an already-applied one does not claim to")
-    void ranInThisProcessIsReported() {
-        var migration = new V6RenameMigration(database, migrationLog, true);
-        assertFalse(migration.ranInThisProcess());
-        migration.runIfNeeded();
-        assertTrue(migration.ranInThisProcess());
+    @DisplayName("the retention hold is recorded durably, and also holds for an unmigrated 5.x database")
+    void retentionHoldIsDurable() {
+        runMigration();
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-retention-hold".equals(log.getName())));
 
-        IMigrationLogStore applied = mock(IMigrationLogStore.class);
-        when(applied.readMigrationLog(any())).thenReturn(new MigrationLog("v6-rename-migration-complete"));
-        var later = new V6RenameMigration(database, applied, true);
-        later.runIfNeeded();
-        assertFalse(later.ranInThisProcess());
+        IMigrationLogStore recorded = mock(IMigrationLogStore.class);
+        when(recorded.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+        when(recorded.readMigrationLog("v6-rename-retention-hold")).thenReturn(new MigrationLog("v6-rename-retention-hold"));
+        assertTrue(new V6RenameMigration(database, recorded, true).holdsRetention(), "a later boot of a migrated database");
+        assertTrue(new V6RenameMigration(database, recorded, false).holdsRetention(), "also with the migration flag off");
+
+        IMigrationLogStore fresh = mock(IMigrationLogStore.class);
+        when(fresh.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+        assertFalse(new V6RenameMigration(database, fresh, true).holdsRetention(), "a database that never came from EDDI 5");
+
+        database.getCollection("bots").insertOne(new Document("_id", new ObjectId()));
+        assertTrue(new V6RenameMigration(database, fresh, false).holdsRetention(), "a 5.x database booted with the flag off");
     }
 
     // --- workflows ------------------------------------------------------------
@@ -387,7 +402,7 @@ class V6RenameMigrationFirstBootTest {
 
         runMigration();
 
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         for (String collection : List.of("workflows", "workflows.history")) {
             Document workflow = database.getCollection(collection).find().first();
             assertNotNull(workflow, collection + " holds the renamed workflow");

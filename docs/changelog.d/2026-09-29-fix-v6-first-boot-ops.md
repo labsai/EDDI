@@ -12,7 +12,7 @@ These are the operational hazards of a 5.x → 6.x first boot, found in the same
 
 ### What changed
 
-**No retention deletes on the migration boot.** EDDI 5 kept ended conversations for ever; 6.x defaults to 365 days, and the daily sweep starts at boot. [`RestConversationStore`](../../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java) now deletes nothing while the rename migration is pending or was started by this process ([`V6RenameMigration.ranInThisProcess`](../../src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java)). Instead it logs how many ended conversations it would have deleted and how to keep them. From the next restart on it runs as configured; `eddi.migration.v6-rename.allow-retention-on-first-boot=true` lets it run on the migration boot itself.
+**No retention deletes on a database from EDDI 5 until the operator decides.** EDDI 5 kept ended conversations for ever; 6.x defaults to 365 days, and the daily sweep starts at boot. [`RestConversationStore`](../../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java) now deletes nothing while [`V6RenameMigration.holdsRetention`](../../src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java) is true: the migration is pending, it has completed (a `v6-rename-retention-hold` marker in `migrationlog`), or the v5 collections still hold documents. Instead it logs daily how many ended conversations it would have deleted. The operator decides with `eddi.migration.v6-rename.retention-confirmed=true`, or keeps them with a retention of `-1`. A first version held only for the process that ran the migration; review pointed out that a second replica or a rescheduled pod would then delete minutes later, so the hold is now durable.
 
 **The startup probe checks liveness.** Readiness is DOWN for as long as the migrations run, and a startup probe on readiness gave the pod 60 s. On a throttled database the migration took 24 minutes, so the pod crash-looped, and each restart began the migration again. The chart ([`deployment.yaml`](../../helm/eddi/templates/deployment.yaml)), `k8s/base` and `k8s/quickstart.yaml` now probe `/q/health/live` at startup. The chart makes path, `failureThreshold` and `periodSeconds` configurable under `eddi.startupProbe`. Chart `2.2.0 → 2.3.0`. `DeploymentManifestsTest` and the CI chart render check both cover it.
 
@@ -26,9 +26,9 @@ These are the operational hazards of a 5.x → 6.x first boot, found in the same
 
 ### Decisions
 
-- **Retention holds for the migration boot, not for a fixed time.** A restart is a deliberate act, and the WARN tells the operator what the next one will delete and how to prevent it.
+- **Retention holds until the operator confirms**, not for a boot or a fixed time. Never deleting is what EDDI 5 did, so the hold costs nothing that existed before; deleting is irreversible.
 - The startup probe moved to **liveness** rather than getting a longer readiness budget. No budget fits every database, and readiness still keeps traffic away until the agents are deployed.
 
 ### Tests
 
-`RestConversationStoreTest` (held while pending, held on the migration boot, allowed by the flag, runs on later boots), `V6RenameMigrationFirstBootTest` (server-side field rename and revision bump, a stale pre-migration write refused, an ambiguous `botId`+`agentId` document left alone, `ranInThisProcess`), and `DeploymentManifestsTest.startupProbeChecksLiveness`. Each was mutation-checked.
+`RestConversationStoreTest` (held for a database from EDDI 5, released by the confirmation, runs without EDDI 5 history), `V6RenameMigrationFirstBootTest` (server-side field rename and revision bump, a stale pre-migration write refused, an ambiguous `botId`+`agentId` document left alone, the durable retention hold), and `DeploymentManifestsTest.startupProbeChecksLiveness`. Each was mutation-checked.

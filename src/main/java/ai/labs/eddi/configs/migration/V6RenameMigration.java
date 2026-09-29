@@ -51,6 +51,15 @@ public class V6RenameMigration {
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
 
+    /**
+     * Written when this migration completes, and read by {@link #holdsRetention()}:
+     * the database came from EDDI 5, which never deleted ended conversations.
+     */
+    static final String RETENTION_HOLD_KEY = "v6-rename-retention-hold";
+
+    /** A v5 collection whose documents mean the database has not been migrated. */
+    private static final String V5_MARKER_COLLECTION = "bots";
+
     /** MongoDB {@code NamespaceExists} — renameCollection onto an existing name. */
     private static final int NAMESPACE_EXISTS_ERROR_CODE = 48;
 
@@ -170,11 +179,6 @@ public class V6RenameMigration {
      */
     private volatile boolean knownNotPending;
 
-    /**
-     * Set when this process started the migration; see {@link #ranInThisProcess()}.
-     */
-    private volatile boolean ranInThisProcess;
-
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
             @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
@@ -224,14 +228,30 @@ public class V6RenameMigration {
     }
 
     /**
-     * Whether this process started the migration — i.e. whether this is the first
-     * boot of a database coming from EDDI 5 (or a later boot retrying a run that
-     * did not complete). Used to hold back what should not happen on that boot
-     * without the operator's say-so, such as the ended-conversation retention
-     * sweep.
+     * Whether ended conversations must not be deleted yet because this database
+     * comes from EDDI 5 — which kept them for ever — and the operator has not said
+     * that 6.x's retention may apply.
+     *
+     * <p>
+     * True while the migration is pending, once it has completed (a marker in the
+     * migration log, so it holds on every later boot and every replica, not only in
+     * the process that migrated), and while the v5 collections still hold documents
+     * — which covers a 5.x database booted with the migration flag off. It is
+     * lifted by the operator, through
+     * {@code eddi.migration.v6-rename.retention-confirmed}, not by time or by a
+     * restart: a rescheduled pod or a second replica is not a decision anybody
+     * made. A migration log or collection that cannot be read answers true; a sweep
+     * that waits a day loses nothing.
+     * </p>
      */
-    public boolean ranInThisProcess() {
-        return ranInThisProcess;
+    public boolean holdsRetention() {
+        try {
+            return isPending() || migrationLogStore.readMigrationLog(RETENTION_HOLD_KEY) != null
+                    || database.getCollection(V5_MARKER_COLLECTION).estimatedDocumentCount() > 0;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not tell whether this database came from EDDI 5 (%s) — holding the retention sweep", e.getMessage());
+            return true;
+        }
     }
 
     /**
@@ -250,7 +270,6 @@ public class V6RenameMigration {
         }
 
         LOGGER.info("Starting V6 rename migration...");
-        ranInThisProcess = true;
 
         // 0a. Refuse to run while a v5 and its v6 counterpart both hold documents:
         // the rename would be skipped, the URI rewrite only scans v6 names, and the
@@ -289,9 +308,7 @@ public class V6RenameMigration {
         total = total.plus(migrateDescriptors("descriptors.history"));
 
         // 4. Rename the v5 step shape inside stored conversations (packages →
-        // workflows).
-        // Server-side, and before the per-document pass below, which then rewrites the
-        // renamed documents as it finds them.
+        // workflows), server-side.
         total = total.plus(migrateConversationStepShape());
 
         // 5. The managed-conversation mappings: triggers by intent, and each user's
@@ -317,6 +334,7 @@ public class V6RenameMigration {
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", total.migrated());
 
+        migrationLogStore.createMigrationLog(new MigrationLog(RETENTION_HOLD_KEY));
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 

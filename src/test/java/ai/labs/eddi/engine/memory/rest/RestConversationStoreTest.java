@@ -1218,10 +1218,9 @@ class RestConversationStoreTest {
         }
 
         @SuppressWarnings("unchecked")
-        private void migrating(boolean pending, boolean ranInThisProcess) {
+        private void fromEddi5(boolean holdsRetention) {
             var migration = mock(V6RenameMigration.class);
-            when(migration.isPending()).thenReturn(pending);
-            when(migration.ranInThisProcess()).thenReturn(ranInThisProcess);
+            when(migration.holdsRetention()).thenReturn(holdsRetention);
             Instance<V6RenameMigration> instance = mock(Instance.class);
             when(instance.isResolvable()).thenReturn(true);
             when(instance.get()).thenReturn(migration);
@@ -1237,10 +1236,10 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("while the rename migration is pending, nothing is deleted")
-        void heldWhileMigrationPending() throws Exception {
+        @DisplayName("on a database from EDDI 5, nothing is deleted until the operator confirms")
+        void heldForADatabaseFromEddi5() throws Exception {
             oneEndedConversationPastRetention();
-            migrating(true, false);
+            fromEddi5(true);
 
             runSubmittedSweep();
 
@@ -1249,22 +1248,11 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("on the boot that ran the rename migration, nothing is deleted")
-        void heldOnTheMigrationBoot() throws Exception {
+        @DisplayName("once the operator confirms, the sweep deletes as configured")
+        void confirmedByTheOperator() throws Exception {
             oneEndedConversationPastRetention();
-            migrating(false, true);
-
-            runSubmittedSweep();
-
-            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
-        }
-
-        @Test
-        @DisplayName("the operator can allow the sweep on the migration boot")
-        void allowedByTheOperator() throws Exception {
-            oneEndedConversationPastRetention();
-            migrating(false, true);
-            restConversationStore.allowRetentionOnMigrationBoot = true;
+            fromEddi5(true);
+            restConversationStore.retentionConfirmed = true;
 
             runSubmittedSweep();
 
@@ -1272,10 +1260,10 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("on a later boot of a migrated database the sweep deletes as configured")
-        void runsOnLaterBoots() throws Exception {
+        @DisplayName("on a database that never came from EDDI 5 the sweep deletes as configured")
+        void runsWithoutEddi5History() throws Exception {
             oneEndedConversationPastRetention();
-            migrating(false, false);
+            fromEddi5(false);
 
             runSubmittedSweep();
 

@@ -41,11 +41,13 @@ EDDI 5 kept ended conversations for ever (`deleteEndedConversationsOnceOlderThan
 defaults to **365 days**, and the sweep that deletes older ended conversations **permanently**
 runs daily, starting at boot.
 
-On the boot that migrates a 5.x database, the sweep deletes nothing. Instead it logs a WARN
-with how many ended conversations it *would* delete. **From the next restart on, it deletes as
-configured.** To keep EDDI 5's behaviour, set the retention to `-1` before that restart. To let
-the sweep run on the migration boot itself, set
-`EDDI_MIGRATION_V6_RENAME_ALLOW_RETENTION_ON_FIRST_BOOT=true`.
+On a database that comes from EDDI 5, the sweep **deletes nothing until you decide**, on every
+boot and every replica. Instead it logs daily how many ended conversations it would delete. This
+holds while the migration is pending, after it has completed, and even when a 5.x database is
+booted with the migration flag off. Decide with one of:
+
+- `EDDI_CONVERSATIONS_DELETEENDEDCONVERSATIONSONCEOLDERTHANDAYS=-1` to keep them, as EDDI 5 did;
+- `EDDI_MIGRATION_V6_RENAME_RETENTION_CONFIRMED=true` to let the configured retention apply.
 
 ## 4. Health probes during the first boot
 
@@ -86,7 +88,8 @@ A second later the migrations run in this order. Each records its completion in 
 
    The deployment sweep and readiness wait for it.
 2. **Template migration** (`v6-qute-migration-complete`): Thymeleaf → Qute.
-3. Channel-connector and workspace access-index migrations.
+3. Channel-connector and workspace access-index migrations, then the legacy-format pass for
+   v5-era property, API-call and output documents (normally already recorded on a 5.5.1 database).
 4. The deployment sweep deploys every agent version that was deployed on 5.x, and readiness goes
    UP.
 
@@ -118,8 +121,11 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
   are left in Thymeleaf and reported, as above.
 - **Old `eddi://` URIs inside stored conversation step data** are left as they were. No 6.x code
   reads them.
-- **REST clients.** The API was renamed (`/botstore/bots` → `/agentstore/agents`, `/bots/…` →
-  `/agents/…`) with no v5 aliases; clients have to be ported.
+- **REST clients.** The store paths were renamed (the bot, package, behavior, httpcalls, langchain and
+  dictionary stores are now the agent, workflow, rules, API-call, LLM and dictionary stores).
+  `LegacyPathRewriteFilter` still rewrites the v5 paths and the `unrestricted` / `restricted`
+  environment segments to their v6 equivalents, so existing clients keep working. Port them anyway:
+  the filter is scheduled for removal in v7.
 
 ## 8. Afterwards
 

@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -93,7 +94,7 @@ class V6RenameMigrationTriggersTest extends MongoTestBase {
 
         boot();
 
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         var trigger = triggers.readAgentTrigger("synthetic-intent");
         assertEquals(1, trigger.getAgentDeployments().size());
         AgentDeployment deployment = trigger.getAgentDeployments().getFirst();
@@ -151,7 +152,7 @@ class V6RenameMigrationTriggersTest extends MongoTestBase {
         boot();
 
         assertEquals(ambiguous, collection.find().first());
-        verify(migrationLog).createMigrationLog(any());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
     }
 
     @Test
