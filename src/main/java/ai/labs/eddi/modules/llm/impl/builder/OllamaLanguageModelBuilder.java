@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -85,6 +86,9 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         var builder = OllamaChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
@@ -112,6 +116,9 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         var builder = OllamaStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
 
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {

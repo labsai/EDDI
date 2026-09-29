@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Bot,
-  UsersRound,
   MessageSquare,
   ArrowRight,
   Sparkles,
   Plus,
   Rocket,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -333,7 +333,7 @@ function OnboardingHero() {
           />
           <HowItWorksStep
             step={2}
-            icon={<UsersRound className="h-6 w-6" />}
+            icon={<Users className="h-6 w-6" />}
             title={t(
               "Workforce.onboarding.step2Title",
               "Assemble a Task Force",
@@ -409,7 +409,7 @@ function OnboardingHero() {
             className="gap-2"
           >
             <Link to="/workforce/new">
-              <UsersRound className="h-5 w-5" />
+              <Users className="h-5 w-5" />
               {t(
                 "Workforce.onboarding.assembleNow",
                 "Assemble Your First Task Force",

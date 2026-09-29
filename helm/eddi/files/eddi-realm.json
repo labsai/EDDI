@@ -500,7 +500,8 @@
         "https://eddi.example.com"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "+"
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
       },
       "defaultClientScopes": [
         "openid",

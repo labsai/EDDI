@@ -21,6 +21,13 @@ const OUTPUT_PREFIX = "output";
 /** Same mask the composer shows when a secret turn is sent. */
 export const SECRET_MASK = "●●●●●●●●";
 
+/**
+ * Placeholder the backend now persists in `input:initial` for a secret-flagged
+ * turn (Conversation.scrubSecretUserInput). Seeing it means the raw text was
+ * scrubbed server-side, so masking survives a reload without the session ref.
+ */
+const SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
 let seq = 0;
 function makeMessage(role: "user" | "agent", content: string): ChatMessage {
   seq += 1;
@@ -53,14 +60,15 @@ export function stepsToMessages(
       if (key === INPUT_INITIAL) {
         const text = typeof entry.value === "string" ? entry.value.trim() : "";
         if (!text) continue;
-        // `input:initial` is the RAW message, always — Conversation.java:337
-        // stores it unmasked even for a secret turn, and the masked copy
-        // (conversationOutput["input"]) is filtered off the wire entirely. So a
-        // rebuild would print the user's password in clear unless we mask it
-        // here from what the session knows was secret.
-        messages.push(
-          makeMessage("user", secretTexts.has(text) ? SECRET_MASK : text),
-        );
+        // The backend now scrubs `input:initial` to the placeholder for a
+        // secret-flagged turn (Conversation.scrubSecretUserInput), so masking
+        // survives a reload. We still consult the session set as a fallback for
+        // turns sent to an older backend, and normalise both to the same mask so
+        // the transcript never prints either the raw secret or the raw
+        // placeholder token.
+        const isSecret =
+          text === SECRET_INPUT_PLACEHOLDER || secretTexts.has(text);
+        messages.push(makeMessage("user", isSecret ? SECRET_MASK : text));
         continue;
       }
 

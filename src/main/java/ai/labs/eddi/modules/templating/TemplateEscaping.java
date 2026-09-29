@@ -51,17 +51,34 @@ public final class TemplateEscaping {
      * boundary: the <code>|</code> ends one unparsed block and the
      * <code>&#125;</code> opens the next, leaving neither block containing a
      * terminator while the concatenated output is byte-identical.
+     * <p>
+     * Leading pipes need the same care from the other end. Qute counts every
+     * <code>|</code> directly after the opening brace as part of the opener, so
+     * <code>{||x|&#125;</code> opens a two-pipe block that a single-pipe terminator
+     * never closes and the parse fails. Content that starts with <code>|</code>
+     * therefore keeps those pipes <em>in front of</em> the block, where they are
+     * plain template text: a bare <code>|</code> is not Qute syntax.
      *
      * @param content
      *            text to render literally; {@code null} and empty are returned
      *            unchanged, since wrapping nothing only adds markers
-     * @return {@code content} enclosed in an unparsed block
+     * @return {@code content} enclosed in an unparsed block, preceded by any
+     *         leading pipes it started with
      */
     public static String unparsedBlock(String content) {
         if (content == null || content.isEmpty()) {
             return content;
         }
-        String safe = content.replace(UNPARSED_END, "|" + UNPARSED_END + UNPARSED_START + "}");
-        return UNPARSED_START + safe + UNPARSED_END;
+        int leadingPipes = 0;
+        while (leadingPipes < content.length() && content.charAt(leadingPipes) == '|') {
+            leadingPipes++;
+        }
+        if (leadingPipes == content.length()) {
+            // nothing but pipes: no marker Qute could evaluate, and a block would
+            // have no content to open with
+            return content;
+        }
+        String safe = content.substring(leadingPipes).replace(UNPARSED_END, "|" + UNPARSED_END + UNPARSED_START + "}");
+        return content.substring(0, leadingPipes) + UNPARSED_START + safe + UNPARSED_END;
     }
 }

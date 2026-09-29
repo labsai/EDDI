@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
-import { Users, Brain, Database, Link2 } from "lucide-react";
+import { NotebookPen, Tags, MessagesSquare, UserRoundSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UserMemoryPage } from "./user-memory";
 import { PropertiesPage } from "./properties";
@@ -11,9 +11,9 @@ const TABS = ["memories", "properties", "conversations"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_ICONS: Record<Tab, React.ElementType> = {
-  memories: Brain,
-  properties: Database,
-  conversations: Link2,
+  memories: NotebookPen,
+  properties: Tags,
+  conversations: MessagesSquare,
 };
 
 const TAB_COLORS: Record<Tab, string> = {
@@ -47,7 +47,7 @@ export function UserDataPage() {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10">
-            <Users className="h-5 w-5 text-violet-500" />
+            <UserRoundSearch className="h-5 w-5 text-violet-500" />
           </div>
           {t("userData.title", "User Data")}
         </h1>

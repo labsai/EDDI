@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { deployedEnvironments, preferredChatEnvironment } from "@/lib/deployment-environments";
+import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -9,7 +9,6 @@ import {
   Bot,
   Workflow,
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Plus,
@@ -30,6 +29,7 @@ import {
   ArrowUpCircle,
   Sparkles,
   Info,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
@@ -47,8 +47,8 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
-  useUpdateAgent,
 } from "@/hooks/use-agents";
+import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
@@ -70,7 +70,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 const envLabels: Record<string, string> = {
@@ -284,9 +284,15 @@ export function AgentDetailPage() {
     );
   }
 
-  const handleVersionChange = useCallback((v: number) => {
-    setVersion(v);
-  }, []);
+  const handleVersionChange = useCallback(
+    (v: number) => {
+      // Choosing the latest version means "follow the latest", not "pin this
+      // number": pinned, the page stayed on it after the next inline save
+      // created a newer one, and every section went on editing the old one.
+      setVersion(v === versions?.[0]?.version ? undefined : v);
+    },
+    [versions],
+  );
 
   if (isLoading && !agent) {
     return (
@@ -880,10 +886,17 @@ function EnvironmentBadges({
         </h2>
       </div>
       <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-        {statuses.map(({ environment, status }) => {
+        {statuses.map((entry) => {
+          const { environment, status, deployedVersion } = entry;
           const conf = statusIcons[status];
           const Icon = conf.icon;
-          const isUp = status === "READY";
+          // The button acts on the version this page shows. An environment
+          // live at an OLDER version is shown as deployed (with its version),
+          // but its action is Deploy: undeploying the page's version would hit
+          // a version that is not running — the backend still answers 202 and
+          // disables every schedule of the agent, while the old version keeps
+          // serving.
+          const isUp = isLiveAtRequestedVersion(entry);
           return (
             <div key={environment} className="flex items-center justify-between gap-3 px-5 py-3">
               <div className="flex items-center gap-2">
@@ -896,12 +909,25 @@ function EnvironmentBadges({
                   </p>
                   <p className={cn("text-xs", conf.color)}>
                     {envStatusLabels[status] ?? status}
+                    {deployedVersion !== undefined && (
+                      <span
+                        className="ms-1 tabular-nums opacity-75"
+                        data-testid={`env-badge-version-${environment}`}
+                        title={t("agents.liveInVersion", "Live in {{environment}} at version {{version}}", {
+                          environment: t(envLabels[environment] ?? environment),
+                          version: deployedVersion,
+                        })}
+                      >
+                        v{deployedVersion}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
                 disabled={isBusy}
+                data-testid={`env-toggle-${environment}`}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   isUp
@@ -1096,7 +1122,7 @@ function A2ASection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [skillInput, setSkillInput] = useState("");
   const [localDesc, setLocalDesc] = useState(agent.description ?? "");
   const [showCard, setShowCard] = useState(false);

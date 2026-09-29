@@ -28,6 +28,7 @@ import {
   Sparkles,
   Trash2,
   Type,
+  BookA,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueries } from "@tanstack/react-query";
@@ -446,7 +447,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                   className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
                   data-testid={`regular-dict-${idx}`}
                 >
-                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                  <BookA className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-foreground">{label}</p>
                     <p className="truncate text-[10px] text-muted-foreground" title={uri}>

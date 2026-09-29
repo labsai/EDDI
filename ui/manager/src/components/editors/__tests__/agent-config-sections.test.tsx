@@ -11,10 +11,11 @@ import {
 } from "@/components/editors/agent-config-sections";
 import type { Agent } from "@/lib/api/agents";
 
-// Mock hooks
+// Mock hooks. The sections save through `useAgentSectionSave` (versioning and
+// ordering are covered by its own test); here only what each section sends.
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-agents", () => ({
-  useUpdateAgent: () => ({
+vi.mock("@/hooks/use-agent-section-save", () => ({
+  useAgentSectionSave: () => ({
     mutate: mockMutate,
     isPending: false,
   }),
