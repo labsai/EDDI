@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Globe, Loader2, CheckCircle, AlertCircle, Eye, EyeOff } from "lucide-react";
+import { Globe, Loader2, AlertCircle, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { useListRemoteAgents } from "@/hooks/use-backup";
 import type { DocumentDescriptor } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
@@ -139,7 +139,7 @@ export function SyncConfigPanel({
         {/* Status badge */}
         {connectionStatus === "connected" && (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <CheckCircle className="h-4 w-4" />
+            <CheckCircle2 className="h-4 w-4" />
             {t("syncPage.connected", "Connected")} — {agentCount}{" "}
             {t("syncPage.agentsFound", "agents")}
           </span>

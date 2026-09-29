@@ -16,9 +16,9 @@ import {
   Loader2,
   PanelRightClose,
   PanelRight,
-  GitBranch,
-  Layers,
   MessageCircle,
+  Workflow,
+  SquarePen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -417,8 +417,8 @@ export function AgentStudioPage() {
       {/* Mobile: bottom tab bar */}
       <div className="flex border-t border-border lg:hidden">
         {([
-          { id: "pipeline" as const, icon: <GitBranch className="h-4 w-4" />, label: t("studio.pipeline", "Pipeline") },
-          { id: "editor" as const, icon: <Layers className="h-4 w-4" />, label: t("studio.editor", "Editor") },
+          { id: "pipeline" as const, icon: <Workflow className="h-4 w-4" />, label: t("studio.pipeline", "Pipeline") },
+          { id: "editor" as const, icon: <SquarePen className="h-4 w-4" />, label: t("studio.editor", "Editor") },
           { id: "chat" as const, icon: <MessageCircle className="h-4 w-4" />, label: t("studio.chat", "Chat") },
         ]).map((tab) => (
           <button

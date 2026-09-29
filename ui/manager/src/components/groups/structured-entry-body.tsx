@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, ListOrdered, XCircle, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,7 +101,7 @@ export function StructuredItemsList({
               {item.feedback && <ExpandableText text={item.feedback} className="mt-0.5" />}
               {item.assignedTo && (
                 <div className="mt-1.5 flex items-center gap-1">
-                  <User2 className="h-3 w-3 text-muted-foreground" />
+                  <User className="h-3 w-3 text-muted-foreground" />
                   <span
                     className="max-w-[200px] truncate text-[10px] font-medium text-muted-foreground"
                     title={item.assignedTo}
