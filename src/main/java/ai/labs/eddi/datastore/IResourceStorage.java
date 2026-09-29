@@ -154,6 +154,24 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * As {@link #storeIfFieldEquals(IResource, String, String)}, but the write also
+     * lands when the stored document has <em>no</em> value for {@code fieldName}
+     * (the field is absent or JSON {@code null}). For stamping a guard field onto a
+     * document written before that field existed: the stored value is still
+     * compared inside the one atomic write, so of two writers that both read the
+     * field-less document only the first lands — its write stamps the field, and
+     * the second then matches neither branch and gets
+     * {@link IResourceStore.ResourceModifiedException}. Same zero-match and
+     * no-fallback contract as the plain overload.
+     */
+    default void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEqualsOrMissing is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
      * As {@link #storeIfFieldEquals(IResource, String, String)}, but comparing a
      * JSON <em>number</em> field. A separate overload because the two backends
      * disagree about text-comparing numbers: PostgreSQL's {@code data ->> field}

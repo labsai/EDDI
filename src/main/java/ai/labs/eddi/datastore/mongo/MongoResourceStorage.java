@@ -147,11 +147,26 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        replaceIfMatches(newResource, fieldName, expectedValue, Filters.eq(fieldName, expectedValue));
+    }
+
+    @Override
+    public void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        // {field: null} matches both an absent field and an explicit null — one
+        // filter, so the "equals or missing" decision stays inside the single
+        // atomic replaceOne.
+        replaceIfMatches(newResource, fieldName, expectedValue,
+                Filters.or(Filters.eq(fieldName, expectedValue), Filters.eq(fieldName, null)));
+    }
+
+    private void replaceIfMatches(IResource<T> newResource, String fieldName, String expectedValue, Bson fieldFilter)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         Resource resource = checkInternalResource(newResource);
         var result = currentCollection.replaceOne(
                 Filters.and(
                         Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
-                        Filters.eq(fieldName, expectedValue)),
+                        fieldFilter),
                 resource.getMongoDocument());
         if (result.getMatchedCount() == 0) {
             // Distinguish "deleted" (404) from "field mismatch" (409) — a bare
