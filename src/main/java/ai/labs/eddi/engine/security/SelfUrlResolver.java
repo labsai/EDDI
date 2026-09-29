@@ -38,10 +38,10 @@ import java.util.Optional;
  * wrong — TLS terminated in-process, a sidecar that must be addressed by
  * service name, an in-cluster hostname a mesh requires.</li>
  * <li>Otherwise {@code http://127.0.0.1:${quarkus.http.port}} when the HTTP
- * listener binds a wildcard or loopback address (the default), and
- * {@code http://${quarkus.http.host}:${quarkus.http.port}} when it binds one
- * specific non-loopback address — see {@link #derivedBaseUrl}. The loopback
- * form is the same address
+ * listener binds a wildcard, empty or {@code localhost} address (the default),
+ * and {@code http://${quarkus.http.host}:${quarkus.http.port}} when it binds
+ * one specific address, loopback ones such as {@code 127.0.0.5} or {@code ::1}
+ * included — see {@link #derivedBaseUrl}. The loopback form is the same address
  * {@link ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory} has
  * always used for EDDI's internal loopback hop, and the same one the
  * container's own health check probes. It is correct behind a reverse proxy and
@@ -75,7 +75,7 @@ public class SelfUrlResolver {
 
     /**
      * {@link #source()} when the value was derived from the HTTP listener — its
-     * port, and its bind address when that is one specific non-loopback host.
+     * port, and its bind address when that is one specific host.
      */
     public static final String SOURCE_LOOPBACK = "loopback";
 

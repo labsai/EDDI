@@ -186,9 +186,10 @@ Resolution is narrow and fails loudly rather than degrading quietly:
 - **Same origin, or EDDI itself** — released only to the exact
   `scheme://host:port` the caller addressed (read from the inbound request, not
   config), or to this deployment's own address (`SelfUrlResolver`:
-  `eddi.self.base-url`, else `http://127.0.0.1:${quarkus.http.port}`, or the
-  `quarkus.http.host` address when the listener binds one specific non-loopback
-  address — deployment
+  `eddi.self.base-url`, else the `quarkus.http.host` address when the listener
+  binds one specific address (loopback ones such as `127.0.0.5` or `::1`
+  included), else `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty
+  or `localhost` bind — deployment
   config only, never agent config or a request; on a random port
   (`quarkus.http.port=0`) with no override it is *unresolved* and only the
   caller's origin qualifies). A config naming a third-party

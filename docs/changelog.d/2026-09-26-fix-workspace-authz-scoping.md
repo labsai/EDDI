@@ -24,8 +24,9 @@ true and behaviour is unchanged); the items marked **always** apply whenever aut
   the same paging reason the HITL redaction lives there. `readSchedule` now hides HITL timeouts from
   non-admins like the listing does, and fire logs are visible exactly when their schedule is.
   `fireNow` rethrows `ForbiddenException` instead of turning the ingestion EDIT gate's 403 into a 500.
-- **H2e — forged team cadences.** Create/update reject a body carrying `teamCadenceType` (like the
-  HITL and ingestion markers), `fireNow` on a cadence needs EDIT on its group, and
+- **H2e — forged team cadences.** A create is refused when its body carries `teamCadenceType` (like
+  the HITL and ingestion markers); an update may carry only the markers the stored cadence already
+  has, so group editors can still change its cron, while adding or re-pointing them is refused. `fireNow` on a cadence needs EDIT on its group, and
   `TeamCadenceService.processScheduledFire` now takes the firing schedule's id and refuses unless it
   is the `Cadence.scheduleRef` the workspace registered, as a failure so the impostor dead-letters.
 - **H2b — triggers.** The listing and single read show only triggers whose targets the caller may
