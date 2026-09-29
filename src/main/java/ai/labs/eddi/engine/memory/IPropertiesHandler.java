@@ -21,11 +21,21 @@ public interface IPropertiesHandler {
     IUserMemoryStore getUserMemoryStore();
 
     /**
-     * User memory config from agent configuration. {@code null} when advanced
-     * memory tools (Dream, guardrails, recall settings) are not enabled.
+     * User memory config from agent configuration — recall settings, default
+     * visibility, guardrails. {@code null} when the agent declares no
+     * {@code userMemoryConfig} and does not enable the memory tools.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
+    }
+
+    /**
+     * Whether the LLM memory tools are enabled ({@code enableMemoryTools}).
+     * Defaults to "a config is present" — the meaning the config alone used to
+     * carry.
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
     }
 
     /** The userId this handler is scoped to. */

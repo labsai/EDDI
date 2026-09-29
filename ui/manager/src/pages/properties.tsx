@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-  Database,
   Search,
   Trash2,
   RefreshCw,
@@ -12,21 +11,23 @@ import {
   ToggleRight,
   List,
   Braces,
+  Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useUserProperties, useDeleteProperties } from "@/hooks/use-properties";
-import type { Property } from "@/lib/api/properties";
-
-function getValueDisplay(prop: Property): { type: string; value: string; icon: React.ElementType } {
-  if (prop.valueString != null) return { type: "string", value: String(prop.valueString), icon: Type };
-  if (prop.valueInt != null) return { type: "number", value: String(prop.valueInt), icon: Hash };
-  if (prop.valueFloat != null) return { type: "number", value: String(prop.valueFloat), icon: Hash };
-  if (prop.valueBoolean != null) return { type: "boolean", value: String(prop.valueBoolean), icon: ToggleRight };
-  if (prop.valueList != null) return { type: "array", value: JSON.stringify(prop.valueList), icon: List };
-  if (prop.valueObject != null) return { type: "object", value: JSON.stringify(prop.valueObject), icon: Braces };
+/**
+ * Type and display text for one property. The endpoint returns RAW values (see
+ * `Properties`), so the type is the value's own JavaScript type.
+ */
+function getValueDisplay(value: unknown): { type: string; value: string; icon: React.ElementType } {
+  if (typeof value === "string") return { type: "string", value, icon: Type };
+  if (typeof value === "number" || typeof value === "bigint") return { type: "number", value: String(value), icon: Hash };
+  if (typeof value === "boolean") return { type: "boolean", value: String(value), icon: ToggleRight };
+  if (Array.isArray(value)) return { type: "array", value: JSON.stringify(value), icon: List };
+  if (value != null && typeof value === "object") return { type: "object", value: JSON.stringify(value), icon: Braces };
   return { type: "null", value: "—", icon: Type };
 }
 
@@ -74,7 +75,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
-            <Database className="h-5 w-5 text-indigo-500" />
+            <Tags className="h-5 w-5 text-indigo-500" />
           </div>
           {t("properties.title", "User Properties")}
         </h1>
@@ -125,7 +126,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
       {/* Empty state */}
       {!debouncedUserId && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
-          <Database className="h-12 w-12 opacity-30" />
+          <Tags className="h-12 w-12 opacity-30" />
           <p className="mt-4 text-sm">{t("properties.enterUserId", "Enter a User ID to view their properties")}</p>
         </div>
       )}
@@ -188,7 +189,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
         open={showDeleteAll}
         onOpenChange={setShowDeleteAll}
         title={t("properties.deleteAllTitle", "Delete All Properties")}
-        description={t("properties.deleteAllDesc", "This will permanently delete ALL properties for this user.")}
+        description={t("properties.deleteAllDesc", "This permanently deletes ALL global properties of this user: every global user-memory entry, including those agents saved, not only the rows listed here.")}
         confirmLabel={t("common.delete")}
         variant="destructive"
         onConfirm={() => {

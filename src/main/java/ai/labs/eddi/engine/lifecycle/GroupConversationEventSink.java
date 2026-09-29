@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -152,7 +153,18 @@ public final class GroupConversationEventSink {
     public record CancelledEvent(String reason, String cancelledBy) {
     }
 
-    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+    /**
+     * @param pausedAt
+     *            the pause identity ({@code GroupConversation.pausedAt}) — lets a
+     *            channel that posts an approval card bind the card to THIS pause,
+     *            so a stale card cannot resolve a later one. {@code null} when not
+     *            known.
+     */
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+            this(phaseIndex, phaseName, reason, granularity, null);
+        }
     }
 
     public record HitlResumeEvent(String verdict, String note, String decidedBy) {

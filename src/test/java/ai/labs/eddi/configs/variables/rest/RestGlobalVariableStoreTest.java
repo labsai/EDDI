@@ -7,7 +7,9 @@ package ai.labs.eddi.configs.variables.rest;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,13 +30,18 @@ class RestGlobalVariableStoreTest {
 
     private IGlobalVariableStore store;
     private GlobalVariableResolver resolver;
+    private SecurityIdentity identity;
     private RestGlobalVariableStore rest;
 
     @BeforeEach
     void setUp() {
         store = mock(IGlobalVariableStore.class);
         resolver = mock(GlobalVariableResolver.class);
-        rest = new RestGlobalVariableStore(store, resolver);
+        identity = mock(SecurityIdentity.class);
+        // Default: an authenticated admin, so ordinary tests are unaffected.
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        rest = new RestGlobalVariableStore(store, resolver, identity);
     }
 
     @Test
@@ -130,5 +137,53 @@ class RestGlobalVariableStoreTest {
     void upsertVariableNullBody() {
         assertThrows(BadRequestException.class, () -> rest.upsertVariable(DEFAULT, "valid-key", null));
         verifyNoInteractions(store);
+    }
+
+    // ─── Finding #1: only an admin may store a variable that resolves to a secret
+    // ───
+
+    @Test
+    void nonAdminCannotStoreVaultReferenceValue() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var input = new GlobalVariable(DEFAULT, "cred", "${vault:someKey}", null, false);
+        assertThrows(ForbiddenException.class, () -> rest.upsertVariable(DEFAULT, "cred", input));
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void nonAdminCannotStoreConnectionReferenceValue() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var input = new GlobalVariable(DEFAULT, "cred", "Bearer ${connection:jira}", null, false);
+        assertThrows(ForbiddenException.class, () -> rest.upsertVariable(DEFAULT, "cred", input));
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void nonAdminCanStorePlainValue() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var input = new GlobalVariable(DEFAULT, "model", "gpt-4.1", null, true);
+        Response response = rest.upsertVariable(DEFAULT, "model", input);
+        assertEquals(200, response.getStatus());
+        verify(store).upsert(any());
+    }
+
+    @Test
+    void adminCanStoreVaultReferenceValue() {
+        // identity defaults to admin in setUp
+        var input = new GlobalVariable(DEFAULT, "cred", "${vault:someKey}", null, false);
+        Response response = rest.upsertVariable(DEFAULT, "cred", input);
+        assertEquals(200, response.getStatus());
+        verify(store).upsert(any());
+    }
+
+    @Test
+    void anonymousCallerIsNotBlocked() {
+        // Auth disabled — no editor/admin distinction to enforce.
+        when(identity.isAnonymous()).thenReturn(true);
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var input = new GlobalVariable(DEFAULT, "cred", "${vault:someKey}", null, false);
+        Response response = rest.upsertVariable(DEFAULT, "cred", input);
+        assertEquals(200, response.getStatus());
+        verify(store).upsert(any());
     }
 }

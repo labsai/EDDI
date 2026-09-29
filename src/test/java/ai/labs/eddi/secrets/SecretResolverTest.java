@@ -159,4 +159,33 @@ class SecretResolverTest {
 
         assertEquals("user-secret", result);
     }
+
+    // ─── Finding #3a: reserved namespaces (agent signing keys) never resolve via
+    // config ───
+
+    @Test
+    void resolveValue_reservedSigningKey_isNeverResolved() throws Exception {
+        // An editor who adds ${vault:agent-signing-key:X} to a header must NOT be able
+        // to exfiltrate the private key: the reference is left literal, never resolved,
+        // and the provider is never even consulted for it.
+        String input = "Bearer ${vault:agent-signing-key:agentX}";
+        String result = resolver.resolveValue(input);
+
+        assertEquals(input, result, "the reserved reference must remain literal, not be replaced with the key");
+        verify(secretProvider, never()).resolve(any(SecretReference.class));
+    }
+
+    @Test
+    void resolveValue_reservedSigningKey_fullForm_isNeverResolved() throws Exception {
+        String input = "${vault:default/agent-signing-key:agentX:v2}";
+        assertEquals(input, resolver.resolveValue(input));
+        verify(secretProvider, never()).resolve(any(SecretReference.class));
+    }
+
+    @Test
+    void resolveValue_reservedSigningKey_failsClosedViaRequireResolved() {
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:agent-signing-key:agentX}"));
+        assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
+                () -> SecretResolver.requireResolved(resolved, "LLM provider 'x'"));
+    }
 }

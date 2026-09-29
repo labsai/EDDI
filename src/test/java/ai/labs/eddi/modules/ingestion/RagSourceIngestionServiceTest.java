@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -89,6 +90,103 @@ class RagSourceIngestionServiceTest {
         source.setWeb(web);
         source.setCron(cron);
         return source;
+    }
+
+    @Nested
+    @DisplayName("a run whose process died")
+    class AbandonedRuns {
+
+        private String runStartedAgo(Duration ago) {
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null))).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(ago));
+            return runId;
+        }
+
+        /**
+         * Observed live: a crawl killed by a restart stayed RUNNING in the history an
+         * hour after its 25-minute threshold, because only claiming a new run reaped.
+         */
+        @Test
+        @DisplayName("reads as failed in the history once past the stale threshold, without a new run")
+        void historyShowsItFailed() {
+            String runId = runStartedAgo(Duration.ofHours(1));
+
+            var runs = service.listRuns(KB_ID, source(null), 20);
+
+            assertEquals(1, runs.size());
+            assertEquals(runId, runs.getFirst().runId());
+            assertEquals(IIngestionStateStore.IngestionRun.Status.FAILED, runs.getFirst().status());
+            assertTrue(runs.getFirst().error().contains("abandoned"), runs.getFirst().error());
+        }
+
+        /** activeRun is the guard purge and file delete answer 409 on. */
+        @Test
+        @DisplayName("no longer counts as active, so purge and file delete are not refused")
+        void noLongerActive() {
+            runStartedAgo(Duration.ofHours(1));
+
+            assertTrue(service.activeRun(KB_ID, source(null)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a run inside its time budget is left running")
+        void liveRunUntouched() {
+            String runId = runStartedAgo(Duration.ofMinutes(5));
+
+            assertEquals(runId, service.activeRun(KB_ID, source(null)).orElseThrow().runId());
+            assertEquals(IIngestionStateStore.IngestionRun.Status.RUNNING,
+                    service.listRuns(KB_ID, source(null), 20).getFirst().status());
+        }
+
+        @Test
+        @DisplayName("the threshold follows the source's own time budget")
+        void thresholdFollowsTheBudget() {
+            var longRunning = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(180);
+            longRunning.setSettings(settings);
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, longRunning)).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(Duration.ofHours(1)));
+
+            assertEquals(runId, service.activeRun(KB_ID, longRunning).orElseThrow().runId(),
+                    "an hour into a three-hour budget is a slow run, not a dead one");
+        }
+
+        /**
+         * The claim records the deadline from the budget the run started under. A read
+         * judged it by the source's current settings instead — lowering the budget
+         * mid-run declared the live run dead, and purge and file delete could then
+         * proceed underneath its worker.
+         */
+        @Test
+        @DisplayName("lowering the budget mid-run does not have the live run reaped")
+        void loweredBudgetDoesNotReapALiveRun() {
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null)),
+                    Instant.now().plus(Duration.ofMinutes(180 + 15))).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(Duration.ofMinutes(20)));
+            var lowered = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(1);
+            lowered.setSettings(settings);
+
+            assertEquals(runId, service.activeRun(KB_ID, lowered).orElseThrow().runId());
+        }
+
+        @Test
+        @DisplayName("a reap that fails does not fail the read")
+        void failingReapDoesNotBreakTheRead() {
+            var failing = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized int reapStaleRuns(String sourceId, Instant startedBefore) {
+                    throw new IngestionStateStoreException("store unavailable", new RuntimeException());
+                }
+            };
+            var withFailingStore = new RagSourceIngestionService(pipeline, failing, scheduleStore, ragStore, fileStore);
+            failing.startRun(IngestionPipeline.stateKey(KB_ID, source(null)));
+
+            assertEquals(1, assertDoesNotThrow(() -> withFailingStore.listRuns(KB_ID, source(null), 20)).size());
+            assertTrue(assertDoesNotThrow(() -> withFailingStore.activeRun(KB_ID, source(null))).isPresent());
+        }
     }
 
     private static RagConfiguration knowledgeBase(IngestionSource... sources) {

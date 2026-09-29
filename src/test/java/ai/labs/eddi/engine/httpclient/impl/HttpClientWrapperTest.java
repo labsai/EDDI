@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.httpclient.impl;
 
 import io.vertx.core.MultiMap;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.impl.headers.HeadersMultiMap;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -127,6 +128,38 @@ class HttpClientWrapperTest {
 
             // HashMap.put replaces — last entry during iteration wins
             assertNotNull(result.get("X-Custom"));
+        }
+    }
+
+    @Nested
+    @DisplayName("CappedBufferSink — bounded response body")
+    class CappedBufferSinkTests {
+
+        @Test
+        @DisplayName("accumulates chunks that stay within the cap")
+        void underCap() {
+            HttpClientWrapper.CappedBufferSink sink = new HttpClientWrapper.CappedBufferSink(100);
+            assertTrue(sink.write(Buffer.buffer("hello")).succeeded());
+            assertTrue(sink.write(Buffer.buffer(" world")).succeeded());
+            assertEquals("hello world", sink.captured().toString());
+        }
+
+        @Test
+        @DisplayName("a write that would exceed the cap fails and notifies the exception handler")
+        void overCap() {
+            HttpClientWrapper.CappedBufferSink sink = new HttpClientWrapper.CappedBufferSink(4);
+            Throwable[] reported = {null};
+            sink.exceptionHandler(t -> reported[0] = t);
+
+            var first = sink.write(Buffer.buffer("abcd")); // exactly the cap
+            assertTrue(first.succeeded());
+
+            var second = sink.write(Buffer.buffer("e")); // one over
+            assertTrue(second.failed());
+            assertInstanceOf(HttpClientWrapper.ResponseSizeExceededException.class, second.cause());
+            assertInstanceOf(HttpClientWrapper.ResponseSizeExceededException.class, reported[0]);
+            // Nothing past the cap is retained.
+            assertEquals("abcd", sink.captured().toString());
         }
     }
 }

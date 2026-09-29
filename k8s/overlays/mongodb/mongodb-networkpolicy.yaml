@@ -1,0 +1,37 @@
+# NetworkPolicy — isolate MongoDB so only the EDDI pod may connect to it.
+#
+# Defense in depth beside the production overlay's EGRESS rules (which restrict
+# what EDDI may reach): this restricts INGRESS to MongoDB, so a compromised or
+# mislabelled pod elsewhere in the namespace cannot open a connection to the
+# database even if EDDI's own egress policy is absent (this overlay ships without
+# the production overlay). MongoDB uses an exec readiness probe, so a strict
+# ingress rule does not affect the pod becoming Ready.
+#
+# Inert on a cluster whose CNI does not enforce NetworkPolicy — never harmful.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongodb-network-policy
+  labels:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mongodb
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the EDDI server pod, identified by the same labels the base
+    # Deployment carries. A bare podSelector means "in this policy's own
+    # namespace", so it follows kustomize's `namespace:` transformer.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eddi
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 27017

@@ -619,9 +619,13 @@ kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 # Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
-# Helm (renders the Secret itself, so the key is a required value)
+# Helm (renders the Secret itself, so the key is a required value). Local,
+# port-forward shape without OIDC: the two opt-ins are required, see the guide.
 helm install eddi ./helm/eddi \
   --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
 ```
 

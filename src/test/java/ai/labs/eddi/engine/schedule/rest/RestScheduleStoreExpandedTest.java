@@ -165,7 +165,7 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should throw InternalServerError when store fails")
         void storeError() throws Exception {
-            when(scheduleStore.readAllSchedules(500, 0, false))
+            when(scheduleStore.readAllSchedules(eq(500), eq(0), eq(false), any()))
                     .thenThrow(new RuntimeException("db error"));
 
             assertThrows(InternalServerErrorException.class, () -> sut.readAllSchedules(null, 500, 0));
@@ -174,12 +174,12 @@ class RestScheduleStoreExpandedTest {
         @Test
         @DisplayName("should handle blank agentId as null (read all)")
         void blankAgentId() throws Exception {
-            when(scheduleStore.readAllSchedules(500, 0, false)).thenReturn(List.of());
+            when(scheduleStore.readAllSchedules(eq(500), eq(0), eq(false), any())).thenReturn(List.of());
 
             sut.readAllSchedules("  ", 500, 0);
 
-            verify(scheduleStore).readAllSchedules(500, 0, false);
-            verify(scheduleStore, never()).readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean());
+            verify(scheduleStore).readAllSchedules(eq(500), eq(0), eq(false), any());
+            verify(scheduleStore, never()).readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any());
         }
     }
 

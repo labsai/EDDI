@@ -132,6 +132,18 @@ git push origin 6.3.0
 This is the only trigger that publishes the moving `6.3` and `6` aliases alongside `6.3.0` and
 `latest`.
 
+`pom.xml` must already say `6.3.0` — CI refuses a tag that disagrees with it. It normally does: the
+previous release's post-release PR set it (see [After a GA Release](#after-a-ga-release)). Two
+cases where it does not:
+
+- **The next release is a major** (the PR assumed `6.4.0`, you are shipping `7.0.0`): run
+  `python scripts/bump-version.py next 7.0.0` on a branch and merge it before tagging. `next`
+  refuses to go backwards, so this only works upwards.
+- **A patch release** (`6.3.1` while main already says `6.4.0`): do not pull main's pom back. Cut
+  a release branch from the `6.3.0` tag, fix there, run `python scripts/bump-version.py next
+  6.3.1` on that branch and tag it. After it is published, the post-release PR on main moves the
+  release pointers to `6.3.1` and leaves main's `6.4.0` alone.
+
 > **If nothing happens after pushing a tag, check the prefix first.** A `v`-prefixed tag does not
 > match the `[0-9]*` trigger, and GitHub reports no error for a tag that matches no workflow — the
 > push simply succeeds and nothing runs. Delete it (`git push origin :refs/tags/v6.3.0`) and re-tag
@@ -275,17 +287,51 @@ Every tag in this diagram is written exactly as it must be pushed — bare, with
 
 ### After a GA Release
 
-After tagging `6.3.0`, update `pom.xml` on the feature branch to the next version:
+**Nothing to do by hand.** Once a stable tag's image is published and smoke-tested, `ci.yml`'s
+`post-release` job runs [`post-release.yml`](../.github/workflows/post-release.yml), which opens a
+PR titled `chore(release): after 6.3.0`. Review and merge it. It does two things, and they belong
+to two different versions:
+
+| Version | Where it lives | Moves |
+|---|---|---|
+| **Build version** — what main is building | `pom.xml` only. `application.properties`, the OpenAPI document, the image label and the Manager's sidebar all derive from it | To the next minor (`6.3.0` → `6.4.0`) **right after** the release, so every snapshot from then on is `6.4.0-b<N>` |
+| **Published release** — what a reader should deploy | The release pointers: Helm `appVersion`, the k8s base and quickstart, the docs' copy-pasteable commands — everything [`scripts/release-pointers.json`](../scripts/release-pointers.json) matches | To the new release, but **only once its image exists** — which is why this happens after the tag, not before |
+
+Without the first, main publishes `6.3.0-b<N>` for a whole cycle after `6.3.0` shipped, and a
+pre-release suffix sorts *before* the release — so every snapshot looks older than the version it
+came after. Without the second, the quickstart keeps deploying the previous release.
+
+Both are done by one script, which you can also run yourself:
 
 ```bash
-# On feature/version-6.4.0 (or rename the branch)
-# Update pom.xml: <version>6.4.0</version>
-# CI builds will now produce 6.4.0-b1, 6.4.0-b2, etc.
+python scripts/bump-version.py show                   # both versions, and every pointer
+python scripts/bump-version.py post-release 6.3.0     # what the PR contains
+python scripts/bump-version.py next 7.0.0             # e.g. the next release is a major
+python scripts/bump-version.py release 6.3.0          # pointers only (the chart version follows)
 ```
 
-`pom.xml` is not the only artefact carrying the release number — the Helm chart, the k8s manifests,
-the Dockerfile label, `application.properties` and the bundled agent filename all do too. See the
-version-bump entries in [`changelog.md`](changelog.md) for the full file set.
+`release` also bumps the Helm chart's own `version` — a minor, or a patch for a patch release —
+along with the constant `DeploymentManifestsTest` pins it to. A breaking chart change is a human
+decision: pass `--chart-bump major`. `post-release` never moves `pom.xml` backwards, so a patch
+release cut from an older line moves only the pointers.
+
+`ReleaseVersionSourceTest` enforces the result: every release pointer must name the chart's
+`appVersion`, which may never be ahead of `pom.xml`. The `Release Pointers` job in `ci.yml` runs the
+same check (`bump-version.py check`) on any PR that touches `docs/`, `k8s/`, `helm/` or `README.md`,
+including a docs-only one that skips Build & Test. A new doc that writes `labsai/eddi:<x.y.z>` is
+covered without anyone listing it, and a stale one fails the build instead of shipping. History is
+excluded (the changelog, `docs/archive/`, `docs/release-notes-*`), and so is this page, whose
+version numbers are worked examples.
+
+**Tokens.** The PR is opened with `RELEASE_BOT_TOKEN`, or `CHANGELOG_BOT_TOKEN`, a bot account's
+fine-grained PAT. With neither set, it falls back to the default `GITHUB_TOKEN`, and GitHub then
+does not start the PR's required checks: close and reopen the PR to start them. That fallback also
+needs the repository setting *Actions → General → Allow GitHub Actions to create and approve pull
+requests*, which the nightly changelog collation relies on as well.
+
+**Redoing a run.** The workflow can be dispatched by hand with the release version. It refuses a
+version that has no tag on `origin` or no image on Docker Hub, and does nothing if main already
+reflects it.
 
 ---
 
