@@ -333,6 +333,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 
 ### OpenAI-compatible API
 
@@ -348,6 +349,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed |
 | `eddi.openai-compat.environment` | `production` | Deployment environment agents are resolved from |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Also list `…-stateless` model ids |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |
