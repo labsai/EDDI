@@ -20,7 +20,14 @@ import {
   type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
 import { styleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { memberPolicyLabel, uncoveredRolePhases } from "@/lib/group-config";
+import {
+  groupSaveProblems,
+  memberPolicyLabel,
+  uncoveredRolePhases,
+  type GroupSaveProblem,
+} from "@/lib/group-config";
+import { GroupSaveProblems } from "@/components/groups/group-save-problems";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   getGroupTemplates,
   DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -143,6 +150,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   }
 
   function handleCreate() {
+    if (saveProblems.length > 0) return;
     const config: AgentGroupConfiguration = {
       name,
       description,
@@ -165,7 +173,8 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
         toast.success(t("groups.createSuccess", "Group created successfully"));
         resetAndClose();
       },
-      onError: () => toast.error(t("common.error")),
+      // The backend's 400 names what it rejected; a generic error hid it.
+      onError: (err) => toast.error(getErrorMessage(err)),
     });
   }
 
@@ -176,6 +185,14 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   // A style the running backend does not offer would fail at save time, so it
   // blocks progression rather than being silently carried to Create.
   const styleSupported = isStyleSupported(style, availableStyles);
+  // The backend's hard rejections, checked before Create rather than learned
+  // from a 400 afterwards. Same member filter `handleCreate` applies.
+  const saveProblems = groupSaveProblems({
+    members: members.filter((m) => m.agentId || m.displayName),
+    phases: null,
+    style,
+    maxRounds,
+  });
   const canNext =
     step === "template" ||
     (step === "basics" && name.trim() && styleSupported) ||
@@ -662,6 +679,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
               maxRetries={maxRetries}
               onMemberUnavailable={onMemberUnavailable}
               maxTurns={maxTurns}
+              saveProblems={saveProblems}
             />
           )}
         </div>
@@ -685,7 +703,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
           </Button>
 
           {step === "review" ? (
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
+            <Button
+              onClick={handleCreate}
+              disabled={createMutation.isPending || saveProblems.length > 0}
+              data-testid="create-group-submit"
+            >
               {createMutation.isPending ? t("common.saving", "Saving…") : t("groups.createGroup", "Create Group")}
             </Button>
           ) : (
@@ -714,6 +736,7 @@ interface ReviewStepProps {
   maxRetries: number;
   onMemberUnavailable: MemberUnavailablePolicy;
   maxTurns: number;
+  saveProblems: GroupSaveProblem[];
 }
 
 function ReviewStep({
@@ -729,6 +752,7 @@ function ReviewStep({
   maxRetries,
   onMemberUnavailable,
   maxTurns,
+  saveProblems,
 }: ReviewStepProps) {
   const { t } = useTranslation();
   const unassignedCount = members.filter((m) => !m.agentId).length;
@@ -738,6 +762,7 @@ function ReviewStep({
 
   return (
     <div className="space-y-4" data-testid="review-summary">
+      <GroupSaveProblems problems={saveProblems} testId="dialog-save-problems" />
       {/* Warning banner for unassigned members */}
       {unassignedCount > 0 && (
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">

@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMappe
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -109,6 +110,14 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     private final boolean cancelOnClientDisconnect;
 
+    /**
+     * Removes the engine-reserved keys from client-supplied context. Field-injected
+     * with the strict default so directly constructed unit tests keep it non-null
+     * (CDI overwrites it with the configured bean in production).
+     */
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
@@ -145,6 +154,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200
         // stream. ConversationService re-checks, and the catch below still maps it.
         conversationService.requireInputWithinLimit(inputData);
+
+        // Engine-reserved context keys are only ever set by EDDI itself — see
+        // ClientContextGuard. Same boundary as the non-streaming twin.
+        clientContextGuard.strip(inputData);
 
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.

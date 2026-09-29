@@ -101,6 +101,24 @@ public class CounterweightService {
      * @return the (possibly modified) system message
      */
     public String apply(String systemMessage, CounterweightConfig config, String channelTag) {
+        return apply(systemMessage, config, channelTag, null);
+    }
+
+    /**
+     * As {@link #apply(String, CounterweightConfig, String)}, resolving the preset
+     * snippets the way a render for {@code agentId} does
+     * ({@link PromptSnippetService#getForAgent}): under enforced workspaces only a
+     * snippet in the agent's own space, its owner's own snippet (personal-space
+     * agents only) or a legacy snippet can replace the built-in preset. A snippet
+     * granted or published from another workspace never can, so another workspace
+     * cannot override this agent's safety text by naming a snippet
+     * {@code counterweight-strict}. A {@code null} agent gets the legacy snippets
+     * only.
+     *
+     * @param agentId
+     *            the agent whose system message this is
+     */
+    public String apply(String systemMessage, CounterweightConfig config, String channelTag, String agentId) {
         if (config == null || !config.isEnabled()) {
             return systemMessage;
         }
@@ -120,7 +138,7 @@ public class CounterweightService {
             level = "cautious";
         }
 
-        String injection = resolveInjection(config, level);
+        String injection = resolveInjection(config, level, agentId);
         if (injection == null || injection.isBlank()) {
             activationNormalCounter.increment();
             return systemMessage;
@@ -154,7 +172,7 @@ public class CounterweightService {
      * <li>Built-in fallback preset</li>
      * </ol>
      */
-    private String resolveInjection(CounterweightConfig config, String level) {
+    private String resolveInjection(CounterweightConfig config, String level, String agentId) {
         // Custom instructions override presets entirely
         if (config.getCustomInstructions() != null && !config.getCustomInstructions().isEmpty()) {
             StringBuilder sb = new StringBuilder("## BEHAVIORAL GUIDELINES (engine-injected)\n");
@@ -165,8 +183,8 @@ public class CounterweightService {
         }
 
         return switch (level.toLowerCase()) {
-            case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK);
-            case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK);
+            case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK, agentId);
+            case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK, agentId);
             default -> null; // normal = no injection
         };
     }
@@ -175,8 +193,8 @@ public class CounterweightService {
      * Try to resolve preset text from Prompt Snippets; fall back to built-in
      * default if the snippet does not exist.
      */
-    private String resolveFromSnippetsOrFallback(String snippetKey, String fallback) {
-        Map<String, Object> snippets = promptSnippetService.getAll();
+    private String resolveFromSnippetsOrFallback(String snippetKey, String fallback, String agentId) {
+        Map<String, Object> snippets = promptSnippetService.getForAgent(agentId);
         Object snippetValue = snippets.get(snippetKey);
         if (snippetValue instanceof String text && !text.isBlank()) {
             LOGGER.debugf("Counterweight preset resolved from Prompt Snippet '%s'", snippetKey);

@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -115,16 +116,31 @@ class SlackHitlSupportTest {
     // ─── Action value (integration-bound button payload) ───
 
     @Test
-    void buildActionValue_withIntegration_prefixesName() {
-        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1"));
-        assertEquals("my-int|group:gc-9",
-                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9"));
+    void buildActionValue_withIntegration_prefixesNameAndAppendsCardId() {
+        assertEquals("my-int|conv-1|card-a", SlackHitlSupport.buildActionValue("my-int", "conv-1", "card-a"));
+        assertEquals("my-int|group:gc-9|card-a",
+                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9", "card-a"));
+        // Without a card id the value is unbound (and refused on click).
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1", null));
     }
 
     @Test
     void buildActionValue_noIntegration_returnsBareSubject() {
-        assertEquals("conv-1", SlackHitlSupport.buildActionValue(null, "conv-1"));
-        assertEquals("conv-1", SlackHitlSupport.buildActionValue("", "conv-1"));
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue(null, "conv-1", "card-a"));
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue("", "conv-1", "card-a"));
+    }
+
+    @Test
+    void parseActionValue_cardBound() {
+        var v = SlackHitlSupport.parseActionValue("my-int|conv-1|card-a");
+        assertEquals("my-int", v.integrationName());
+        assertEquals("conv-1", v.subject());
+        assertEquals("card-a", v.cardId());
+        var g = SlackHitlSupport.parseActionValue("my-int|group:gc-9|card-b");
+        assertEquals("gc-9", g.groupConversationId());
+        assertEquals("card-b", g.cardId());
+        // An empty card id part is no card id.
+        assertNull(SlackHitlSupport.parseActionValue("my-int|conv-1|").cardId());
     }
 
     @Test
@@ -135,6 +151,7 @@ class SlackHitlSupportTest {
         assertEquals("conv-1", v.subject());
         assertFalse(v.isGroup());
         assertNull(v.groupConversationId());
+        assertNull(v.cardId(), "a value from before card binding has no card id");
     }
 
     @Test
@@ -163,10 +180,12 @@ class SlackHitlSupportTest {
 
     @Test
     void parseActionValue_roundTrip() {
-        String built = SlackHitlSupport.buildActionValue("int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-1");
+        String cardId = ISlackApprovalRecordStore.newCardId();
+        String built = SlackHitlSupport.buildActionValue("int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-1", cardId);
         var v = SlackHitlSupport.parseActionValue(built);
         assertEquals("int", v.integrationName());
         assertEquals("gc-1", v.groupConversationId());
+        assertEquals(cardId, v.cardId());
     }
 
     // ─── Response extraction ───

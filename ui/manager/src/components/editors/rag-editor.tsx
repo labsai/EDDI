@@ -373,6 +373,8 @@ interface IngestionStatus {
   ingestionId: string;
   status: string;
   documentName: string;
+  /** A caveat on a completed ingestion — e.g. a replacement the vector store could not carry out. */
+  warning?: string;
 }
 
 function IngestionPanel({
@@ -396,10 +398,17 @@ function IngestionPanel({
   const [ingestions, setIngestions] = useState<IngestionStatus[]>([]);
   const [textContent, setTextContent] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  // Off by default: without it, ingesting a file name twice keeps both copies,
+  // which is the long-standing behaviour of this endpoint.
+  const [replaceSameName, setReplaceSameName] = useState(false);
   const mountedRef = useRef(true);
 
-  // Cleanup: mark unmounted so polling stops updating state
+  // Cleanup: mark unmounted so polling stops updating state. Set on mount as well,
+  // not only initialised: StrictMode mounts, unmounts and mounts again, and a ref
+  // that only the cleanup writes stays false from then on — every poll returned
+  // at once and an ingestion sat at "processing" for ever in development.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -413,13 +422,13 @@ function IngestionPanel({
         if (!mountedRef.current) return;
         attempts++;
         try {
-          const result = await api.get<{ status: string }>(
+          const result = await api.get<{ status: string; warning?: string }>(
             `/ragstore/rags/${kbId}/ingestion/${ingestionId}/status`,
           );
           if (!mountedRef.current) return;
           setIngestions((prev) =>
             prev.map((ing) =>
-              ing.ingestionId === ingestionId ? { ...ing, status: result.status } : ing,
+              ing.ingestionId === ingestionId ? { ...ing, status: result.status, warning: result.warning } : ing,
             ),
           );
           if ((result.status === "processing" || result.status === "pending") && attempts < MAX_POLL_ATTEMPTS) {
@@ -446,7 +455,7 @@ function IngestionPanel({
   );
 
   const startIngestion = useCallback(
-    async (content: string, name: string) => {
+    async (content: string, name: string, replace = false) => {
       const tempId = `local-${Date.now()}`;
       setIngestions((prev) => [...prev, { ingestionId: tempId, status: "uploading", documentName: name }]);
 
@@ -457,6 +466,7 @@ function IngestionPanel({
           version: String(version),
           documentName: name,
         });
+        if (replace) params.set("replace", "true");
         const response = await fetch(
           `${api.getBaseUrl()}/ragstore/rags/${kbId}/ingest?${params.toString()}`,
           {
@@ -521,7 +531,7 @@ function IngestionPanel({
             return;
           }
           const content = reader.result as string;
-          startIngestion(content, file.name);
+          startIngestion(content, file.name, replaceSameName);
         };
         reader.onerror = () => {
           setIngestions((prev) => [
@@ -532,7 +542,7 @@ function IngestionPanel({
         reader.readAsText(file);
       });
     },
-    [startIngestion, hasUnsavedChanges, version],
+    [startIngestion, hasUnsavedChanges, version, replaceSameName],
   );
 
   const handleTextIngest = useCallback(() => {
@@ -603,6 +613,15 @@ function IngestionPanel({
             data-testid="ingestion-file-input"
           />
         </label>
+        <label className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={replaceSameName}
+            onChange={(e) => setReplaceSameName(e.target.checked)}
+            data-testid="ingest-replace-same-name"
+          />
+          {t("ragEditor.replaceSameName", "Replace a previously ingested document with the same file name")}
+        </label>
       </div>
 
       {/* Text paste */}
@@ -643,7 +662,7 @@ function IngestionPanel({
           {ingestions.map((ing) => (
             <div
               key={ing.ingestionId}
-              className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
             >
               {ing.status === "completed" ? (
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
@@ -667,6 +686,11 @@ function IngestionPanel({
               >
                 {ing.status}
               </span>
+              {ing.warning && (
+                <span className="basis-full text-[10px] text-warning" role="status">
+                  {ing.warning}
+                </span>
+              )}
             </div>
           ))}
         </div>

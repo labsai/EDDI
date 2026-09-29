@@ -260,6 +260,7 @@
     "deployAndChat": "デプロイしてチャット",
     "openExternalChat": "新しいタブで開く",
     "liveIn": "{{environment}} で稼働中",
+    "liveInVersion": "{{environment}} でバージョン {{version}} が稼働中",
     "chatIn": "{{environment}} でチャット",
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
@@ -747,7 +748,8 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -2048,6 +2050,7 @@
     "ingestion": "ドキュメントの取り込み",
     "dropFiles": "ここに取り込むドキュメントをドロップします",
     "dropHint": "テキスト、Markdown、または任意のテキストベースのファイル",
+    "replaceSameName": "同じファイル名で以前に取り込んだドキュメントを置き換える",
     "browse": "参照",
     "pasteText": "またはテキストを貼り付けます",
     "pastePlaceholder": "ここにドキュメントのテキストを貼り付けてください...",
@@ -2079,6 +2082,8 @@
       "includeSubdomains": "サブドメインを含める",
       "excludePatterns": "除外パターン",
       "excludePatternsHint": "URL パスに対するグロブをカンマ区切りで指定 — * は 1 つのセグメント内、** はセグメントをまたぎます",
+      "sitemapUrls": "サイトマップ",
+      "sitemapUrlsHint": "ページ検出に使うサイトマップのURL（カンマ区切り）。robots.txt に記載がない場合のみ必要です。サイトマップインデックスもたどります",
       "saveFirst": "このソースの実行・プレビュー・履歴表示には、ナレッジベースの保存が必要です。",
       "run": "今すぐ実行",
       "runFailed": "実行を開始できませんでした。すでに実行中の可能性があります。",
@@ -2712,7 +2717,6 @@
     "contextWindowEntries": "全文のまま残す直近エントリ数",
     "contextWindowSummarize": "ウィンドウから外れた分を要約する",
     "contextWindowTruncateNote": "古いエントリは「N 件の以前のエントリを省略」という簡易な表示に置き換えられます。",
-    "retroConfigHint": "振り返りフェーズが学びをチームメモリに記録し、以降の議論に引き継ぎます。",
     "retroPerRun": "1 回の実行あたり",
     "retroStored": "保存上限",
     "artifactConfigHint": "メンバーが共同で文書を作成し、書かれたターンを越えて残せるようにします。",
@@ -2907,7 +2911,24 @@
     },
     "stateRejected": "却下",
     "inputDisabledRejected": "この提案は却下されました",
-    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。"
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。",
+    "retroCustomLimits": "レトロの教訓の上限をカスタマイズ",
+    "retroCustomHint": "レトロフェーズは教訓をチームの記憶に書き込み、以降のディスカッションに引き継ぎます。この上限で件数を制限します。",
+    "retroDefaultHint": "レトロフェーズは既定の上限（1回あたり {{perRun}} 件、保存 {{stored}} 件）で引き続き教訓を書き込みます。止めるには RETRO フェーズを削除してください。",
+    "voteOptionsTooFew": "明示的な投票用紙には少なくとも 2 つの選択肢が必要です。",
+    "saveProblem": {
+      "title": "このグループはまだ作成できません:",
+      "debateRoles": "ディベートには、役割 PRO のメンバーと役割 CON のメンバーがそれぞれ少なくとも 1 人必要です。",
+      "devilAdvocateRole": "悪魔の代弁者グループには、役割 DEVIL_ADVOCATE のメンバーが必要です。",
+      "humanInTaskForce": "人間のメンバーはタスクフォースグループ（計画・実行・検証フェーズ）に参加できません。",
+      "humanWithPeerPhases": "ピアレビューのように、フェーズが各メンバーに順番に向けられるグループには人間のメンバーは参加できません。",
+      "memberUnassigned_one": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "memberUnassigned_other": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
+    }
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2971,7 +2992,7 @@
     "value": "値",
     "deleteAll": "すべて削除",
     "deleteAllTitle": "すべてのプロパティを削除",
-    "deleteAllDesc": "このユーザーのすべてのプロパティが完全に削除されます。",
+    "deleteAllDesc": "このユーザーのすべてのグローバルプロパティが完全に削除されます。ここに表示されている行だけでなく、エージェントが保存したものを含む、すべてのグローバルなユーザーメモリエントリが対象です。",
     "deleted": "プロパティを削除しました",
     "noResults": "プロパティが見つかりません",
     "showingCount": "{{count}}件のプロパティ"
@@ -3072,6 +3093,8 @@
     "title": "エージェントの同期",
     "subtitle": "EDDIインスタンス間でエージェントを同期する",
     "connection": "ソースインスタンス",
+    "loadingLocalAgents": "照合の前にすべてのローカルエージェントを読み込んでいます…",
+    "localAgentsError": "ローカルのエージェント一覧を完全に読み込めなかったため、名前でエージェントを照合できません。今同期すると重複が作成されます。",
     "sourceUrl": "ソースEDDIインスタンスのURL",
     "authToken": "認証トークン",
     "authHint": "任意。X-Source-Authorization ヘッダに設定。",
@@ -3764,7 +3787,19 @@
       "toggleConfig": "詳細パネルの表示切替",
       "unpin": "回答のピン留めを解除",
       "untitled": "無題",
-      "viewSessions": "過去のセッションを表示"
+      "viewSessions": "過去のセッションを表示",
+      "alreadyEnded": "ディスカッションはすでに終了していました。",
+      "stopRaced": "停止しようとした時点でディスカッションの状態が変わり、まだ続いています。もう一度停止してください。",
+      "stopUnconfirmed": "ディスカッションが停止したことを確認できませんでした。状態を確認して、もう一度停止してください。",
+      "stopFailed": "ディスカッションを停止できませんでした: {{error}}",
+      "stopping": "停止しています…",
+      "startOver": "最初からやり直す",
+      "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+      "confirmNewTitle": "実行中のディスカッションを停止しますか？",
+      "confirmNewDescription": "ディスカッションがまだ実行中です。新しく開始すると先に停止され、進行中の作業は破棄されます。",
+      "confirmNewButton": "停止して新規開始",
+      "keepRunning": "実行を続ける",
+      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3793,7 +3828,8 @@
       "stop": "生成を停止",
       "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
       "newConversation": "新しい会話",
-      "newConversationFailed": "新しい会話を開始できませんでした"
+      "newConversationFailed": "新しい会話を開始できませんでした",
+      "initFailed": "この会話を開けませんでした。"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -4965,5 +5001,12 @@
     "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
     "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
     "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
+  },
+  "cascadeSave": {
+    "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "agentChanged": "エージェント {{agentId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
+    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
+    "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
   }
 }

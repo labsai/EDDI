@@ -44,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -92,6 +93,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MAX_TRANSPORT_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024;
 
     /**
+     * Requests a fire-and-forget batch may expand into when its config sets no
+     * {@code maxBatchSize}. The target array usually comes from an upstream
+     * response or LLM output, so without a cap one turn could fan out into as many
+     * outbound requests as that data has elements. Operator override:
+     * {@value #BATCH_DEFAULT_MAX_SIZE_PROPERTY}.
+     */
+    public static final int DEFAULT_MAX_BATCH_SIZE = 100;
+
+    /**
+     * Ceiling for {@code maxBatchSize}: a config may lower the default or raise it
+     * up to this, never beyond — a save above it is refused. Operator override:
+     * {@value #BATCH_MAX_SIZE_CEILING_PROPERTY}.
+     */
+    public static final int MAX_BATCH_SIZE_CEILING = 1_000;
+
+    public static final String BATCH_DEFAULT_MAX_SIZE_PROPERTY = "eddi.httpcalls.batch.default-max-size";
+    public static final String BATCH_MAX_SIZE_CEILING_PROPERTY = "eddi.httpcalls.batch.max-size-ceiling";
+
+    // Field-injected rather than constructor parameters so that the many direct
+    // constructions of this class in tests keep compiling; the initializers are the
+    // same defaults the properties declare, so a directly built instance behaves
+    // like a default deployment.
+    @ConfigProperty(name = BATCH_DEFAULT_MAX_SIZE_PROPERTY, defaultValue = "100")
+    int defaultMaxBatchSize = DEFAULT_MAX_BATCH_SIZE;
+
+    @ConfigProperty(name = BATCH_MAX_SIZE_CEILING_PROPERTY, defaultValue = "1000")
+    int maxBatchSizeCeiling = MAX_BATCH_SIZE_CEILING;
+
+    /**
      * Response headers that are credentials, and are dropped before the header map
      * reaches conversation memory, the template data or an LLM tool result.
      * <p>
@@ -102,12 +132,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * status alone leaves the live session cookie flowing into persisted memory and
      * the model's context.
      * <p>
-     * {@code Set-Cookie} is the case that matters: {@code HttpClientModule} builds
-     * a cookie-aware, application-scoped {@code WebClientSession}, so that value is
-     * a session credential EDDI is actively replaying, and {@code HttpOnly} exists
-     * precisely to keep such values out of scriptable — here, prompt-injectable —
-     * context. The authenticate headers carry challenge material with the same
-     * property.
+     * {@code Set-Cookie} is the case that matters: it is a session credential, and
+     * {@code HttpOnly} exists precisely to keep such values out of scriptable —
+     * here, prompt-injectable — context. (The shared outbound client no longer
+     * keeps a cookie jar, so the value is not replayed on later calls either; see
+     * {@code HttpClientModule}. Dropping it from memory remains defense in depth.)
+     * The authenticate headers carry challenge material with the same property.
      * <p>
      * A deny-list rather than an allow-list, deliberately: the useful header on any
      * given API is not knowable here ({@code Location}, {@code ETag}, a pagination
@@ -578,6 +608,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // run after this one.
             List<Object> batchIterationList = prePostUtils.buildIterationValues(batchRequest.getIterationObjectName(),
                     batchRequest.getPathToTargetArray(), batchRequest.getTemplateFilterExpression(), templateDataObjects);
+            int maxBatchSize = resolveMaxBatchSize(batchRequest.getMaxBatchSize(), defaultMaxBatchSize, maxBatchSizeCeiling);
+            if (batchRequest.getMaxBatchSize() != null && batchRequest.getMaxBatchSize() > maxBatchSize) {
+                // Saving such a config is refused; one stored before the ceiling was
+                // lowered still runs, at the ceiling, and says so.
+                LOGGER.warnf("http call '%s' sets maxBatchSize %d, above the deployment ceiling %d (%s) — using %d",
+                        LogSanitizer.sanitize(callName), batchRequest.getMaxBatchSize(), maxBatchSizeCeiling, BATCH_MAX_SIZE_CEILING_PROPERTY,
+                        maxBatchSize);
+            }
+            if (batchIterationList.size() > maxBatchSize) {
+                // Refused as a whole, before anything is built or sent: a truncated batch
+                // would report success while quietly dropping the tail.
+                throw new IllegalArgumentException("Batch of http call '" + callName + "' would send " + batchIterationList.size()
+                        + " requests, more than its limit of " + maxBatchSize + ". Narrow 'pathToTargetArray' or "
+                        + "'templateFilterExpression', or raise 'preRequest.batchRequests.maxBatchSize' (at most "
+                        + maxBatchSizeCeiling + ", set by " + BATCH_MAX_SIZE_CEILING_PROPERTY + ").");
+            }
             // Each request is kept as the BuiltRequest it came back as, not just its
             // IRequest: the plaintexts the build resolved are what the log line below has
             // to be redacted by, and only the build knows them.
@@ -607,6 +653,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties), callName);
         }
+    }
+
+    /**
+     * The batch size limit in force: the deployment default when the config sets
+     * none (or a non-positive value), otherwise the configured value — both capped
+     * at the deployment ceiling.
+     */
+    static int resolveMaxBatchSize(Integer configured, int defaultSize, int ceiling) {
+        int effective = configured == null || configured <= 0 ? defaultSize : configured;
+        return Math.max(1, Math.min(effective, ceiling));
     }
 
     private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {
@@ -858,15 +914,35 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // never decide, because one side of it is a credential.
         var claimedHeaders = new HashMap<String, Boolean>();
         var connectionOwnedHeaders = new HashSet<String>();
+        // Whether ANY header carries a RESOLVED credential — a connection reference, a
+        // vault secret, or a caller token/identity. These are the highest-value
+        // secrets (a live vault value, the end user's own token), so for them we do
+        // not merely rely on the cross-origin header stripping the shared client now
+        // applies to every redirect hop
+        // (HttpClientModule.strippingCrossOriginCredentials,
+        // which also covers a static/literal credential written in the config): we
+        // disable redirect-following outright, so the request can only ever reach the
+        // origin the caller vouched for.
+        boolean headerCarriesCredential = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);
+            int secretsBefore = resolvedSecrets.size();
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
+            if (resolvedSecrets.size() > secretsBefore) {
+                // A vault ${secret} was substituted into this header.
+                headerCarriesCredential = true;
+            }
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
+            String beforeCallerResolution = headerValue;
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
+            if (!Objects.equals(beforeCallerResolution, headerValue)) {
+                // A ${caller:token}/${caller:userId} was resolved into this header.
+                headerCarriesCredential = true;
+            }
             // Connections resolve last, and only in a header. A ${connection:name}
             // resolves to a credential bound to THIS caller and THIS moment, so
             // unlike a vault reference it cannot be substituted into a cached
@@ -896,6 +972,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 }
                 request.setHttpHeader(credential.headerName(), credential.headerValue());
                 connectionOwnedHeaders.add(credential.headerName());
+                headerCarriesCredential = true;
                 continue;
             }
             // The same map, read from the other side. A plain header sharing a name
@@ -909,6 +986,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
+        }
+
+        // A resolved credential in any header must never be replayed to another
+        // origin by a redirect. When ssrf-protection is on, redirects are already
+        // disabled above; when it is off (redirects followed), disable them for this
+        // request alone so a cross-origin 3xx cannot carry a connection/vault/caller
+        // credential anywhere. The shared client also strips credential headers on
+        // cross-origin hops for literal credentials; this is the stronger measure for
+        // the resolved ones.
+        if (headerCarriesCredential) {
+            request.setFollowRedirects(false);
         }
 
         Map<String, String> queryParams = requestConfig.getQueryParams();

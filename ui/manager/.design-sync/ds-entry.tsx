@@ -12,10 +12,11 @@
 //
 // Defining it here runs at bundle init, before anything mounts, so it covers
 // designs built with the DS as well as the preview cards — and leaves the real
-// component untouched. The value is cosmetic chrome; it is a static string and
-// will drift from package.json (recorded in NOTES.md's re-sync risks).
+// component untouched. The value is cosmetic chrome, so it is deliberately not
+// a version number: a literal "6.x.0" here was one more file every release had
+// to remember, and went stale whenever it was forgotten.
 (globalThis as unknown as { __APP_VERSION__?: string }).__APP_VERSION__ ??=
-  "6.4.0";
+  "preview";
 
 // ── ui/ ────────────────────────────────────────────────────────────────────
 export { AccessibleDialog } from "@/components/ui/accessible-dialog";

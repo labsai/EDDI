@@ -34,6 +34,8 @@ import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 
@@ -42,6 +44,7 @@ import java.net.UnknownHostException;
 import java.net.SocketTimeoutException;
 import java.net.ConnectException;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_ERRORS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CONFIDENCE;
@@ -125,6 +128,32 @@ public class LifecycleManager implements ILifecycleManager {
 
     /** Maximum length for error digest message shown to the LLM. */
     private static final int MAX_ERROR_DIGEST_LENGTH = 200;
+    private static final Pattern FQCN_EXCEPTION = Pattern
+            .compile("(?:[a-z][a-z0-9_]*\\.)+[A-Z][A-Za-z0-9_$]*(?:Exception|Error)\\s*:?\\s*");
+    private static final Pattern JSON_MESSAGE = Pattern.compile("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+    private static final Pattern JSON_ERROR_STRING = Pattern.compile("\"error\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.){1,300})\"");
+
+    /**
+     * Replaces an embedded JSON error body with the text of its {@code message} (or
+     * string {@code error}) field — {@code {"type":"error","error":{"type":
+     * "invalid_request_error","message":"..."},"request_id":"..."}} becomes just
+     * the message. A body without one is dropped rather than passed through.
+     */
+    static String replaceJsonErrorBody(String msg) {
+        int start = msg.indexOf('{');
+        int end = msg.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return msg;
+        }
+        String body = msg.substring(start, end + 1);
+        // message first: {"error":"invalid_request_error","message":"Unsupported
+        // model"}
+        // carries the actionable text in message, the category in error.
+        var message = JSON_MESSAGE.matcher(body);
+        var error = JSON_ERROR_STRING.matcher(body);
+        String replacement = message.find() ? message.group(1) : error.find() ? error.group(1) : "(details omitted)";
+        return (msg.substring(0, start) + replacement + msg.substring(end + 1)).trim();
+    }
 
     // Cached Micrometer meters keyed by "taskId|taskType" to avoid per-invocation
     // builder allocation on the hot path.
@@ -270,6 +299,13 @@ public class LifecycleManager implements ILifecycleManager {
         // Resolve memory policy once (null-safe)
         var memoryPolicy = conversationMemory.getMemoryPolicy();
         boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
+        // Configured at all — keep_all included. keep_all rolls nothing back, which is
+        // why it is not "effectively enabled", but it still emits task_failed_<id>: the
+        // documentation promises that action whenever the discipline is on, and it is
+        // the only hook a fallback rule has.
+        var strictWriteDiscipline = memoryPolicy != null ? memoryPolicy.getStrictWriteDiscipline() : null;
+        boolean strictWriteConfigured = strictWriteDiscipline != null && strictWriteDiscipline.isEnabled();
+        boolean continueOnFailure = strictWriteConfigured && strictWriteDiscipline.isContinueOnFailure();
 
         // Execute each task in sequence
         for (int index = startIndex; index < tasks.size(); index++) {
@@ -311,10 +347,10 @@ public class LifecycleManager implements ILifecycleManager {
                     : List.of();
 
             Map<String, IData<?>> dataIdentitiesBefore = Map.of();
-            Set<String> outputKeysBefore = Set.of();
+            Map<String, Object> outputBefore = Map.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                 dataIdentitiesBefore = cs.snapshotDataIdentities();
-                outputKeysBefore = cs.snapshotOutputKeys();
+                outputBefore = snapshotOutput(cs.getConversationOutput());
             }
 
             // === OpenTelemetry: create span per task ===
@@ -380,13 +416,20 @@ public class LifecycleManager implements ILifecycleManager {
                             tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
                 }
 
-                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
-                taskSpan.recordException(e);
-
                 // Classify error for metrics, audit, and admin dashboards
                 String errorType = classifyError(e);
                 String errorSummary = summarizeForAudit(e);
                 long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+
+                // The span carries the REDACTED summary, never the raw exception message:
+                // a task exception can quote a resolved credential (e.g. an upstream API's
+                // "invalid key sk-live-…" echo), and OpenTelemetry spans are exported to
+                // collectors that are not part of the secret-redaction boundary.
+                // recordException
+                // would re-attach the raw message and stack-trace, so it is deliberately not
+                // called — only the exception type is recorded alongside the redacted status.
+                taskSpan.setStatus(StatusCode.ERROR, errorSummary);
+                taskSpan.setAttribute("exception.type", e.getClass().getName());
 
                 // Record error counter for dashboards & alerting (tagged by error.type)
                 String errTaskId = task.getId().name();
@@ -417,7 +460,23 @@ public class LifecycleManager implements ILifecycleManager {
                     // === Strict Write Discipline: handle task failure ===
                     String onFailureMode = resolveOnFailureMode(memoryPolicy);
                     handleTaskFailure(cs, task, e, dataIdentitiesBefore,
-                            outputKeysBefore, actionsBefore, onFailureMode);
+                            outputBefore, actionsBefore, onFailureMode);
+                } else if (strictWriteConfigured && currentStep instanceof ConversationStep cs) {
+                    // keep_all: the failed task's data stays, but the failure is still
+                    // announced — on top of whatever actions the task itself added.
+                    IData<List<String>> currentActions = cs.getLatestData(ACTIONS);
+                    injectFailureAction(cs, task, currentActions != null && currentActions.getResult() != null
+                            ? List.copyOf(currentActions.getResult())
+                            : actionsBefore);
+                } else if (currentStep instanceof ConversationStep cs) {
+                    // Without strict write the caller was told nothing: the turn came back
+                    // as conversationState ERROR with an output that was simply empty — no
+                    // reply, and no reason, on the plain and the streaming path alike. The
+                    // failure is reported in the step's output under "taskErrors", the key
+                    // strict write already uses. It reaches the client only; nothing reads
+                    // it back into what the model sees, so an agent's prompts are unchanged.
+                    // Strict write keeps its own semantics — "exclude_all" still means silence.
+                    reportFailureToCaller(cs, task, e);
                 }
 
                 // Collect failure audit entry. Best-effort: an audit failure must not
@@ -446,7 +505,16 @@ public class LifecycleManager implements ILifecycleManager {
                     }
                 }
 
-                // Re-throw — pipeline stops (current behavior preserved).
+                // continueOnFailure: the failure is recorded (digest, task_failed action,
+                // rollback) — carry on with the remaining tasks so one of them can answer
+                // in this turn. An interrupt is never swallowed: shutdown must win.
+                if (continueOnFailure && !(e instanceof LifecycleException.LifecycleInterruptedException)) {
+                    LOGGER.infof("[STRICT_WRITE] Task '%s' failed — continuing the pipeline (continueOnFailure) for conversation '%s'",
+                            errTaskId, sanitize(conversationMemory.getConversationId()));
+                    continue;
+                }
+
+                // Re-throw — pipeline stops (the default).
                 // The error digest and task_failed action are stored in the
                 // conversation output for the next turn's behavior rules.
                 if (e instanceof LifecycleException le) {
@@ -838,7 +906,10 @@ public class LifecycleManager implements ILifecycleManager {
      * <ol>
      * <li>Marks all IData entries added or overwritten by the failed task as
      * uncommitted (using identity comparison against pre-execution snapshot)</li>
-     * <li>Rolls back ConversationOutput entries added by the failed task</li>
+     * <li>Rolls back the ConversationOutput to its pre-task state: entries the
+     * failed task added are removed, entries it changed get their previous value
+     * back — otherwise, under {@code continueOnFailure}, the failed task's output
+     * would become part of the reply</li>
      * <li>Injects an error digest (if mode is "digest") under a separate
      * "taskErrors" key, and a {@code task_failed_<taskId>} action rebuilt from the
      * pre-failure action state</li>
@@ -846,7 +917,7 @@ public class LifecycleManager implements ILifecycleManager {
      */
     private void handleTaskFailure(ConversationStep step, ILifecycleTask task, Exception exception,
                                    Map<String, IData<?>> dataIdentitiesBefore,
-                                   Set<String> outputKeysBefore, List<String> actionsBefore,
+                                   Map<String, Object> outputBefore, List<String> actionsBefore,
                                    String onFailureMode) {
 
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
@@ -863,20 +934,49 @@ public class LifecycleManager implements ILifecycleManager {
             }
         }
 
-        // 2. Rollback ConversationOutput entries added by the failed task
-        var output = step.getConversationOutput();
-        Set<String> currentKeys = new LinkedHashSet<>(output.keySet());
-        for (String key : currentKeys) {
-            if (!outputKeysBefore.contains(key)) {
-                output.remove(key);
-            }
-        }
+        // 2. Roll the ConversationOutput back to its pre-task state
+        restoreOutput(step.getConversationOutput(), outputBefore);
 
         // 3. Inject error digest and task_failed action
         if ("digest".equals(onFailureMode)) {
             injectErrorDigest(step, task, exception);
         }
         injectFailureAction(step, task, actionsBefore);
+    }
+
+    /**
+     * The ConversationOutput values, for {@link #restoreOutput}. Lists and maps are
+     * copied one level deep: {@code addConversationOutputList} and
+     * {@code addConversationOutputMap} append to the existing container in place,
+     * so a snapshot holding the same instance would change along with it.
+     */
+    static Map<String, Object> snapshotOutput(Map<String, Object> output) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        output.forEach((key, value) -> snapshot.put(key, shallowCopy(value)));
+        return snapshot;
+    }
+
+    /**
+     * Puts the ConversationOutput back to a {@link #snapshotOutput} state: keys
+     * added since are removed, keys changed since get their snapshot value back.
+     */
+    static void restoreOutput(Map<String, Object> output, Map<String, Object> snapshot) {
+        output.keySet().removeIf(key -> !snapshot.containsKey(key));
+        snapshot.forEach((key, value) -> {
+            if (!Objects.equals(output.get(key), value)) {
+                output.put(key, shallowCopy(value));
+            }
+        });
+    }
+
+    private static Object shallowCopy(Object value) {
+        if (value instanceof List<?> list) {
+            return new ArrayList<>(list);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>(map);
+        }
+        return value;
     }
 
     /**
@@ -887,16 +987,7 @@ public class LifecycleManager implements ILifecycleManager {
      * icon, different color).
      */
     private void injectErrorDigest(ConversationStep step, ILifecycleTask task, Exception exception) {
-        String summary = summarizeException(exception);
-        String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
-
-        // Store under separate "taskErrors" key — never mixed into "output"
-        var errorOutput = new LinkedHashMap<String, Object>();
-        errorOutput.put("type", "errorDigest");
-        errorOutput.put("taskId", task.getId().name());
-        errorOutput.put("taskType", task.getType());
-        errorOutput.put("text", digestText);
-        step.addConversationOutputList("taskErrors", List.of(errorOutput));
+        String digestText = reportFailureToCaller(step, task, exception);
 
         // Also store as committed IData so it's visible in memory
         Data<String> digestData = new Data<>("taskError:" + task.getId(), digestText);
@@ -927,24 +1018,96 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Creates a concise, sanitized error summary suitable for LLM consumption.
-     * Strips stack traces, internal URLs, and class names to avoid context
-     * pollution.
+     * Records a failed task in the step's output under the dedicated
+     * {@code taskErrors} key — never mixed into {@code output}, so
+     * {@link ConversationLogGenerator} does not concatenate it with the reply. A
+     * client renders it as a failure rather than as something the agent said.
+     *
+     * @return the digest text
      */
-    private String summarizeException(Exception e) {
-        String msg = e.getMessage();
-        if (msg == null || msg.isBlank()) {
-            msg = e.getClass().getSimpleName();
-        }
+    private String reportFailureToCaller(ConversationStep step, ILifecycleTask task, Exception exception) {
+        String digestText = String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
+        var errorOutput = new LinkedHashMap<String, Object>();
+        errorOutput.put("type", "errorDigest");
+        errorOutput.put("taskId", task.getId().name());
+        errorOutput.put("taskType", task.getType());
+        errorOutput.put("text", digestText);
+        step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
+        return digestText;
+    }
+
+    /**
+     * Creates a concise, sanitized error summary suitable for a client and for LLM
+     * consumption. Strips stack traces and URLs, and redacts credentials: this text
+     * leaves the server.
+     */
+    static String summarizeException(Throwable e) {
+        String msg = describeFailure(e);
 
         // Strip common noise patterns
         msg = msg.replaceAll("https?://[^\\s]+", "[url]");
         msg = msg.replaceAll("at [a-zA-Z0-9.$]+\\([^)]+\\)", "");
+        // Fully-qualified exception class names ("dev.langchain4j.exception.
+        // ModelNotFoundException: ") — the digest reached the model with these, the
+        // very noise it exists to keep out of the context.
+        msg = FQCN_EXCEPTION.matcher(msg).replaceAll("");
+        // A provider's raw JSON error body: keep only its message.
+        msg = replaceJsonErrorBody(msg);
+        // Redact before truncating — cutting first can split a secret so the
+        // pattern no longer matches, leaving a fragment behind. This text leaves the
+        // server: it is in every response and streaming event of a failed turn.
+        msg = SecretRedactionFilter.redact(msg).trim();
 
         if (msg.length() > MAX_ERROR_DIGEST_LENGTH) {
             msg = msg.substring(0, MAX_ERROR_DIGEST_LENGTH) + "...";
         }
-        return msg.trim();
+        return msg;
+    }
+
+    /** {@code "message":"..."} in a provider's JSON error body. */
+    private static final Pattern PROVIDER_ERROR_MESSAGE = Pattern.compile("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /**
+     * What actually went wrong, rather than what the outermost wrapper says.
+     * <p>
+     * A provider rejection reaches this point wrapped — "Streaming chat failed",
+     * with the reason three causes down as the provider's raw JSON error body. The
+     * summary used to be the wrapper alone, so the one sentence that said why
+     * ("`temperature` is deprecated for this model") appeared in no response, event
+     * or audit entry, only in the server log. This keeps the outermost message for
+     * context and appends the most specific one, pulling {@code message} out of a
+     * JSON error body when there is one.
+     */
+    static String describeFailure(Throwable e) {
+        String outer = e.getMessage();
+        if (outer == null || outer.isBlank()) {
+            outer = e.getClass().getSimpleName();
+        }
+        String innermost = null;
+        Throwable cause = e.getCause();
+        for (int depth = 0; cause != null && cause != e && depth < 16; depth++) {
+            if (cause.getMessage() != null && !cause.getMessage().isBlank()) {
+                innermost = cause.getMessage();
+            }
+            cause = cause.getCause();
+        }
+        String specific = innermost == null ? null : providerMessage(innermost);
+        if (innermost != null && !innermost.equals(specific) && outer.contains(innermost)) {
+            // The wrapper already quotes the raw body ("Chat model execution failed:
+            // {json}") — swap the body for the message inside it.
+            return outer.replace(innermost, specific);
+        }
+        if (specific == null || outer.contains(specific)) {
+            return providerMessage(outer);
+        }
+        return outer + ": " + specific;
+    }
+
+    private static String providerMessage(String message) {
+        Matcher matcher = PROVIDER_ERROR_MESSAGE.matcher(message);
+        return message.trim().startsWith("{") && matcher.find()
+                ? matcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\")
+                : message;
     }
 
     // ==================== OpenTelemetry ====================
@@ -1018,10 +1181,7 @@ public class LifecycleManager implements ILifecycleManager {
      * are scrubbed via {@link SecretRedactionFilter}.
      */
     static String summarizeForAudit(Throwable e) {
-        String msg = e.getMessage();
-        if (msg == null || msg.isBlank()) {
-            msg = e.getClass().getSimpleName();
-        }
+        String msg = describeFailure(e);
         // Redact before truncating — cutting first can split a secret so the
         // pattern no longer matches, leaving a fragment behind.
         msg = SecretRedactionFilter.redact(msg);

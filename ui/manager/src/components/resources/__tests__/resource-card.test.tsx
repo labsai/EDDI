@@ -19,7 +19,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -32,7 +31,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -45,7 +43,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -58,7 +55,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -71,7 +67,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -84,7 +79,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -98,7 +92,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={{ ...baseItem, name: "" }}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -111,7 +104,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={{ ...baseItem, description: "" }}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -125,7 +117,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -142,7 +133,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={onDuplicate}
         onDelete={vi.fn()}
       />
@@ -159,7 +149,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={baseItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={onDelete}
       />
@@ -169,19 +158,31 @@ describe("ResourceCard", () => {
     expect(onDelete).toHaveBeenCalledWith("res-456", 2);
   });
 
-  it("uses default GitBranch icon for unknown iconName", () => {
+  it("draws the icon of its own type, not the rules icon", () => {
+    // The card's private icon map used to know six of the ten types and fell
+    // back to GitBranch, so a RAG card was drawn as a rule set.
     const { container } = renderWithProviders(
       <ResourceCard
         item={baseItem}
-        typeSlug="rules"
-        iconName="UnknownIcon"
+        typeSlug="rag"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
     );
-    // Falls back to GitBranch
-    const icon = container.querySelector("svg.lucide-git-branch");
-    expect(icon).not.toBeNull();
+    expect(container.querySelector("svg.lucide-library")).not.toBeNull();
+    expect(container.querySelector("svg.lucide-git-branch")).toBeNull();
+  });
+
+  it("uses the unknown-type icon for a type it does not know", () => {
+    const { container } = renderWithProviders(
+      <ResourceCard
+        item={baseItem}
+        typeSlug="not-a-type"
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(container.querySelector("svg.lucide-package")).not.toBeNull();
   });
 
   it("shows Just now for very recent items", () => {
@@ -190,7 +191,6 @@ describe("ResourceCard", () => {
       <ResourceCard
         item={recentItem}
         typeSlug="rules"
-        iconName="GitBranch"
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
       />
