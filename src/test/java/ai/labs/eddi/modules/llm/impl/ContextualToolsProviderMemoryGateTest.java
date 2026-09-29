@@ -52,6 +52,7 @@ class ContextualToolsProviderMemoryGateTest {
         lenient().when(memory.getAgentId()).thenReturn("agent-gate-1");
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         lenient().when(memory.getUserMemoryConfig()).thenReturn(new AgentConfiguration.UserMemoryConfig());
+        lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
 
         task = mock(LlmConfiguration.Task.class);
 
@@ -100,6 +101,16 @@ class ContextualToolsProviderMemoryGateTest {
         when(memory.getUserMemoryConfig()).thenReturn(null);
 
         assertTrue(contribute().specs().isEmpty(),
-                "the config carries enableMemoryTools' verdict — absent means the agent never opted in");
+                "no config means the agent declared no memory at all");
+    }
+
+    @Test
+    @DisplayName("memory config present but enableMemoryTools off → no tool: the config is tuning, not the switch")
+    void configWithoutTheSwitchNoTool() {
+        when(task.getEnableBuiltInTools()).thenReturn(true);
+        when(memory.isMemoryToolsEnabled()).thenReturn(false);
+
+        assertTrue(contribute().specs().isEmpty(),
+                "a userMemoryConfig (e.g. for defaultVisibility) must not grant the cross-conversation write tool");
     }
 }

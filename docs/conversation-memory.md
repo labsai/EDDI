@@ -74,6 +74,15 @@ This enables scenarios like:
 - Testing different conversation paths
 - Debugging agent behavior
 
+Undo and redo carry the **conversation properties** with the step. Each completed turn records which
+properties it changed (step data `properties:changes`, uncommitted and non-public, so the LLM never
+sees it); undo restores their values from before the turn — including removing a property the turn
+created — and redo re-applies them. For `longTerm` properties the change is carried into the user
+memory store as well, but only where the store still holds exactly the value the undone turn wrote: a
+value another conversation or agent has written since is left alone. A new turn clears the redo stack,
+because the undone steps now belong to an abandoned branch. A turn completed through a HITL resume
+records no property changes; undoing it leaves its properties as they are.
+
 ## Conversation Memory Structure
 
 ### Core Properties

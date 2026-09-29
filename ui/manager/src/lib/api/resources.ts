@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
+import { getDescriptorVersions } from "./descriptors";
 
 export { parseResourceUri } from "./agents";
 export type { AgentDescriptor as ResourceDescriptor };
@@ -175,10 +176,11 @@ export function duplicateResource(
 /**
  * Get all versions of a specific resource.
  *
- * The GET descriptors endpoint does NOT support includePreviousVersions;
- * that parameter only works on POST (containingResourceUri lookup).
- * Instead, we resolve the current (latest) version via the backend's
- * `currentversion` endpoint and return descriptors for all versions 1..N.
+ * The GET descriptors endpoint does NOT support includePreviousVersions (that
+ * parameter only works on POST, for the containingResourceUri lookup) and has no
+ * `version` parameter at all. So we resolve the current (latest) version via the
+ * backend's `currentversion` endpoint and read each version's descriptor by id
+ * and version — see `getDescriptorVersions`.
  */
 export async function getResourceVersions(
   rt: ResourceTypeConfig,
@@ -188,7 +190,7 @@ export async function getResourceVersions(
   let latest: number | null = null;
   try {
     const currentVersion = await api.get<number>(
-      `${basePath(rt)}/${id}/currentversion`
+      `${basePath(rt)}/${encodeURIComponent(id)}/currentversion`
     );
     latest = currentVersion ?? null;
   } catch {
@@ -197,21 +199,7 @@ export async function getResourceVersions(
   }
 
   if (latest !== null && latest > 0) {
-    // Fetch descriptor for each version in parallel
-    const descriptors = await Promise.all(
-      Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-        try {
-          const results = await api.get<AgentDescriptor[]>(
-            `${basePath(rt)}/descriptors?filter=${id}&version=${v}`
-          );
-          return results;
-        } catch {
-          return [];
-        }
-      })
-    );
-
-    const flat = descriptors.flat();
+    const flat = await getDescriptorVersions(id, latest);
     if (flat.length > 0) {
       return flat;
     }

@@ -246,6 +246,14 @@ class PostgresSecretPersistenceTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("set-if-absent — first value wins, a later one never replaces it")
+        void setIfAbsentKeepsFirst() {
+            assertEquals("first", persistence.setMetaValueIfAbsent("once.key", "first"));
+            assertEquals("first", persistence.setMetaValueIfAbsent("once.key", "second"));
+            assertEquals("first", persistence.getMetaValue("once.key"));
+        }
+
+        @Test
         @DisplayName("get non-existent — returns null")
         void getNonExistent() {
             assertNull(persistence.getMetaValue("nonexistent.key"));

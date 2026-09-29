@@ -55,6 +55,29 @@ public final class EnvelopeCrypto {
      * @return encrypted result containing Base64-encoded ciphertext and IV
      */
     public static EncryptionResult encrypt(String plaintext, byte[] key) {
+        return encrypt(plaintext, key, null);
+    }
+
+    /**
+     * Encrypt plaintext using AES-256-GCM, binding {@code aad} into the
+     * authentication tag as Additional Authenticated Data.
+     * <p>
+     * The AAD is authenticated but not encrypted: it is not stored with the
+     * ciphertext and must be reconstructed identically at decryption time. Passing
+     * a value such as {@code tenantId|keyName|dekId} binds the ciphertext to the
+     * row it belongs to, so an attacker with database write access cannot swap a
+     * ciphertext (and its IV) from one key onto another — the tag no longer
+     * verifies. A {@code null} AAD produces a plain (legacy-compatible) ciphertext.
+     *
+     * @param plaintext
+     *            the data to encrypt
+     * @param key
+     *            the 32-byte AES-256 key
+     * @param aad
+     *            additional authenticated data to bind, or {@code null} for none
+     * @return encrypted result containing Base64-encoded ciphertext and IV
+     */
+    public static EncryptionResult encrypt(String plaintext, byte[] key, byte[] aad) {
         validateKey(key);
         try {
             byte[] iv = generateIv();
@@ -62,6 +85,9 @@ public final class EnvelopeCrypto {
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
             SecretKeySpec keySpec = new SecretKeySpec(key, ALGORITHM);
             cipher.init(Cipher.ENCRYPT_MODE, keySpec, parameterSpec);
+            if (aad != null) {
+                cipher.updateAAD(aad);
+            }
 
             byte[] ciphertext = cipher.doFinal(plaintext.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
@@ -83,6 +109,26 @@ public final class EnvelopeCrypto {
      * @return the decrypted plaintext
      */
     public static String decrypt(String encryptedValue, String ivBase64, byte[] key) {
+        return decrypt(encryptedValue, ivBase64, key, null);
+    }
+
+    /**
+     * Decrypt AES-256-GCM ciphertext, verifying {@code aad} as the Additional
+     * Authenticated Data it was encrypted with. The AAD must be byte-identical to
+     * what {@link #encrypt(String, byte[], byte[])} was given, or the tag fails and
+     * this throws.
+     *
+     * @param encryptedValue
+     *            Base64-encoded ciphertext (includes auth tag)
+     * @param ivBase64
+     *            Base64-encoded 12-byte IV
+     * @param key
+     *            the 32-byte AES-256 key
+     * @param aad
+     *            the additional authenticated data to verify, or {@code null}
+     * @return the decrypted plaintext
+     */
+    public static String decrypt(String encryptedValue, String ivBase64, byte[] key, byte[] aad) {
         validateKey(key);
         try {
             byte[] ciphertext = Base64.getDecoder().decode(encryptedValue);
@@ -92,6 +138,9 @@ public final class EnvelopeCrypto {
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv);
             SecretKeySpec keySpec = new SecretKeySpec(key, ALGORITHM);
             cipher.init(Cipher.DECRYPT_MODE, keySpec, parameterSpec);
+            if (aad != null) {
+                cipher.updateAAD(aad);
+            }
 
             byte[] decrypted = cipher.doFinal(ciphertext);
             return new String(decrypted, java.nio.charset.StandardCharsets.UTF_8);

@@ -47,6 +47,32 @@ describe("dashboard API", () => {
       expect(result.agentCount).toBe(2); // a and b, not 3
     });
 
+    it("asks for the backend's conversation ceiling and flags a full page as a lower bound", async () => {
+      // RestConversationStore clamps `limit` to 100. Asking for 1000 got 100,
+      // and the dashboard showed "100" as if it were the total.
+      let askedLimit: string | null = null;
+      server.use(
+        http.get("*/conversationstore/conversations", ({ request }) => {
+          askedLimit = new URL(request.url).searchParams.get("limit");
+          return HttpResponse.json(
+            Array.from({ length: 100 }, (_, i) => ({
+              resource: `eddi://ai.labs.conversation/conversationstore/conversations/c${i}`,
+            })),
+          );
+        }),
+      );
+      const result = await getDashboardStats();
+      expect(askedLimit).toBe("100");
+      expect(result.conversationCount).toBe(100);
+      expect(result.conversationCountCapped).toBe(true);
+      expect(result.agentCountCapped).toBe(false);
+    });
+
+    it("does not flag a count that did not fill its page", async () => {
+      const result = await getDashboardStats();
+      expect(result.conversationCountCapped).toBe(false);
+    });
+
     it("handles partial failure gracefully (catch → [])", async () => {
       server.use(
         http.get("*/agentstore/agents/descriptors", () =>

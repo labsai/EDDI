@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { getDescriptorVersions } from "./descriptors";
 import { ENVIRONMENTS, type Environment } from "../constants";
 
 // Re-export from shared constants for backward compatibility
@@ -194,36 +195,20 @@ export function getAgentDescriptors(
 /**
  * Fetch agent descriptors for all versions of a specific agent.
  *
- * The GET descriptors endpoint does NOT support includePreviousVersions;
- * we use the currentversion endpoint to resolve the latest version.
+ * Resolves the latest version via `currentversion`, then reads each version's
+ * descriptor by id and version — see `getDescriptorVersions` for why the store
+ * listing (`descriptors?filter=…`) cannot answer this.
  */
 export async function getAgentDescriptorsWithVersions(
   agentId: string
 ): Promise<AgentDescriptor[]> {
-  // Resolve the latest version number
   const currentVersion = await api.get<number>(
-    `/agentstore/agents/${agentId}/currentversion`
+    `/agentstore/agents/${encodeURIComponent(agentId)}/currentversion`
   );
-  const latest = currentVersion ?? 1;
-
-  // Fetch descriptor for each version in parallel
-  const descriptors = await Promise.all(
-    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-      try {
-        const results = await api.get<AgentDescriptor[]>(
-          `/agentstore/agents/descriptors?filter=${agentId}&version=${v}`
-        );
-        return results;
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const flat = descriptors.flat();
+  const flat = await getDescriptorVersions(agentId, currentVersion ?? 1);
   if (flat.length === 0) {
     return api.get<AgentDescriptor[]>(
-      `/agentstore/agents/descriptors?filter=${agentId}`
+      `/agentstore/agents/descriptors?filter=${encodeURIComponent(agentId)}`
     );
   }
   return flat;
@@ -334,6 +319,30 @@ export function getDeploymentStatus(
 export interface EnvironmentStatus {
   environment: Environment;
   status: DeploymentStatus["status"];
+  /**
+   * Set when `status` describes a DIFFERENT version than the one asked about —
+   * the agent is live in this environment, but at this (older) version. See
+   * `withAnyDeployedVersion`.
+   */
+  deployedVersion?: number;
+}
+
+/** One row of `GET /administration/{environment}/deploymentstatus` (backend `AgentDeploymentStatus`). */
+export interface AgentDeploymentSummary {
+  environment: Environment;
+  agentId: string;
+  agentVersion: number;
+  status: DeploymentStatus["status"];
+}
+
+/**
+ * Every agent deployed in an environment, each at its HIGHEST deployed version
+ * (`AgentFactory.getAllLatestAgents`). The per-agent status endpoint answers for
+ * one exact version only, so this is how to learn that an agent is still live
+ * at an older version after a save bumped it.
+ */
+export function listDeploymentStatuses(environment: Environment): Promise<AgentDeploymentSummary[]> {
+  return api.get<AgentDeploymentSummary[]>(`/administration/${environment}/deploymentstatus`);
 }
 
 export async function getDeploymentStatuses(

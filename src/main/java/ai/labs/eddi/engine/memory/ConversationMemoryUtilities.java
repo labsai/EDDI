@@ -117,6 +117,7 @@ public class ConversationMemoryUtilities {
             for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(),
                         data.getOriginWorkflowId(), data.isPublic(), data.isCommitted());
+                resultSnapshot.setVerbatim(data.isVerbatim());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
         }
@@ -138,6 +139,7 @@ public class ConversationMemoryUtilities {
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
                             (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     data.setCommitted(resultSnapshot.isCommitted());
+                    data.setVerbatim(resultSnapshot.isVerbatim());
                     conversationStep.storeData(data);
                 }
             }
@@ -209,12 +211,99 @@ public class ConversationMemoryUtilities {
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
                             (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
                     data.setCommitted(resultSnapshot.isCommitted());
+                    data.setVerbatim(resultSnapshot.isVerbatim());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
             }
         }
 
         return conversationMemory;
+    }
+
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
+    private static boolean isSensitiveDetailedKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
+    }
+
+    /**
+     * Runs a step/output value through {@link SecretRedactionFilter}, recursing
+     * into {@link Map} keys and values, {@link Collection} elements and
+     * {@code Object[]} elements so a secret embedded in a <em>structured</em> value
+     * is masked too — e.g. a deserialized httpCall response body stored as a
+     * Map/List under the agent-chosen {@code responseObjectName}, which is not a
+     * denylisted key and would otherwise reach the caller-controlled
+     * {@code returnDetailed} view unredacted. A credential can sit in a map
+     * <em>key</em> as easily as in a value (a token-keyed lookup table), so String
+     * keys are redacted as well. Every String leaf is redacted; other scalar shapes
+     * (including primitive arrays, which cannot hold a String) are returned
+     * unchanged. The sensitive internal keys are already dropped by
+     * {@link #isSensitiveDetailedKey} before this is reached.
+     * <p>
+     * The filter's name-bound rules ({@code apiKey}, {@code token}, {@code secret},
+     * ...) only fire when the name and the value share one string, and walking a
+     * Map separates them — so {@code {"apiKey": "tenantsecret123"}} carries no
+     * credential <em>shape</em> the value rules would see. The key is therefore
+     * judged here, BEFORE its value is recursed into: everything under a
+     * credential-named key (at any depth) is masked outright via
+     * {@link SecretRedactionFilter#maskCredentialValue}, with the filter's usual
+     * exemptions (under 8 characters, a vault reference).
+     *
+     * @param underCredentialKey
+     *            whether this value sits, at any depth, under a credential-named
+     *            key
+     */
+    private static Object redactDetailedValue(Object value, boolean underCredentialKey) {
+        if (underCredentialKey && (value instanceof Map<?, ?> || value instanceof Collection<?> || value instanceof Object[])) {
+            // Everything beneath a credential-named key is secret material — map KEYS
+            // included, and a pattern filter cannot recognise a shapeless credential used
+            // as a key ({"authorization":{"mytenantcredential123":"x"}}). Masking the keys
+            // one by one could also collapse distinct keys onto one placeholder, so the
+            // whole container is replaced.
+            return SecretRedactionFilter.REDACTED;
+        }
+        if (value instanceof String s) {
+            return underCredentialKey
+                    ? SecretRedactionFilter.redact(SecretRedactionFilter.maskCredentialValue(s))
+                    : SecretRedactionFilter.redact(s);
+        }
+        if (underCredentialKey && value instanceof Number number) {
+            String asText = number.toString();
+            String masked = SecretRedactionFilter.maskCredentialValue(asText);
+            return masked.equals(asText) ? value : masked;
+        }
+        if (value instanceof Map<?, ?> map) {
+            var redacted = new LinkedHashMap<Object, Object>();
+            for (var entry : map.entrySet()) {
+                boolean credentialKey = underCredentialKey
+                        || entry.getKey() instanceof String k && SecretRedactionFilter.isCredentialFieldName(k);
+                var key = entry.getKey() instanceof String k ? SecretRedactionFilter.redact(k) : entry.getKey();
+                redacted.put(key, redactDetailedValue(entry.getValue(), credentialKey));
+            }
+            return redacted;
+        }
+        if (value instanceof Collection<?> collection) {
+            var redacted = new ArrayList<Object>(collection.size());
+            for (var element : collection) {
+                redacted.add(redactDetailedValue(element, underCredentialKey));
+            }
+            return redacted;
+        }
+        if (value instanceof Object[] array) {
+            var redacted = new Object[array.length];
+            for (int i = 0; i < array.length; i++) {
+                redacted[i] = redactDetailedValue(array[i], underCredentialKey);
+            }
+            return redacted;
+        }
+        return value;
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
@@ -226,7 +315,25 @@ public class ConversationMemoryUtilities {
         var conversationOutputs = conversationMemorySnapshot.getConversationOutputs();
         conversationOutputs = returnCurrentStepOnly ? List.of(conversationOutputs.getLast()) : conversationOutputs;
         if (returnDetailed) {
-            newSnapshot.getConversationOutputs().addAll(conversationOutputs);
+            // returnDetailed is caller-controlled and reachable by any chatting user, so
+            // the detailed projection must not leak internal step data: drop denylisted
+            // keys (audit:*, *:trace:*, *Error) and run every value through the current
+            // SecretRedactionFilter — the same discipline the SSE path already applies.
+            // Without this a plain user could read the compiled system prompt, the raw
+            // model trace and raw error bodies by setting returnDetailed=true. Admin
+            // debugging still has the owner/admin-gated raw endpoint for full fidelity.
+            var newConversationOutputs = newSnapshot.getConversationOutputs();
+            for (var conversationOutput : conversationOutputs) {
+                var newConversationOutput = new ConversationOutput();
+                for (var key : conversationOutput.keySet()) {
+                    if (isSensitiveDetailedKey(key)) {
+                        continue;
+                    }
+                    newConversationOutput.put(key,
+                            redactDetailedValue(conversationOutput.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
+                }
+                newConversationOutputs.add(newConversationOutput);
+            }
         } else {
             var newConversationOutputs = newSnapshot.getConversationOutputs();
             for (int index = 0; index < conversationOutputs.size(); index++) {
@@ -254,16 +361,24 @@ public class ConversationMemoryUtilities {
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
                     var key = resultSnapshot.getKey();
-                    if (returnDetailed || key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
-                            || key.startsWith(QUICK_REPLIES_PREFIX)) {
-
-                        var result = resultSnapshot.getResult();
-                        simpleConversationStep.getConversationStep()
-                                .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
-
-                    } else {
+                    boolean whitelisted = key.equals(INPUT_INITIAL.key()) || key.startsWith(ACTIONS.key()) || key.startsWith(OUTPUT_PREFIX)
+                            || key.startsWith(QUICK_REPLIES_PREFIX);
+                    // returnDetailed exposes every step datum; denylist the sensitive
+                    // internal keys and redact detailed values (see the outputs branch
+                    // above). The non-detailed whitelist is returned verbatim as before.
+                    if (returnDetailed) {
+                        if (isSensitiveDetailedKey(key)) {
+                            continue;
+                        }
+                    } else if (!whitelisted) {
                         continue;
                     }
+
+                    var result = returnDetailed
+                            ? redactDetailedValue(resultSnapshot.getResult(), SecretRedactionFilter.isCredentialFieldName(key))
+                            : resultSnapshot.getResult();
+                    simpleConversationStep.getConversationStep()
+                            .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
 
                     simpleConversationStep.setTimestamp(resultSnapshot.getTimestamp());
                 }

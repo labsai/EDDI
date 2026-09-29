@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -281,8 +282,12 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildOllama(Map<String, String> params) {
+        String baseUrl = params.getOrDefault("baseUrl", "http://localhost:11434");
+        // Never let the embedding endpoint point at the cloud instance-metadata
+        // service (always-on, independent of eddi.security.ssrf-protection.enabled).
+        UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
         return OllamaEmbeddingModel.builder().modelName(params.getOrDefault("model", "nomic-embed-text"))
-                .baseUrl(params.getOrDefault("baseUrl", "http://localhost:11434")).build();
+                .baseUrl(baseUrl).build();
     }
 
     // ──────────────────────────────────────────────────

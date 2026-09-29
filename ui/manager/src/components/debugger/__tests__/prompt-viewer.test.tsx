@@ -294,14 +294,19 @@ describe("PromptViewer", () => {
   });
 
   // ── Tool calls display ─────────────────────────────────────────────
-  it("displays tool calls section when present", async () => {
+  it("displays tool calls from the backend's `{calls: [...]}` map", async () => {
+    // AuditEntry.toolCalls is a Map on the wire, whose `calls` are trace events.
+    // Reading it as an array meant tool calls never rendered at all.
     server.use(
       http.get("*/auditstore/:conversationId", () => {
         return HttpResponse.json([
           makeLlmEntry({
-            toolCalls: [
-              { name: "search", arguments: { query: "test" } },
-            ],
+            toolCalls: {
+              calls: [
+                { type: "tool_call", tool: "search", arguments: '{"query":"test"}' },
+                { type: "tool_result", tool: "search", result: "3 hits" },
+              ],
+            },
           }),
         ]);
       })
@@ -310,8 +315,9 @@ describe("PromptViewer", () => {
     renderViewer("conv-tools");
 
     await waitFor(() => {
-      expect(screen.getByText(/Tool Calls/i)).toBeInTheDocument();
-      expect(screen.getByText(/search/)).toBeInTheDocument();
+      expect(screen.getByText(/Tool Calls \(1\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/"tool": "search"/)).toBeInTheDocument();
+      expect(screen.getByText(/3 hits/)).toBeInTheDocument();
     }, { timeout: 5000 });
   });
 
