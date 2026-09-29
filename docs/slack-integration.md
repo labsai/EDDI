@@ -495,7 +495,9 @@ card's buttons carry a random card id that is recorded with the card, and a
 click is accepted only from the card recorded for the conversation's (or
 group's) current pause. An older card of the same conversation cannot approve a
 newer pause, and a button without a card id — a card posted before this
-binding — is refused. See [HITL → Slack Integration](hitl.md#slack-integration).
+binding — is refused. The button value is `<integration>|<subject>|<cardId>`, so an
+integration name may not contain `|` (refused on save). See
+[HITL → Slack Integration](hitl.md#slack-integration).
 
 ### Retry Logic
 
