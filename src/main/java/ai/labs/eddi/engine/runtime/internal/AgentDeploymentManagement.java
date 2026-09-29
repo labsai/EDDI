@@ -132,6 +132,28 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     /** Replaced in tests, so that the backoff can be stepped through. */
     Clock clock = Clock.systemUTC();
 
+    /**
+     * True while {@link #autoDeployAgents()} runs the startup migrations.
+     *
+     * <p>
+     * The sweep used to wait for the rename migration only. The scheduled tick that
+     * followed its completion then deployed agents while the startup thread was
+     * still converting their Thymeleaf templates to Qute; such an agent kept the
+     * templates it had loaded, was READY, and so was never redeployed — it rendered
+     * its templates as literal text until a restart. The sweep now waits for all of
+     * them.
+     * </p>
+     */
+    private final AtomicBoolean startupMigrationsRunning = new AtomicBoolean();
+
+    /**
+     * Serializes {@link #checkDeployments()}. {@code SKIP} only stops one scheduled
+     * tick overlapping the next; the startup path calls the sweep itself, and two
+     * passes deploying the same agents at once shared an unsynchronized list and
+     * could record a deployment the other pass then failed.
+     */
+    private final Object sweepLock = new Object();
+
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -167,6 +189,19 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Override
     public void autoDeployAgents() {
         LOGGER.info("Starting deployment of agents...");
+        startupMigrationsRunning.set(true);
+        try {
+            runStartupMigrationsAndDeploy();
+        } finally {
+            // Also when a migration threw past its own guard: a sweep parked for good
+            // would never deploy anything, which is worse than deploying on configs
+            // a failed migration left as they were.
+            startupMigrationsRunning.set(false);
+        }
+        LOGGER.info("Finished deployment of agents.");
+    }
+
+    private void runStartupMigrationsAndDeploy() {
 
         // V6 rename migration must run before document-level migrations.
         // Each migration is independently guarded: a failure logs the error
@@ -196,6 +231,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
+            startupMigrationsRunning.set(false);
             checkDeployments();
             if (v6RenameMigration.isPending()) {
                 // The sweep above was parked, so nothing has been deployed yet.
@@ -218,8 +254,6 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
             reportReady();
         });
-
-        LOGGER.info("Finished deployment of agents.");
     }
 
     /**
@@ -243,6 +277,16 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     // SKIP because a slow pass must not overlap the next tick and double-deploy.
     @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
+        synchronized (sweepLock) {
+            sweep();
+        }
+    }
+
+    private void sweep() {
+        if (startupMigrationsRunning.get()) {
+            LOGGER.debug("Deployment sweep parked: the startup migrations are still running.");
+            return;
+        }
         // This sweep retires — deletes — the deployment row of any agent whose config
         // it cannot read, and it runs on its own schedule rather than after the
         // startup migrations. While the 6.x rename migration is outstanding the agent
@@ -294,8 +338,16 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
-                            if (endedInError(deploymentInfo)) {
+                            Deployment.Status outcome = deployedStatus(deploymentInfo);
+                            if (outcome == Deployment.Status.ERROR) {
                                 recordFailure(deploymentInfo, "the deployment ended in ERROR — its cause is logged above", null);
+                                return;
+                            }
+                            if (outcome != Deployment.Status.READY) {
+                                // Still in progress elsewhere (a REST deploy), or not registered:
+                                // not done, and not a failure either — the next sweep looks again.
+                                LOGGER.debugf("Deployment of agent %s version %d not confirmed yet (%s); checked again on the next sweep",
+                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), outcome);
                                 return;
                             }
                             recordSuccess(deploymentInfo);
@@ -307,10 +359,10 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            recordFailure(deploymentInfo, e.getMessage(), null);
-
                             // If the root cause is a missing resource, auto-clean the stale record
-                            if (isCausedByResourceNotFound(e)) {
+                            if (!isCausedByResourceNotFound(e)) {
+                                recordFailure(deploymentInfo, e.getMessage(), null);
+                            } else {
                                 LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
                                 deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
@@ -340,17 +392,18 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     }
 
     /**
-     * Whether {@code deployAgent} returned normally but left the agent in ERROR —
-     * the way it reports a workflow that cannot be built. A status that cannot be
-     * read is not taken for an error: the call returned, and the previous behaviour
-     * (recording it as done) is kept.
+     * The status the registry reports after {@code deployAgent} returned, or
+     * {@code null} when it has none. {@code deployAgent} reports a workflow that
+     * cannot be built by leaving the agent in ERROR and returning normally, and it
+     * returns at once when another caller holds the deployment IN_PROGRESS — so
+     * only READY means this deployment is done.
      */
-    private boolean endedInError(DeploymentInfo deploymentInfo) {
+    private Deployment.Status deployedStatus(DeploymentInfo deploymentInfo) {
         try {
             var agent = agentFactory.getAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
-            return agent != null && agent.getDeploymentStatus() == Deployment.Status.ERROR;
+            return agent == null ? null : agent.getDeploymentStatus();
         } catch (Exception e) {
-            return false;
+            return null;
         }
     }
 

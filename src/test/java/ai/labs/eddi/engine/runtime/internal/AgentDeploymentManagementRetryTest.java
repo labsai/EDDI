@@ -38,10 +38,13 @@ import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
@@ -72,6 +75,8 @@ class AgentDeploymentManagementRetryTest {
     private AgentDeploymentManagement management;
     private Instant now;
     private IAgent agent;
+    private V6QuteMigration qute;
+    private IMigrationManager migrationManager;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -81,9 +86,11 @@ class AgentDeploymentManagementRetryTest {
         var runtime = mock(IRuntime.class);
         when(runtime.getScheduledExecutorService()).thenReturn(mock(ScheduledExecutorService.class));
 
+        qute = mock(V6QuteMigration.class);
+        migrationManager = mock(IMigrationManager.class);
         management = new AgentDeploymentManagement(deploymentStore, agentFactory, mock(IAgentStore.class), readiness,
-                mock(IConversationMemoryStore.class), mock(IDocumentDescriptorStore.class), mock(IMigrationManager.class),
-                mock(V6RenameMigration.class), mock(V6QuteMigration.class), mock(ChannelConnectorMigration.class),
+                mock(IConversationMemoryStore.class), mock(IDocumentDescriptorStore.class), migrationManager,
+                mock(V6RenameMigration.class), qute, mock(ChannelConnectorMigration.class),
                 mock(WorkspaceAccessIndexMigration.class), runtime, mock(IWorkflowStore.class), mock(IRuleSetStore.class), 30);
         now = START;
         management.clock = new Clock() {
@@ -210,7 +217,68 @@ class AgentDeploymentManagementRetryTest {
         assertEquals(HealthCheckResponse.Status.UP, response.getStatus());
         assertTrue(response.getData().isPresent());
         assertEquals(2L, response.getData().get().get("agentsInErrorCount"));
-        assertEquals("production/agent-a/1, production/agent-b/2", response.getData().get().get("agentsInError"));
+        assertFalse(response.getData().get().containsKey("agentsInError"),
+                "/q/health is unauthenticated: the check reports how many agents are in ERROR, not which");
+        assertEquals(List.of("production/agent-a/1", "production/agent-b/2"), readiness.getAgentsInError());
+    }
+
+    @Test
+    @DisplayName("a deployment whose outcome is not READY yet is neither recorded as done nor reported as failed")
+    void unconfirmedOutcomeIsRetriedSilently() throws Exception {
+        deployed(info("agent-a", 1));
+        when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(null, agent);
+        when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+
+        sweepAt(Duration.ZERO);
+        assertEquals(List.of(), readiness.getAgentsInError());
+
+        sweepAt(Duration.ofSeconds(1));
+        verify(agentFactory, times(2)).deployAgent(Environment.production, "agent-a", 1, null);
+
+        sweepAt(Duration.ofSeconds(2));
+        verify(agentFactory, times(2)).deployAgent(Environment.production, "agent-a", 1, null);
+    }
+
+    /**
+     * A scheduled tick that fires while the startup thread is still converting
+     * templates must deploy nothing: an agent built then keeps its Thymeleaf
+     * templates, is READY, and is never redeployed.
+     */
+    @Test
+    @DisplayName("the sweep deploys nothing while the startup migrations after the rename are still running")
+    void sweepWaitsForEveryStartupMigration() throws Exception {
+        deployed(info("agent-a", 1));
+        when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        List<Integer> deploysDuringQute = new ArrayList<>();
+        doAnswer(invocation -> {
+            management.checkDeployments(); // a scheduled tick landing mid-migration
+            deploysDuringQute.add(mockingDetails(agentFactory).getInvocations().stream()
+                    .filter(i -> i.getMethod().getName().equals("deployAgent")).toList().size());
+            return null;
+        }).when(qute).runIfNeeded();
+        doAnswer(invocation -> {
+            ((IMigrationManager.IMigrationFinished) invocation.getArgument(0)).onComplete();
+            return null;
+        }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+        management.autoDeployAgents();
+
+        assertEquals(List.of(0), deploysDuringQute);
+        verify(agentFactory, times(1)).deployAgent(Environment.production, "agent-a", 1, null);
+        assertTrue(readiness.isAgentsReady());
+    }
+
+    @Test
+    @DisplayName("a startup migration that throws past its guard does not park the sweep for good")
+    void sweepIsReleasedWhenStartupThrows() throws Exception {
+        deployed(info("agent-a", 1));
+        when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        doThrow(new IllegalStateException("migration manager failed")).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+        assertThrows(IllegalStateException.class, () -> management.autoDeployAgents());
+        sweepAt(Duration.ZERO);
+
+        verify(agentFactory, times(1)).deployAgent(Environment.production, "agent-a", 1, null);
     }
 
     @Test

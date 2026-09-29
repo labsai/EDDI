@@ -74,4 +74,24 @@ class V6QuteMigrationUnconvertibleTest extends MongoTestBase {
                 converted.getList("httpCalls", Document.class).getFirst().get("request", Document.class).getString("body"));
         verify(migrationLog, never()).createMigrationLog(any());
     }
+
+    /**
+     * The check for a conversion that did not happen looks for Thymeleaf
+     * delimiters. Text that merely names Thymeleaf syntax — a prompt explaining
+     * {@code th:if}, say — is not a template left behind, and must not keep the
+     * migration incomplete.
+     */
+    @Test
+    @DisplayName("text that mentions th:if beside a real template is converted, and the migration completes")
+    void textMentioningThymeleafIsNotAFailure() {
+        var apicalls = getDatabase().getCollection("apicalls");
+        apicalls.insertOne(apiCall(CLEAN, "Explain what th:if does. Hello [[${properties.name}]]", "fixed"));
+
+        new V6QuteMigration(getDatabase(), migrationLog, new TemplateSyntaxMigrator(), true).runIfNeeded();
+
+        Document converted = apicalls.find(new Document("_id", CLEAN)).first();
+        assertEquals("Explain what th:if does. Hello {properties.name}",
+                converted.getList("httpCalls", Document.class).getFirst().get("request", Document.class).getString("body"));
+        verify(migrationLog).createMigrationLog(any());
+    }
 }

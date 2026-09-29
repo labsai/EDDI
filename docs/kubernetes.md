@@ -543,7 +543,7 @@ EDDI provides three probe endpoints:
 | `/q/health/ready` | Readiness + Startup | DB connected, ready for traffic |
 | `/q/metrics` | — | Prometheus metrics |
 
-Readiness includes the check `Agents are ready health check`. It is DOWN until the startup migrations have run and the first deployment pass has finished. An agent that fails to deploy does **not** make it DOWN: one broken agent would otherwise take every replica out of rotation. Instead, the check reports each such deployment in its data, as `agentsInErrorCount` and `agentsInError` (`environment/agentId/version`, at most 20 listed). Watch that count after a deploy or an upgrade. A failed deployment is retried after 10 s, then with a doubling delay capped at 5 minutes, and is logged once when it starts failing and once when it recovers.
+Readiness includes the check `Agents are ready health check`. It is DOWN until the startup migrations have run and the first deployment pass has finished. An agent that fails to deploy does **not** make it DOWN: one broken agent would otherwise take every replica out of rotation. Instead, the check counts such deployments in its data, as `agentsInErrorCount`. It gives only the count because `/q/health` is reachable without authentication. Which agents failed is in the log and in the authenticated `GET /administration/{environment}/deploymentstatus`. Watch that count after a deploy or an upgrade. A failed deployment is retried after 10 s, then with a doubling delay capped at 5 minutes, and is logged once when it starts failing and once when it recovers.
 
 ## File Structure
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.engine.model.AgentDeployment;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -166,6 +168,49 @@ class V6RenameMigrationTriggersTest extends MongoTestBase {
         assertEquals(triggersAfterFirst, getDatabase().getCollection("agenttriggers").find().into(new ArrayList<>()));
         assertEquals(mappingsAfterFirst, getDatabase().getCollection("userconversations").find().into(new ArrayList<>()));
         assertTrue(triggersAfterFirst.getFirst().containsKey("agentDeployments"));
+    }
+
+    /**
+     * Before 6.5 the rename migration did not touch triggers. A database it already
+     * migrated has them under {@code bottriggers}, where the 6.x store never looks.
+     */
+    @Test
+    @DisplayName("on a database an earlier 6.x migrated, the triggers left under bottriggers are migrated")
+    void triggersCaughtUpAfterAnEarlierMigration() throws Exception {
+        insertV5Trigger("synthetic-intent", v5Deployment("unrestricted", AGENT_A));
+        insertV5UserConversation("synthetic-intent", "synthetic-user");
+        when(migrationLog.readMigrationLog(any())).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+
+        boot();
+
+        assertEquals(AGENT_A, triggers.readAgentTrigger("synthetic-intent").getAgentDeployments().getFirst().getAgentId());
+        assertEquals(0, getDatabase().getCollection("bottriggers").countDocuments());
+        assertFalse(getDatabase().getCollection("userconversations").find().first().containsKey("botId"));
+        verify(migrationLog, never()).createMigrationLog(any());
+    }
+
+    @Test
+    @DisplayName("v5 environments are matched ignoring case, as the per-document pass did")
+    void environmentCaseIsIgnored() {
+        getDatabase().getCollection("userconversations").insertOne(new Document("_id", new ObjectId()).append("userId", "synthetic-user")
+                .append("agentId", AGENT_A).append("conversationId", CONVERSATION).append("environment", "Unrestricted")
+                .append("intent", "synthetic-intent"));
+
+        boot();
+
+        assertEquals("production", getDatabase().getCollection("userconversations").find().first().getString("environment"));
+    }
+
+    @Test
+    @DisplayName("a trigger entry without an environment does not gain an explicit null one")
+    void absentEnvironmentStaysAbsent() {
+        insertV5Trigger("synthetic-intent", new Document("botId", AGENT_A));
+
+        boot();
+
+        Document entry = getDatabase().getCollection("agenttriggers").find().first().getList("agentDeployments", Document.class).getFirst();
+        assertFalse(entry.containsKey("environment"));
+        assertEquals(AGENT_A, entry.getString("agentId"));
     }
 
     @Test

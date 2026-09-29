@@ -2511,7 +2511,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Final pass: migrate any remaining Thymeleaf template syntax to Qute. A
             // template the converter cannot convert safely is imported unchanged
             // rather than rewritten wrongly; say so, since it renders as literal text.
-            String unconvertible = templateSyntaxMigrator.unconvertibleReason(resourceContent);
+            String unconvertible = templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)
+                    ? templateSyntaxMigrator.unconvertibleReason(resourceContent)
+                    : null;
             if (unconvertible != null) {
                 LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
                         resourcePath.getFileName(), unconvertible);
