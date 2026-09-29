@@ -826,8 +826,11 @@ public class SlackEventHandler {
         // pause that began before it was written. A normal-turn pause and an
         // init-turn pause detected on the next say both route here — the first wins
         // the record; re-message-while-paused is a no-op. The record is removed
-        // below if delivery fails.
+        // below if delivery fails. The record also carries a fresh card id that goes
+        // into this card's buttons, so only THIS card can resolve this pause — an
+        // older card for the same conversation cannot approve it.
         String integrationName = integration.getName();
+        String cardId = ISlackApprovalRecordStore.newCardId();
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
@@ -835,7 +838,7 @@ public class SlackEventHandler {
             includeButtons = false; // unbindable — a decision on it would be refused
         } else {
             try {
-                if (!approvalRecords.tryRecord(integrationName, conversationId, pauseEpoch, approvalChannel)) {
+                if (!approvalRecords.tryRecord(integrationName, conversationId, pauseEpoch, cardId, approvalChannel)) {
                     return;
                 }
                 recorded = true;
@@ -855,9 +858,9 @@ public class SlackEventHandler {
                         bookmark.getHitlApprovalTimeout())
                 : null;
 
-        // The button value carries the owning integration name so the decision is
-        // bound to THIS integration at the interactivity endpoint (IDOR-safe).
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId);
+        // The button value carries the owning integration name and this card's id,
+        // so the decision is bound to THIS integration and THIS card.
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(

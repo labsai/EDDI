@@ -45,6 +45,7 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
     private static final String FIELD_INTEGRATION = "integrationName";
     private static final String FIELD_SUBJECT = "subject";
     private static final String FIELD_PAUSE = "pauseEpoch";
+    private static final String FIELD_CARD = "cardId";
     private static final String FIELD_CHANNEL = "approvalChannelId";
     private static final String FIELD_CREATED = "createdAt";
     private static final String FIELD_EXPIRES = "expiresAt";
@@ -66,7 +67,8 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
     }
 
     @Override
-    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String approvalChannelId) {
+    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String cardId,
+                             String approvalChannelId) {
         Instant now = Instant.now();
         // Upsert whose filter only matches an EXPIRED record: an expired record is
         // replaced in place (→ true), no record is inserted (→ true), and a LIVE
@@ -79,6 +81,7 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
                 Filters.eq(FIELD_PAUSE, pauseEpoch),
                 Filters.lte(FIELD_EXPIRES, Date.from(now)));
         var update = Updates.combine(
+                Updates.set(FIELD_CARD, cardId),
                 Updates.set(FIELD_CHANNEL, approvalChannelId),
                 Updates.set(FIELD_CREATED, Date.from(now)),
                 Updates.set(FIELD_EXPIRES, Date.from(now.plus(retention))));
@@ -119,6 +122,7 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
                 document.getString(FIELD_INTEGRATION),
                 document.getString(FIELD_SUBJECT),
                 document.getString(FIELD_PAUSE),
+                document.getString(FIELD_CARD),
                 document.getString(FIELD_CHANNEL),
                 toInstant(document.getDate(FIELD_CREATED)),
                 toInstant(document.getDate(FIELD_EXPIRES)));

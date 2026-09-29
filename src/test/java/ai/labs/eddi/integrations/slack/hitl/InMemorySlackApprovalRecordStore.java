@@ -26,9 +26,10 @@ public class InMemorySlackApprovalRecordStore implements ISlackApprovalRecordSto
     }
 
     @Override
-    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String approvalChannelId) {
+    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String cardId,
+                             String approvalChannelId) {
         Instant now = Instant.now();
-        var fresh = new SlackApprovalRecord(integrationName, subject, pauseEpoch, approvalChannelId, now,
+        var fresh = new SlackApprovalRecord(integrationName, subject, pauseEpoch, cardId, approvalChannelId, now,
                 now.plus(retention));
         String key = key(integrationName, subject, pauseEpoch);
         synchronized (records) {

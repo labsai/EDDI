@@ -28,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,6 +52,8 @@ class SlackInteractivityHandlerTest {
     private IGroupConversationService groupConversationService;
     private SlackWebApiClient slackApi;
     private InMemorySlackApprovalRecordStore approvalRecords;
+    /** Card id of the latest card each {@code integration|subject} posted. */
+    private final Map<String, String> cardIds = new HashMap<>();
     private SlackInteractivityHandler handler;
 
     @BeforeEach
@@ -70,8 +73,13 @@ class SlackInteractivityHandlerTest {
         groupPausedAt("gc-7", PAUSED_AT);
     }
 
-    private void notified(String integrationName, String subject, Instant pausedAt) {
-        approvalRecords.tryRecord(integrationName, subject, ISlackApprovalRecordStore.pauseEpochOf(pausedAt), "C_APPROVAL");
+    /** Record a card as the posting path does; returns the card's id. */
+    private String notified(String integrationName, String subject, Instant pausedAt) {
+        String cardId = ISlackApprovalRecordStore.newCardId();
+        approvalRecords.tryRecord(integrationName, subject, ISlackApprovalRecordStore.pauseEpochOf(pausedAt), cardId,
+                "C_APPROVAL");
+        cardIds.put(integrationName + "|" + subject, cardId);
+        return cardId;
     }
 
     private void conversationPausedAt(String conversationId, Instant pausedAt) {
@@ -112,9 +120,17 @@ class SlackInteractivityHandlerTest {
         return cfg;
     }
 
-    /** Value carries the owning integration name: {@code <name>|<subject>}. */
+    /**
+     * Value of the latest card INT_NAME posted for {@code subject}:
+     * {@code <name>|<subject>|<cardId>}. A subject INT_NAME never posted a card for
+     * gets a card id no record holds.
+     */
     private String value(String subject) {
-        return SlackHitlSupport.buildActionValue(INT_NAME, subject);
+        return value(subject, cardIds.getOrDefault(INT_NAME + "|" + subject, ISlackApprovalRecordStore.newCardId()));
+    }
+
+    private String value(String subject, String cardId) {
+        return SlackHitlSupport.buildActionValue(INT_NAME, subject, cardId);
     }
 
     private String approvePayload(String slackUserId, String value) {
@@ -390,16 +406,16 @@ class SlackInteractivityHandlerTest {
         Instant now = Instant.now();
         // Card posted before the bookmark was readable: no pause epoch, written now.
         approvalRecords.put(new SlackApprovalRecord(INT_NAME, "conv-2", ISlackApprovalRecordStore.UNKNOWN_PAUSE,
-                "C_APPROVAL", now, now.plus(Duration.ofDays(1))));
+                "card-2", "C_APPROVAL", now, now.plus(Duration.ofDays(1))));
 
         // A pause that began after the card was written cannot be the one it was for.
         conversationPausedAt("conv-2", now.plusSeconds(30));
-        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2")));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2", "card-2")));
         verify(conversationService, never()).resumeConversation(eq("conv-2"), any(), any());
 
         // The pause that was already running when the card was posted is.
         conversationPausedAt("conv-2", now.minusMillis(200));
-        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2")));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2", "card-2")));
         verify(conversationService).resumeConversation(eq("conv-2"), any(), isNull());
     }
 
@@ -408,10 +424,10 @@ class SlackInteractivityHandlerTest {
         bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
         Instant longAgo = PAUSED_AT.minus(Duration.ofDays(60));
         approvalRecords.put(new SlackApprovalRecord(INT_NAME, "conv-3", ISlackApprovalRecordStore.pauseEpochOf(longAgo),
-                "C_APPROVAL", longAgo, longAgo.plus(Duration.ofDays(30))));
+                "card-3", "C_APPROVAL", longAgo, longAgo.plus(Duration.ofDays(30))));
         conversationPausedAt("conv-3", longAgo);
 
-        handler.handlePayload(approvePayload("U_APPROVER", value("conv-3")));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-3", "card-3")));
 
         verify(conversationService, never()).resumeConversation(any(), any(), any());
     }
@@ -456,18 +472,94 @@ class SlackInteractivityHandlerTest {
 
     @Test
     void matchesPause_exactEpochOrUnknownWrittenAfterPause() {
-        var exact = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.pauseEpochOf(PAUSED_AT), null,
-                PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        var exact = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.pauseEpochOf(PAUSED_AT), "card",
+                null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
         assertTrue(exact.matchesPause(PAUSED_AT));
         assertFalse(exact.matchesPause(PAUSED_AT.plusMillis(1)));
         assertFalse(exact.matchesPause(null));
 
-        var unknown = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.UNKNOWN_PAUSE, null,
-                PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        var unknown = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.UNKNOWN_PAUSE, "card",
+                null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
         assertTrue(unknown.matchesPause(PAUSED_AT));
         assertTrue(unknown.matchesPause(PAUSED_AT.minusSeconds(1)));
         assertFalse(unknown.matchesPause(PAUSED_AT.plusSeconds(1)));
         assertEquals(List.of(), approvalRecords.findBySubject(INT_NAME, "nothing"));
+    }
+
+    @Test
+    void matchesCard_exactIdOnly_andNeverWithoutOne() {
+        var record = new SlackApprovalRecord(INT_NAME, "c", "1", "card-a", null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        assertTrue(record.matchesCard("card-a"));
+        assertFalse(record.matchesCard("card-b"));
+        assertFalse(record.matchesCard("card-a2"));
+        assertFalse(record.matchesCard(null));
+        assertFalse(record.matchesCard(""));
+        var noId = new SlackApprovalRecord(INT_NAME, "c", "1", null, null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
+        assertFalse(noId.matchesCard(null));
+        assertFalse(noId.matchesCard("card-a"));
+    }
+
+    // --- Card binding: a click is bound to the card it was made on ---
+
+    @Test
+    void staleCardOfSameConversation_cannotResolveTheCurrentPause_butTheCurrentCardCan() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        // conv-1's first card ("delete file A") is still in the channel. That pause
+        // was resolved, the conversation paused again ("delete everything"), and a
+        // NEW card was posted for the new pause.
+        String staleValue = value("conv-1");
+        Instant secondPause = PAUSED_AT.plusSeconds(60);
+        conversationPausedAt("conv-1", secondPause);
+        notified(INT_NAME, "conv-1", secondPause);
+
+        // Clicking the OLD card must not approve an action the approver never saw.
+        handler.handlePayload(approvePayload("U_APPROVER", staleValue));
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                contains("already been resolved"), any());
+
+        // The card posted for the current pause does resolve it.
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+        verify(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+    }
+
+    @Test
+    void staleCardOfSameGroup_cannotResolveTheCurrentPause_butTheCurrentCardCan() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        String staleValue = value(GROUP_SUBJECT);
+        Instant secondPause = PAUSED_AT.plusSeconds(60);
+        groupPausedAt("gc-7", secondPause);
+        notified(INT_NAME, GROUP_SUBJECT, secondPause);
+
+        handler.handlePayload(approvePayload("U_APPROVER", staleValue));
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(GROUP_SUBJECT)));
+        verify(groupConversationService).resumeDiscussion(eq("gc-7"), any(), isNull());
+    }
+
+    @Test
+    void unboundLegacyValue_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        // "<integration>|<subject>" with no card id: a card posted before card
+        // binding. It cannot be tied to one card, so it must not resolve the pause
+        // even though a live record for the current pause exists.
+        handler.handlePayload(approvePayload("U_APPROVER", INT_NAME + "|conv-1"));
+        handler.handlePayload(approvePayload("U_APPROVER", INT_NAME + "|" + GROUP_SUBJECT));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(groupConversationService, never()).resumeDiscussion(any(), any(), any());
+    }
+
+    @Test
+    void unknownCardId_isRefused() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        // A live record exists for conv-1's current pause, but the click names a
+        // card id no record holds (an edited or hand-built button).
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1", ISlackApprovalRecordStore.newCardId())));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), anyString(), any());
     }
 
     // ─── Ignored payloads ───

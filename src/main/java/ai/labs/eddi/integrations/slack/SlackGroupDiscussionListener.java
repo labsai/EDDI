@@ -443,10 +443,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             }
             boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
             String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
-            // The button value carries the owning integration name so the group
-            // decision is bound to THIS integration at the interactivity endpoint.
+            // The button value carries the owning integration name and this card's id,
+            // so the group decision is bound to THIS integration and THIS card — an
+            // older card for the same discussion cannot approve a later phase.
             String subject = SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId;
-            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject);
+            String cardId = ISlackApprovalRecordStore.newCardId();
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId);
 
             // Record the card BEFORE posting it, keyed by this pause's identity: the
             // interactivity endpoint refuses a decision on a subject this integration
@@ -460,7 +462,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                     includeButtons = false;
                 } else {
                     try {
-                        if (!approvalRecords.tryRecord(integrationName, subject, pauseEpoch, hitlApprovalChannel)) {
+                        if (!approvalRecords.tryRecord(integrationName, subject, pauseEpoch, cardId, hitlApprovalChannel)) {
                             return; // a card for this pause was already posted
                         }
                         recorded = true;

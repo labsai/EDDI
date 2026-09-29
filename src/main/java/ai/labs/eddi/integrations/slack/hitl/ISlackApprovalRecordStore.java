@@ -4,7 +4,11 @@
  */
 package ai.labs.eddi.integrations.slack.hitl;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -25,6 +29,17 @@ import java.util.List;
  * {@code (integrationName, subject)} whose pause identity is the pause the
  * subject is in right now — so a card can only resolve the pause it was posted
  * for, by the integration that posted it.
+ * <p>
+ * <b>Card binding.</b> Matching the subject and the current pause is not enough
+ * on its own: every card of one subject would carry the same
+ * {@code <integration>|<subject>}, so an approver clicking an OLD card (say,
+ * "delete file A") while a NEW pause of the same conversation is live ("delete
+ * everything") would approve the new action without ever having seen it. Each
+ * record therefore carries a random {@link SlackApprovalRecord#cardId() card
+ * id}, generated before the record is written and embedded in that card's
+ * buttons ({@code <integration>|<subject>|<cardId>}). A decision is accepted
+ * only from the card whose id is on the record for the current pause; a button
+ * without a card id (a card posted before this binding existed) is refused.
  * <p>
  * It doubles as the idempotency marker for posting ("one card per pause"),
  * which used to be an in-memory cache and so re-posted after every restart.
@@ -56,6 +71,9 @@ public interface ISlackApprovalRecordStore {
      * @param pauseEpoch
      *            epoch millis of the pause the card was posted for, as a string, or
      *            {@link #UNKNOWN_PAUSE}
+     * @param cardId
+     *            the random id embedded in this card's buttons (see
+     *            {@link #newCardId()}); a missing id never matches
      * @param approvalChannelId
      *            the channel the card was posted to (diagnostics only)
      * @param createdAt
@@ -63,8 +81,21 @@ public interface ISlackApprovalRecordStore {
      * @param expiresAt
      *            when it stops being honoured
      */
-    record SlackApprovalRecord(String integrationName, String subject, String pauseEpoch,
+    record SlackApprovalRecord(String integrationName, String subject, String pauseEpoch, String cardId,
             String approvalChannelId, Instant createdAt, Instant expiresAt) {
+
+        /**
+         * Whether a clicked button carrying {@code presentedCardId} belongs to this
+         * card. Constant-time; a missing id on either side never matches, so neither a
+         * legacy button nor a record without an id can resolve anything.
+         */
+        public boolean matchesCard(String presentedCardId) {
+            if (cardId == null || cardId.isEmpty() || presentedCardId == null || presentedCardId.isEmpty()) {
+                return false;
+            }
+            return MessageDigest.isEqual(cardId.getBytes(StandardCharsets.UTF_8),
+                    presentedCardId.getBytes(StandardCharsets.UTF_8));
+        }
 
         /**
          * Whether this card was posted for the pause that began at {@code pausedAt}. An
@@ -91,7 +122,29 @@ public interface ISlackApprovalRecordStore {
     }
 
     /**
+     * A fresh, unguessable card id: 128 random bits as URL-safe base64 (22
+     * characters, never {@code |}), so it can end a button value.
+     */
+    static String newCardId() {
+        byte[] bytes = new byte[16];
+        CardIds.RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /** Holds the shared generator (an interface cannot have private fields). */
+    final class CardIds {
+        private static final SecureRandom RANDOM = new SecureRandom();
+
+        private CardIds() {
+        }
+    }
+
+    /**
      * Record that {@code integrationName} is about to post a card for this pause.
+     * <p>
+     * {@code cardId} is a fresh {@link #newCardId()} that the caller embeds in the
+     * card's buttons. When this returns {@code false} no card is posted and the id
+     * is discarded.
      *
      * @return {@code true} if this call wrote the record (the caller should post
      *         the card); {@code false} if a live record for the same
@@ -102,7 +155,8 @@ public interface ISlackApprovalRecordStore {
      *             on a storage failure — never reported as {@code false}, so a
      *             failed write cannot be mistaken for "already posted"
      */
-    boolean tryRecord(String integrationName, String subject, String pauseEpoch, String approvalChannelId);
+    boolean tryRecord(String integrationName, String subject, String pauseEpoch, String cardId,
+                      String approvalChannelId);
 
     /**
      * The live (unexpired) records {@code integrationName} holds for

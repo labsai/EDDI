@@ -43,11 +43,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * raw-body signature has been verified.
  * <p>
  * Handles {@code block_actions} with action ids {@code hitl_approve} /
- * {@code hitl_reject}. The button value carries the owning integration name
- * followed by the subject: {@code <integrationName>|<conversationId>} for a
- * single conversation resume, or {@code <integrationName>|group:<gcId>} for a
- * group discussion resume. Legacy bare values (no integration name) are treated
- * as unbindable and rejected.
+ * {@code hitl_reject}. The button value carries the owning integration name,
+ * the subject and the id of the card it was posted on:
+ * {@code <integrationName>|<conversationId>|<cardId>} for a single conversation
+ * resume, or {@code <integrationName>|group:<gcId>|<cardId>} for a group
+ * discussion resume. Legacy bare values (no integration name) are treated as
+ * unbindable and rejected, and so are values without a card id.
  * <p>
  * The owning integration — resolved by NAME from the button value, not by a
  * channel lookup — governs both signature verification (see
@@ -70,6 +71,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * never notified is refused and logged; a card from an earlier pause of the
  * same subject is treated as already resolved. This holds for group decisions
  * too.
+ * <p>
+ * <b>Card binding.</b> Subject and pause alone would let an OLD card of the
+ * same subject resolve a NEW pause — an approver clicking a stale "delete file
+ * A" card would approve a later "delete everything" they never saw. So the
+ * decision must also carry the card id recorded for the current pause; a stale
+ * card's id belongs to an earlier pause's record, and a button with no card id
+ * is refused.
  *
  * @since 6.1.0
  */
@@ -194,9 +202,18 @@ public class SlackInteractivityHandler {
 
         String auth = botToken != null && !botToken.isBlank() ? "Bearer " + botToken : null;
 
-        // SUBJECT BINDING: the decision must name a subject THIS integration posted
-        // a card for, and the card must be for the pause the subject is in now.
+        // SUBJECT + CARD BINDING: the decision must come from a card THIS integration
+        // posted for the subject, and that card must be for the pause the subject is
+        // in now. A button without a card id predates card binding and cannot be tied
+        // to one card, so it is refused.
         String subject = parsed.value().subject();
+        String cardId = parsed.value().cardId();
+        if (cardId == null) {
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button is not "
+                    + "bound to an approval card",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            return;
+        }
         List<SlackApprovalRecord> records;
         try {
             records = approvalRecords.findBySubject(integration.getName(), subject);
@@ -212,6 +229,13 @@ public class SlackInteractivityHandler {
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
             return;
         }
+        SlackApprovalRecord card = records.stream().filter(r -> r.matchesCard(cardId)).findFirst().orElse(null);
+        if (card == null) {
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button does not "
+                    + "belong to an approval card this integration posted for this subject",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            return;
+        }
         // Residual TOCTOU (review Finding D, accepted): reading the pause and resuming
         // are two steps, so a resume+re-pause landing between them is not detected.
         // Closing it fully needs an expected-pausedAt threaded into
@@ -224,9 +248,10 @@ public class SlackInteractivityHandler {
             finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
             return;
         }
-        if (records.stream().noneMatch(r -> r.matchesPause(pause.pausedAt()))) {
+        if (!card.matchesPause(pause.pausedAt())) {
             // A card from an EARLIER pause of this subject: that pause was resolved,
-            // and this card must not approve the one that followed it.
+            // and this card must not approve the one that followed it — even when a
+            // newer card for the current pause exists.
             LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=card was posted "
                     + "for an earlier pause",
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));

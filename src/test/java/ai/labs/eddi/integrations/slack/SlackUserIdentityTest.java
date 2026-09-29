@@ -36,6 +36,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -239,6 +240,15 @@ class SlackUserIdentityTest {
         var records = approvalRecords.findBySubject("acme-int", "conv-1");
         assertEquals(1, records.size());
         assertTrue(records.get(0).matchesPause(pausedAt));
+
+        // The posted buttons carry the card id recorded for this pause.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Map<String, Object>>> blocks = ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
+        String cardId = records.get(0).cardId();
+        assertNotNull(cardId);
+        assertTrue(blocks.getValue().toString().contains("acme-int|conv-1|" + cardId),
+                "the approval buttons must carry this card's id");
     }
 
     @Test
@@ -256,7 +266,7 @@ class SlackUserIdentityTest {
     @Test
     void notifyApprovers_recordFailure_postsWithoutButtons() {
         var failing = mock(ISlackApprovalRecordStore.class);
-        when(failing.tryRecord(any(), any(), any(), any())).thenThrow(new IllegalStateException("db down"));
+        when(failing.tryRecord(any(), any(), any(), any(), any())).thenThrow(new IllegalStateException("db down"));
 
         newHandler(failing).notifyApprovers(resolvedWithApprovalChannel(), "conv-1", "agent-1",
                 bookmarkPausedAt(Instant.ofEpochMilli(5_000L)));

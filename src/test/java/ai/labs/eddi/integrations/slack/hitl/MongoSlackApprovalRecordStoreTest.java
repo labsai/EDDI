@@ -46,11 +46,11 @@ class MongoSlackApprovalRecordStoreTest extends MongoTestBase {
 
     @Test
     void tryRecord_firstWins_secondForSamePauseIsSuppressed() {
-        assertTrue(store.tryRecord(INT, SUBJECT, "1000", "C_APPROVAL"));
-        assertFalse(store.tryRecord(INT, SUBJECT, "1000", "C_APPROVAL"),
+        assertTrue(store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL"));
+        assertFalse(store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL"),
                 "a live record for the same (integration, subject, pause) must suppress a second card");
         // A different pause of the same subject gets its own record.
-        assertTrue(store.tryRecord(INT, SUBJECT, "2000", "C_APPROVAL"));
+        assertTrue(store.tryRecord(INT, SUBJECT, "2000", "card-2000", "C_APPROVAL"));
     }
 
     @Test
@@ -62,7 +62,7 @@ class MongoSlackApprovalRecordStoreTest extends MongoTestBase {
             List<Callable<Void>> tasks = new ArrayList<>();
             for (int i = 0; i < threads; i++) {
                 tasks.add(() -> {
-                    if (store.tryRecord(INT, SUBJECT, "9000", "C_APPROVAL")) {
+                    if (store.tryRecord(INT, SUBJECT, "9000", "card-9000", "C_APPROVAL")) {
                         winners.incrementAndGet();
                     }
                     return null;
@@ -84,25 +84,30 @@ class MongoSlackApprovalRecordStoreTest extends MongoTestBase {
         // A store with an already-elapsed retention writes rows that are immediately
         // expired; the next tryRecord must therefore succeed (replace), not be blocked.
         var shortLived = new MongoSlackApprovalRecordStore(getDatabase(), Duration.ofMillis(1));
-        assertTrue(shortLived.tryRecord(INT, "conv-ttl", "1000", "C_APPROVAL"));
+        assertTrue(shortLived.tryRecord(INT, "conv-ttl", "1000", "card-1000", "C_APPROVAL"));
         sleepPastExpiry();
         // Expired rows are not honoured by findBySubject...
         assertTrue(store.findBySubject(INT, "conv-ttl").isEmpty(), "an expired record must not be returned");
-        // ...and a fresh record can replace it.
-        assertTrue(store.tryRecord(INT, "conv-ttl", "1000", "C_APPROVAL"));
+        // ...and a fresh record can replace it, carrying the NEW card's id.
+        assertTrue(store.tryRecord(INT, "conv-ttl", "1000", "card-new", "C_APPROVAL"));
+        assertEquals("card-new", store.findBySubject(INT, "conv-ttl").get(0).cardId());
     }
 
     @Test
     void findBySubject_isScopedToIntegrationAndSubject() {
-        store.tryRecord(INT, SUBJECT, "1000", "C_APPROVAL");
-        store.tryRecord(OTHER_INT, SUBJECT, "1000", "C_APPROVAL");
-        store.tryRecord(INT, "other-subject", "1000", "C_APPROVAL");
+        store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL");
+        store.tryRecord(OTHER_INT, SUBJECT, "1000", "card-1000", "C_APPROVAL");
+        store.tryRecord(INT, "other-subject", "1000", "card-1000", "C_APPROVAL");
 
         List<SlackApprovalRecord> mine = store.findBySubject(INT, SUBJECT);
         assertEquals(1, mine.size());
         assertEquals(INT, mine.get(0).integrationName());
         assertEquals(SUBJECT, mine.get(0).subject());
         assertTrue(mine.get(0).matchesPause(Instant.ofEpochMilli(1000)));
+        // The card id round-trips, so the handler can bind a click to this card.
+        assertEquals("card-1000", mine.get(0).cardId());
+        assertTrue(mine.get(0).matchesCard("card-1000"));
+        assertFalse(mine.get(0).matchesCard("card-2000"));
         // Another integration's card for the same subject is not visible here.
         assertEquals(1, store.findBySubject(OTHER_INT, SUBJECT).size());
     }
@@ -117,10 +122,10 @@ class MongoSlackApprovalRecordStoreTest extends MongoTestBase {
 
     @Test
     void delete_removesTheRecord_soAFailedDeliveryCanRetry() {
-        store.tryRecord(INT, SUBJECT, "1000", "C_APPROVAL");
+        store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL");
         store.delete(INT, SUBJECT, "1000");
         assertTrue(store.findBySubject(INT, SUBJECT).isEmpty());
         // After delete, the same pause can be recorded again (retry path).
-        assertTrue(store.tryRecord(INT, SUBJECT, "1000", "C_APPROVAL"));
+        assertTrue(store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL"));
     }
 }

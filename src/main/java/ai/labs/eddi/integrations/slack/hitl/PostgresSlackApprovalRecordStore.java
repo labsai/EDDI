@@ -42,12 +42,19 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
                 integration_name VARCHAR(255) NOT NULL,
                 subject VARCHAR(512) NOT NULL,
                 pause_epoch VARCHAR(32) NOT NULL,
+                card_id VARCHAR(64),
                 approval_channel_id VARCHAR(255),
                 created_at TIMESTAMP NOT NULL,
                 expires_at TIMESTAMP NOT NULL,
                 PRIMARY KEY (integration_name, subject, pause_epoch)
             )
             """;
+
+    /**
+     * Adds {@code card_id} to a table created by a build that predated card
+     * binding. A row without it can never resolve a decision.
+     */
+    private static final String ADD_CARD_ID = "ALTER TABLE slack_hitl_approval_records ADD COLUMN IF NOT EXISTS card_id VARCHAR(64)";
 
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_slack_approval_expires ON slack_hitl_approval_records (expires_at)";
 
@@ -73,6 +80,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            statement.execute(ADD_CARD_ID);
             statement.execute(CREATE_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -81,16 +89,18 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     }
 
     @Override
-    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String approvalChannelId) {
+    public boolean tryRecord(String integrationName, String subject, String pauseEpoch, String cardId,
+                             String approvalChannelId) {
         createSchema();
         Instant now = Instant.now();
         sweepExpired(now);
         String sql = """
                 INSERT INTO slack_hitl_approval_records AS r
-                    (integration_name, subject, pause_epoch, approval_channel_id, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (integration_name, subject, pause_epoch) DO UPDATE
-                    SET approval_channel_id = EXCLUDED.approval_channel_id,
+                    SET card_id = EXCLUDED.card_id,
+                        approval_channel_id = EXCLUDED.approval_channel_id,
                         created_at = EXCLUDED.created_at,
                         expires_at = EXCLUDED.expires_at
                     WHERE r.expires_at <= ?
@@ -99,10 +109,11 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
             statement.setString(1, integrationName);
             statement.setString(2, subject);
             statement.setString(3, pauseEpoch);
-            statement.setString(4, approvalChannelId);
-            statement.setTimestamp(5, Timestamp.from(now));
-            statement.setTimestamp(6, Timestamp.from(now.plus(retention)));
-            statement.setTimestamp(7, Timestamp.from(now));
+            statement.setString(4, cardId);
+            statement.setString(5, approvalChannelId);
+            statement.setTimestamp(6, Timestamp.from(now));
+            statement.setTimestamp(7, Timestamp.from(now.plus(retention)));
+            statement.setTimestamp(8, Timestamp.from(now));
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to record a Slack HITL approval card", e);
@@ -113,7 +124,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     public List<SlackApprovalRecord> findBySubject(String integrationName, String subject) {
         createSchema();
         String sql = """
-                SELECT integration_name, subject, pause_epoch, approval_channel_id, created_at, expires_at
+                SELECT integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at
                   FROM slack_hitl_approval_records
                  WHERE integration_name = ? AND subject = ? AND expires_at > ?
                 """;
@@ -128,6 +139,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
                             rows.getString("integration_name"),
                             rows.getString("subject"),
                             rows.getString("pause_epoch"),
+                            rows.getString("card_id"),
                             rows.getString("approval_channel_id"),
                             toInstant(rows.getTimestamp("created_at")),
                             toInstant(rows.getTimestamp("expires_at"))));

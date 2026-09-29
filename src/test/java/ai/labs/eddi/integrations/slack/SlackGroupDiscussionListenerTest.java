@@ -392,10 +392,12 @@ class SlackGroupDiscussionListenerTest {
     @Test
     void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
         // H2/H1: the group approval button value carries
-        // "<integrationName>|group:<gcId>"
-        // so the decision binds to that integration at the interactivity endpoint.
+        // "<integrationName>|group:<gcId>|<cardId>"
+        // so the decision binds to that integration and to this card at the
+        // interactivity endpoint.
+        var records = new InMemorySlackApprovalRecordStore();
         var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
-                "C_APPROVAL", "U1,U2", "acme-int", new InMemorySlackApprovalRecordStore());
+                "C_APPROVAL", "U1,U2", "acme-int", records);
         withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
 
         withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
@@ -411,6 +413,11 @@ class SlackGroupDiscussionListenerTest {
         var parsed = SlackHitlSupport.parseActionValue(value);
         assertEquals("acme-int", parsed.integrationName());
         assertTrue(parsed.isGroup());
+        // The button carries the card id that was recorded for this pause.
+        var recorded = records.findBySubject("acme-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc1");
+        assertEquals(1, recorded.size());
+        assertNotNull(parsed.cardId());
+        assertTrue(recorded.get(0).matchesCard(parsed.cardId()));
     }
 
     @Test

@@ -262,6 +262,24 @@ residual; the second is mutation-checked.
   conversation stays owned by the raw id, so GDPR export/erasure must address both
   `openwebui:<id>` and `<id>`; this is documented, not automated, because deriving
   the raw id could reach an OIDC principal's data.
+- **Round 4 — Slack approval buttons are bound to their card.** Records were matched
+  by `(integration, subject)` and the subject's current pause, but the clicked card
+  was never identified, so an approver clicking an OLD card of the same conversation
+  or group ("delete file A") while a NEW pause was live ("delete everything")
+  approved the new action without seeing it. Each record now carries a random
+  128-bit card id, generated before the record is written and embedded in the
+  buttons (`<integration>|<subject>|<cardId>`); a click is accepted only when its
+  card id is on the record for the current pause. A button without a card id is
+  refused. The id travels with the card, so there is no post-then-update window and
+  no second write. Stores: MongoDB `cardId` field, PostgreSQL `card_id` column (added
+  with `ADD COLUMN IF NOT EXISTS` to a table from an earlier build of this branch).
+  Tests `SlackInteractivityHandlerTest.staleCardOfSameConversation_…`,
+  `staleCardOfSameGroup_…`, `unboundLegacyValue_isRefused`, `unknownCardId_isRefused`
+  (mutation-checked), plus `PostgresSlackApprovalRecordStoreUnitTest` and card-id
+  round-trips in `MongoSlackApprovalRecordStoreTest`. Deferred: channel-name
+  uniqueness is still read-then-write, so two concurrent creates can persist the
+  same name; that fails closed (an ambiguous name binds no decision) and needs a
+  name-claim collection on both backends to make atomic.
 
 ```decision-log
 | 2026-09-26 | Slack HITL decisions require a persisted record of the card the owning integration posted, matched to the subject's current pause | Signature and approver list bound the integration, not the subject | In-memory marker (lost on restart); trusting the button value |
@@ -273,6 +291,7 @@ residual; the second is mutation-checked.
 | 2026-09-28 | The Slack workspace comes only from a declared `platformConfig.teamId`, for owned channels too; without one the identity is team-less | A signing secret authenticates the integration, not the workspace in the payload | Trusting an owned channel's payload team_id; scoping team-less ids by integration name (names are mutable) |
 | 2026-09-28 | Adoption of raw-id `/v1` chat mappings is opt-in (`adopt-legacy-header-mappings`, default false) | A raw mapping may have been written for an OIDC principal under `http-policy=authenticated`; its origin is unrecorded | Adopting by default (reopens the cross-namespace reach); heuristics on the id's shape |
 | 2026-09-28 | `/v1` refuses an OIDC principal carrying the reserved `openwebui:` prefix | Such a principal equals a header-derived identity | Namespacing OIDC principals too |
+| 2026-09-29 | Each Slack approval card carries a random card id in its buttons, recorded with the card; a click must present the id recorded for the current pause | Subject + pause matching let an old card of the same subject approve a newer pause | Storing the posted message `ts` on the record after `chat.postMessage` (a post-then-update window, and a failed update leaves a live card unusable) |
 ```
 
 ```regression-note

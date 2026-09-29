@@ -490,6 +490,13 @@ their legacy conversations have ended, also address the raw id. Group
 discussions started from Slack are owned by the namespaced id. The audit label
 `decidedBy: slack:<userId>` for Slack HITL decisions is unchanged.
 
+Slack HITL approval buttons are bound to the card they were posted on: each
+card's buttons carry a random card id that is recorded with the card, and a
+click is accepted only from the card recorded for the conversation's (or
+group's) current pause. An older card of the same conversation cannot approve a
+newer pause, and a button without a card id — a card posted before this
+binding — is refused. See [HITL → Slack Integration](hitl.md#slack-integration).
+
 ### Retry Logic
 
 All Slack API calls use **exponential backoff** (3 attempts, 500ms/1s/2s base). Failed messages are logged but don't crash the event handler.
