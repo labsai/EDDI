@@ -26,6 +26,9 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -79,6 +82,7 @@ public class GdprComplianceService {
     private final Instance<GroupConversationStore> groupConversationStoreInstance;
     private final Instance<ISharedArtifactStore> sharedArtifactStoreInstance;
     private final IScheduleStore scheduleStore;
+    private final Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
     private final ICache<String, UserConversation> userConversationCache;
     /**
      * Null in the older test seams, and unresolvable where no backend provides it.
@@ -134,13 +138,14 @@ public class GdprComplianceService {
             Instance<IConnectionGrantStore> connectionGrantStoreInstance,
             Instance<IOAuthStateStore> oauthStateStoreInstance,
             Instance<UserErasureParticipant> erasureParticipants,
+            Instance<AutoVaultedSecrets> autoVaultedSecretsInstance,
             ICacheFactory cacheFactory,
             @ConfigProperty(name = RESTRICTION_CACHE_TTL_PROPERTY,
                             defaultValue = RESTRICTION_CACHE_TTL_DEFAULT) long restrictionCacheTtlSeconds) {
         this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore, auditLedgerService,
                 attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
                 groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, connectionGrantStoreInstance,
-                oauthStateStoreInstance, (Iterable<UserErasureParticipant>) erasureParticipants, cacheFactory,
+                oauthStateStoreInstance, (Iterable<UserErasureParticipant>) erasureParticipants, autoVaultedSecretsInstance, cacheFactory,
                 restrictionCacheTtlSeconds);
     }
 
@@ -167,6 +172,36 @@ public class GdprComplianceService {
             Iterable<UserErasureParticipant> erasureParticipants,
             ICacheFactory cacheFactory,
             long restrictionCacheTtlSeconds) {
+        this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore, auditLedgerService,
+                attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, connectionGrantStoreInstance,
+                oauthStateStoreInstance, erasureParticipants, null, cacheFactory, restrictionCacheTtlSeconds);
+    }
+
+    /**
+     * Test seam with every collaborator: the grant store, the in-flight-work
+     * participants as a plain iterable, and the auto-vaulted secret cleaner (null
+     * when absent, which skips that erasure step).
+     */
+    GdprComplianceService(IUserMemoryStore userMemoryStore,
+            IConversationMemoryStore conversationMemoryStore,
+            IUserConversationStore userConversationStore,
+            IDatabaseLogs databaseLogs,
+            IAuditStore auditStore,
+            AuditLedgerService auditLedgerService,
+            Instance<IAttachmentStore> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore,
+            IConversationDescriptorStore conversationDescriptorStore,
+            IConversationCheckpointStore checkpointStore,
+            Instance<GroupConversationStore> groupConversationStoreInstance,
+            Instance<ISharedArtifactStore> sharedArtifactStoreInstance,
+            IScheduleStore scheduleStore,
+            Instance<IConnectionGrantStore> connectionGrantStoreInstance,
+            Instance<IOAuthStateStore> oauthStateStoreInstance,
+            Iterable<UserErasureParticipant> erasureParticipants,
+            Instance<AutoVaultedSecrets> autoVaultedSecretsInstance,
+            ICacheFactory cacheFactory,
+            long restrictionCacheTtlSeconds) {
         this.connectionGrantStoreInstance = connectionGrantStoreInstance;
         this.oauthStateStoreInstance = oauthStateStoreInstance;
         this.erasureParticipants = erasureParticipants == null ? List.of() : erasureParticipants;
@@ -183,6 +218,7 @@ public class GdprComplianceService {
         this.groupConversationStoreInstance = groupConversationStoreInstance;
         this.sharedArtifactStoreInstance = sharedArtifactStoreInstance;
         this.scheduleStore = scheduleStore;
+        this.autoVaultedSecretsInstance = autoVaultedSecretsInstance;
         this.userConversationCache = cacheFactory.getCache(USER_CONVERSATION_CACHE_NAME);
         this.restrictionCache = restrictionCacheTtlSeconds <= 0
                 ? null
@@ -194,8 +230,8 @@ public class GdprComplianceService {
     }
 
     /**
-     * Test seam for the shape before connection grants and erasure participants —
-     * neither is present.
+     * Test seam for the shape before connection grants, erasure participants and
+     * the auto-vaulted secret cleanup — none is present.
      */
     GdprComplianceService(IUserMemoryStore userMemoryStore,
             IConversationMemoryStore conversationMemoryStore,
@@ -214,7 +250,7 @@ public class GdprComplianceService {
             long restrictionCacheTtlSeconds) {
         this(userMemoryStore, conversationMemoryStore, userConversationStore, databaseLogs, auditStore, auditLedgerService,
                 attachmentStorageInstance, hitlToolJournalStore, conversationDescriptorStore, checkpointStore,
-                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, null, List.of(), cacheFactory,
+                groupConversationStoreInstance, sharedArtifactStoreInstance, scheduleStore, null, null, List.of(), null, cacheFactory,
                 restrictionCacheTtlSeconds);
     }
 
@@ -506,15 +542,60 @@ public class GdprComplianceService {
                     checkpointsDeleted, pseudonym);
         }
 
-        // 4c. Delete conversation memory snapshots
+        // 4b-bis. Delete the vault slots holding the user's scope:"secret" property
+        // values. Each auto-vaulted write owns its own slot, named after a hash of
+        // the user (AutoVaultedSecrets), so the default tenant is swept for them —
+        // together with any other tenant the user's conversations point into, which
+        // is why this runs BEFORE the snapshots that name those tenants are gone.
+        // Every property version counts — the undo history can point into a tenant
+        // the current properties no longer name.
+        long autoVaultedSecretsDeleted = 0;
+        boolean vaultCleanupIncomplete = false;
+        if (autoVaultedSecretsInstance != null && autoVaultedSecretsInstance.isResolvable()) {
+            Set<String> tenants = new LinkedHashSet<>();
+            for (String convId : conversationIds) {
+                try {
+                    var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(convId);
+                    if (snapshot != null) {
+                        ConversationMemory.everyPropertyVersion(ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot)).stream()
+                                .map(AutoVaultedSecrets::tenantOf)
+                                .filter(Objects::nonNull)
+                                .forEach(tenants::add);
+                    }
+                } catch (Exception e) {
+                    vaultCleanupIncomplete = true;
+                    recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
+                }
+            }
+            try {
+                autoVaultedSecretsDeleted = autoVaultedSecretsInstance.get().deleteForUser(userId, tenants);
+                if (autoVaultedSecretsDeleted > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d auto-vaulted secrets [%s]", autoVaultedSecretsDeleted, pseudonym);
+                }
+            } catch (Exception e) {
+                vaultCleanupIncomplete = true;
+                recordFailure(failedSteps, "autoVaultedSecrets", e, pseudonym);
+            }
+        }
+
+        // 4c. Delete conversation memory snapshots — unless the vault step above is
+        // incomplete. A snapshot is the only record of a custom tenant its secrets
+        // live in; deleting it now would leave a retry of this erasure unable to
+        // find them, while keeping it lets the retry finish the job. The result
+        // reports the step as failed either way.
         long conversationsDeleted = 0;
-        try {
-            conversationsDeleted = conversationMemoryStore
-                    .deleteConversationsByUserId(userId);
-            LOGGER.infof("[GDPR] Deleted %d conversations [%s]",
-                    conversationsDeleted, pseudonym);
-        } catch (Exception e) {
-            recordFailure(failedSteps, "conversations", e, pseudonym);
+        if (vaultCleanupIncomplete) {
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until their vault secrets are erased — retry the erasure"), pseudonym);
+        } else {
+            try {
+                conversationsDeleted = conversationMemoryStore
+                        .deleteConversationsByUserId(userId);
+                LOGGER.infof("[GDPR] Deleted %d conversations [%s]",
+                        conversationsDeleted, pseudonym);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "conversations", e, pseudonym);
+            }
         }
 
         // 5. Delete managed conversation mappings.
@@ -675,7 +756,7 @@ public class GdprComplianceService {
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, connectionGrantsDeleted, failedSteps, Instant.now(), additionalDeleted);
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -705,6 +786,7 @@ public class GdprComplianceService {
         auditDetails.put("sharedArtifactsDeleted", sharedArtifactsDeleted);
         auditDetails.put("schedulesDeleted", schedulesDeleted);
         auditDetails.put("connectionGrantsDeleted", connectionGrantsDeleted);
+        auditDetails.put("autoVaultedSecretsDeleted", autoVaultedSecretsDeleted);
         auditDetails.put("inFlightWorkStopped", inFlightWorkStopped);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);

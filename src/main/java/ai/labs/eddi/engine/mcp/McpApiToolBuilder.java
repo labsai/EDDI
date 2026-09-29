@@ -450,8 +450,13 @@ public final class McpApiToolBuilder {
         var request = new Request();
         request.setMethod(method.toLowerCase());
 
+        // Template variable names for this operation's parameters. A parameter name
+        // comes from a third-party spec and is copied into a {...} placeholder, so it
+        // must be reduced to a plain identifier first — see safeVariableName.
+        Map<String, String> variableNames = variableNamesFor(operation);
+
         // Convert path params to Qute templates: /{petId} → /{petId}
-        String convertedPath = convertPathParams(path);
+        String convertedPath = convertPathParams(path, variableNames);
         request.setPath(convertedPath);
 
         // Headers (auth if provided)
@@ -467,7 +472,11 @@ public final class McpApiToolBuilder {
 
         if (operation.getParameters() != null) {
             for (Parameter param : operation.getParameters()) {
+                if (param == null || param.getName() == null) {
+                    continue;
+                }
                 String paramName = param.getName();
+                String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
                 String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
                 // The description is the model's ONLY view of the value space —
                 // the generated tool schema types every parameter as a plain
@@ -480,10 +489,12 @@ public final class McpApiToolBuilder {
 
                 if ("query".equals(param.getIn())) {
                     // Query params use Qute template for LLM-provided values
-                    queryParams.put(paramName, "{" + paramName + "}");
-                    paramDescriptions.put(paramName, paramDesc);
+                    // The query KEY stays the spec's name; only the placeholder (and so
+                    // the tool parameter the model fills) uses the safe variable name.
+                    queryParams.put(paramName, "{" + variableName + "}");
+                    paramDescriptions.put(variableName, paramDesc);
                 } else if ("path".equals(param.getIn())) {
-                    paramDescriptions.put(paramName, paramDesc);
+                    paramDescriptions.put(variableName, paramDesc);
                 }
                 // header/cookie params are skipped for now
             }
@@ -601,14 +612,94 @@ public final class McpApiToolBuilder {
      * stays as /pets/{petId}/toys (already Qute-compatible)
      */
     static String convertPathParams(String path) {
+        return convertPathParams(path, Map.of());
+    }
+
+    /**
+     * As {@link #convertPathParams(String)}, with every placeholder reduced to a
+     * safe template variable name — the one {@code variableNames} assigned to that
+     * parameter, or {@link #safeVariableName} of it for a placeholder the spec does
+     * not declare as a parameter.
+     * <p>
+     * An undeclared placeholder never takes a name a declared parameter already
+     * holds: {@code {item-id}} next to a declared {@code item_id} would otherwise
+     * reduce to {@code item_id} and silently be filled with that parameter's value,
+     * addressing the wrong resource. It gets a suffixed name instead (reused if the
+     * same placeholder repeats), and stays unfilled as the spec leaves it.
+     */
+    static String convertPathParams(String path, Map<String, String> variableNames) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
         var sb = new StringBuilder();
+        Set<String> taken = new HashSet<>(variableNames.values());
+        Map<String, String> undeclared = new HashMap<>();
         while (matcher.find()) {
             String paramName = matcher.group(1);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + paramName + "}"));
+            String variableName = variableNames.get(paramName);
+            if (variableName == null) {
+                variableName = undeclared.computeIfAbsent(paramName, name -> {
+                    String base = safeVariableName(name);
+                    String candidate = base;
+                    for (int suffix = 2; !taken.add(candidate); suffix++) {
+                        candidate = base + "_" + suffix;
+                    }
+                    return candidate;
+                });
+            }
+            matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + variableName + "}"));
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Reduces a parameter name taken from an OpenAPI spec to a plain template
+     * identifier: ASCII letters, digits and underscores, not starting with a digit.
+     * <p>
+     * The name is copied into a Qute placeholder that EDDI renders on every call,
+     * and a spec is third-party input: a "name" carrying template syntax would
+     * otherwise be evaluated as an expression rather than filled in as a parameter.
+     * Ordinary names ({@code petId}, {@code page_size}) are unchanged; others are
+     * mapped ({@code pet-id} to {@code pet_id}).
+     */
+    static String safeVariableName(String name) {
+        var safe = new StringBuilder(name == null ? 0 : name.length());
+        if (name != null) {
+            for (int i = 0; i < name.length(); i++) {
+                char c = name.charAt(i);
+                boolean allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+                safe.append(allowed ? c : '_');
+            }
+        }
+        if (safe.isEmpty() || Character.isDigit(safe.charAt(0))) {
+            safe.insert(0, "p_");
+        }
+        return safe.toString();
+    }
+
+    /**
+     * Assigns each declared parameter of {@code operation} a distinct safe variable
+     * name, in declaration order. Two names that reduce to the same identifier (a
+     * {@code pet-id} and a {@code pet_id}) get distinct suffixes, so neither
+     * silently takes the other's value.
+     */
+    static Map<String, String> variableNamesFor(Operation operation) {
+        Map<String, String> names = new LinkedHashMap<>();
+        if (operation.getParameters() == null) {
+            return names;
+        }
+        Set<String> taken = new HashSet<>();
+        for (Parameter param : operation.getParameters()) {
+            if (param == null || param.getName() == null || names.containsKey(param.getName())) {
+                continue;
+            }
+            String base = safeVariableName(param.getName());
+            String candidate = base;
+            for (int suffix = 2; !taken.add(candidate); suffix++) {
+                candidate = base + "_" + suffix;
+            }
+            names.put(param.getName(), candidate);
+        }
+        return names;
     }
 
     /**

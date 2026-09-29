@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.LinkedHashSet;
@@ -113,15 +114,18 @@ final class ConfigReferenceGuard {
      * where it came from. Only a marker set at the moment of vaulting can.
      * <p>
      * <b>The marker is necessary, not sufficient.</b> The value must still be this
-     * conversation's own auto-vault reference for the property the template names:
-     * key {@code <agentId>.<name>} for this conversation's agent, under this
-     * conversation's tenant. The marker already implies all three, because
-     * {@code autoVaultSecret} derives them itself — so the comparison is redundant
-     * by construction and deliberately kept anyway, as the bound that still holds
-     * if a marked {@code Property} ever reaches memory from somewhere other than
-     * that method (a restored document, a future writer). A marked property whose
-     * tenant has since been rewritten under it fails this comparison and the call
-     * is refused, which is the safe direction of that corner.
+     * conversation's own auto-vault reference for the property the template names,
+     * under this conversation's tenant: the per-write slot
+     * {@code <agentId>.u<userHash>.<nonce>.<name>} of this conversation's agent,
+     * user and property (see {@code AutoVaultedSecrets}), or — for a conversation
+     * vaulted before slots became per-write — the legacy {@code <agentId>.<name>}.
+     * The marker already implies all three, because {@code autoVaultSecret} derives
+     * them itself — so the comparison is redundant by construction and deliberately
+     * kept anyway, as the bound that still holds if a marked {@code Property} ever
+     * reaches memory from somewhere other than that method (a restored document, a
+     * future writer). A marked property whose tenant has since been rewritten under
+     * it fails this comparison and the call is refused, which is the safe direction
+     * of that corner.
      * <p>
      * Built by string comparison rather than a pattern compiled per call, so there
      * is no dynamic regex to reason about.
@@ -136,6 +140,7 @@ final class ConfigReferenceGuard {
         if (agentId == null) {
             return found;
         }
+        String userId = userId(templateData);
         String tenantId = tenantId(conversationProperties);
         Matcher access = PROPERTY_ACCESS.matcher(template);
         while (access.find()) {
@@ -152,15 +157,34 @@ final class ConfigReferenceGuard {
             if (value == null) {
                 continue;
             }
-            String key = SecretReference.DEFAULT_TENANT.equals(tenantId) ? agentId + "." + name : tenantId + "/" + agentId + "." + name;
+            String tenantPrefix = SecretReference.DEFAULT_TENANT.equals(tenantId) ? "" : tenantId + "/";
             // The legacy prefix too: a conversation property stored before the
             // ${eddivault:…} → ${vault:…} rename still holds the old spelling, and the
             // vault still resolves it.
-            if (value.equals("${vault:" + key + "}") || value.equals("${eddivault:" + key + "}")) {
+            String body = value.startsWith("${vault:") && value.endsWith("}")
+                    ? value.substring("${vault:".length(), value.length() - 1)
+                    : value.startsWith("${eddivault:") && value.endsWith("}")
+                            ? value.substring("${eddivault:".length(), value.length() - 1)
+                            : null;
+            if (body == null || !body.startsWith(tenantPrefix)) {
+                continue;
+            }
+            String keyName = body.substring(tenantPrefix.length());
+            if (keyName.contains("/")) {
+                continue; // a tenant prefix on a default-tenant conversation
+            }
+            if (keyName.equals(agentId + "." + name) || AutoVaultedSecrets.isSlotFor(keyName, agentId, userId, name)) {
                 found.add(value);
             }
         }
         return found;
+    }
+
+    private static String userId(Map<String, Object> templateData) {
+        if (templateData.get("userInfo") instanceof Map<?, ?> info && info.get("userId") != null) {
+            return String.valueOf(info.get("userId"));
+        }
+        return null;
     }
 
     private static String agentId(Map<String, Object> templateData) {
