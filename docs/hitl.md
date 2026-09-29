@@ -488,7 +488,7 @@ The Slack channel integration is HITL-aware end to end. Configuration lives in t
 | Key | Description |
 |-----|-------------|
 | `hitlApprovalChannel` | Slack channel id that receives approval notifications when a conversation pauses. |
-| `hitlApproverUserIds` | Comma-separated Slack user ids allowed to decide via buttons. **Without this list, buttons are not rendered and interactive decisions are rejected — fail-closed.** |
+| `hitlApproverUserIds` | Comma-separated Slack user ids allowed to decide via buttons. A Slack user id is unique within one workspace only, so when the integration declares its workspace (`platformConfig.teamId`) a clicking user of another workspace — possible in a shared Slack Connect approval channel — is refused even if their id is listed. **Without this list, buttons are not rendered and interactive decisions are rejected — fail-closed.** |
 
 Behavior:
 

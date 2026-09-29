@@ -240,6 +240,51 @@ class SlackInteractivityHandlerTest {
         assertEquals(HitlDecision.HitlVerdict.REJECTED, captor.getValue().getVerdict());
     }
 
+    // ─── Approver identity is scoped to the integration's workspace ───
+
+    private String approvePayloadFromTeam(String slackUserId, String slackTeamId, String value) {
+        return """
+                {"type":"block_actions",
+                 "user":{"id":"%s","team_id":"%s"},
+                 "channel":{"id":"C_APPROVAL"},
+                 "message":{"ts":"1700000000.000100"},
+                 "actions":[{"action_id":"hitl_approve","value":"%s"}]}
+                """.formatted(slackUserId, slackTeamId, value);
+    }
+
+    private static void declareTeam(ChannelIntegrationConfiguration cfg, String teamId) {
+        var platformConfig = cfg.getPlatformConfig(); // a copy
+        platformConfig.put("teamId", teamId);
+        cfg.setPlatformConfig(platformConfig);
+    }
+
+    @Test
+    void approverOfAnotherWorkspace_isRefused_whenTheIntegrationDeclaresItsTeam() throws Exception {
+        // A bare Slack user id is unique within one workspace only. In a shared
+        // (Slack Connect) approval channel a user of another workspace may carry the
+        // same id as a listed approver; with the integration's workspace declared,
+        // only that workspace's user is the approver.
+        var cfg = integrationWith(INT_NAME, "U_APPROVER", "s");
+        declareTeam(cfg, "T1");
+        bindIntegration(cfg);
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T_OTHER", value("conv-1")));
+
+        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(slackApi).postMessage(anyString(), eq("C_APPROVAL"), isNull(), contains("not authorized"));
+    }
+
+    @Test
+    void approverOfTheDeclaredWorkspace_decides() throws Exception {
+        var cfg = integrationWith(INT_NAME, "U_APPROVER", "s");
+        declareTeam(cfg, "T1");
+        bindIntegration(cfg);
+
+        handler.handlePayload(approvePayloadFromTeam("U_APPROVER", "T1", value("conv-1")));
+
+        verify(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+    }
+
     // ─── The decision names the pause its card was checked against ───
 
     @Test

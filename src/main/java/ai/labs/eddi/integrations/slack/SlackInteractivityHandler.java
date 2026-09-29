@@ -192,8 +192,15 @@ public class SlackInteractivityHandler {
                 ? platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS)
                 : null;
 
-        // AUTHZ (fail-closed): the acting user must be an approver.
-        if (!SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), approverIds)) {
+        // AUTHZ (fail-closed): the acting user must be an approver. A bare Slack user
+        // id is unique within one workspace only, so when the integration declares
+        // its workspace (platformConfig.teamId) a clicking user of another workspace
+        // — possible in a shared Slack Connect approval channel — is refused even if
+        // their id is on the list.
+        String declaredTeam = platformConfig != null ? platformConfig.get("teamId") : null;
+        boolean foreignTeamUser = declaredTeam != null && !declaredTeam.isBlank() && parsed.slackUserTeamId() != null
+                && !declaredTeam.trim().equals(parsed.slackUserTeamId());
+        if (foreignTeamUser || !SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), approverIds)) {
             LOGGER.warnf("Unauthorized Slack HITL decision attempt by user %s on channel %s",
                     sanitize(parsed.slackUserId()), sanitize(parsed.approvalChannelId()));
             postAuthzDenied(botToken, parsed.approvalChannelId(), parsed.slackUserId());
@@ -292,6 +299,7 @@ public class SlackInteractivityHandler {
         String actionId = action.path("action_id").asText("");
         String rawValue = action.path("value").asText("");
         String slackUserId = payload.path("user").path("id").asText("");
+        String slackUserTeamId = payload.path("user").path("team_id").asText("");
         String approvalChannelId = payload.path("channel").path("id").asText("");
         String messageTs = payload.path("message").path("ts").asText(null);
 
@@ -305,7 +313,8 @@ public class SlackInteractivityHandler {
             LOGGER.warn("Slack HITL action missing value — ignoring");
             return null;
         }
-        return new ParsedAction(verdict, value, slackUserId, approvalChannelId, messageTs);
+        return new ParsedAction(verdict, value, slackUserId, slackUserTeamId.isBlank() ? null : slackUserTeamId,
+                approvalChannelId, messageTs);
     }
 
     /**
@@ -431,7 +440,7 @@ public class SlackInteractivityHandler {
      * A parsed, actionable HITL decision from a block_actions payload.
      */
     private record ParsedAction(HitlVerdict verdict, SlackHitlSupport.ActionValue value,
-            String slackUserId, String approvalChannelId, String messageTs) {
+            String slackUserId, String slackUserTeamId, String approvalChannelId, String messageTs) {
     }
 
     /**
