@@ -12,6 +12,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // claude-sonnet-5 leads because it is the app-wide default model — a
     // datalist's first entry is what an admin sees before typing, so it should
     // match the placeholder they were already shown.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-fable-5-1",
     "claude-fable-5",
@@ -24,6 +26,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   openai: [
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -70,6 +74,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "google/gemma3@gemma-3-12b-it",
     "google/gemma2@gemma-2-2b-it",
     // Vertex serves current-generation Claude under the bare first-party id.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-opus-5",
     "claude-opus-4-8",
@@ -131,6 +137,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
     // Anthropic — current-generation ids carry the `anthropic.` prefix with no
     // version suffix.
+    "anthropic.claude-sonnet-5-5",
+    "anthropic.claude-opus-5-5",
     "anthropic.claude-sonnet-5",
     "anthropic.claude-opus-5",
     "anthropic.claude-opus-4-8",
