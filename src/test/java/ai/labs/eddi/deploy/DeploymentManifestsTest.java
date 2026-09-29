@@ -4025,6 +4025,137 @@ class DeploymentManifestsTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Installers — the realm-account lines of the success banner
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("installers — realm accounts in the success banner")
+    class InstallerRealmAccountBanner {
+
+        private static final Path INSTALL_SH = Path.of("install.sh");
+        private static final Path INSTALL_PS1 = Path.of("install.ps1");
+        private static final String UNREAD = "Could not read the eddi realm accounts";
+
+        /**
+         * After a failed admin login (a stale password in .env, say) the installer
+         * never read the realm, so its account lists are empty for that reason alone.
+         * The banner used to report them anyway: "No account in the eddi realm has a
+         * password yet" and "viewer and user have no password", both unverified. Run
+         * for real against a stand-in {@code curl} that must not be reached.
+         */
+        @Test
+        @DisplayName("install.sh reports the realm accounts only when it read them")
+        void shellReportsRealmAccountsOnlyWhenRead() throws Exception {
+            BannerRun unread = runBanner("KC_ADMIN_TOKEN=''\nREALM_ACCOUNTS_CHECKED=true\n"
+                    + "set_first_login_passwords http://keycloak-stub jq >/dev/null\n");
+            assertEquals(0, unread.exitCode(), INSTALL_SH + ": the banner failed. " + unread);
+            assertTrue(unread.output().contains(UNREAD),
+                    INSTALL_SH + ": after a failed admin login the banner must say the realm could not be read. " + unread);
+            assertFalse(unread.output().contains("No account in the eddi realm has a password yet"),
+                    INSTALL_SH + ": the banner claims no account has a password, but nothing was read. " + unread);
+            assertFalse(unread.output().contains("have no password"),
+                    INSTALL_SH + ": the banner reports viewer/user status, but nothing was read. " + unread);
+            assertEquals("", unread.curlArguments(),
+                    INSTALL_SH + ": set_first_login_passwords called the admin API without a token. " + unread);
+
+            BannerRun read = runBanner("REALM_ACCOUNTS_CHECKED=true\n");
+            assertEquals(0, read.exitCode(), INSTALL_SH + ": the banner failed. " + read);
+            assertFalse(read.output().contains(UNREAD), INSTALL_SH + ": a read realm was reported as unread. " + read);
+            assertTrue(read.output().contains("No account in the eddi realm has a password yet")
+                    && read.output().contains("have no password"),
+                    INSTALL_SH + ": a realm that was read and has no passwords must say so. " + read);
+        }
+
+        @Test
+        @DisplayName("install.ps1 gates the realm-account lines on having read the realm")
+        void powerShellReportsRealmAccountsOnlyWhenRead() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String setter = InstallerGrafanaCredential.functionBody(ps1, "function Set-FirstLoginPassword {");
+            int grant = setter.indexOf("Close-SpaPasswordGrant $kcBase $headers");
+            int flag = setter.indexOf("$script:RealmAccountsChecked = $true");
+            assertTrue(grant >= 0 && flag > grant,
+                    INSTALL_PS1 + ": Set-FirstLoginPassword must set $script:RealmAccountsChecked only after it has a "
+                            + "token and has closed the password grant");
+            String success = InstallerGrafanaCredential.functionBody(ps1, "function Write-Success {");
+            int unread = success.indexOf("if (-not $RealmAccountsChecked)");
+            assertTrue(unread >= 0 && success.contains(UNREAD),
+                    INSTALL_PS1 + ": Write-Success must print a neutral line when the realm was not read");
+            assertTrue(success.indexOf("No account in the eddi realm has a password yet") > unread,
+                    INSTALL_PS1 + ": the 'no account has a password' line must sit behind the read check");
+            assertTrue(success.contains("if ($RealmAccountsChecked -and -not $DemoUsers)"),
+                    INSTALL_PS1 + ": the viewer/user status must sit behind the read check");
+        }
+
+        /**
+         * {@code SetAccessRuleProtection} only changes the in-memory ACL; the copied
+         * inherited ACEs stay inherited in that object, so {@code RemoveAccessRule}
+         * cannot match them and Users / Authenticated Users survived on
+         * first-login.txt. The ACL has to be written and read back first.
+         */
+        @Test
+        @DisplayName("install.ps1 persists the broken inheritance before removing broad ACEs")
+        void powerShellPersistsAclBeforeRemovingInheritedRules() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String protect = InstallerGrafanaCredential.functionBody(ps1, "function Protect-SensitiveFile([string]$SecurePath) {")
+                    .replaceAll("#[^\n]*", "");
+            int protection = protect.indexOf("$acl.SetAccessRuleProtection($true, $true)");
+            int persist = protect.indexOf("Set-Acl", protection);
+            int reload = protect.indexOf("$acl = Get-Acl $SecurePath", protection);
+            int removal = protect.indexOf("foreach ($rule in $acl.Access)");
+            assertTrue(protection >= 0 && persist > protection && reload > persist && removal > reload,
+                    INSTALL_PS1 + ": Protect-SensitiveFile must Set-Acl and re-read the ACL between "
+                            + "SetAccessRuleProtection and the removal loop, or inherited broad ACEs survive");
+        }
+
+        private record BannerRun(int exitCode, String output, String curlArguments) {
+            @Override
+            public String toString() {
+                return "Exit status " + exitCode + "; curl argv:\n" + curlArguments + "\noutput:\n" + output;
+            }
+        }
+
+        private BannerRun runBanner(String setup) throws IOException, InterruptedException {
+            Path bash = locateBash();
+            assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
+            String installer = read(INSTALL_SH);
+            Path directory = Files.createDirectories(Path.of("target", "realm-banner-stub"));
+            Path argv = directory.resolve("curl-argv.log");
+            Files.deleteIfExists(argv);
+            Path curl = directory.resolve("curl");
+            Files.writeString(curl, "#!/usr/bin/env bash\necho \"$*\" >> \"$REALM_STUB_ARGV\"\nexit 7\n",
+                    StandardCharsets.US_ASCII);
+            curl.toFile().setExecutable(true, false);
+
+            Path harness = directory.resolve("harness.sh");
+            Files.writeString(harness, "set -eo pipefail\n"
+                    + "info() { echo \"INFO $1\"; }\nwarn() { echo \"WARN $1\"; }\nfail() { echo -e \"FAIL $1\"; exit 1; }\n"
+                    + InstallerGrafanaCredential.functionBody(installer, "set_first_login_passwords() {") + "\n"
+                    + InstallerGrafanaCredential.functionBody(installer, "print_success() {") + "\n"
+                    + "EDDI_DIR=\"$PWD/eddi\" EDDI_PORT=7070 EDDI_HTTPS_PORT=7443 KEYCLOAK_PORT=8180\n"
+                    + "WITH_AUTH=true WITH_MONITORING=false DEMO_USERS=false PLATFORM=none\n"
+                    + "FIRST_LOGIN_PASSWORDS=() LEGACY_FIXTURE_LOGINS=()\n"
+                    + setup
+                    + "print_success\n", StandardCharsets.UTF_8);
+
+            String command = "cd \"" + slashed(directory) + "\" && PATH=\"$PWD:$PATH\" bash harness.sh";
+            ProcessBuilder builder = new ProcessBuilder(bash.toString(), "-c", command);
+            builder.redirectErrorStream(true);
+            builder.environment().put("REALM_STUB_ARGV", slashed(argv));
+            Process process = builder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!process.waitFor(2, TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                throw new AssertionError("the install.sh banner harness did not finish; it printed:\n" + output);
+            }
+            return new BannerRun(process.exitValue(), output,
+                    Files.exists(argv) ? Files.readString(argv, StandardCharsets.UTF_8) : "");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 

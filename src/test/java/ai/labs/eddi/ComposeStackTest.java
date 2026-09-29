@@ -97,8 +97,15 @@ class ComposeStackTest {
      * literal, or a variable that DEFAULTS to it (an operator exposing Keycloak
      * deliberately, behind TLS, sets {@code KEYCLOAK_BIND}).
      */
-    private static final Pattern LOOPBACK_PUBLISH = Pattern.compile(
-            "^(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND:-127\\.0\\.0\\.1\\}):.+");
+    private static final String LOOPBACK_HOST = "(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND:-127\\.0\\.0\\.1\\})";
+
+    /**
+     * A short-form mapping ({@code host:published:target}) whose host is loopback.
+     */
+    private static final Pattern LOOPBACK_PUBLISH = Pattern.compile("^" + LOOPBACK_HOST + ":.+");
+
+    /** The {@code host_ip} of a long-form port declaration, on its own. */
+    private static final Pattern LOOPBACK_HOST_IP = Pattern.compile("^" + LOOPBACK_HOST + "$");
 
     /**
      * Administrator passwords of the bundled third-party services. Each comes from
@@ -311,9 +318,8 @@ class ComposeStackTest {
                 }
                 for (JsonNode port : entry.getValue().path("ports")) {
                     checked++;
-                    String mapping = port.isTextual() ? port.asText() : port.path("host_ip").asText("") + ":";
-                    if (!LOOPBACK_PUBLISH.matcher(mapping).matches()) {
-                        offenders.add(name(file) + " publishes `" + entry.getKey() + "` as `" + mapping + "`");
+                    if (!publishesOnLoopback(port)) {
+                        offenders.add(name(file) + " publishes `" + entry.getKey() + "` as `" + port + "`");
                     }
                 }
             }
@@ -323,6 +329,35 @@ class ComposeStackTest {
                 "an infrastructure service is published on every interface. Prefix the mapping with 127.0.0.1: (or a"
                         + " *_BIND variable defaulting to it) — the containers reach each other over the compose"
                         + " network, so the host binding is only for the developer's own shell.");
+    }
+
+    /**
+     * Short-form strings carry the host in the mapping; the long form
+     * ({@code target}/{@code published}/{@code host_ip}) carries it in
+     * {@code host_ip} alone, which must be checked by itself rather than glued to a
+     * {@code :port} suffix it does not have. A long form without {@code host_ip}
+     * publishes on every interface.
+     */
+    private static boolean publishesOnLoopback(JsonNode port) {
+        if (port.isTextual()) {
+            return LOOPBACK_PUBLISH.matcher(port.asText()).matches();
+        }
+        return LOOPBACK_HOST_IP.matcher(port.path("host_ip").asText("")).matches();
+    }
+
+    @Test
+    @DisplayName("the loopback check reads both short-form and long-form port declarations")
+    void loopbackCheckHandlesBothPortForms() throws IOException {
+        assertTrue(publishesOnLoopback(YAML.readTree("\"127.0.0.1:9090:9090\"")));
+        assertTrue(publishesOnLoopback(YAML.readTree("\"${KEYCLOAK_BIND:-127.0.0.1}:8180:8080\"")));
+        assertFalse(publishesOnLoopback(YAML.readTree("\"9090:9090\"")));
+        assertFalse(publishesOnLoopback(YAML.readTree("\"0.0.0.0:9090:9090\"")));
+
+        assertTrue(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090, host_ip: 127.0.0.1}")));
+        assertTrue(publishesOnLoopback(YAML.readTree("{target: 8080, published: 8180, host_ip: \"${KEYCLOAK_BIND:-127.0.0.1}\"}")));
+        assertFalse(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090}")),
+                "a long-form port without host_ip publishes on every interface");
+        assertFalse(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090, host_ip: 0.0.0.0}")));
     }
 
     /**

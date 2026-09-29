@@ -54,7 +54,7 @@ This starts Keycloak alongside EDDI with a pre-configured realm, clients and acc
 | `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
 | `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
 
-The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` — with the user `admin` and the `KC_BOOTSTRAP_ADMIN_PASSWORD` the installer generated into `~/.eddi/.env` (a plain `docker compose up` without it falls back to the loopback-only `admin`/`admin` dev default). The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
+The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` unless `KEYCLOAK_BIND` says otherwise — with the user `admin` and the `KC_BOOTSTRAP_ADMIN_PASSWORD` in `~/.eddi/.env`: the installers generate one, and the GCP provisioner generates one on the VM. A plain `docker compose up` without it falls back to the `admin`/`admin` dev default, which is acceptable only while Keycloak stays on loopback — set `KC_BOOTSTRAP_ADMIN_PASSWORD` before widening `KEYCLOAK_BIND` (Keycloak reads it only when it first creates the master realm). The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
 
 > **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-run the installer (`install.sh` or `install.ps1`, whether EDDI is running or stopped):
 >

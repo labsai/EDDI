@@ -201,6 +201,9 @@ $FirstLogins = @()
 # not given: on a realm imported before the fixtures stopped shipping passwords
 # that is viewer/viewer and user/user.
 $LegacyFixtureLogins = @()
+# Set by Set-FirstLoginPassword once it holds an admin token and has closed the
+# password grant; until then Write-Success cannot say what the accounts look like.
+$RealmAccountsChecked = $false
 # Set when a legacy admin/admin login was moved to the generated password.
 $KcAdminRotated = $false
 $GrafanaRotated = $false
@@ -943,6 +946,11 @@ function Protect-SensitiveFile([string]$SecurePath) {
         $acl = Get-Acl $SecurePath
         # Protect from inheritance but copy existing inherited ACEs as explicit rules
         $acl.SetAccessRuleProtection($true, $true)
+        # Persist and re-read: until then the copied ACEs are still inherited in
+        # this object, RemoveAccessRule cannot match them, and Users /
+        # Authenticated Users would survive on first-login.txt.
+        Set-Acl -Path $SecurePath -AclObject $acl
+        $acl = Get-Acl $SecurePath
         # Remove 'Users' and 'Everyone' groups (keep SYSTEM, Administrators, current user)
         $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         foreach ($rule in $acl.Access) {
@@ -1113,6 +1121,7 @@ function Set-FirstLoginPassword {
     }
     $headers = @{ Authorization = "Bearer $token" }
     Close-SpaPasswordGrant $kcBase $headers
+    $script:RealmAccountsChecked = $true
     # `| Write-Output` on every list read: PowerShell 7's Invoke-RestMethod
     # emits a JSON array as ONE pipeline object, so @(...) around an empty
     # credentials list counted 1 and every account looked as if it already had
@@ -1410,11 +1419,16 @@ function Write-Success {
                 Write-Information -MessageData "  $($entry.Account) / $($entry.Secret)  (one-time -- you choose a new one at first login)"
             }
         }
-        if ($FirstLogins.Count -eq 0) {
+        # Only what was actually read is reported: after a failed admin login the
+        # lists above are empty because nothing was looked at.
+        if (-not $RealmAccountsChecked) {
+            Write-Information -MessageData "  Could not read the eddi realm accounts -- check them in the Keycloak console."
+        }
+        elseif ($FirstLogins.Count -eq 0) {
             Write-Information -MessageData "  No account in the eddi realm has a password yet. Set one in the"
             Write-Information -MessageData "  Keycloak console below: Users -> eddi -> Credentials -> Set password."
         }
-        if (-not $DemoUsers) {
+        if ($RealmAccountsChecked -and -not $DemoUsers) {
             if ($LegacyFixtureLogins.Count -gt 0) {
                 Write-Warn "$($LegacyFixtureLogins -join ', ') still has a password. On a realm imported before they stopped shipping one that is viewer/viewer and user/user -- anyone who can reach Keycloak can log in. Reset or delete it: console -> Users -> <name> -> Credentials."
             }

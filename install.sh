@@ -73,6 +73,9 @@ FIRST_LOGIN_PASSWORDS=()
 # --demo-users was not given — on a realm imported before the fixtures stopped
 # shipping passwords, that is viewer/viewer and user/user.
 LEGACY_FIXTURE_LOGINS=()
+# Set by set_first_login_passwords once it holds an admin token and has read the
+# eddi realm's accounts. Until then print_success cannot say what they look like.
+REALM_ACCOUNTS_CHECKED=false
 # Set by keycloak_admin_login when it moved a legacy admin/admin login to
 # KC_BOOTSTRAP_ADMIN_PASSWORD, so a caller knows the new value is now the true one.
 KC_ADMIN_ROTATED=false
@@ -1320,12 +1323,14 @@ set_first_login_passwords() {
   # run it, and the banner must not list an account twice.
   FIRST_LOGIN_PASSWORDS=()
   LEGACY_FIXTURE_LOGINS=()
+  REALM_ACCOUNTS_CHECKED=false
 
   echo -ne "  Setting first-login passwords  "
   if [[ -z "$KC_ADMIN_TOKEN" ]]; then
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(not logged in to the Keycloak admin API — set them in the admin console)${RESET}"
     return 0
   fi
+  REALM_ACCOUNTS_CHECKED=true
 
   local account users_json user_id creds_json cred_count password status problems=""
   for account in "${accounts[@]}"; do
@@ -2196,11 +2201,16 @@ print_success() {
         echo -e "  ${BOLD}${account}${RESET} / ${CYAN}${password}${RESET}  ${DIM}(one-time — you choose a new one at first login)${RESET}"
       fi
     done
-    if [[ "$printed" != "true" ]]; then
+    # Only what was actually read is reported: after a failed admin login (a
+    # stale password in .env, say) the lists above are empty because nothing
+    # was looked at, not because no account has a password.
+    if [[ "$REALM_ACCOUNTS_CHECKED" != "true" ]]; then
+      echo -e "  ${DIM}Could not read the eddi realm accounts — check them in the Keycloak console.${RESET}"
+    elif [[ "$printed" != "true" ]]; then
       echo -e "  ${DIM}No account in the eddi realm has a password yet. Set one in the${RESET}"
       echo -e "  ${DIM}Keycloak console below: Users -> eddi -> Credentials -> Set password.${RESET}"
     fi
-    if [[ "$DEMO_USERS" != "true" ]]; then
+    if [[ "$REALM_ACCOUNTS_CHECKED" == "true" && "$DEMO_USERS" != "true" ]]; then
       if [[ ${#LEGACY_FIXTURE_LOGINS[@]} -gt 0 ]]; then
         warn "${LEGACY_FIXTURE_LOGINS[*]} still has a password. On a realm imported before"
         echo -e "     ${DIM}they stopped shipping one that is viewer/viewer and user/user — anyone who can${RESET}"
