@@ -209,7 +209,10 @@ public class PropertySetterTask implements ILifecycleTask {
                                         // API sent. Rendering it would evaluate their "{vars.x}" or
                                         // "{#for ...}" with the server's template data. valueString is the
                                         // authored alternative and is still templated below.
-                                        conversationProperties.put(name, withInstructionVisibility(new Property(name, valueString, scope), property));
+                                        if (!isScrubbedPlaceholder(name, valueString, scope)) {
+                                            conversationProperties.put(name,
+                                                    withInstructionVisibility(new Property(name, valueString, scope), property));
+                                        }
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;
@@ -232,17 +235,8 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        if (scope == Scope.secret && isScrubbedPlaceholder(templateString)) {
-                                            // The value has already been scrubbed — typically a RULE
-                                            // approval pause ran between the secret turn and this task, and
-                                            // the turn's finally replaced the input before the conversation
-                                            // was persisted. Vaulting now would overwrite the stored secret
-                                            // with the placeholder. Leave the property unset: the plaintext is
-                                            // deliberately not carried across a pause, so the user must submit
-                                            // the credential again.
-                                            LOGGER.warnf("Not vaulting scope='secret' property '%s': its value is the scrubbed "
-                                                    + "placeholder, not the secret (was the input consumed across a HITL pause?). "
-                                                    + "The property was left unset.", name);
+                                        if (isScrubbedPlaceholder(name, templateString, scope)) {
+                                            // Neither vaulted nor stored — see isScrubbedPlaceholder.
                                             continue;
                                         }
                                         if (scope == Scope.secret) {
@@ -321,7 +315,8 @@ public class PropertySetterTask implements ILifecycleTask {
                     IData<String> initialInputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
                     if (initialInputData != null) {
                         String initialInput = initialInputData.getResult();
-                        if (initialInput != null && !initialInput.isEmpty()) {
+                        if (initialInput != null && !initialInput.isEmpty()
+                                && !isScrubbedPlaceholder(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation)) {
                             properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
                         }
                     }
@@ -468,6 +463,38 @@ public class PropertySetterTask implements ILifecycleTask {
 
             return propertyInstruction;
         }).toList();
+    }
+
+    /**
+     * True when a property value resolved to a scrub placeholder instead of the
+     * value it was meant to capture, which means that value had already been
+     * scrubbed. This happens when a turn the client flagged {@code secretInput}
+     * paused on a RULE pause and this setter runs after the resume:
+     * {@code Conversation} scrubs a secret input when the turn stops, so
+     * {@code {memory.current.input}} then reads the placeholder.
+     * <ul>
+     * <li>Any scope: a value that IS {@code <secret input>}. Storing it would
+     * silently configure the agent with that literal text.</li>
+     * <li>{@code scope:"secret"}: a value that CONTAINS either placeholder
+     * ({@code <secret input>} or the secret-context one). Vaulting it would
+     * overwrite the stored secret with the placeholder; the plaintext is
+     * deliberately not carried across a pause, so the user must submit the
+     * credential again.</li>
+     * </ul>
+     * The property is left unset instead, and the reason logged.
+     */
+    private static boolean isScrubbedPlaceholder(String keyName, String value, Scope scope) {
+        if (value == null) {
+            return false;
+        }
+        boolean scrubbed = SECRET_INPUT_PLACEHOLDER.equals(value.trim()) || scope == Scope.secret
+                && (value.contains(SECRET_INPUT_PLACEHOLDER) || value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
+        if (scrubbed) {
+            LOGGER.warnf("Property '%s' resolved to a scrub placeholder, not the value it captures: that value was already scrubbed "
+                    + "(typically a capture that runs after a HITL resume of a secretInput turn). The property is not set "
+                    + "and nothing is vaulted. Capture the input before the pause.", keyName);
+        }
+        return scrubbed;
     }
 
     /**
@@ -678,14 +705,6 @@ public class PropertySetterTask implements ILifecycleTask {
      * what a configured parser normalizer produces — the resolved secret is the
      * NORMALIZED input, never byte-identical to the raw one.
      */
-    /**
-     * Whether {@code value} carries one of the placeholders a scrubbed secret is
-     * replaced by, instead of the secret itself.
-     */
-    static boolean isScrubbedPlaceholder(String value) {
-        return value != null && (value.contains(SECRET_INPUT_PLACEHOLDER) || value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
-    }
-
     private static boolean carriesSecret(String value, String plaintext) {
         if (isNullOrEmpty(value)) {
             return false;

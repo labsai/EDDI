@@ -34,6 +34,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -63,7 +64,6 @@ public class EmbeddingStoreFactory {
 
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
-    private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
     /** Ceiling on cached embedding stores across every knowledge base. */
     static final int MAX_STORES = 50;
@@ -310,7 +310,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", endpointForLog(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -381,8 +381,8 @@ public class EmbeddingStoreFactory {
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
-                collectionName, version.toString());
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", endpointForLog(baseUrl),
+                sanitize(tenantName), sanitize(databaseName), sanitize(collectionName), version.toString());
 
         return ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)
@@ -450,8 +450,39 @@ public class EmbeddingStoreFactory {
         }
     }
 
+    /**
+     * A store URL as it may be logged: scheme, host and port. A URL in
+     * {@code storeParameters} can carry credentials — {@code user:password@}, a
+     * token in the query, or one in the path — and
+     * {@link ai.labs.eddi.utils.LogSanitizer#sanitize} only neutralises control
+     * characters, so it left both in the log line.
+     */
+    static String endpointForLog(String url) {
+        if (url == null) {
+            return "null";
+        }
+        try {
+            URI parsed = URI.create(url.trim());
+            if (parsed.getHost() == null) {
+                return "<unparseable URL>";
+            }
+            String port = parsed.getPort() >= 0 ? ":" + parsed.getPort() : "";
+            return sanitize(parsed.getScheme() + "://" + parsed.getHost() + port);
+        } catch (IllegalArgumentException e) {
+            return "<unparseable URL>";
+        }
+    }
+
     static String sanitizeCollection(String kbId) {
-        return TRAILING_UNDERSCORES.matcher("eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_")).replaceAll("");
+        String name = "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
+        // A scan from the end, not the "_+$" regex it replaces: an unanchored-start
+        // "_+$" retries at every underscore, quadratic on a name that is a long run of
+        // them (CodeQL java/polynomial-redos), and the name is operator input.
+        int end = name.length();
+        while (end > 0 && name.charAt(end - 1) == '_') {
+            end--;
+        }
+        return name.substring(0, end);
     }
 
     /**

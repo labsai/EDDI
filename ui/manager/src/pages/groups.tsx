@@ -3,7 +3,7 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate } from "lucide-react";
+import { Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   useEnrichedGroupDescriptors,
@@ -234,7 +234,7 @@ export function GroupsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <Boxes className="h-8 w-8 text-primary" />
+            <Users className="h-8 w-8 text-primary" />
             {t("pages.groups.title", "Groups")}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -296,7 +296,7 @@ export function GroupsPage() {
       {/* Empty */}
       {!isLoading && !isError && groupedGroups.length === 0 && (
         <EmptyState
-          icon={Boxes}
+          icon={Users}
           title={search ? t("common.noResults") : t("groups.empty", "No groups yet")}
           description={!search ? t("groups.emptyDescription", "Groups let multiple agents collaborate on structured discussions.") : undefined}
           actionLabel={!search ? t("groups.createGroup", "Create Group") : undefined}

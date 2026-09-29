@@ -153,12 +153,13 @@ describe("ResourceDetailPage", () => {
     expect(screen.getByTestId("back-to-list")).toBeInTheDocument();
   });
 
-  it("renders delete button", () => {
+  it("renders delete button", async () => {
     renderWithRoute(
       "/manage/resources/rules/res1",
       <ResourceDetailPage />
     );
-    expect(screen.getByText("Delete")).toBeInTheDocument();
+    // Delete waits for the descriptor's callerLevel — it needs OWN.
+    expect(await screen.findByText("Delete")).toBeInTheDocument();
   });
 
   it("renders duplicate button", () => {

@@ -56,9 +56,9 @@ import {
   ChevronUp,
   Hash,
   Clock,
-  Layers,
-  HandMetal,
   Wrench,
+  Hand,
+  ListOrdered,
 } from "lucide-react";
 
 export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
@@ -476,7 +476,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               </button>
             </div>
             <div className="flex items-center gap-1" title="Steps">
-              <Layers className="h-3 w-3" />
+              <ListOrdered className="h-3 w-3" />
               <span>{messages.filter((m) => m.role === "user").length} {t("chat.context.stepCount", "turns")}</span>
             </div>
             <div className="flex items-center gap-1" title="Started">
@@ -649,7 +649,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs"
             data-testid="chat-pause-banner"
           >
-            <HandMetal className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <Hand className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
             <span className="text-amber-600 dark:text-amber-400">
               {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
             </span>

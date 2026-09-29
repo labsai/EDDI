@@ -679,6 +679,19 @@ export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
+/**
+ * A chat message containing this makes the mocked turn fail the way a rejected
+ * LLM call does: `conversationState: ERROR`, no reply, and the reason under
+ * `taskErrors` — on the plain and the streaming path.
+ */
+export const TASK_FAILURE_TRIGGER = "trigger a task failure";
+
+/** The reason the mocked failed turn reports. */
+export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
+
+/** What the mocked ingestion status says for a `replace=true` ingestion. */
+export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
+
 function readSeed<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -1389,8 +1402,58 @@ export const handlers = [
     });
   }),
 
+  // Streaming send (v6: POST /agents/:conversationId/stream). A plain reply, or —
+  // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
+  http.post("*/agents/:conversationId/stream", async ({ request }) => {
+    const body = await request.clone().text();
+    const frame = (name: string, data: unknown) =>
+      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+    const frames = body.includes(TASK_FAILURE_TRIGGER)
+      ? [
+          frame("task_failed", {
+            taskId: "eddi://ai.labs.llm",
+            taskType: "langchain",
+            errorType: "unknown",
+            error: "Streaming chat failed: `temperature` is deprecated for this model.",
+          }),
+          frame("done", {
+            conversationState: "ERROR",
+            conversationOutputs: [
+              {
+                actions: ["send_message"],
+                taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+              },
+            ],
+          }),
+        ]
+      : [
+          frame("token", "Happy to help."),
+          frame("done", {
+            conversationState: "READY",
+            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+          }),
+        ];
+    return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
+  }),
+
   // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
-  http.post("*/agents/:conversationId", () => {
+  http.post("*/agents/:conversationId", async ({ request }) => {
+    if ((await request.clone().text()).includes(TASK_FAILURE_TRIGGER)) {
+      return HttpResponse.json({
+        agentId: "agent1",
+        agentVersion: 3,
+        conversationId: "conv-mock",
+        conversationState: "ERROR",
+        environment: "production",
+        conversationSteps: [],
+        conversationOutputs: [
+          {
+            actions: ["send_message"],
+            taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+          },
+        ],
+      });
+    }
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 3,
@@ -2286,6 +2349,7 @@ export const handlers = [
             maxDepth: 3,
             maxPages: 200,
             excludePatterns: ["*.pdf"],
+            sitemapUrls: ["https://example.com/docs/sitemap.xml"],
             requestDelayMs: 500,
             respectRobots: true,
           },
@@ -2300,15 +2364,20 @@ export const handlers = [
   }),
 
   // RAG ingestion endpoints (mock)
-  http.post("*/ragstore/rags/:id/ingest", () => {
+  http.post("*/ragstore/rags/:id/ingest", ({ request }) => {
+    // The id records whether the client asked to replace, so the status below can
+    // answer the way a store that cannot delete by metadata does.
+    const replace = new URL(request.url).searchParams.get("replace") === "true";
     return HttpResponse.json({
-      ingestionId: `ingest-${Date.now()}`,
+      ingestionId: `ingest-${replace ? "replace-" : ""}${Date.now()}`,
     });
   }),
 
-  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", () => {
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", ({ params }) => {
+    const replaced = String(params.ingestionId).startsWith("ingest-replace-");
     return HttpResponse.json({
       status: "completed",
+      ...(replaced ? { warning: MOCK_REPLACE_WARNING } : {}),
     });
   }),
 

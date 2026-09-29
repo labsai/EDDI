@@ -89,7 +89,7 @@ compile or does not work, stale counts and paths, and a context cost (84 KB for 
   been sent since 2026-08-14 and this widget does not handle it yet (a code follow-up, not done
   here). Known `error` events carry a `code`. The query-parameter list is complete, the
   approvals route is the Manager's `/manage/approvals`, the personal `c:\dev\git` path is gone,
-  and the CI gates (`typecheck`, `test`) are named.
+  and the CI gates (`typecheck`, `lint`, `test`) are named.
 
 ### Tooling
 

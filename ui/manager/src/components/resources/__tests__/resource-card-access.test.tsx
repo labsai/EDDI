@@ -24,7 +24,6 @@ function renderResource(callerLevel?: string) {
     <ResourceCard
       item={row(callerLevel)}
       typeSlug="output"
-      iconName="GitBranch"
       onDuplicate={noop}
       onDelete={noop}
     />,

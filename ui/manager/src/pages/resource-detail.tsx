@@ -4,18 +4,11 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import {
-  FileCode,
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  Brain,
-  Settings,
-  Plug,
   Trash2,
   Copy,
-  Puzzle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,7 +24,7 @@ import {
   useCascadeSave,
 } from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
-import type { LucideIcon } from "lucide-react";
+import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
@@ -54,19 +47,6 @@ import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { deployAgent } from "@/lib/api/agents";
 
-const ICON_MAP: Record<string, LucideIcon> = {
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck: BookOpen, // reuse BookOpen for Knowledge Bases
-  Brain,
-  Settings,
-  Plug,
-  Puzzle,
-};
-
-
 /**
  * One id for the "saved — not yet live" toast, so only the most recent save's
  * Deploy action is ever on screen. See where it is used for why that matters.
@@ -81,7 +61,7 @@ export function ResourceDetailPage() {
   const queryClient = useQueryClient();
 
   const rt = getResourceType(type ?? "");
-  const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
+  const Icon = getResourceTypeIcon(rt?.slug);
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
   // Cascade context from URL search params (set when navigating from agent/workflow)
@@ -124,6 +104,11 @@ export function ResourceDetailPage() {
     isLoading: isVersionsLoading,
     isError: isVersionsError,
   } = useResourceVersions(type ?? "", id ?? "");
+  // Deleting a resource needs OWN; an EDIT grantee may still change it.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Resolve latest version from descriptors
   useEffect(() => {
@@ -562,14 +547,17 @@ export function ResourceDetailPage() {
             <Copy className="h-4 w-4" />
             {t("common.duplicate")}
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => setShowDeleteDialog(true)}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 className="h-4 w-4" />
-            {t("common.delete")}
-          </Button>
+          {access.canOwn && (
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={deleteMutation.isPending}
+              data-testid="delete-resource-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("common.delete")}
+            </Button>
+          )}
         </div>
       </div>
 

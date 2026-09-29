@@ -1,51 +1,17 @@
 /* ──────────────────────────────────────────────
    ChatWidget — query-param hardening helpers
 
-   Pure helpers that guard the widget against three URL-borne risks:
-   token leakage/CSRF (?token=), cross-origin API redirection (?apiServer=),
-   and untrusted postMessage token sources (?tokenOrigin=).
+   Pure helpers that guard the widget against two URL-borne risks:
+   cross-origin API redirection (?apiServer=) and untrusted postMessage token
+   sources (?tokenOrigin=). Stripping ?token= from the address is covered by
+   ChatWidget.review-fixes.test.tsx.
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, vi } from "vitest";
 import {
-  stripTokenFromUrl,
   sanitizeApiServer,
   parseAllowedTokenOrigins,
 } from "./ChatWidget";
-
-describe("stripTokenFromUrl", () => {
-  it("removes the token param and returns its value", () => {
-    const { token, cleanedUrl } = stripTokenFromUrl(
-      "https://host.example/chat/prod/agent-1?token=secret-jwt&theme=dark",
-    );
-    expect(token).toBe("secret-jwt");
-    // The token must be gone; other params survive.
-    expect(cleanedUrl).toBe("/chat/prod/agent-1?theme=dark");
-    expect(cleanedUrl).not.toContain("secret-jwt");
-    expect(cleanedUrl).not.toContain("token");
-  });
-
-  it("preserves the hash while stripping the token", () => {
-    const { cleanedUrl } = stripTokenFromUrl(
-      "https://host.example/chat?token=abc#section",
-    );
-    expect(cleanedUrl).toBe("/chat#section");
-  });
-
-  it("returns nulls when there is no token", () => {
-    expect(stripTokenFromUrl("https://host.example/chat?theme=dark")).toEqual({
-      token: null,
-      cleanedUrl: null,
-    });
-  });
-
-  it("returns nulls for an unparseable URL rather than throwing", () => {
-    expect(stripTokenFromUrl("::::not a url::::")).toEqual({
-      token: null,
-      cleanedUrl: null,
-    });
-  });
-});
 
 describe("sanitizeApiServer", () => {
   it("accepts a same-origin relative path", () => {

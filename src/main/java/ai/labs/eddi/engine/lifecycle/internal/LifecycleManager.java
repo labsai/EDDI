@@ -34,15 +34,17 @@ import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 
 import org.jboss.logging.Logger;
 import java.net.UnknownHostException;
 import java.net.SocketTimeoutException;
 import java.net.ConnectException;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_ERRORS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CONFIDENCE;
@@ -466,6 +468,15 @@ public class LifecycleManager implements ILifecycleManager {
                     injectFailureAction(cs, task, currentActions != null && currentActions.getResult() != null
                             ? List.copyOf(currentActions.getResult())
                             : actionsBefore);
+                } else if (currentStep instanceof ConversationStep cs) {
+                    // Without strict write the caller was told nothing: the turn came back
+                    // as conversationState ERROR with an output that was simply empty — no
+                    // reply, and no reason, on the plain and the streaming path alike. The
+                    // failure is reported in the step's output under "taskErrors", the key
+                    // strict write already uses. It reaches the client only; nothing reads
+                    // it back into what the model sees, so an agent's prompts are unchanged.
+                    // Strict write keeps its own semantics — "exclude_all" still means silence.
+                    reportFailureToCaller(cs, task, e);
                 }
 
                 // Collect failure audit entry. Best-effort: an audit failure must not
@@ -976,16 +987,7 @@ public class LifecycleManager implements ILifecycleManager {
      * icon, different color).
      */
     private void injectErrorDigest(ConversationStep step, ILifecycleTask task, Exception exception) {
-        String summary = summarizeException(exception);
-        String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
-
-        // Store under separate "taskErrors" key — never mixed into "output"
-        var errorOutput = new LinkedHashMap<String, Object>();
-        errorOutput.put("type", "errorDigest");
-        errorOutput.put("taskId", task.getId().name());
-        errorOutput.put("taskType", task.getType());
-        errorOutput.put("text", digestText);
-        step.addConversationOutputList("taskErrors", List.of(errorOutput));
+        String digestText = reportFailureToCaller(step, task, exception);
 
         // Also store as committed IData so it's visible in memory
         Data<String> digestData = new Data<>("taskError:" + task.getId(), digestText);
@@ -1016,15 +1018,31 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Creates a concise, sanitized error summary suitable for LLM consumption.
-     * Strips stack traces, internal URLs, and class names to avoid context
-     * pollution.
+     * Records a failed task in the step's output under the dedicated
+     * {@code taskErrors} key — never mixed into {@code output}, so
+     * {@link ConversationLogGenerator} does not concatenate it with the reply. A
+     * client renders it as a failure rather than as something the agent said.
+     *
+     * @return the digest text
      */
-    static String summarizeException(Exception e) {
-        String msg = e.getMessage();
-        if (msg == null || msg.isBlank()) {
-            msg = e.getClass().getSimpleName();
-        }
+    private String reportFailureToCaller(ConversationStep step, ILifecycleTask task, Exception exception) {
+        String digestText = String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
+        var errorOutput = new LinkedHashMap<String, Object>();
+        errorOutput.put("type", "errorDigest");
+        errorOutput.put("taskId", task.getId().name());
+        errorOutput.put("taskType", task.getType());
+        errorOutput.put("text", digestText);
+        step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
+        return digestText;
+    }
+
+    /**
+     * Creates a concise, sanitized error summary suitable for a client and for LLM
+     * consumption. Strips stack traces and URLs, and redacts credentials: this text
+     * leaves the server.
+     */
+    static String summarizeException(Throwable e) {
+        String msg = describeFailure(e);
 
         // Strip common noise patterns
         msg = msg.replaceAll("https?://[^\\s]+", "[url]");
@@ -1035,11 +1053,61 @@ public class LifecycleManager implements ILifecycleManager {
         msg = FQCN_EXCEPTION.matcher(msg).replaceAll("");
         // A provider's raw JSON error body: keep only its message.
         msg = replaceJsonErrorBody(msg);
+        // Redact before truncating — cutting first can split a secret so the
+        // pattern no longer matches, leaving a fragment behind. This text leaves the
+        // server: it is in every response and streaming event of a failed turn.
+        msg = SecretRedactionFilter.redact(msg).trim();
 
         if (msg.length() > MAX_ERROR_DIGEST_LENGTH) {
             msg = msg.substring(0, MAX_ERROR_DIGEST_LENGTH) + "...";
         }
-        return msg.trim();
+        return msg;
+    }
+
+    /** {@code "message":"..."} in a provider's JSON error body. */
+    private static final Pattern PROVIDER_ERROR_MESSAGE = Pattern.compile("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /**
+     * What actually went wrong, rather than what the outermost wrapper says.
+     * <p>
+     * A provider rejection reaches this point wrapped — "Streaming chat failed",
+     * with the reason three causes down as the provider's raw JSON error body. The
+     * summary used to be the wrapper alone, so the one sentence that said why
+     * ("`temperature` is deprecated for this model") appeared in no response, event
+     * or audit entry, only in the server log. This keeps the outermost message for
+     * context and appends the most specific one, pulling {@code message} out of a
+     * JSON error body when there is one.
+     */
+    static String describeFailure(Throwable e) {
+        String outer = e.getMessage();
+        if (outer == null || outer.isBlank()) {
+            outer = e.getClass().getSimpleName();
+        }
+        String innermost = null;
+        Throwable cause = e.getCause();
+        for (int depth = 0; cause != null && cause != e && depth < 16; depth++) {
+            if (cause.getMessage() != null && !cause.getMessage().isBlank()) {
+                innermost = cause.getMessage();
+            }
+            cause = cause.getCause();
+        }
+        String specific = innermost == null ? null : providerMessage(innermost);
+        if (innermost != null && !innermost.equals(specific) && outer.contains(innermost)) {
+            // The wrapper already quotes the raw body ("Chat model execution failed:
+            // {json}") — swap the body for the message inside it.
+            return outer.replace(innermost, specific);
+        }
+        if (specific == null || outer.contains(specific)) {
+            return providerMessage(outer);
+        }
+        return outer + ": " + specific;
+    }
+
+    private static String providerMessage(String message) {
+        Matcher matcher = PROVIDER_ERROR_MESSAGE.matcher(message);
+        return message.trim().startsWith("{") && matcher.find()
+                ? matcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\")
+                : message;
     }
 
     // ==================== OpenTelemetry ====================
@@ -1113,10 +1181,7 @@ public class LifecycleManager implements ILifecycleManager {
      * are scrubbed via {@link SecretRedactionFilter}.
      */
     static String summarizeForAudit(Throwable e) {
-        String msg = e.getMessage();
-        if (msg == null || msg.isBlank()) {
-            msg = e.getClass().getSimpleName();
-        }
+        String msg = describeFailure(e);
         // Redact before truncating — cutting first can split a secret so the
         // pattern no longer matches, leaving a fragment behind.
         msg = SecretRedactionFilter.redact(msg);

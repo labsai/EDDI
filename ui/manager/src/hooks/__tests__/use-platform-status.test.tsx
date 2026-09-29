@@ -64,4 +64,33 @@ describe("usePlatformStatus", () => {
     expect(result.current.instanceId).toBeNull();
     expect(result.current.latencyMs).toBeNull();
   });
+
+  it.each([401, 403])(
+    "returns online without an instance ID when the probe answers %i",
+    async (status) => {
+      // eddi-editor / eddi-viewer: the instance-id endpoint is eddi-admin
+      // only. The refusal proves the backend answered, so it is not offline.
+      server.use(
+        http.get("*/administration/logs/instance-id", () =>
+          HttpResponse.json({}, { status }),
+        ),
+      );
+      const { result } = renderHook(() => usePlatformStatus(), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => expect(result.current.status).toBe("online"));
+      expect(result.current.instanceId).toBeNull();
+      expect(typeof result.current.latencyMs).toBe("number");
+    },
+  );
+
+  it("returns offline when the backend is unreachable", async () => {
+    server.use(
+      http.get("*/administration/logs/instance-id", () => HttpResponse.error()),
+    );
+    const { result } = renderHook(() => usePlatformStatus(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.status).toBe("offline"));
+  });
 });

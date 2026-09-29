@@ -41,8 +41,9 @@ src/
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 │   ├── MessageBubble.tsx   # User/agent messages with markdown
+│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js loading (rich-math.ts, rich-highlight.ts)
+│   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
-│   ├── SecretInput.tsx     # Masked field for an `inputField` output (password/text/email)
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
 │   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade)
@@ -71,9 +72,25 @@ src/
   `tool_call` (`{"tool":"<name>"}`, sent as the LLM invokes a tool) is **not handled
   by this widget yet** — `SSEEventType` in `types.ts` omits it and the event `switch` in
   `ChatWidget.tsx` has no case for it.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string — and for every
-  known client condition (each one the non-streaming endpoint answers with a typed
-  status — 409, 410, 404, 413, 429, 403, 503) it also carries a `"code"`. Branch on `code`, show `message`.
+- **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
+  refused BEFORE it ran — every condition the non-streaming endpoint answers with a
+  typed status (409, 410, 404, 413, 429, 403, 503) — also carries a `code`
+  (`awaiting_approval`, `conversation_ended`, …, pinned in
+  `UNCONSUMED_STREAM_ERROR_CODES` against `RestAgentEngineStreaming`): treat it like
+  a 409 — withdraw the bubble and restore the draft. Branch on `code`, show `message`.
+- **Every `data:` line carries one delimiter space** —
+  `RestAgentEngineStreaming.padDataLines` writes it. Strip exactly one; a
+  token's own leading space follows it.
+- **`inputField` arrives on `done` too.** Read it from every transport, not
+  only the non-streaming snapshot.
+- **The route's environment must be sent** as `?environment=` on start; the
+  backend defaults a missing one to production.
+- **The turn output's `input` is the masked display copy** — `<secret input>`
+  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
+  a secret turn when it ends and masks older stored ones on read, so
+  `input:initial` also reads `<secret input>`; the client-side mask is a
+  second line of defence, not the only one.
+- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
   the snapshot to refresh them.
@@ -121,8 +138,9 @@ src/
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
 4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token`, `userId`. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
+6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `userId`. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
+8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 
 ---
 
@@ -138,8 +156,9 @@ npm run build    # Outputs to dist/
 
 ### Quality gates
 
-CI's `UI Chat` job runs `npm ci`, `npm run typecheck` and `npm test` on every PR into `main`
-that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets no CI at all). Run both before pushing, plus `npm run build`. There is no lint script in this package.
+CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
+PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
+no CI at all). Run all three before pushing, plus `npm run build`.
 
 ---
 
