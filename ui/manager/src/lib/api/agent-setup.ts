@@ -123,7 +123,7 @@ export const LLM_PROVIDERS = [
   { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true },
   { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true },
   { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true },
-  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-5-5", needsKey: false },
+  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "global.anthropic.claude-sonnet-5-5", needsKey: false },
   { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false },
   { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false },
   // Jlama loads from Hugging Face, so the default has to be a real `owner/name`

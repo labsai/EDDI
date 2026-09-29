@@ -11,8 +11,8 @@ Claude Opus 5 / Sonnet 5 and the `gpt-5.6-*` OpenAI ids, so the newest releases 
 ### What changed
 
 - `anthropic`, `gemini-vertex`: added `claude-opus-5-5` and `claude-sonnet-5-5`, listed first.
-- `bedrock`: added `anthropic.claude-opus-5-5` and `anthropic.claude-sonnet-5-5`.
-- **Default model** is now `claude-sonnet-5-5` (was `claude-sonnet-5`) wherever the Manager fills one in: the wizard provider table (`anthropic`, and `anthropic.claude-sonnet-5-5` for Bedrock), the group wizard fallbacks, the Operator's default config, and the conversation-summary and Dream model defaults. The `e.g. claude-sonnet-5` placeholders (`llmEditor.cascadeModelName`, `Workforce.wizard.modelPlaceholder`) follow, in all 11 locales.
+- `bedrock`: added `global.anthropic.claude-sonnet-5-5` (on `bedrock-runtime` the bare model id is not accepted for on-demand inference; the `global.` inference profile is) and `anthropic.claude-opus-5-5` (kept bare: its inference-profile id is unconfirmed).
+- **Default model** is now `claude-sonnet-5-5` (was `claude-sonnet-5`) wherever the Manager fills one in: the wizard provider table (`anthropic`, and `global.anthropic.claude-sonnet-5-5` for Bedrock), the group wizard fallbacks, the Operator's default config, and the conversation-summary and Dream model defaults. The `e.g. claude-sonnet-5` placeholders (`llmEditor.cascadeModelName`, `Workforce.wizard.modelPlaceholder`) follow, in all 11 locales.
 - `openai`: added `gpt-6-sol` and `gpt-6-luna` after `gpt-6-astra`.
 
 ### Decisions

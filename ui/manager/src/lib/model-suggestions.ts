@@ -137,7 +137,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
     // Anthropic — current-generation ids carry the `anthropic.` prefix with no
     // version suffix.
-    "anthropic.claude-sonnet-5-5",
+    "global.anthropic.claude-sonnet-5-5",
     "anthropic.claude-opus-5-5",
     "anthropic.claude-sonnet-5",
     "anthropic.claude-opus-5",
