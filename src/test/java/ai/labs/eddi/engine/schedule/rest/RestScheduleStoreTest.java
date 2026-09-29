@@ -873,6 +873,10 @@ class RestScheduleStoreTest {
         asEditor("editor-1");
         when(scheduleStore.readSchedule("tc2")).thenReturn(storedCadenceSchedule("tc2"));
         var guard = mock(ResourceAccessGuard.class);
+        // EDIT on the group, answered consistently by both the throwing and the
+        // non-throwing check (the latter decides who manages a system schedule under
+        // workspace enforcement).
+        when(guard.hasAccess("group-1", AccessLevel.EDIT)).thenReturn(true);
         setField(rest, "resourceAccessGuard", guard);
 
         Response response = rest.updateSchedule("tc2", makeCronSchedule("tc2"));
@@ -1631,6 +1635,7 @@ class RestScheduleStoreTest {
 
     @Test
     void readFireLogs_hugeLimit_isCapped() throws Exception {
+        when(scheduleStore.readSchedule("s1")).thenReturn(makeCronSchedule("s1"));
         when(scheduleStore.readFireLogs(eq("s1"), anyInt())).thenReturn(List.of());
 
         rest.readFireLogs("s1", 10_000_000);
@@ -1736,8 +1741,43 @@ class RestScheduleStoreTest {
      * {@code requireAgentUseAccess} does nothing. These tests exercise schedule
      * semantics; the USE gate has its own.
      */
+    /**
+     * Workspaces off: every caller sees every resource, as the guard answers then.
+     */
     private static ResourceAccessGuard permissiveResourceGuard() {
-        return mock(ResourceAccessGuard.class);
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.seesEverything()).thenReturn(true);
+        lenient().when(guard.hasAccess(any(), any())).thenReturn(true);
+        return guard;
+    }
+
+    /**
+     * Workspaces enforced: a fresh guard that grants nothing unless a test stubs
+     * it.
+     */
+    private ResourceAccessGuard enforcedGuard() throws Exception {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        setField(rest, "resourceAccessGuard", guard);
+        return guard;
+    }
+
+    private static ScheduleConfiguration systemSchedule(String id, String createdBy) {
+        var s = makeCronSchedule(id);
+        s.setUserId("system:scheduler");
+        s.setCreatedBy(createdBy);
+        return s;
+    }
+
+    private static ScheduleFireLog failedFire(String scheduleId) {
+        return new ScheduleFireLog("f-" + scheduleId, scheduleId, "fire-1", Instant.now(), Instant.now(), Instant.now(),
+                "DEAD_LETTERED", "i-1", "conv-" + scheduleId, "boom", 3, 0);
+    }
+
+    private static ScheduleConfiguration cadenceSchedule(String id, String creator, String groupId) {
+        var s = makeCronSchedule(id);
+        s.setUserId(creator);
+        s.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", groupId, "cadenceId", "c1"));
+        return s;
     }
 
     // --- Finding 3: create must not seed a caller-supplied
@@ -1899,7 +1939,8 @@ class RestScheduleStoreTest {
         assertEquals(List.of("own0", "own1", "own2"), firstPage.stream().map(ScheduleConfiguration::getId).toList(),
                 "a full first page of the editor's own schedules, not a short page of what survived a post-filter");
         assertEquals(List.of("shared"), secondPage.stream().map(ScheduleConfiguration::getId).toList());
-        verify(scheduleStore, times(2)).readAllSchedules(anyInt(), anyInt(), eq(true), eq(ScheduleOwnerScope.visibleTo("editor-1")));
+        verify(scheduleStore, times(2)).readAllSchedules(anyInt(), anyInt(), eq(true),
+                eq(ScheduleOwnerScope.visibleTo("editor-1").withTeamCadences()));
     }
 
     @Test
@@ -1909,7 +1950,7 @@ class RestScheduleStoreTest {
 
         rest.readAllSchedules("agent-1", 500, 0);
 
-        verify(scheduleStore).readSchedulesByAgentId("agent-1", 500, 0, true, ScheduleOwnerScope.visibleTo("editor-1"));
+        verify(scheduleStore).readSchedulesByAgentId("agent-1", 500, 0, true, ScheduleOwnerScope.visibleTo("editor-1").withTeamCadences());
     }
 
     @Test
@@ -1920,6 +1961,216 @@ class RestScheduleStoreTest {
 
         rest.readAllSchedules(null, 500, 0);
 
-        verify(scheduleStore).readAllSchedules(500, 0, true, ScheduleOwnerScope.visibleTo(null));
+        verify(scheduleStore).readAllSchedules(500, 0, true, ScheduleOwnerScope.visibleTo(null).withTeamCadences());
+    }
+
+    // --- Ported from fix/workspace-authz-scoping: what main's owner scoping does
+    // not cover (fire logs, the failed-fires view, HITL reads, team cadences,
+    // forged cadence bodies, and the workspace rules for system schedules) ---
+
+    @Test
+    void readFireLogs_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("d1")).thenReturn(dreamSchedule("d1", "victim-42"));
+
+        assertThrows(ForbiddenException.class, () -> rest.readFireLogs("d1", 10));
+        verify(scheduleStore, never()).readFireLogs(any(), anyInt());
+    }
+
+    @Test
+    void readFireLogs_ofADeletedSchedule_areAdminOnly() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("gone")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        assertThrows(NotFoundException.class, () -> rest.readFireLogs("gone", 10));
+
+        asAdmin("root");
+        when(scheduleStore.readFireLogs("gone", 10)).thenReturn(List.of());
+        assertEquals(List.of(), rest.readFireLogs("gone", 10));
+    }
+
+    @Test
+    void readSchedule_hidesHitlTimeoutsFromNonAdmins_likeTheListing() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
+
+        assertThrows(ForbiddenException.class, () -> rest.readSchedule("h1"));
+
+        asAdmin("root");
+        assertEquals("h1", rest.readSchedule("h1").getId());
+    }
+
+    @Test
+    void readFailedFires_showsANonAdminOnlyTheSchedulesTheyCanSee() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readFailedFireLogs(anyInt())).thenReturn(List.of(
+                failedFire("s-mine"), failedFire("s-theirs"), failedFire("s-mine"), failedFire("s-gone")));
+        when(scheduleStore.readSchedule("s-mine")).thenReturn(dreamSchedule("s-mine", "editor-1"));
+        when(scheduleStore.readSchedule("s-theirs")).thenReturn(dreamSchedule("s-theirs", "victim-42"));
+        when(scheduleStore.readSchedule("s-gone")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        List<ScheduleFireLog> visible = rest.readFailedFires(50);
+
+        assertEquals(List.of("s-mine", "s-mine"), visible.stream().map(ScheduleFireLog::scheduleId).toList(),
+                "another user's failed dream run must not leak its conversation id and error text");
+        verify(scheduleStore, times(1)).readSchedule("s-mine");
+    }
+
+    @Test
+    void readFailedFires_adminSeesEverything() throws Exception {
+        asAdmin("root");
+        when(scheduleStore.readFailedFireLogs(anyInt())).thenReturn(List.of(failedFire("s-theirs"), failedFire("s-gone")));
+
+        assertEquals(2, rest.readFailedFires(50).size());
+        verify(scheduleStore, never()).readSchedule(any());
+    }
+
+    @Test
+    void enforced_listing_showsOnlyOwnSharedSchedules_unlessTheCallerMayEditTheAgent() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        when(guard.hasAccess("team-agent", AccessLevel.EDIT)).thenReturn(true);
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
+
+        rest.readAllSchedules(null, 50, 0);
+        rest.readAllSchedules("team-agent", 50, 0);
+        rest.readAllSchedules("other-agent", 50, 0);
+
+        var ownShared = ScheduleOwnerScope.visibleTo("editor-1").sharedOnlyIfCreatedByCaller();
+        verify(scheduleStore).readAllSchedules(50, 0, true, ownShared);
+        verify(scheduleStore).readSchedulesByAgentId("team-agent", 50, 0, true, ScheduleOwnerScope.visibleTo("editor-1"));
+        verify(scheduleStore).readSchedulesByAgentId("other-agent", 50, 0, true, ownShared);
+    }
+
+    @Test
+    void enforced_systemScheduleOfAnotherTeam_cannotBeReadOrDeleted_butItsCreatorCan() throws Exception {
+        asEditor("editor-1");
+        enforcedGuard();
+        when(scheduleStore.readSchedule("s-other")).thenReturn(systemSchedule("s-other", "someone-else"));
+        when(scheduleStore.readSchedule("s-mine")).thenReturn(systemSchedule("s-mine", "editor-1"));
+
+        assertThrows(ForbiddenException.class, () -> rest.readSchedule("s-other"));
+        assertEquals(403, rest.deleteSchedule("s-other").getStatus());
+        assertEquals(204, rest.deleteSchedule("s-mine").getStatus());
+
+        verify(scheduleStore, never()).deleteSchedule("s-other");
+        verify(scheduleStore).deleteSchedule("s-mine");
+    }
+
+    @Test
+    void enforced_systemSchedule_isManageableByAnEditorOfItsAgent() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        when(guard.hasAccess("agent-1", AccessLevel.EDIT)).thenReturn(true);
+        when(scheduleStore.readSchedule("s-team")).thenReturn(systemSchedule("s-team", "colleague"));
+
+        assertEquals(204, rest.deleteSchedule("s-team").getStatus());
+    }
+
+    @Test
+    void enforced_systemScheduleOfAnotherTeam_cannotBeUpdated() throws Exception {
+        asEditor("editor-1");
+        enforcedGuard();
+        when(scheduleStore.readSchedule("s-other")).thenReturn(systemSchedule("s-other", "someone-else"));
+
+        assertEquals(403, rest.updateSchedule("s-other", makeCronSchedule("s-other")).getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    @Test
+    void teamCadence_isReadableWithViewAndManageableWithEditOnTheGroup() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        when(scheduleStore.readSchedule("c1")).thenReturn(cadenceSchedule("c1", "creator", "g1"));
+        when(guard.hasAccess("g1", AccessLevel.VIEW)).thenReturn(true);
+
+        assertEquals("c1", rest.readSchedule("c1").getId(), "a co-member of the group sees the cadence");
+        assertEquals(403, rest.disableSchedule("c1").getStatus(), "VIEW does not let them toggle it");
+
+        when(guard.hasAccess("g1", AccessLevel.EDIT)).thenReturn(true);
+        assertEquals(200, rest.disableSchedule("c1").getStatus(), "a co-editor may toggle it");
+    }
+
+    @Test
+    void teamCadence_withWorkspacesOff_isVisibleToEveryEditor() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("c1")).thenReturn(cadenceSchedule("c1", "creator", "g1"));
+
+        assertEquals("c1", rest.readSchedule("c1").getId());
+    }
+
+    @Test
+    void anotherUsersPersonalSchedule_isNotAdmittedByGroupAccess() throws Exception {
+        // Only a cadence is reachable through its group; a dream schedule is personal.
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("d1")).thenReturn(dreamSchedule("d1", "victim-42"));
+
+        assertThrows(ForbiddenException.class, () -> rest.readSchedule("d1"));
+    }
+
+    @Test
+    void create_withTeamCadenceMetadata_isRejected() throws Exception {
+        var forged = makeCronSchedule(null);
+        forged.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", "victim-group", "cadenceId", "c1"));
+
+        Response response = rest.createSchedule(forged);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void update_toTeamCadenceMetadata_isRejected() throws Exception {
+        when(scheduleStore.readSchedule("s1")).thenReturn(makeCronSchedule("s1"));
+        var forged = makeCronSchedule("s1");
+        forged.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", "victim-group", "cadenceId", "c1"));
+
+        Response response = rest.updateSchedule("s1", forged);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    @Test
+    void update_ofACadenceEchoingItsOwnMarkers_isAllowed() throws Exception {
+        // A read-modify-write of a cadence's cron sends its markers back; that is not
+        // a forgery. guardManagedSchedule has already required EDIT on the group.
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("c1")).thenReturn(cadenceSchedule("c1", "editor-1", "g1"));
+        var body = cadenceSchedule("c1", "editor-1", "g1");
+        body.setCronExpression("0 9 * * 1");
+
+        assertEquals(200, rest.updateSchedule("c1", body).getStatus());
+        verify(scheduleStore).updateSchedule(eq("c1"), any());
+
+        var repointed = cadenceSchedule("c1", "editor-1", "other-group");
+        assertEquals(400, rest.updateSchedule("c1", repointed).getStatus(), "naming another group is a forgery");
+    }
+
+    @Test
+    void fireNow_teamCadence_requiresEditOnTheGroup() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        var cadence = cadenceSchedule("c-sched", "editor-1", "victim-group");
+        when(scheduleStore.readSchedule("c-sched")).thenReturn(cadence);
+        doThrow(new ForbiddenException("no")).when(guard)
+                .requireAccess("victim-group", AccessLevel.EDIT, "group");
+
+        assertThrows(ForbiddenException.class, () -> rest.fireNow("c-sched"));
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_ingestionWithoutEditOnTheKnowledgeBase_is403NotAServerError() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        var ingestion = makeCronSchedule("i1");
+        ingestion.setMetadata(RagIngestionSchedules.metadata("kb-1", 1, "src-1"));
+        when(scheduleStore.readSchedule("i1")).thenReturn(ingestion);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess("kb-1", AccessLevel.EDIT, "RAG configuration");
+
+        assertThrows(ForbiddenException.class, () -> rest.fireNow("i1"));
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
     }
 }

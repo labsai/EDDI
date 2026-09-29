@@ -151,8 +151,10 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > out.
 >
 > A non-admin's listing holds only the schedules that run as the caller plus shared
-> ones (no `userId`, or the `system:scheduler` placeholder), and HITL approval
-> timeouts are left out. Both restrictions are part of the query, so `limit`/`offset`
+> ones (no `userId`, or the `system:scheduler` placeholder), refined for team
+> cadences and workspaces as described in
+> [Who Can See and Manage a Schedule](#who-can-see-and-manage-a-schedule), and HITL
+> approval timeouts are left out. Both restrictions are part of the query, so `limit`/`offset`
 > count only the rows the caller can see and a short page really is the last one.
 >
 > **`limit=0` is now `400`, on all three listing endpoints.** It used to be passed
@@ -183,12 +185,44 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > comes back. The fire itself continues, and the schedule stays claimed until it
 > ends — a retry in the meantime answers `409`.
 
+### Who Can See and Manage a Schedule
+
+With authorization on, schedule access follows who the schedule **runs as**:
+
+- A schedule whose `userId` names a real user (a per-user dream schedule, a
+  schedule created with your own `userId`) belongs to that user. Other non-admin
+  callers do not see it in the listing, get `403` reading it or its fire logs, and
+  cannot update, fire, enable, disable, delete, retry or dismiss it — **with
+  workspaces on or off**. Administrators see and manage everything. HITL approval
+  timeouts are hidden from non-admins on a direct read too, as in the listing.
+- A **team cadence** schedule runs as the cadence's creator but belongs to its
+  group: callers with VIEW on the group can read it, and callers with EDIT can
+  enable, disable or delete it. Firing or re-pointing it still takes the creator
+  (or an admin), and firing also needs EDIT on the group. With workspaces off every
+  cadence is listed; with them on, a co-editor reaches another member's cadence by
+  id or through the group workspace, not through the listing. A create or update
+  whose body carries the cadence marker (`teamCadenceType`) is refused with `400`,
+  unless it is an update of that same cadence echoing its own markers.
+- A **shared** schedule (`userId` absent, blank or `system:scheduler`) is open to
+  every editor while workspaces are off. With workspaces enforced it belongs to its
+  creator (`createdBy`) and to whoever holds EDIT (VIEW, to read it) on what it
+  drives: the agent, the knowledge base of an ingestion schedule, or the group of
+  a cadence.
+- **Listing under enforcement.** The listing filter runs inside the database
+  query, so it cannot ask about agent access row by row. Without `?agentId=`, a
+  non-admin sees their own schedules and the shared ones they created. To see a
+  team's other shared schedules — including ones created before `createdBy` was
+  recorded — list with `?agentId=` of an agent you may edit, or open them by id.
+- The failed-fires view (`/admin/failed`) shows non-admins only the entries of
+  schedules they can see, so a page can hold fewer entries than `limit`.
+- Agent export and its preview leave out schedules that run as another user.
+
 ### Admin Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
-| `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500) |
+| `GET` | `/schedulestore/schedules/admin/failed` | List failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500); non-admins get only the entries of schedules they can see |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
 | `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry, re-armed at its next regular fire. It does **not** change `enabled`: a schedule that was disabled (by `/disable`, or because its agent was undeployed) stays disabled — use `/enable` to re-arm it. `409` unless the schedule is currently `DEAD_LETTERED` — the write itself is conditional on that state, so it can never reset a running fire |
 
