@@ -90,6 +90,14 @@ export interface OperatorConfig {
    * the problem to a cast.
    */
   apiBaseUrl?: string | null;
+  /**
+   * The LLM endpoint the operator was activated with (a named provider's
+   * non-default region, or a proxy / local server), so a reconfigure can show and
+   * keep it. Distinct from `apiBaseUrl` above, which is where the generated tools
+   * point. Optional: configs written before this field existed lack it, and
+   * `null` / absent both mean the provider's default endpoint.
+   */
+  llmBaseUrl?: string | null;
   scope: OperatorScope;
   authMode: OperatorAuthMode;
   /** Editable half of the system prompt; the safety preamble is prepended. */

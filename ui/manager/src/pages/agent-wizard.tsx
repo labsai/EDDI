@@ -160,11 +160,13 @@ export function AgentWizardPage() {
   );
 
   function handleProviderChange(providerId: string) {
-    const config = getProviderConfig(providerId);
     update({
       provider: providerId,
       model: "",
-      apiKey: config?.needsKey === false ? "" : state.apiKey,
+      // A key is issued by one vendor. Carried across a provider switch it would be
+      // sent to another vendor's endpoint, so any switch clears it (the operator
+      // form does the same).
+      apiKey: "",
       // A provider with no endpoint hides the field, so a URL left over from
       // the previous provider would be submitted with no way to see or clear
       // it. What the user cannot see, the wizard does not send. The same goes
@@ -785,7 +787,10 @@ function LlmStep({
       <div className="mt-6 space-y-5">
         {/* Provider */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
+          <label
+            htmlFor="wizard-provider"
+            className="mb-1.5 block text-sm font-medium text-foreground"
+          >
             {t("setupWizard.provider", "Provider")}
           </label>
           <div className="relative">
@@ -793,6 +798,7 @@ function LlmStep({
               value={provider}
               onChange={onProviderChange}
               className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              id="wizard-provider"
               testId="wizard-provider"
             />
             <ChevronDown className="pointer-events-none absolute inset-e-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

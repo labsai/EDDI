@@ -1093,6 +1093,30 @@ describe("LlmEditor", () => {
     );
   });
 
+  it("shows the endpoint in the backend's precedence order: baseUrl, then region, then default", () => {
+    const hint = (parameters: Record<string, string>) => {
+      const view = renderWithProviders(
+        <LlmEditor
+          data={{ tasks: [{ type: "qwen", actions: [], parameters }] }}
+          onChange={onChange}
+        />
+      );
+      const text = screen.getByTestId("compatible-endpoint-hint").textContent ?? "";
+      view.unmount();
+      return text;
+    };
+    const CN = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    expect(hint({})).toContain("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+    expect(hint({ region: "cn" })).toContain(CN);
+    expect(hint({ region: "CN" })).toContain(CN);
+    // an explicit baseUrl beats the region
+    expect(hint({ region: "cn", baseUrl: "https://proxy.example/v1" })).toContain(
+      "https://proxy.example/v1",
+    );
+    // an unknown region falls back to the default (the backend rejects it at build time)
+    expect(hint({ region: "mars" })).toContain("https://dashscope-intl.aliyuncs.com");
+  });
+
   it("keeps an unknown type as a custom option instead of rewriting it", () => {
     renderWithProviders(
       <LlmEditor

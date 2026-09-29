@@ -1375,7 +1375,9 @@
     "taskPricing": "تسعير الاستدعاءات العادية",
     "taskPricingDesc": "يحدد سعر استدعاءات النموذج العادية (غير المتسلسلة) لهذه المهمة لأغراض تتبع التكلفة وسقوف تكلفة المجموعة. بدون سعر (فارغ) يُحتسب كـ 0$.",
     "unknownType": "{{type}} (مخصص)",
-    "compatibleEndpoint": "نقطة النهاية: {{url}} — أضف معلمة baseUrl أو region لتجاوزها"
+    "compatibleEndpoint": "نقطة النهاية: {{url}} — أضف معلمة baseUrl أو region لتجاوزها",
+    "compatibleEndpointOverridden": "نقطة النهاية: {{url}}",
+    "modelType": "نوع النموذج"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",
@@ -4505,7 +4507,8 @@
       "platformBaseUrlAuto": "يُحدّد من الخادم",
       "platformBaseUrlDiffers": "يُبلغ هذا النشر حاليًا عن عنوانه الخاص بأنه {{serverUrl}}. القيمة أعلاه مختلفة — احتفظ بها فقط إذا ضبطتها عن قصد.",
       "platformBaseUrlQueryFailed": "تعذّر سؤال الخادم عن عنوانه الخاص. سيفشل التفعيل ما لم تدخله هنا — أو أعد تحميل الصفحة للمحاولة مجددًا.",
-      "platformBaseUrlUnresolved": "يعمل هذا النشر على منفذ HTTP عشوائي وليس لديه eddi.self.base-url، لذا لا يمكنه تحديد العنوان الذي يصل به إلى نفسه. أدخل العنوان هنا."
+      "platformBaseUrlUnresolved": "يعمل هذا النشر على منفذ HTTP عشوائي وليس لديه eddi.self.base-url، لذا لا يمكنه تحديد العنوان الذي يصل به إلى نفسه. أدخل العنوان هنا.",
+      "llmEndpoint": "نقطة نهاية النموذج"
     },
     "authMode": {
       "none": {
@@ -5211,9 +5214,10 @@
       "intl": "دولي",
       "cn": "البر الرئيسي للصين",
       "us": "الولايات المتحدة",
-      "custom": "عنوان URL مخصص"
+      "custom": "عنوان URL مخصص (محدد أدناه)"
     },
     "compatibleNote": "يتصل عبر واجهة API المتوافقة مع OpenAI لدى المزوّد ({{url}}). لا تغيّره إلا عند استخدام وكيل أو منطقة أخرى.",
-    "keyHint": "احصل على مفتاح API من {{url}}"
+    "keyHint": "احصل على مفتاح API من {{url}}",
+    "select": "اختر مزودًا"
   }
 }

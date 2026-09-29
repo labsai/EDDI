@@ -1359,7 +1359,9 @@
     "taskPricing": "Plain-Call Pricing",
     "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
     "unknownType": "{{type}} (custom)",
-    "compatibleEndpoint": "Endpoint: {{url}} — add a baseUrl or region parameter to override"
+    "compatibleEndpoint": "Endpoint: {{url}} — add a baseUrl or region parameter to override",
+    "compatibleEndpointOverridden": "Endpoint: {{url}}",
+    "modelType": "Model type"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -4329,7 +4331,8 @@
       "platformBaseUrlAuto": "resolved from the server",
       "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
       "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
-      "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here."
+      "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
+      "llmEndpoint": "Model endpoint"
     },
     "authMode": {
       "none": {
@@ -5003,9 +5006,10 @@
       "intl": "International",
       "cn": "China mainland",
       "us": "United States",
-      "custom": "Custom URL"
+      "custom": "Custom URL (set below)"
     },
     "compatibleNote": "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
-    "keyHint": "Get an API key at {{url}}"
+    "keyHint": "Get an API key at {{url}}",
+    "select": "Select a provider"
   }
 }

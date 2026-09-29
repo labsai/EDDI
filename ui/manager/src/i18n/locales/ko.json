@@ -1319,7 +1319,9 @@
     "taskPricing": "일반 호출 요금",
     "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다.",
     "unknownType": "{{type}} (사용자 지정)",
-    "compatibleEndpoint": "엔드포인트: {{url}} — 재정의하려면 baseUrl 또는 region 매개변수를 추가하세요"
+    "compatibleEndpoint": "엔드포인트: {{url}} — 재정의하려면 baseUrl 또는 region 매개변수를 추가하세요",
+    "compatibleEndpointOverridden": "엔드포인트: {{url}}",
+    "modelType": "모델 유형"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -4329,7 +4331,8 @@
       "platformBaseUrlAuto": "서버에서 확인",
       "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요.",
       "platformBaseUrlQueryFailed": "서버에 자신의 주소를 물어볼 수 없었습니다. 여기에 입력하지 않으면 활성화가 실패합니다. 다시 시도하려면 페이지를 새로 고침하세요.",
-      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요."
+      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요.",
+      "llmEndpoint": "모델 엔드포인트"
     },
     "authMode": {
       "none": {
@@ -5003,9 +5006,10 @@
       "intl": "국제",
       "cn": "중국 본토",
       "us": "미국",
-      "custom": "사용자 지정 URL"
+      "custom": "사용자 지정 URL(아래에서 설정)"
     },
     "compatibleNote": "제공업체의 OpenAI 호환 API({{url}})를 통해 연결합니다. 프록시나 다른 리전을 사용할 때만 변경하세요.",
-    "keyHint": "{{url}}에서 API 키를 받으세요"
+    "keyHint": "{{url}}에서 API 키를 받으세요",
+    "select": "공급자 선택"
   }
 }

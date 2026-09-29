@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { LLM_PROVIDERS, LLM_PROVIDER_GROUPS } from "@/lib/api/agent-setup";
 import {
@@ -18,7 +19,13 @@ const REGION_FALLBACKS: Record<string, string> = {
  *
  * A stored value the catalog does not know (a hand-written or newer config) gets
  * its own "(custom)" option instead of silently rendering as the first provider,
- * so opening and saving a config never rewrites its `type`.
+ * so opening and saving a config never rewrites its `type`. An empty value with
+ * no `leadingOptions` renders a "Select a provider" placeholder rather than
+ * silently showing the first provider.
+ *
+ * `leadingOptions` slots extra `<option>`s (for instance a "None" or "inherit"
+ * choice with `value=""`) ahead of the groups. Give the select an `ariaLabel`
+ * wherever there is no visible `<label htmlFor={id}>`.
  */
 export function ProviderSelect({
   value,
@@ -27,6 +34,8 @@ export function ProviderSelect({
   className,
   testId,
   id,
+  ariaLabel,
+  leadingOptions,
 }: {
   value: string;
   onChange: (providerId: string) => void;
@@ -34,6 +43,8 @@ export function ProviderSelect({
   className?: string;
   testId?: string;
   id?: string;
+  ariaLabel?: string;
+  leadingOptions?: ReactNode;
 }) {
   const { t } = useTranslation();
   const known = LLM_PROVIDERS.some((p) => p.id === value);
@@ -43,9 +54,16 @@ export function ProviderSelect({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       id={id}
+      aria-label={ariaLabel}
       className={className}
       data-testid={testId}
     >
+      {leadingOptions}
+      {!value && !leadingOptions && (
+        <option value="" disabled>
+          {t("llmProviders.select", "Select a provider")}
+        </option>
+      )}
       {!known && value && (
         <option value={value}>
           {t("llmEditor.unknownType", "{{type}} (custom)", { type: value })}
@@ -64,12 +82,19 @@ export function ProviderSelect({
   );
 }
 
-/** Region picker for providers with more than one endpoint; renders nothing otherwise. */
+/**
+ * Region picker for providers with more than one endpoint; renders nothing otherwise.
+ *
+ * `className` styles the `<select>` (it is merged over the defaults, so
+ * `h-10 rounded-md` wins); `hideLabel` drops the built-in label for callers that
+ * supply their own field chrome, such as the operator form.
+ */
 export function ProviderRegionSelect({
   provider,
   baseUrl,
   onBaseUrlChange,
   className,
+  hideLabel,
   testId = "wizard-region",
 }: {
   provider: string;
@@ -77,6 +102,7 @@ export function ProviderRegionSelect({
   /** Receives the region's URL, or "" for the default region (which needs none). */
   onBaseUrlChange: (baseUrl: string) => void;
   className?: string;
+  hideLabel?: boolean;
   testId?: string;
 }) {
   const { t } = useTranslation();
@@ -98,12 +124,14 @@ export function ProviderRegionSelect({
 
   return (
     <div>
-      <label
-        htmlFor={testId}
-        className="mb-1.5 block text-sm font-medium text-foreground"
-      >
-        {t("llmProviders.region.label", "Region")}
-      </label>
+      {!hideLabel && (
+        <label
+          htmlFor={testId}
+          className="mb-1.5 block text-sm font-medium text-foreground"
+        >
+          {t("llmProviders.region.label", "Region")}
+        </label>
+      )}
       <select
         id={testId}
         value={selected}
@@ -121,7 +149,7 @@ export function ProviderRegionSelect({
         ))}
         {!matched && (
           <option value="custom" disabled>
-            {t("llmProviders.region.custom", "Custom URL")}
+            {t("llmProviders.region.custom", "Custom URL (set below)")}
           </option>
         )}
       </select>

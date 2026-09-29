@@ -94,6 +94,32 @@ announced the retirement of `llama-3.3-70b-versatile` (2026-08-16), so it is not
   model, a new `LlmModuleTest` covers registration and the id-collision guard, and a unit test
   checks vision tokens against a list of known text-only model ids.
 
+### Review follow-up (Manager)
+
+- **The catalog mirror** follows the backend corrections above (xAI regions, DeepSeek default,
+  MiniMax `cn` host, refreshed suggestions and Moonshot key URL).
+- **No key crosses vendors.** The agent wizard clears the API key on any provider change, as the
+  operator form already did.
+- **The operator remembers its endpoint.** `OperatorConfig` gained an optional `llmBaseUrl`, so
+  reconfiguring seeds the region select from it instead of silently falling back to the default
+  region; the review step lists the endpoint when one is set. Any provider switch in the operator
+  form now clears the base URL (ollama's `http://localhost:11434` used to stay in a hidden field
+  and be submitted with openai), and switching back to the stored provider restores it.
+- **Consistent provider pickers.** The group wizard (member and moderator), the workforce team
+  builder and the group advanced editor's summarizer now use `ProviderSelect`, which gained
+  `leadingOptions` (for their "None" / "Workforce default" choices), `ariaLabel` and a
+  "Select a provider" placeholder for an empty value. The wizard label is bound to its select.
+  `ProviderRegionSelect` takes a `className` and `hideLabel`, so the operator form renders it
+  inside its own field chrome with matching `h-10 rounded-md` styling; its custom option reads
+  "Custom URL (set below)". `LLM_PROVIDERS` is type-checked against `ProviderGroup` with
+  `satisfies`.
+- **LLM editor.** The endpoint hint resolves in the backend's order (`baseUrl`, then the `region`
+  URL, then the default); a comment records that changing the type deliberately keeps the
+  parameters, which stay visible in the grid.
+- Four new i18n keys (`llmProviders.select`, `llmEditor.compatibleEndpointOverridden`,
+  `llmEditor.modelType`, `operator.activation.llmEndpoint`) and one reworded
+  (`llmProviders.region.custom`) in all 11 locales.
+
 ### Design decisions
 
 ```decision-log

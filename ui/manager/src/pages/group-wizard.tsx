@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ProviderSelect } from "@/components/shared/provider-select";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
@@ -1597,20 +1598,17 @@ function MemberCard({
                         {t("groupWizard.provider")}
                       </label>
                       <div className="relative">
-                        <select
+                        <ProviderSelect
                           value={member.provider}
-                          onChange={(e) => {
+                          onChange={(provider) => {
                             onUpdate({
-                              provider: e.target.value,
+                              provider,
                               model: "",
                             });
                           }}
+                          ariaLabel={t("groupWizard.provider")}
                           className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        >
-                          {LLM_PROVIDERS.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
+                        />
                         <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                       </div>
                     </div>
@@ -1770,17 +1768,14 @@ function ModeratorCard({
           />
           <div className="grid grid-cols-2 gap-2">
             <div className="relative">
-              <select
+              <ProviderSelect
                 value={moderator.provider}
-                onChange={(e) => {
-                  onChange({ provider: e.target.value, model: "" });
+                onChange={(provider) => {
+                  onChange({ provider, model: "" });
                 }}
+                ariaLabel={t("groupWizard.provider")}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                {LLM_PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+              />
               <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             </div>
             <input

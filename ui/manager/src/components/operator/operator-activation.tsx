@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { getProviderConfig } from "@/lib/api/agent-setup";
-import { getDefaultBaseUrl } from "@/lib/llm-provider-catalog";
+import { getProviderRegions } from "@/lib/llm-provider-catalog";
 import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
@@ -56,7 +56,9 @@ export function OperatorActivation({
   const [apiKey, setApiKey] = useState(
     initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
-  const [baseUrl, setBaseUrl] = useState("");
+  // Seeded from the stored config so reconfiguring keeps the region / endpoint the
+  // operator was activated with instead of silently falling back to the default.
+  const [baseUrl, setBaseUrl] = useState(initial.llmBaseUrl ?? "");
   /**
    * The address EDDI can reach ITSELF at — what the generated tools will target.
    *
@@ -201,10 +203,12 @@ export function OperatorActivation({
     setProvider(next);
     const cfg = getProviderConfig(next);
     if (cfg) setModel(cfg.defaultModel);
-    // The field only renders for a provider that needs one, so a URL carried
-    // across a switch would be sent invisibly — and for an in-process provider
-    // it would be sent to something that has no endpoint to begin with.
-    if (!supportsBaseUrl(next) || getDefaultBaseUrl(provider) !== undefined || getDefaultBaseUrl(next) !== undefined) setBaseUrl("");
+    // An endpoint belongs to one provider: carried across a switch it would be
+    // sent to the wrong vendor, and mostly invisibly (the field only renders for
+    // a provider that needs one) — ollama's http://localhost:11434 ended up
+    // submitted with openai. So any switch clears it, and switching back to the
+    // stored provider restores the stored endpoint.
+    setBaseUrl(next === initial.provider && supportsBaseUrl(next) ? (initial.llmBaseUrl ?? "") : "");
     // A key is provider-specific, so carrying it across a provider switch would
     // silently send the wrong credential.
     setApiKey(next === initial.provider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "");
@@ -223,10 +227,12 @@ export function OperatorActivation({
         // Trimmed to null rather than "" so `resolveOperatorApiBaseUrl` sees
         // "not set" and asks the backend, instead of provisioning a blank target.
         apiBaseUrl: normalizeBaseUrl(apiBaseUrl) || null,
+        // Persisted so a later reconfigure shows (and keeps) the region.
+        llmBaseUrl: baseUrl.trim() || null,
         scope,
       },
       apiKey,
-      baseUrl || undefined,
+      baseUrl.trim() || undefined,
     );
   }
 
@@ -269,12 +275,18 @@ export function OperatorActivation({
               />
             </Field>
 
-            <ProviderRegionSelect
-              provider={provider}
-              baseUrl={baseUrl}
-              onBaseUrlChange={setBaseUrl}
-              testId="operator-region"
-            />
+            {getProviderRegions(provider).length >= 2 && (
+              <Field label={t("llmProviders.region.label", "Region")} htmlFor="operator-region">
+                <ProviderRegionSelect
+                  provider={provider}
+                  baseUrl={baseUrl}
+                  onBaseUrlChange={setBaseUrl}
+                  hideLabel
+                  className="h-10 rounded-md py-0"
+                  testId="operator-region"
+                />
+              </Field>
+            )}
 
             <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
               <input
@@ -440,6 +452,12 @@ export function OperatorActivation({
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <Summary label={t("operator.activation.provider", "Provider")} value={providerConfig?.name ?? provider} />
               <Summary label={t("operator.activation.model", "Model")} value={model} />
+              {baseUrl.trim() && (
+                <Summary
+                  label={t("operator.activation.llmEndpoint", "Model endpoint")}
+                  value={baseUrl.trim()}
+                />
+              )}
               <Summary label={t("operator.activation.environment", "Environment")} value={environment} />
               <Summary
                 label={t("operator.activation.platformBaseUrl", "Platform base URL")}

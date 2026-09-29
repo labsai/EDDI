@@ -1333,7 +1333,9 @@
     "taskPricing": "Precios de llamadas simples",
     "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
     "unknownType": "{{type}} (personalizado)",
-    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo"
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo",
+    "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
+    "modelType": "Tipo de modelo"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -4373,7 +4375,8 @@
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
-      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección.",
+      "llmEndpoint": "Endpoint del modelo"
     },
     "authMode": {
       "none": {
@@ -5055,9 +5058,10 @@
       "intl": "Internacional",
       "cn": "China continental",
       "us": "Estados Unidos",
-      "custom": "URL personalizada"
+      "custom": "URL personalizada (definida abajo)"
     },
     "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
-    "keyHint": "Obtén una clave de API en {{url}}"
+    "keyHint": "Obtén una clave de API en {{url}}",
+    "select": "Selecciona un proveedor"
   }
 }
