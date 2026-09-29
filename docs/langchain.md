@@ -1718,8 +1718,8 @@ All LLM tools execute **inside a conversation pipeline**. The full execution pat
 
 ```
 LlmTask.execute(memory)
-  └─→ AgentOrchestrator.buildToolList(memory, config)
-      └─→ Constructs tool instances with conversation context
+  └─→ AgentOrchestrator.buildToolSetup(task, memory)
+      └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -1727,7 +1727,7 @@ LlmTask.execute(memory)
 
 ### Implicit Context
 
-`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it from their `ToolSourceProvider`, which gets the memory in the `ToolAssemblyContext` at tool-assembly time.
 
 This means:
 - **No ThreadLocal** or request-scoped beans needed

@@ -533,7 +533,7 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
-> ⚠️ **`properties` holds raw values, not `Property` objects.** `MemoryItemConverter.convert()` inserts `ConversationProperties.toMap()`, and `toMap()` returns the unwrapped Java value (`String`, `Integer`, `Boolean`, `List`, `Map`) that was stored — the `Property` wrapper is gone by the time a template sees it. Write `{properties.preferred_language}`; `{properties.preferred_language.valueString}` resolves against a `String` and fails at render time. See AGENTS.md §5.1 for the authoritative template data model.
+> ⚠️ **`properties` holds raw values, not `Property` objects.** `MemoryItemConverter.convert()` inserts `ConversationProperties.toMap()`, and `toMap()` returns the unwrapped Java value (`String`, `Integer`, `Boolean`, `List`, `Map`) that was stored — the `Property` wrapper is gone by the time a template sees it. Write `{properties.preferred_language}`; `{properties.preferred_language.valueString}` resolves against a `String` and fails at render time. See [Agent Config Authoring](agent-config-authoring.md#template-syntax) for the authoritative template data model.
 
 ### When to Use Which
 

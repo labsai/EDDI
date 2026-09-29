@@ -20,7 +20,7 @@ export function EmptyState({
     // An empty state is a real rendered state, not the absence of one — on the
     // conversation-monitoring screen it is what "the page loaded" *looks like*
     // until an agent is picked. Without a testid there was nothing to assert on
-    // there, which is what AGENTS.md §247 asks for.
+    // there, which is what AGENTS.md (Tests: assert on `data-testid`) asks for.
     <div
       data-testid="empty-state"
       className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border px-6 py-16 text-center"
