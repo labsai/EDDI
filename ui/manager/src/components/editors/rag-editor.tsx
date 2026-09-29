@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Database,
@@ -505,8 +505,11 @@ function IngestionPanel({
 
   // What the editor looks like *now*, for a file read that finished after the
   // render that started it: the check at drop time is not enough on its own.
+  // Updated in a layout effect, i.e. during the commit that shows the new props:
+  // a passive effect can run after the browser has already handled other tasks,
+  // and a FileReader.onload among them would read the previous guard.
   const readGuard = useRef({ dirty: Boolean(hasUnsavedChanges), version });
-  useEffect(() => {
+  useLayoutEffect(() => {
     readGuard.current = { dirty: Boolean(hasUnsavedChanges), version };
   }, [hasUnsavedChanges, version]);
 

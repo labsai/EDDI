@@ -89,8 +89,35 @@ describe("NumberInput integer parsing", () => {
     renderWithProviders(<Harness initial={5} emptyValue={0} onValue={onValue} />);
     const input = screen.getByTestId("num");
     fireEvent.change(input, { target: { value: "1.5" } });
-    expect(onValue).toHaveBeenLastCalledWith(0);
+    expect(onValue).not.toHaveBeenCalled();
     expect(input).toHaveAttribute("aria-invalid", "true");
+    fireEvent.blur(input);
+    expect(input).toHaveValue(5);
+    expect(input).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps an invalid draft local: the stored value survives, even without an emptyValue", () => {
+    // An optional field (no emptyValue) reported `undefined` for invalid text,
+    // which removed the key from the config — and the save path does not look
+    // at aria-invalid, so the removal was saved.
+    const onValue = vi.fn();
+    renderWithProviders(<Harness initial={3} onValue={onValue} />);
+    const input = screen.getByTestId("num");
+    fireEvent.change(input, { target: { value: "7" } });
+    expect(onValue).toHaveBeenLastCalledWith(7);
+    fireEvent.change(input, { target: { value: "2.5" } });
+    expect(onValue).toHaveBeenCalledTimes(1);
+    fireEvent.blur(input);
+    expect(input).toHaveValue(7);
+  });
+
+  it("still reports the empty value for a cleared field after an invalid draft", () => {
+    const onValue = vi.fn();
+    renderWithProviders(<Harness initial={5} emptyValue={0} onValue={onValue} />);
+    const input = screen.getByTestId("num");
+    fireEvent.change(input, { target: { value: "1.5" } });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(onValue).toHaveBeenLastCalledWith(0);
     fireEvent.blur(input);
     expect(input).toHaveValue(0);
   });

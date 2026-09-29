@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useLayoutEffect } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -20,6 +21,17 @@ const populatedConfig: RagConfig = {
   maxResults: 5,
   minScore: 0.6,
 };
+
+/**
+ * Runs `onCommit` from a layout effect: inside the commit, after the siblings
+ * rendered before it have committed, but before any passive effect has run.
+ */
+function CommitProbe({ onCommit }: { onCommit?: () => void }) {
+  useLayoutEffect(() => {
+    onCommit?.();
+  });
+  return null;
+}
 
 /** Helper to open a collapsed Section by its label text */
 async function openSection(user: ReturnType<typeof userEvent.setup>, label: string) {
@@ -659,6 +671,52 @@ describe("RagEditor", () => {
     rerender(<RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />);
     await act(async () => {
       pending.onload?.call(pending, new ProgressEvent("load") as ProgressEvent<FileReader>);
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/ingest"),
+      expect.anything(),
+    );
+    expect(screen.getByText(/a\.txt was not ingested/)).toBeInTheDocument();
+    readSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it("does not ingest a file whose read finishes before the edit's passive effects run", async () => {
+    // The guard a FileReader.onload consults must already describe the new
+    // props when the commit that shows them completes. A passive effect can
+    // run later than that, and a read landing in between saw the old guard.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const readers: FileReader[] = [];
+    const readSpy = vi
+      .spyOn(FileReader.prototype, "readAsText")
+      .mockImplementation(function (this: FileReader) {
+        readers.push(this);
+      });
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <>
+        <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+        <CommitProbe />
+      </>,
+    );
+    await openSection(user, "Document Ingestion");
+    fireEvent.drop(screen.getByTestId("ingestion-dropzone"), {
+      dataTransfer: { files: [new File(["x"], "a.txt", { type: "text/plain" })] },
+    });
+    expect(readers).toHaveLength(1);
+    const pending = readers[0]!;
+
+    // The read completes inside the commit that makes the editor dirty.
+    const completeRead = () =>
+      pending.onload?.call(pending, new ProgressEvent("load") as ProgressEvent<FileReader>);
+    await act(async () => {
+      rerender(
+        <>
+          <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty />
+          <CommitProbe onCommit={completeRead} />
+        </>,
+      );
     });
 
     expect(fetchSpy).not.toHaveBeenCalledWith(

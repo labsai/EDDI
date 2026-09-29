@@ -93,6 +93,13 @@ known findings U1 and U2. Manager-only; no backend, REST or stored-config shape 
   edited or saved again is refused with a message instead of being ingested into the saved
   version. The two page tests that still expected the removed "Parallel Tool Execution" control
   and the old `arg<n>` count now assert the new behaviour.
+- **Third review round (CodeRabbit)**. The knowledge-base ingestion panel updates its file-read
+  guard in a layout effect, during the commit that shows the new props: from a passive effect, a
+  `FileReader.onload` landing before it ran still saw the clean, old-version guard and ingested.
+  `NumberInput` keeps text that is not a number ("-", "1.5" in an integer field) in the field
+  instead of reporting `emptyValue` for it — for an optional field that removed the key from the
+  config, and the save path does not look at `aria-invalid` — and on blur restores the stored
+  value. An empty field still reports `emptyValue`.
 
 ### What changes for authors
 
