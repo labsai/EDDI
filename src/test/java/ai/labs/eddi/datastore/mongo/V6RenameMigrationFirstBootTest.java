@@ -6,6 +6,8 @@ package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -48,6 +50,7 @@ import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -295,6 +298,74 @@ class V6RenameMigrationFirstBootTest {
         Document stored = conversations().find().first().getList("conversationSteps", Document.class).getFirst();
         assertFalse(stored.containsKey("packages"));
         assertEquals(1, stored.getList("workflows", Document.class).size());
+    }
+
+    @Test
+    @DisplayName("the v5 field names and environment are migrated server-side, and the revision is bumped")
+    void conversationFieldsAreMigratedServerSide() {
+        conversations().insertOne(v5Conversation());
+
+        runMigration();
+
+        Document stored = conversations().find().first();
+        assertFalse(stored.containsKey("botId"));
+        assertFalse(stored.containsKey("botVersion"));
+        assertEquals("0000000000000000000000d3", stored.getString("agentId"));
+        assertEquals(1, ((Number) stored.get("agentVersion")).intValue());
+        assertEquals("production", stored.getString("environment"));
+        long revision = ((Number) stored.get("_rev")).longValue();
+        assertTrue(revision > 0, "the migration writes count as revisions");
+        assertEquals(revision, ((Number) stored.get("_histRev")).longValue());
+    }
+
+    /**
+     * The race the old whole-document replace had: a writer that loaded the
+     * conversation before the migration must not be able to write its stale copy
+     * over the migrated one. With the revision bumped, the store refuses it like
+     * any other concurrent write.
+     */
+    @Test
+    @DisplayName("a copy loaded before the migration cannot be written back over it")
+    void staleWriteAfterMigrationIsRefused() {
+        conversations().insertOne(v5Conversation());
+        var loadedBeforeMigration = load();
+
+        runMigration();
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> new ConversationMemoryStore(database).storeConversationMemorySnapshot(loadedBeforeMigration));
+        assertEquals("0000000000000000000000d3", conversations().find().first().getString("agentId"));
+    }
+
+    @Test
+    @DisplayName("a conversation holding both botId and a different agentId is left unchanged")
+    void ambiguousConversationIsLeftAlone() {
+        Document conversation = v5Conversation().append("agentId", "0000000000000000000000d9");
+        conversation.put("conversationSteps", List.of());
+        conversation.put("redoCache", List.of());
+        conversations().insertOne(conversation);
+
+        runMigration();
+
+        Document stored = conversations().find().first();
+        assertEquals("0000000000000000000000d3", stored.getString("botId"));
+        assertEquals("0000000000000000000000d9", stored.getString("agentId"));
+        verify(migrationLog).createMigrationLog(any());
+    }
+
+    @Test
+    @DisplayName("the migration knows it ran in this process; an already-applied one does not claim to")
+    void ranInThisProcessIsReported() {
+        var migration = new V6RenameMigration(database, migrationLog, true);
+        assertFalse(migration.ranInThisProcess());
+        migration.runIfNeeded();
+        assertTrue(migration.ranInThisProcess());
+
+        IMigrationLogStore applied = mock(IMigrationLogStore.class);
+        when(applied.readMigrationLog(any())).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+        var later = new V6RenameMigration(database, applied, true);
+        later.runIfNeeded();
+        assertFalse(later.ranInThisProcess());
     }
 
     // --- workflows ------------------------------------------------------------

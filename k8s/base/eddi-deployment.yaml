@@ -120,10 +120,13 @@ spec:
               mountPath: /deployments/tmp
             - name: eddi-data
               mountPath: /opt/eddi/data
-          # Startup probe: allow up to 60s for first boot (slow image pull, DB init)
+          # Startup probe: allow up to 60s for the process to come up. It checks
+          # liveness, not readiness: readiness stays false while the startup
+          # migrations run, which on the first boot of an EDDI 5 database can take
+          # minutes, and a startup probe on readiness killed the pod mid-migration.
           startupProbe:
             httpGet:
-              path: /q/health/ready
+              path: /q/health/live
               port: http
             failureThreshold: 30
             periodSeconds: 2

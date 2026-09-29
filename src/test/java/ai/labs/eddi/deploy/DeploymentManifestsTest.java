@@ -2693,10 +2693,43 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * The startup probe must not wait for readiness. Readiness is false for as long
+         * as the startup migrations run, and on the first boot of a database migrated
+         * from EDDI 5 that can be many minutes; a startup probe on readiness killed the
+         * pod after 60 s, mid-migration, and every restart began the migration again.
+         * The chart makes it configurable and defaults it to liveness; the plain
+         * manifests use liveness.
+         */
+        @Test
+        @DisplayName("the startup probe checks liveness and is configurable in the chart")
+        void startupProbeChecksLiveness() throws IOException {
+            String template = stripGoComments(read(HELM_TEMPLATES.resolve("deployment.yaml")));
+            int startup = template.indexOf("startupProbe:");
+            assertTrue(startup >= 0, "the chart must keep a startup probe");
+            String startupBlock = template.substring(startup, template.indexOf("livenessProbe:", startup));
+            assertTrue(startupBlock.contains("$startupProbe.path | default \"/q/health/live\""),
+                    "the chart's startup probe must default to /q/health/live: " + startupBlock);
+            assertTrue(startupBlock.contains("$startupProbe.failureThreshold") && startupBlock.contains("$startupProbe.periodSeconds"),
+                    "failureThreshold and periodSeconds must come from eddi.startupProbe");
+            assertTrue(template.contains(".Values.eddi.startupProbe"), "the probe must read eddi.startupProbe");
+
+            JsonNode values = YAML.readTree(HELM.resolve("values.yaml").toFile());
+            assertEquals("/q/health/live", values.path("eddi").path("startupProbe").path("path").asText());
+
+            for (Path manifest : List.of(K8S.resolve("base/eddi-deployment.yaml"), K8S.resolve("quickstart.yaml"))) {
+                String text = stripComments(read(manifest));
+                int at = text.indexOf("startupProbe:");
+                assertTrue(at >= 0, manifest + " must keep a startup probe");
+                String block = text.substring(at, text.indexOf("livenessProbe:", at));
+                assertTrue(block.contains("path: /q/health/live"), manifest + "'s startup probe must check liveness: " + block);
+            }
+        }
+
+        /**
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.2.0";
+        private static final String EXPECTED_CHART_VERSION = "2.3.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and

@@ -739,7 +739,7 @@ class V6RenameMigrationTest {
             MongoCollection<Document> emptyCol = mock(MongoCollection.class);
             when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
             when(database.getCollection(anyString()))
-                    .thenAnswer(invocation -> "conversationmemories".equals(invocation.getArgument(0)) ? envCol : emptyCol);
+                    .thenAnswer(invocation -> "deployments".equals(invocation.getArgument(0)) ? envCol : emptyCol);
             when(database.getName()).thenReturn("eddi");
 
             migration.runIfNeeded();

@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.memory.rest;
 
 import java.util.Collection;
+import java.util.concurrent.Callable;
+import ai.labs.eddi.configs.migration.V6RenameMigration;
 import org.mockito.ArgumentCaptor;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
@@ -1197,6 +1199,87 @@ class RestConversationStoreTest {
             store.deleteEndedConversationsOlderThanXDays();
 
             verifyNoInteractions(runtime);
+        }
+
+        // --- the boot that migrates an EDDI 5 database -----------------------
+
+        /**
+         * EDDI 5 kept ended conversations for ever; 6.x defaults to 365 days, and the
+         * sweep has no initial delay. The first boot on 6.x therefore deleted every
+         * ended conversation older than a year before anyone could notice. On the boot
+         * that migrates a 5.x database the sweep deletes nothing unless the operator
+         * allows it.
+         */
+        private void oneEndedConversationPastRetention() throws Exception {
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("old-conversation"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(0));
+            when(documentDescriptorStore.readDescriptor(eq("old-conversation"), anyInt())).thenReturn(descriptor);
+        }
+
+        @SuppressWarnings("unchecked")
+        private void migrating(boolean pending, boolean ranInThisProcess) {
+            var migration = mock(V6RenameMigration.class);
+            when(migration.isPending()).thenReturn(pending);
+            when(migration.ranInThisProcess()).thenReturn(ranInThisProcess);
+            Instance<V6RenameMigration> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(migration);
+            restConversationStore.v6RenameMigrationInstance = instance;
+        }
+
+        @SuppressWarnings("unchecked")
+        private void runSubmittedSweep() throws Exception {
+            restConversationStore.deleteEndedConversationsOlderThanXDays();
+            ArgumentCaptor<Callable<Object>> task = ArgumentCaptor.forClass(Callable.class);
+            verify(runtime).submitCallable(task.capture(), any());
+            task.getValue().call();
+        }
+
+        @Test
+        @DisplayName("while the rename migration is pending, nothing is deleted")
+        void heldWhileMigrationPending() throws Exception {
+            oneEndedConversationPastRetention();
+            migrating(true, false);
+
+            runSubmittedSweep();
+
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+            assertEquals(1, restConversationStore.countEndedConversationsOlderThan(30));
+        }
+
+        @Test
+        @DisplayName("on the boot that ran the rename migration, nothing is deleted")
+        void heldOnTheMigrationBoot() throws Exception {
+            oneEndedConversationPastRetention();
+            migrating(false, true);
+
+            runSubmittedSweep();
+
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("the operator can allow the sweep on the migration boot")
+        void allowedByTheOperator() throws Exception {
+            oneEndedConversationPastRetention();
+            migrating(false, true);
+            restConversationStore.allowRetentionOnMigrationBoot = true;
+
+            runSubmittedSweep();
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("old-conversation");
+        }
+
+        @Test
+        @DisplayName("on a later boot of a migrated database the sweep deletes as configured")
+        void runsOnLaterBoots() throws Exception {
+            oneEndedConversationPastRetention();
+            migrating(false, false);
+
+            runSubmittedSweep();
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("old-conversation");
         }
     }
     @Nested
