@@ -110,8 +110,8 @@ class UpgradeExecutorDescriptorTest {
 
         assertTrue(result.failures().isEmpty(), "nothing should have failed, got: " + result.failures());
         verify(agentStore).readAgent(AGENT_ID, 3);
-        verify(agentStore).updateAgent(eq(AGENT_ID), eq(3), any());
-        verify(agentStore, never()).updateAgent(eq(AGENT_ID), eq(1), any());
+        verify(agentStore).updateAgent(eq(AGENT_ID), eq(3), any(), any());
+        verify(agentStore, never()).updateAgent(eq(AGENT_ID), eq(1), any(), any());
         assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=4"),
                 result.agentUri());
     }
@@ -199,7 +199,7 @@ class UpgradeExecutorDescriptorTest {
         agentConfig.setWorkflows(new ArrayList<>(List.of(
                 URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=2"))));
         when(agentStore.readAgent(AGENT_ID, agentVersion)).thenReturn(agentConfig);
-        when(agentStore.updateAgent(eq(AGENT_ID), eq(agentVersion), any())).thenReturn(Response.ok().build());
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(agentVersion), any(), any())).thenReturn(Response.ok().build());
 
         var targetWorkflow = new WorkflowConfiguration();
         var step = new WorkflowConfiguration.WorkflowStep();

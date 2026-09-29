@@ -32,6 +32,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URI;
@@ -261,6 +262,36 @@ class McpAdminToolsCrudTest {
 
     @Test
     void applyAgentChanges_singleWorkflow_success() throws IOException {
+        String mappingsJson = stubSingleWorkflowCascade();
+
+        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null, null);
+
+        assertNotNull(result);
+        assertTrue(result.contains("cascaded"));
+        verify(WorkflowStore).updateWorkflow(eq(PKG_ID), eq(1), any());
+        // No compatible argument: the new agent version is a breaking change.
+        verify(AgentStore).updateAgent(eq(AGENT_ID), eq(1), any(), eq(false));
+    }
+
+    @Test
+    void applyAgentChanges_compatible_isPassedToTheAgentStore() throws IOException {
+        String mappingsJson = stubSingleWorkflowCascade();
+
+        tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null, true);
+
+        verify(AgentStore).updateAgent(eq(AGENT_ID), eq(1), any(), eq(true));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> reported = ArgumentCaptor.forClass(Map.class);
+        verify(jsonSerialization, atLeastOnce()).serialize(reported.capture());
+        assertTrue(reported.getAllValues().stream().anyMatch(m -> Boolean.TRUE.equals(m.get("compatibleWithPreviousVersion"))),
+                "the result must say the new version was written as compatible");
+    }
+
+    /**
+     * One workflow with one LLM extension whose URI the mapping replaces; returns
+     * the mappings JSON.
+     */
+    private String stubSingleWorkflowCascade() throws IOException {
         // Set up Agent with 1 package
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1")));
@@ -279,7 +310,7 @@ class McpAdminToolsCrudTest {
         // Mock updates
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location", "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
-        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
+        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any(), any()))
                 .thenReturn(Response.ok().header("Location", "/agentstore/agents/" + AGENT_ID + "?version=2").build());
 
         // Parse mappings JSON
@@ -289,13 +320,7 @@ class McpAdminToolsCrudTest {
                 .of(Map.of("oldUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1", "newUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=2"));
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":1}");
-
-        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null);
-
-        assertNotNull(result);
-        assertTrue(result.contains("cascaded"));
-        verify(WorkflowStore).updateWorkflow(eq(PKG_ID), eq(1), any());
-        verify(AgentStore).updateAgent(eq(AGENT_ID), eq(1), any());
+        return mappingsJson;
     }
 
     @Test
@@ -320,11 +345,11 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"updatedWorkflows\":0}");
 
-        tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null);
+        tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, false, null, null);
 
         // No package or Agent updates should occur
         verify(WorkflowStore, never()).updateWorkflow(any(), anyInt(), any());
-        verify(AgentStore, never()).updateAgent(any(), anyInt(), any());
+        verify(AgentStore, never()).updateAgent(any(), anyInt(), any(), any());
     }
 
     @Test
@@ -344,7 +369,7 @@ class McpAdminToolsCrudTest {
 
         when(WorkflowStore.updateWorkflow(eq(PKG_ID), eq(1), any()))
                 .thenReturn(Response.ok().header("Location", "/workflowstore/workflows/" + PKG_ID + "?version=2").build());
-        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
+        when(AgentStore.updateAgent(eq(AGENT_ID), eq(1), any(), any()))
                 .thenReturn(Response.ok().header("Location", "/agentstore/agents/" + AGENT_ID + "?version=2").build());
         when(agentAdmin.deployAgent(Environment.production, AGENT_ID, 2, true, true)).thenReturn(Response.ok().build());
 
@@ -355,7 +380,7 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":true}");
 
-        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, true, "production");
+        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, true, "production", null);
 
         assertTrue(result.contains("cascaded"));
         verify(agentAdmin).deployAgent(Environment.production, AGENT_ID, 2, true, true);
@@ -363,7 +388,7 @@ class McpAdminToolsCrudTest {
 
     @Test
     void applyAgentChanges_missingAgentId_returnsError() {
-        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null);
+        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
@@ -373,7 +398,7 @@ class McpAdminToolsCrudTest {
         when(jsonSerialization.deserialize("[]", List.class)).thenReturn(List.of());
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"no_changes\"}");
 
-        String result = tools.applyAgentChanges(AGENT_ID, 1, "[]", false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "[]", false, null, null);
 
         assertNotNull(result);
         verify(AgentStore, never()).readAgent(any(), anyInt());
@@ -385,7 +410,7 @@ class McpAdminToolsCrudTest {
         List<Map<String, String>> mappings = List.of(Map.of("oldUri", "a", "newUri", "b"));
         when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(mappings);
 
-        String result = tools.applyAgentChanges(AGENT_ID, 1, "[{\"oldUri\":\"a\",\"newUri\":\"b\"}]", false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "[{\"oldUri\":\"a\",\"newUri\":\"b\"}]", false, null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Agent not found"));

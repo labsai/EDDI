@@ -1,3 +1,28 @@
+## ✨ feat(agents): each agent version records whether it is compatible with the previous one (2026-09-29)
+
+**Repo:** EDDI (`feat/agent-version-following`) — Phase 1 of
+[`planning/agent-version-following-plan.md`](../../planning/agent-version-following-plan.md). No
+behaviour changes yet; Phase 2 makes conversations act on it.
+
+### What changed
+
+- **`AgentConfiguration.compatibilityGeneration`**, assigned by `AgentStore` on every write and
+  never taken from the body: `create` starts at 1; `update(id, version, config, compatible)` keeps
+  the previous generation when `compatible` is true and advances it otherwise; the plain `update`
+  is breaking. A previous version without a generation (stored before this existed) starts a new
+  chain either way, so its conversations stay pinned. Only the current version can be updated,
+  so the previous version always holds the highest generation and no other version is read.
+- **REST**: `PUT /agentstore/agents/{id}?version=N&compatible=true` and the same flag on
+  `PUT /agentstore/agents/{id}/updateResourceUri`. Absent means `false`.
+- **MCP**: `apply_agent_changes` takes `compatible` (default `false`) and reports
+  `compatibleWithPreviousVersion` when it wrote a new agent version. It is the only MCP tool that
+  creates an agent version from an existing one.
+- **Import and sync** (`RestImportService`, `UpgradeExecutor`) always write a breaking version: the
+  configuration comes from elsewhere and nobody has judged it against the conversations running
+  here. `StructuralMatcher` leaves `compatibilityGeneration` out of the agent comparison — each
+  instance numbers its own, and comparing them made an unchanged agent UPDATE on every sync.
+- **`IAgent.getCompatibilityGeneration()`**, set when a version is deployed.
+
 ## 🐛 fix(conversations): an ended conversation no longer strands a Slack thread or a heartbeat (2026-09-29)
 
 **Repo:** EDDI (`feat/agent-version-following`) — Phase 0 of

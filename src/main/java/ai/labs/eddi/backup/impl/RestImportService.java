@@ -958,7 +958,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
-                Response updateResponse = restAgentStore.updateAgent(localResId.getId(), localResId.getVersion(), agentConfiguration);
+                // Never compatible: an imported configuration comes from elsewhere, and
+                // nobody has judged it against the conversations running here.
+                Response updateResponse = restAgentStore.updateAgent(localResId.getId(), localResId.getVersion(), agentConfiguration, false);
                 if (updateResponse.getStatus() == 200) {
                     // updated — new version = old version + 1
                     int newVersion = localResId.getVersion() + 1;

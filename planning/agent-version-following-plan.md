@@ -102,7 +102,7 @@ resolveAgentFor(environment, memory):
         return getAgent(env, id, memory.version) // pinned — today's behaviour, byte for byte
     candidate = highest READY version on this node with generation == g
     if candidate == null:
-        return getAgent(env, id, memory.version) // falls through to today's AgentNotReady handling
+        return getAgent(env, id, memory.version) // today's path: deploys the version on demand if this node lacks it
     if candidate.version != memory.version:
         switchVersion(memory, candidate)          // §4.3
     return candidate
@@ -110,7 +110,7 @@ resolveAgentFor(environment, memory):
 
 **The stored version is "the version that ran last", not a hard pin** — for conversations with a generation. This matters for three reasons:
 
-- **Cluster rollout.** Other nodes pick up a deployment in the 10 s sweep. A conversation that moved to v6 on node A and whose next turn lands on node B, which has not deployed v6 yet, runs on B's highest compatible version (v5) instead of failing. Pinned conversations keep today's behaviour (and today's window, which already exists for new conversations).
+- **Cluster rollout.** Other nodes pick up a deployment in the 10 s sweep. A conversation that moved to v6 on node A and whose next turn lands on node B, which has not deployed v6 yet, runs on B's highest compatible version (v5) instead of stalling while B deploys v6 on demand (`ConversationService.getAgent` deploys a missing version inline). Pinned conversations keep today's on-demand deploy.
 - **Rollback.** Undeploying a faulty v6 sends its conversations back to v5 automatically, if v5 is still deployed.
 - **Freeing old versions.** v5 can be undeployed as soon as v6 is ready; its conversations move on their next turn (§4.4).
 
@@ -167,7 +167,7 @@ The one addition is a **reason**: conversations ended this way carry `endedBy: s
 
 ### 5.3 MCP
 
-- `compatible` argument (default `false`) on every tool that creates an agent version: `update_agent` (when it produces a new version), `apply_agent_changes`, and `update_resource` when it cascades. The tool descriptions explain the choice, so an LLM operator makes it deliberately rather than by default.
+- `compatible` argument (default `false`) on `apply_agent_changes`, the only MCP tool that creates an agent version from an existing one. (`update_agent` only patches the name and description, and `update_resource` writes the resource without touching the agent; `setup_agent` and `create_api_agent` create version 1.) The tool description explains the choice, so an LLM operator makes it deliberately rather than by default.
 
 ## 6. Interactions with Other Features
 
@@ -229,7 +229,7 @@ Each phase is one PR and leaves `main` releasable. Phase 1 alone changes no beha
 - Tests: pinned conversations still block undeploy (guarantee 5); followable conversations do not block and are not ended; HITL exclusion unchanged.
 
 **Phase 4 — MCP**
-- `compatible` on `update_agent`, `apply_agent_changes`, `update_resource`; descriptions.
+- `compatible` on `apply_agent_changes`; description.
 
 **Phase 5 — Manager**
 - Save/cascade checkbox, version-list markers, deploy impact dialog, per-step version in the conversation view and debugger; i18n for all strings.
@@ -251,6 +251,6 @@ Each phase is one PR and leaves `main` releasable. Phase 1 alone changes no beha
 2. **Channels and schedules** — Slack and persistent schedules recover from an ENDED conversation by starting a fresh one (§6.1, §6.2, Phase 0). `new`-strategy schedules and Dream schedules need no change.
 3. **Editing an older version is impossible** — `HistorizedResourceStore.update` only accepts the latest version, so "previous" is always the latest and carries the highest generation (§4.1).
 
-**To check in Phase 1:** every path that creates an agent version — REST, MCP (`setup_agent`, `create_api_agent`, `update_agent`, `apply_agent_changes`, `update_resource`), ZIP import, agent sync — goes through the agent store's create/update, so the assignment rule cannot be bypassed.
+**Checked in Phase 1:** every path that creates an agent version — REST, MCP (`setup_agent`, `create_api_agent`, `apply_agent_changes`), ZIP import (`RestImportService`), agent sync (`UpgradeExecutor`) — goes through `IRestAgentStore.createAgent` / `updateAgent` and from there the agent store, so the assignment rule cannot be bypassed.
 
 **To check in Phase 2:** how a group member's private conversation behaves when it has ended (`MemberTurnExecutor` reuses it by id), and whether it needs the same recovery as §6.1.

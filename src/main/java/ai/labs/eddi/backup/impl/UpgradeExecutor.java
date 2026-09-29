@@ -913,7 +913,9 @@ public class UpgradeExecutor {
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
-            Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig);
+            // Never compatible: a synced configuration comes from another instance, and
+            // nobody has judged it against the conversations running here.
+            Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig, false);
             if (resp.getStatus() == 200) {
                 bumpDescriptorOrFail(agentId, currentVersion, "agent", agentId, null, outcome);
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));

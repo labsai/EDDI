@@ -62,6 +62,24 @@ public class AgentConfiguration {
     private String description;
 
     /**
+     * Which versions of this agent a running conversation may move between. Two
+     * versions with the same generation are compatible, and a conversation follows
+     * the newest deployed version of its generation from its next turn; a different
+     * generation is a breaking change, and conversations stay where they are.
+     * <p>
+     * <strong>Owned by the store.</strong> {@code AgentStore} assigns it on every
+     * create and update from the save request's {@code compatible} flag and ignores
+     * whatever the submitted body carries, so copying a configuration forward,
+     * exporting it or syncing it can never carry a compatibility claim into a
+     * version nobody declared compatible. {@code null} on every version stored
+     * before the field existed: such a version is compatible only with itself, so
+     * its conversations stay pinned exactly as they always were.
+     *
+     * @since 6.5.0
+     */
+    private Integer compatibilityGeneration;
+
+    /**
      * Cryptographic identity for inter-agent trust. Auto-generated on agent
      * creation. The public key is stored here; the private key is in SecretsVault.
      *
@@ -158,6 +176,14 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
     }
 
     public List<Capability> getCapabilities() {

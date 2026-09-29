@@ -231,7 +231,7 @@ class RestAgentStoreTest {
             var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
 
-            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID)));
+            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
             verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
         }
@@ -254,7 +254,7 @@ class RestAgentStoreTest {
             when(restWorkflowStore.readWorkflow(PKG2_ID, 1)).thenThrow(new NotFoundException());
 
             BadRequestException e = assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID)));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID), false));
 
             assertTrue(String.valueOf(e.getResponse().getEntity()).contains(PKG2_ID));
         }
@@ -903,7 +903,7 @@ class RestAgentStoreTest {
             config.setSecurity(security);
 
             assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
         }
 
         @Test

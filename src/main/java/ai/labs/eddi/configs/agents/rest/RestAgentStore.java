@@ -26,6 +26,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.utils.RuntimeUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -152,20 +153,36 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
+    public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
         validateSecurityFlags(agentConfiguration);
-        // The agent's own EDIT check first (update() repeats it): the workflow lookup
-        // below answers "exists / does not exist", which a caller with no rights to
-        // this agent must not be able to use as an oracle for arbitrary workflow ids.
+        // The agent's own EDIT check first: the workflow lookup below answers "exists
+        // / does not exist", which a caller with no rights to this agent must not be
+        // able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
-        Response response = restVersionInfo.update(id, version, agentConfiguration);
+        Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
     }
 
+    /**
+     * {@code RestVersionInfo.update}, calling the agent store's update that takes
+     * the compatibility declaration — the generic one cannot carry it.
+     */
+    private Response updateWithCompatibility(String id, Integer version, AgentConfiguration agentConfiguration, boolean compatible) {
+        version = restVersionInfo.validateParameters(id, version);
+        RuntimeUtilities.checkNotNull(agentConfiguration, "document");
+        try {
+            Integer newVersion = agentStore.update(id, version, agentConfiguration, compatible);
+            URI newResourceUri = RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
+            return Response.ok().location(newResourceUri).build();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
     @Override
-    public Response updateResourceInAgent(String id, Integer version, URI resourceURI) {
+    public Response updateResourceInAgent(String id, Integer version, URI resourceURI, Boolean compatible) {
         // The supplied URI must carry a real version, not merely a '?'. Stored
         // references are matched by "everything before the query" and then REPLACED by
         // this URI, so '...?other=2' would match a versioned reference and overwrite it
@@ -192,7 +209,7 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         if (updated) {
-            return updateAgent(id, version, agentConfig);
+            return updateAgent(id, version, agentConfig, compatible);
         } else {
             // This store's own constant, qualified because the method parameter shadows
             // it. It was RestWorkflowStore.resourceURI — copied from the workflow-store

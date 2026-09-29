@@ -84,7 +84,9 @@ class SlackThreadConversationTest {
         handler = new SlackEventHandler(mock(ChannelTargetRouter.class), mock(ObserveGate.class),
                 mock(ToolCostTracker.class), slackApi, conversationService, mock(IGroupConversationService.class),
                 userConversationStore, cacheFactory,
-                new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS,
+                // A short request timeout: a regression that leaves a turn unanswered fails in
+                // seconds instead of waiting out the production minute.
+                new SlackConfig(2,
                         SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
                         1, SlackConfig.DEFAULT_API_RETRY_BASE_MS),
                 new InMemorySlackApprovalRecordStore(), mock(IUserMemoryStore.class));
