@@ -94,11 +94,30 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
-     * Get the user memory configuration for this conversation. Returns {@code null}
-     * when persistent user memory is disabled.
+     * Get the user memory configuration for this conversation — recall order and
+     * size, default visibility, guardrails. Present whenever the agent declares a
+     * {@code userMemoryConfig} block (or enables the memory tools), whether or not
+     * the LLM memory tools are on: those settings govern the {@code longTerm}
+     * property path every agent uses. Returns {@code null} when the agent declares
+     * neither.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
+    }
+
+    /**
+     * Whether the agent enabled the LLM memory tools ({@code enableMemoryTools}).
+     * This — not the presence of a config — is what attaches
+     * {@code UserMemoryTool}. Defaults to "a config is present", the meaning the
+     * config alone used to carry.
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
+    }
+
+    /** Set whether the LLM memory tools are enabled for this conversation. */
+    default void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        // no-op by default
     }
 
     /**

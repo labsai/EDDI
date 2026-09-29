@@ -8,19 +8,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_AZURE_OPENAI;
-import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_BEDROCK;
-import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_GEMINI_VERTEX;
-import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_HUGGING_FACE;
-import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OLLAMA;
-
 /**
  * The parameter keys under which the provider builders read the model to use.
  * <p>
  * There is no single key: OpenAI, Anthropic, Gemini, Mistral, Jlama and Oracle
  * read {@code modelName}, Ollama reads {@code model}, Bedrock, HuggingFace and
  * Vertex read {@code modelId} (Vertex also its legacy {@code modelID}), and
- * Azure OpenAI reads {@code deploymentName}.
+ * Azure OpenAI reads {@code deploymentName}. The provider-to-key mapping itself
+ * is {@link SummarizationService#modelParameterKey}.
  */
 final class ModelParameterKeys {
 
@@ -53,20 +48,7 @@ final class ModelParameterKeys {
                 result.put(key, model);
             }
         }
-        result.put(keyFor(provider), model);
+        result.put(SummarizationService.modelParameterKey(provider), model);
         return result;
-    }
-
-    /** The key the given provider's builder reads the model from. */
-    static String keyFor(String provider) {
-        if (provider == null) {
-            return "modelName";
-        }
-        return switch (provider) {
-            case LLM_TYPE_OLLAMA -> "model";
-            case LLM_TYPE_BEDROCK, LLM_TYPE_HUGGING_FACE, LLM_TYPE_GEMINI_VERTEX -> "modelId";
-            case LLM_TYPE_AZURE_OPENAI -> "deploymentName";
-            default -> "modelName";
-        };
     }
 }

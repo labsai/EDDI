@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -24,13 +25,17 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -62,6 +67,20 @@ public class A2AToolProviderManager {
     private volatile HttpClient httpClient;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
+
+    /**
+     * Interrupts a response-body read that stalled after the headers arrived — see
+     * {@link BoundedBodyReader}. The JDK request timeout bounds only the wait for
+     * the response, not the streaming of an {@code ofInputStream} body, so without
+     * this a peer that sends 200 and then trickles (or never completes) the body
+     * holds the worker thread. One daemon thread for this
+     * {@code @ApplicationScoped} bean.
+     */
+    private final ScheduledExecutorService bodyReadWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "a2a-body-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * Resolves a {@code ${connection:name}} apiKey per call. Nullable, because two
@@ -341,20 +360,24 @@ public class A2AToolProviderManager {
 
         applyCredential(requestBuilder, config, agentUrl, true);
 
-        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpRequest cardRequest = requestBuilder.build();
+        HttpResponse<InputStream> response = httpClient().send(cardRequest, HttpResponse.BodyHandlers.ofInputStream());
 
         if (response.statusCode() != 200) {
             LOGGER.warnf("Agent Card fetch returned %d from %s", response.statusCode(), cardUrl);
             return null;
         }
 
-        // Response size limit
-        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
+        // Bounded read: the body is capped as it arrives rather than buffered whole
+        // and measured afterwards. A body over the cap is rejected outright.
+        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), MAX_RESPONSE_SIZE_BYTES,
+                cardRequest.timeout().orElse(null), bodyReadWatchdog);
+        if (bounded.truncated()) {
             LOGGER.warnf("Agent Card response from %s exceeds %d bytes — rejecting", cardUrl, MAX_RESPONSE_SIZE_BYTES);
             return null;
         }
 
-        Map<String, Object> card = MAPPER.readValue(response.body(), Map.class);
+        Map<String, Object> card = MAPPER.readValue(new String(bounded.bytes(), StandardCharsets.UTF_8), Map.class);
 
         // Basic schema validation — must have "name" at minimum
         if (!card.containsKey("name")) {
@@ -412,19 +435,23 @@ public class A2AToolProviderManager {
 
         applyCredential(requestBuilder, config, agentUrl);
 
-        HttpResponse<String> response = httpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpRequest taskRequest = requestBuilder.build();
+        HttpResponse<InputStream> response = httpClient().send(taskRequest, HttpResponse.BodyHandlers.ofInputStream());
 
         if (response.statusCode() != 200) {
             return "A2A agent returned HTTP " + response.statusCode();
         }
 
-        // Response size limit
-        if (response.body() != null && response.body().length() > MAX_RESPONSE_SIZE_BYTES) {
+        // Bounded read: the body is capped as it arrives rather than buffered whole
+        // and measured afterwards. A body over the cap is rejected outright.
+        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), MAX_RESPONSE_SIZE_BYTES,
+                taskRequest.timeout().orElse(null), bodyReadWatchdog);
+        if (bounded.truncated()) {
             return "A2A agent response exceeds size limit (" + MAX_RESPONSE_SIZE_BYTES + " bytes)";
         }
 
         // Validate JSON-RPC response schema
-        Map<String, Object> rpcResponse = MAPPER.readValue(response.body(), Map.class);
+        Map<String, Object> rpcResponse = MAPPER.readValue(new String(bounded.bytes(), StandardCharsets.UTF_8), Map.class);
         if (!rpcResponse.containsKey("jsonrpc") || !"2.0".equals(rpcResponse.get("jsonrpc"))) {
             return "Invalid A2A response: not a valid JSON-RPC 2.0 response";
         }

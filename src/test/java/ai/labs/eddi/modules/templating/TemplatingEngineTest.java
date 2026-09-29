@@ -15,12 +15,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
 /**
  * Comprehensive tests for the Qute-based TemplatingEngine.
  *
@@ -285,30 +279,24 @@ public class TemplatingEngineTest {
 
     @Test
     public void compiledTemplateIsParsedOnceAndReused() throws Exception {
-        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        Engine countingEngine = mock(Engine.class);
-        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
-        var cachingTemplatingEngine = new TemplatingEngine(countingEngine);
+        var cachingTemplatingEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
 
         String template = "Hello {name}";
         for (int i = 0; i < 5; i++) {
             Assertions.assertEquals("Hello Alice", cachingTemplatingEngine.processTemplate(template, Map.of("name", "Alice")));
         }
 
-        verify(countingEngine, times(1)).parse(template);
+        Assertions.assertEquals(1, cachingTemplatingEngine.compiledTemplateCount());
     }
 
     @Test
     public void distinctTemplatesAreParsedSeparately() throws Exception {
-        Engine realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        Engine countingEngine = mock(Engine.class);
-        when(countingEngine.parse(anyString())).thenAnswer(invocation -> realEngine.parse(invocation.getArgument(0, String.class)));
-        var cachingTemplatingEngine = new TemplatingEngine(countingEngine);
+        var cachingTemplatingEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
 
         Assertions.assertEquals("Hi Alice", cachingTemplatingEngine.processTemplate("Hi {name}", Map.of("name", "Alice")));
         Assertions.assertEquals("Bye Alice", cachingTemplatingEngine.processTemplate("Bye {name}", Map.of("name", "Alice")));
+        Assertions.assertEquals("Hi Alice", cachingTemplatingEngine.processTemplate("Hi {name}", Map.of("name", "Alice")));
 
-        verify(countingEngine, times(1)).parse("Hi {name}");
-        verify(countingEngine, times(1)).parse("Bye {name}");
+        Assertions.assertEquals(2, cachingTemplatingEngine.compiledTemplateCount());
     }
 }

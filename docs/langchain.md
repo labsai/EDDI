@@ -1177,6 +1177,10 @@ back into the full text through the `conversationRecall` built-in tool.
 | `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
 | `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
+Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
+the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A requested range such as
+`turns 3-5` is inclusive.
+
 > **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
 > not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
@@ -1745,8 +1749,8 @@ All LLM tools execute **inside a conversation pipeline**. The full execution pat
 
 ```
 LlmTask.execute(memory)
-  └─→ AgentOrchestrator.buildToolList(memory, config)
-      └─→ Constructs tool instances with conversation context
+  └─→ AgentOrchestrator.buildToolSetup(task, memory)
+      └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -1754,7 +1758,7 @@ LlmTask.execute(memory)
 
 ### Implicit Context
 
-`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it from their `ToolSourceProvider`, which gets the memory in the `ToolAssemblyContext` at tool-assembly time.
 
 This means:
 - **No ThreadLocal** or request-scoped beans needed

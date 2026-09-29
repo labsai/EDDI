@@ -87,6 +87,11 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     }
 
     @Override
+    public int deleteByPrincipal(String principal) {
+        return (int) states.deleteMany(Filters.eq(FIELD_PRINCIPAL, principal)).getDeletedCount();
+    }
+
+    @Override
     public int deleteExpired() {
         return (int) states.deleteMany(Filters.lt(FIELD_EXPIRES, Date.from(Instant.now()))).getDeletedCount();
     }

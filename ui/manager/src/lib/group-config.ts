@@ -195,6 +195,138 @@ export function uncoveredRolePhases(config: {
 }
 
 /**
+ * One reason the backend would refuse to save a group — the hard rejections of
+ * `AgentGroupStore.memberAndLimitProblems` and `humanMemberProblems` that a
+ * create flow can run into.
+ */
+export type GroupSaveProblem =
+  | { kind: "debateRoles" }
+  | { kind: "devilAdvocateRole" }
+  | { kind: "memberUnassigned"; count: number }
+  | { kind: "humanNeedsName"; count: number }
+  | { kind: "humanNeedsId"; count: number }
+  | { kind: "humanInTaskForce" }
+  | { kind: "humanWithPeerPhases" };
+
+type ProblemMember = {
+  agentId?: string | null;
+  displayName?: string | null;
+  role?: string | null;
+  memberType?: string | null;
+};
+
+/**
+ * What the backend would reject about this group, checked BEFORE a create
+ * flow commits to anything.
+ *
+ * The wizards used to find out at the final `createGroup` — by which point the
+ * agent wizard had already created and deployed every new member agent — and
+ * then showed a generic error in place of the backend's sentence. The role gap
+ * of a DEBATE with nobody on CON, a HUMAN member in a task force, a member with
+ * no agent: each left a set of orphaned agents and no explanation.
+ *
+ * Mirrors the backend exactly, including its scoping: the preset role rule
+ * applies only to a group that stores no phases (explicit phases may route
+ * roles however they like), and the HUMAN rules expand the preset first, or
+ * they would be inert for exactly the groups that need them.
+ *
+ * `isPendingAgent` marks a member whose agent the flow will create before it
+ * saves — it has no id yet, and is not unassigned.
+ */
+export function groupSaveProblems(
+  config: {
+    members?: ReadonlyArray<ProblemMember | null> | null;
+    phases?: DiscussionPhase[] | null;
+    style?: DiscussionStyle | null;
+    maxRounds?: number | null;
+  },
+  isPendingAgent: (member: ProblemMember, index: number) => boolean = () => false,
+): GroupSaveProblem[] {
+  const members = (config.members ?? []).filter((m): m is ProblemMember => !!m);
+  const problems: GroupSaveProblem[] = [];
+
+  const unassigned = members.filter(
+    (m, i) => m.memberType !== "HUMAN" && !m.agentId?.trim() && !isPendingAgent(m, i),
+  ).length;
+  if (unassigned > 0) problems.push({ kind: "memberUnassigned", count: unassigned });
+
+  if (!config.phases || config.phases.length === 0) {
+    // Trimmed and upper-cased, like `presetRoleProblems`.
+    const roles = new Set(members.map((m) => m.role?.trim().toUpperCase()).filter(Boolean));
+    if (config.style === "DEBATE" && (!roles.has("PRO") || !roles.has("CON"))) {
+      problems.push({ kind: "debateRoles" });
+    }
+    if (config.style === "DEVIL_ADVOCATE" && !roles.has("DEVIL_ADVOCATE")) {
+      problems.push({ kind: "devilAdvocateRole" });
+    }
+  }
+
+  const humans = members.filter((m) => m.memberType === "HUMAN");
+  if (humans.length > 0) {
+    const noName = humans.filter((m) => !m.displayName?.trim()).length;
+    if (noName > 0) problems.push({ kind: "humanNeedsName", count: noName });
+    const noId = humans.filter((m) => !m.agentId?.trim()).length;
+    if (noId > 0) problems.push({ kind: "humanNeedsId", count: noId });
+
+    const phases =
+      config.phases && config.phases.length > 0
+        ? config.phases
+        : getStylePhases(config.style ?? "ROUND_TABLE", config.maxRounds ?? 1);
+    if (phases.some((p) => p && (p.type === "PLAN" || p.type === "EXECUTE" || p.type === "VERIFY"))) {
+      problems.push({ kind: "humanInTaskForce" });
+    }
+    if (phases.some((p) => p?.targetEachPeer)) {
+      problems.push({ kind: "humanWithPeerPhases" });
+    }
+  }
+  return problems;
+}
+
+/** The reader-facing sentence for one {@link GroupSaveProblem}. */
+export function groupSaveProblemMessage(t: TFunction, problem: GroupSaveProblem): string {
+  switch (problem.kind) {
+    case "debateRoles":
+      return t(
+        "groups.saveProblem.debateRoles",
+        "A debate needs at least one member with the role PRO and one with the role CON.",
+      );
+    case "devilAdvocateRole":
+      return t(
+        "groups.saveProblem.devilAdvocateRole",
+        "A Devil's Advocate group needs a member with the role DEVIL_ADVOCATE.",
+      );
+    case "memberUnassigned":
+      return t("groups.saveProblem.memberUnassigned", {
+        defaultValue: "{{count}} member has no agent assigned.",
+        defaultValue_other: "{{count}} members have no agent assigned.",
+        count: problem.count,
+      });
+    case "humanNeedsName":
+      return t("groups.saveProblem.humanNeedsName", {
+        defaultValue: "{{count}} human member needs a display name.",
+        defaultValue_other: "{{count}} human members need a display name.",
+        count: problem.count,
+      });
+    case "humanNeedsId":
+      return t("groups.saveProblem.humanNeedsId", {
+        defaultValue: "{{count}} human member needs the person's user id.",
+        defaultValue_other: "{{count}} human members need the person's user id.",
+        count: problem.count,
+      });
+    case "humanInTaskForce":
+      return t(
+        "groups.saveProblem.humanInTaskForce",
+        "Human members cannot join a task-force group (planning, execution and verification phases).",
+      );
+    case "humanWithPeerPhases":
+      return t(
+        "groups.saveProblem.humanWithPeerPhases",
+        "Human members cannot join a group whose phases address each peer in turn, such as peer review.",
+      );
+  }
+}
+
+/**
  * A cost ceiling of zero or less would stop the very first turn of every
  * discussion — so `AgentGroupStore` coalesces it to `null` (unlimited) with a
  * warning rather than rejecting it. Saving one therefore means the *opposite* of
@@ -244,11 +376,18 @@ export const DEFAULT_GROUP_TASK_CONFIG: GroupTaskConfig = {
  * a non-positive cap falls back to its default rather than meaning "unlimited",
  * because an unbounded write surface for an LLM is never the intent behind a
  * mistyped 0.
+ *
+ * Every other field is carried through untouched. This used to rebuild the
+ * block from the three fields it normalizes, so the Workforce settings page —
+ * which loads and saves through it — dropped `assignmentMode` on every save,
+ * and a group set to BID assignment quietly went back to the backend's ROLE
+ * default.
  */
 export function normalizeGroupTaskConfig(config: Partial<GroupTaskConfig>): GroupTaskConfig {
   const perDiscussion = config.maxAgentAddedTasksPerDiscussion;
   const perTurn = config.maxPerTurn;
   return {
+    ...config,
     allowAgentTaskCreation: !!config.allowAgentTaskCreation,
     maxAgentAddedTasksPerDiscussion:
       typeof perDiscussion === "number" && perDiscussion > 0

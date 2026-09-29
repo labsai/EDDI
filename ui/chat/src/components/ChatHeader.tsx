@@ -3,6 +3,8 @@
    theme toggle. Undo/redo/restart moved to input area.
    ────────────────────────────────────────────── */
 
+import { SunMoon } from "lucide-react";
+
 import { useChatState } from "@/store/chat-store";
 import { useTheme, type ThemeMode } from "@/hooks/useTheme";
 
@@ -44,7 +46,7 @@ export function ChatHeader() {
           aria-label="Toggle theme"
           data-testid="theme-toggle"
         >
-          ◑
+          <SunMoon size="1em" />
         </button>
       </div>
     </header>

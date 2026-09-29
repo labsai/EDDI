@@ -9,6 +9,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
+import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.RequestOptions;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -165,5 +166,93 @@ class HttpClientModuleTest {
         Future<RequestOptions> hop = installed.getValue().apply(mock(HttpClientResponse.class));
         assertTrue(hop.failed(), "the redirect must not be followed");
         assertInstanceOf(IllegalArgumentException.class, hop.cause());
+    }
+
+    private static HttpClientRequest requestFrom(String absoluteUri, String host, int port) {
+        HttpClientRequest request = mock(HttpClientRequest.class);
+        when(request.absoluteURI()).thenReturn(absoluteUri);
+        when(request.getHost()).thenReturn(host);
+        when(request.getPort()).thenReturn(port);
+        return request;
+    }
+
+    private static RequestOptions hopTo(String host, Integer port, Boolean ssl) {
+        RequestOptions options = new RequestOptions().setHost(host).setPort(port).setSsl(ssl).setURI("/next");
+        options.addHeader("Authorization", "Bearer live-token");
+        options.addHeader("X-Api-Key", "secret-key");
+        options.addHeader("Cookie", "session=abc");
+        options.addHeader("Accept", "application/json");
+        return options;
+    }
+
+    @Test
+    @DisplayName("a cross-origin redirect hop is stripped of every credential header, keeping plain ones")
+    void crossOriginHopStripsCredentials() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("evil.example.net", 443, true);
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertNull(next.getHeaders().get("Authorization"), "Authorization must not be replayed to another host");
+        assertNull(next.getHeaders().get("X-Api-Key"), "a custom credential header must not be replayed to another host");
+        assertNull(next.getHeaders().get("Cookie"), "Cookie must not be replayed to another host");
+        assertTrue(next.getHeaders().contains("Accept"), "a non-credential header stays");
+    }
+
+    @Test
+    @DisplayName("a same-origin redirect hop keeps its credential headers so an in-service redirect still authenticates")
+    void sameOriginHopKeepsCredentials() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("api.example.com", 443, true);
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertTrue(next.getHeaders().contains("Authorization"), "same-origin hop keeps Authorization");
+        assertTrue(next.getHeaders().contains("X-Api-Key"), "same-origin hop keeps the custom credential header");
+    }
+
+    @Test
+    @DisplayName("a hop to a different port on the same host is cross-origin and is stripped")
+    void differentPortIsCrossOrigin() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("api.example.com", 8443, true);
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertNull(next.getHeaders().get("Authorization"), "a different port is a different origin");
+    }
+
+    @Test
+    @DisplayName("when the originating request is unknown, the hop is stripped fail-safe")
+    void nullOriginalStrips() {
+        RequestOptions next = hopTo("api.example.com", 443, true);
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(null, next);
+
+        assertNull(next.getHeaders().get("Authorization"), "with no origin to compare, fail safe and strip");
+    }
+
+    @Test
+    @DisplayName("the wrapper strips a cross-origin hop end to end")
+    void wrapperStripsCrossOriginHop() {
+        HttpClientRequest originalRequest = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        HttpClientResponse response = mock(HttpClientResponse.class);
+        when(response.request()).thenReturn(originalRequest);
+        Function<HttpClientResponse, Future<RequestOptions>> followsCrossOrigin = r -> Future.succeededFuture(hopTo("other.example.net", 443, true));
+
+        Future<RequestOptions> hop = HttpClientModule.strippingCrossOriginCredentials(followsCrossOrigin).apply(response);
+
+        assertTrue(hop.succeeded());
+        assertNull(hop.result().getHeaders().get("Authorization"));
+        assertNull(hop.result().getHeaders().get("X-Api-Key"));
+        assertTrue(hop.result().getHeaders().contains("Accept"));
+    }
+
+    @Test
+    @DisplayName("the wrapper leaves a not-followed response unfollowed")
+    void wrapperPassesThroughNull() {
+        Function<HttpClientResponse, Future<RequestOptions>> notFollowed = r -> null;
+
+        assertNull(HttpClientModule.strippingCrossOriginCredentials(notFollowed).apply(mock(HttpClientResponse.class)));
     }
 }

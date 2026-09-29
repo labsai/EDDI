@@ -267,8 +267,9 @@ public class ConversationSummarizer {
      * turns under their section headings.
      */
     private static String composeContent(String existingSummary, int alreadySummarized, int summarizeThroughStep, String newTurnsText) {
-        return "## Previous Summary (turns 1-" + alreadySummarized + "):\n" + existingSummary + "\n\n## New Turns (turns " + (alreadySummarized + 1)
-                + "-" + summarizeThroughStep + "):\n" + newTurnsText;
+        // Numbered by step, as renderTurns labels the turns: step 0 is the opening.
+        return "## Previous Summary (turns 0-" + (alreadySummarized - 1) + "):\n" + existingSummary + "\n\n## New Turns (turns " + alreadySummarized
+                + "-" + (summarizeThroughStep - 1) + "):\n" + newTurnsText;
     }
 
     /**
@@ -284,11 +285,13 @@ public class ConversationSummarizer {
             var input = output.get("input", String.class);
             var outputText = ConversationOutputUtils.extractOutputText(output);
 
-            if (input != null) {
-                sb.append("Turn ").append(i + 1).append(" — User: ").append(input).append('\n');
+            // Labelled by step, as the recall tool reads them: turn 0 is the opening
+            // step, turn 1 the user's first message.
+            if (input != null && !input.isBlank()) {
+                sb.append("Turn ").append(i).append(" — User: ").append(input).append('\n');
             }
             if (outputText != null && !outputText.isEmpty()) {
-                sb.append("Turn ").append(i + 1).append(" — Agent: ").append(outputText).append('\n');
+                sb.append("Turn ").append(i).append(" — Agent: ").append(outputText).append('\n');
             }
         }
 

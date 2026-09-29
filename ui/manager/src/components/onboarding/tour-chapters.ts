@@ -221,7 +221,7 @@ const conversationsChapter: TourChapter = {
 const groupsChapter: TourChapter = {
   id: "groups",
   titleKey: "onboarding.tour.groups.title",
-  icon: "Boxes",
+  icon: "Users",
   route: "/manage/groups",
   steps: [
     {
@@ -389,7 +389,7 @@ const quotasChapter: TourChapter = {
 const coordinatorChapter: TourChapter = {
   id: "coordinator",
   titleKey: "onboarding.tour.coordinator.title",
-  icon: "Activity",
+  icon: "Network",
   route: "/manage/coordinator",
   steps: [
     {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.model;
 
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,6 +41,43 @@ public record SecretReference(String tenantId, String keyName) {
 
     /** Default tenant ID used when none is specified in the reference. */
     public static final String DEFAULT_TENANT = "default";
+
+    /**
+     * Key-name prefix reserved for agents' Ed25519 private signing keys, owned by
+     * {@code AgentSigningService}. The single source of truth for this string — the
+     * signing service builds its key names from this constant, and
+     * {@link #isReservedKeyName(String)} recognises it — so the reservation and the
+     * writer cannot drift apart.
+     * <p>
+     * A signing key is granted to the agent itself so the agent can sign. That
+     * grant is exactly what makes it dangerous: without a resolution-time
+     * reservation, an editor of agent X could add an httpcall header
+     * {@code ${vault:agent-signing-key:X}} and exfiltrate X's private key, since
+     * the deploy-time grant check sees the reference as granted to X. The internal
+     * service reads these keys through {@code ISecretProvider} directly, never
+     * through {@link ai.labs.eddi.secrets.SecretResolver}, so reserving them there
+     * blocks the config/template path without blocking the legitimate one.
+     */
+    public static final String AGENT_SIGNING_KEY_PREFIX = "agent-signing-key:";
+
+    private static final List<String> RESERVED_KEY_NAME_PREFIXES = List.of(AGENT_SIGNING_KEY_PREFIX);
+
+    /**
+     * Whether {@code keyName} names an EDDI-internal secret that must never be
+     * resolvable through a configuration or template {@code ${vault:...}}
+     * reference. See {@link #AGENT_SIGNING_KEY_PREFIX}.
+     */
+    public static boolean isReservedKeyName(String keyName) {
+        if (keyName == null) {
+            return false;
+        }
+        for (String prefix : RESERVED_KEY_NAME_PREFIXES) {
+            if (keyName.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Dual-format regex pattern that matches both vault reference forms and both

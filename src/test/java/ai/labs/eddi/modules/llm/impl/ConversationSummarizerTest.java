@@ -245,8 +245,17 @@ class ConversationSummarizerTest {
         assertEquals(0, ConversationSummarizer.readSummaryThroughStep(memory));
     }
 
+    /**
+     * Turns are labelled by step, as the recall tool reads them: turn 0 is the
+     * opening step (no user input), turn 1 the user's first message. Labels used to
+     * be step + 1, so the user's first message was "turn 2".
+     */
     @Test
     void renderTurns_producesReadableOutput() {
+        var greeting = new ConversationOutput();
+        greeting.put("input", "");
+        greeting.put("output", List.of(Map.of("text", "Welcome!")));
+
         var output1 = new ConversationOutput();
         output1.put("input", "Hello");
         output1.put("output", List.of(Map.of("text", "Hi there!")));
@@ -255,10 +264,10 @@ class ConversationSummarizerTest {
         output2.put("input", "How are you?");
         output2.put("output", List.of(Map.of("text", "I'm doing well.")));
 
-        var outputs = List.of(output1, output2);
+        String rendered = ConversationSummarizer.renderTurns(List.of(greeting, output1, output2), 0, 3);
 
-        String rendered = ConversationSummarizer.renderTurns(outputs, 0, 2);
-
+        assertTrue(rendered.contains("Turn 0 — Agent: Welcome!"));
+        assertFalse(rendered.contains("Turn 0 — User:"), "the opening step has no user input");
         assertTrue(rendered.contains("Turn 1 — User: Hello"));
         assertTrue(rendered.contains("Turn 1 — Agent: Hi there!"));
         assertTrue(rendered.contains("Turn 2 — User: How are you?"));
@@ -282,8 +291,8 @@ class ConversationSummarizerTest {
         String rendered = ConversationSummarizer.renderTurns(List.of(output1, output2, output3), 1, 3);
 
         assertFalse(rendered.contains("First")); // skipped
-        assertTrue(rendered.contains("Turn 2 — User: Second"));
-        assertTrue(rendered.contains("Turn 3 — User: Third"));
+        assertTrue(rendered.contains("Turn 1 — User: Second"));
+        assertTrue(rendered.contains("Turn 2 — User: Third"));
     }
 
     @Test
