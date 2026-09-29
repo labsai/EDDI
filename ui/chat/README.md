@@ -181,7 +181,7 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 
 | Layer     | Technology                                             |
 | --------- | ------------------------------------------------------ |
-| Build     | Vite 6                                                 |
+| Build     | Vite 8                                                 |
 | UI        | React 19 + TypeScript 5.7 (strict)                     |
 | Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
 | Markdown  | react-markdown 10 + remark-gfm + remark-math           |
