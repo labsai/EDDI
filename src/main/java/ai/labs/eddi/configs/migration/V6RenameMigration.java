@@ -860,7 +860,13 @@ public class V6RenameMigration {
      */
     private void catchUpManagedConversationMappings() {
         try {
-            if (documentCount("bottriggers") > 0) {
+            long legacyTriggers = exactDocumentCount("bottriggers");
+            if (legacyTriggers < 0) {
+                LOGGER.errorf("  Could not tell whether an earlier 6.x left triggers under 'bottriggers' (logged above); "
+                        + "checked again on the next start");
+                return;
+            }
+            if (legacyTriggers > 0) {
                 if (renameCollectionIfExists("bottriggers", COLLECTION_AGENT_TRIGGERS)) {
                     LOGGER.info("  Migrating the triggers an earlier 6.x left under 'bottriggers'");
                 } else {

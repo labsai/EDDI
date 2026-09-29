@@ -4,9 +4,12 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -404,6 +407,37 @@ class TemplateSyntaxMigratorTest {
             "plain text"})
     void ordinaryTemplatesAreNotRefused(String input) {
         assertNull(migrator.unconvertibleReason(input), input);
+    }
+
+    /**
+     * A lone closing delimiter in a literal is only text: the delimiter scan is
+     * quote-aware, so the expression's own end is found and the concat converts.
+     */
+    @Test
+    void literalClosingDelimiterIsNotRefused() {
+        assertNull(migrator.unconvertibleReason("[[${a + ']]' + b}]]"));
+        assertEquals("{a}]]{b}", migrator.migrate("[[${a + ']]' + b}]]"));
+    }
+
+    @Test
+    void directiveOpenerWithAnyWhitespaceCountsAsLeftBehind() {
+        assertTrue(migrator.containsThymeleafDelimiters("[#  th:if=\"${a} and ${b}\"]x[/]"));
+        assertTrue(migrator.containsThymeleafDelimiters("[#	th:each=\"i : ${items}\"]"));
+        assertFalse(migrator.containsThymeleafDelimiters("Explain what th:if does, and #strings.trim"));
+    }
+
+    /**
+     * The import converts a resource as one JSON string. There, the escaped quotes
+     * of a double-quoted literal hide where it ends, so the refusal has to look at
+     * the decoded values.
+     */
+    @Test
+    void refusalLooksAtDecodedJsonValues() throws Exception {
+        String json = "{\"httpCalls\":[{\"request\":{\"body\":\"[[\\\"[[${\\\"+\\\"x.x\\\"+\\\"}]]\\\"]]\"}}]}";
+        Object decoded = new ObjectMapper().readValue(json, Map.class);
+
+        assertNotNull(migrator.unconvertibleReasonIn(decoded));
+        assertNull(migrator.unconvertibleReasonIn(new ObjectMapper().readValue("{\"body\":\"[[${x}]]\"}", Map.class)));
     }
 
     @Test

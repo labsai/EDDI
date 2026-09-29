@@ -146,6 +146,9 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      */
     private final AtomicBoolean startupMigrationsRunning = new AtomicBoolean();
 
+    /** Whether the startup path reached the point where it grants readiness. */
+    private final AtomicBoolean startupCallbackRan = new AtomicBoolean();
+
     /**
      * Serializes {@link #checkDeployments()}. {@code SKIP} only stops one scheduled
      * tick overlapping the next; the startup path calls the sweep itself, and two
@@ -197,6 +200,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             // would never deploy anything, which is worse than deploying on configs
             // a failed migration left as they were.
             startupMigrationsRunning.set(false);
+            if (!startupCallbackRan.get()) {
+                // The startup path never got to grant readiness. Hand it to the first
+                // sweep that completes, as for a pending rename migration, rather than
+                // leave the instance DOWN while the sweep deploys and serves its agents.
+                LOGGER.error("The startup deployment did not complete (logged above); readiness is granted by the first "
+                        + "scheduled deployment sweep that does.");
+                readinessDeferred.set(true);
+            }
         }
         LOGGER.info("Finished deployment of agents.");
     }
@@ -231,6 +242,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
+            startupCallbackRan.set(true);
             startupMigrationsRunning.set(false);
             checkDeployments();
             if (v6RenameMigration.isPending()) {

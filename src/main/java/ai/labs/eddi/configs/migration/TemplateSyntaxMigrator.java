@@ -317,10 +317,12 @@ public class TemplateSyntaxMigrator {
     }
 
     /**
-     * Template delimiters that must not appear inside a string literal of an
-     * expression.
+     * Expression openers that must not appear inside a string literal of an
+     * expression: a literal holding one generates template syntax. A lone closer
+     * ({@code ]]}, {@code )]}) is only text — {@code [[${a + ']]' + b}]]} converts
+     * safely to <code>{a}]]{b}</code>, because the delimiter scan is quote-aware.
      */
-    private static final List<String> NESTED_TEMPLATE_MARKERS = List.of("[[", "[(", "${", "]]", ")]");
+    private static final List<String> NESTED_TEMPLATE_MARKERS = List.of("[[", "[(", "${");
 
     /** Every inline-expression opener and the closer that ends it. */
     private static final String[][] INLINE_DELIMITERS = {{"[[", "]]"}, {"[(", ")]"}};
@@ -419,7 +421,46 @@ public class TemplateSyntaxMigrator {
      * template left behind.
      */
     public boolean containsThymeleafDelimiters(String input) {
-        return input != null && (input.contains("[[${") || input.contains("[(${") || input.contains("[# th:") || input.contains("[#th:"));
+        return input != null && THYMELEAF_DELIMITER.matcher(input).find();
+    }
+
+    /**
+     * The expression openers, and a directive opener with any whitespace between
+     * {@code [#} and {@code th:} — the shape the conversion patterns accept.
+     */
+    private static final Pattern THYMELEAF_DELIMITER = Pattern.compile("\\[\\[\\$\\{|\\[\\(\\$\\{|\\[#\\s*th:");
+
+    /**
+     * {@link #unconvertibleReason(String)} for every string in a decoded JSON
+     * document, or {@code null} when all of them are convertible.
+     *
+     * <p>
+     * For the import, which converts a resource as one JSON string. Judged on the
+     * raw JSON, the escaped quotes of a double-quoted literal ({@code \"}) hide
+     * where it ends, so a template the scan would refuse as a value passes as JSON
+     * text — and the conversion then rewrites the expression inside it.
+     * </p>
+     */
+    public String unconvertibleReasonIn(Object decoded) {
+        if (decoded instanceof String text) {
+            return containsThymeleafSyntax(text) ? unconvertibleReason(text) : null;
+        }
+        if (decoded instanceof Map<?, ?> map) {
+            for (Object value : map.values()) {
+                String reason = unconvertibleReasonIn(value);
+                if (reason != null) {
+                    return reason;
+                }
+            }
+        } else if (decoded instanceof List<?> list) {
+            for (Object item : list) {
+                String reason = unconvertibleReasonIn(item);
+                if (reason != null) {
+                    return reason;
+                }
+            }
+        }
+        return null;
     }
 
     /**

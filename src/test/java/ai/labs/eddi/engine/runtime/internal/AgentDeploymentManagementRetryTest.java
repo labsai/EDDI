@@ -276,9 +276,11 @@ class AgentDeploymentManagementRetryTest {
         doThrow(new IllegalStateException("migration manager failed")).when(migrationManager).startMigrationIfFirstTimeRun(any());
 
         assertThrows(IllegalStateException.class, () -> management.autoDeployAgents());
+        assertFalse(readiness.isAgentsReady());
         sweepAt(Duration.ZERO);
 
         verify(agentFactory, times(1)).deployAgent(Environment.production, "agent-a", 1, null);
+        assertTrue(readiness.isAgentsReady(), "the first completed sweep grants the readiness the startup path never reached");
     }
 
     @Test
