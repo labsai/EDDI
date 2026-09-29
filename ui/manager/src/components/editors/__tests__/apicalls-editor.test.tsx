@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { screen, within, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -400,13 +401,15 @@ describe("ApiCallsEditor", () => {
     expect(screen.getByText("Fire and Forget")).toBeInTheDocument();
   });
 
-  it("shows Batch Calls checkbox after expanding Options", async () => {
+  it("does not offer Batch Calls, which the engine never reads", async () => {
+    // ApiCall.isBatchCalls / iterationObjectName are declared but read by
+    // nothing; batching is preRequest.batchRequests.
     const user = userEvent.setup();
     renderWithProviders(
       <ApiCallsEditor data={populatedConfig} onChange={onChange} />
     );
     await user.click(screen.getByText("Options"));
-    expect(screen.getByText("Batch Calls")).toBeInTheDocument();
+    expect(screen.queryByText("Batch Calls")).not.toBeInTheDocument();
   });
 
   it("shows saveResponse additional fields when saveResponse is enabled", async () => {
@@ -430,7 +433,7 @@ describe("ApiCallsEditor", () => {
     expect(screen.getByDisplayValue("myHeaders")).toBeInTheDocument();
   });
 
-  it("shows iteration object name field when batch mode is on", async () => {
+  it("keeps a stored batch setting without offering a control for it", async () => {
     const user = userEvent.setup();
     const config: HttpCallsConfig = {
       httpCalls: [
@@ -446,7 +449,13 @@ describe("ApiCallsEditor", () => {
     renderWithProviders(<ApiCallsEditor data={config} onChange={onChange} />);
     // Options section is collapsed by default - open it first
     await user.click(screen.getByText("Options"));
-    expect(screen.getByDisplayValue("batchItem")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("batchItem")).not.toBeInTheDocument();
+    // …but a stored value is carried through an edit untouched.
+    await user.type(screen.getByTestId("call-name-input"), "x");
+    expect(onChange.mock.lastCall![0].httpCalls[0]).toMatchObject({
+      isBatchCalls: true,
+      iterationObjectName: "batchItem",
+    });
   });
 
   // ─── Pre-Request section ──────────────────────────────────────────
@@ -1290,5 +1299,178 @@ describe("ApiCallsEditor — Post-Response retry section", () => {
     expect(arg.httpCalls[0]!.postResponse!.retryApiCallInstruction!.maxRetries).toBe(
       9
     );
+  });
+});
+
+// ─── Editors review fixes ────────────────────────────────────────────────────
+
+describe("HTTP code filter on a property instruction", () => {
+  const onChange = vi.fn();
+  beforeEach(() => vi.clearAllMocks());
+
+  const mapped = (httpCodeValidator?: PropertyInstruction["httpCodeValidator"]): PropertyInstruction[] => [
+    { name: "p", valueString: "", scope: "step", fromObjectPath: "a.b", httpCodeValidator },
+  ];
+
+  it("adds a filter with the run list absent and nothing skipped", async () => {
+    // It used to write runOnHttpCode: []. PrePostUtils substitutes the
+    // defaults only for null, and [] contains no status code — the
+    // instruction never ran again. The skip list, by contrast, is written as
+    // [] ("skip nothing"): absent would mean the default skip list.
+    const user = userEvent.setup();
+    renderWithProviders(<PropertyInstructionsEditor instructions={mapped()} onChange={onChange} />);
+    await user.click(screen.getByTestId("add-http-code-filter"));
+    const written = onChange.mock.lastCall![0][0].httpCodeValidator;
+    expect(written).toEqual({ skipOnHttpCode: [] });
+    expect(written.runOnHttpCode).toBeUndefined();
+  });
+
+  it("writes an emptied code list as absent, not as []", () => {
+    renderWithProviders(
+      <PropertyInstructionsEditor instructions={mapped({ runOnHttpCode: [200] })} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByTestId("http-code-filter-run"), { target: { value: "" } });
+    expect(onChange.mock.lastCall![0][0].httpCodeValidator.runOnHttpCode).toBeUndefined();
+  });
+
+  it("parses typed codes", () => {
+    renderWithProviders(<PropertyInstructionsEditor instructions={mapped({})} onChange={onChange} />);
+    fireEvent.change(screen.getByTestId("http-code-filter-skip"), { target: { value: "404, 500" } });
+    expect(onChange.mock.lastCall![0][0].httpCodeValidator.skipOnHttpCode).toEqual([404, 500]);
+  });
+
+  it("flags a stored empty run list and repairs it to the defaults", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <PropertyInstructionsEditor instructions={mapped({ runOnHttpCode: [] })} onChange={onChange} />,
+    );
+    expect(screen.getByTestId("http-code-filter-runs-on-nothing")).toBeInTheDocument();
+    await user.click(screen.getByTestId("http-code-filter-use-defaults"));
+    expect(onChange.mock.lastCall![0][0].httpCodeValidator.runOnHttpCode).toBeUndefined();
+  });
+});
+
+describe("property instruction scope", () => {
+  const onChange = vi.fn();
+  beforeEach(() => vi.clearAllMocks());
+
+  it("does not offer the secret scope, which PrePostUtils stores in plain text", () => {
+    renderWithProviders(
+      <PropertyInstructionsEditor
+        instructions={[{ name: "p", valueString: "v", scope: "step" }]}
+        onChange={onChange}
+      />,
+    );
+    const select = within(screen.getByTestId("property-instruction-row")).getByDisplayValue("step") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["step", "conversation", "longTerm"]);
+    expect(screen.queryByTestId("property-instruction-secret-warning")).not.toBeInTheDocument();
+  });
+
+  it("keeps a stored secret scope visible, unselectable, and warns about it", () => {
+    renderWithProviders(
+      <PropertyInstructionsEditor
+        instructions={[{ name: "token", valueString: "{response.token}", scope: "secret" }]}
+        onChange={onChange}
+      />,
+    );
+    const select = within(screen.getByTestId("property-instruction-row")).getAllByRole("combobox")[0] as HTMLSelectElement;
+    expect(select.value).toBe("secret");
+    expect([...select.options].find((o) => o.value === "secret")!.disabled).toBe(true);
+    expect(screen.getByTestId("property-instruction-secret-warning")).toHaveTextContent(/plain text/);
+    // Opening it does not rewrite it.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ApiCallsEditor with an unexpected config shape", () => {
+  it("renders a call whose request is null instead of crashing the page", () => {
+    const config = {
+      targetServerUrl: "https://api.example.com",
+      httpCalls: [{ name: "broken", actions: [], request: null }],
+    } as unknown as HttpCallsConfig;
+    const onChange = vi.fn();
+    renderWithProviders(<ApiCallsEditor data={config} onChange={onChange} />);
+    expect(screen.getByDisplayValue("broken")).toBeInTheDocument();
+
+    // Editing the path creates the request rather than throwing.
+    fireEvent.change(screen.getByTestId("httpcall-path-input"), { target: { value: "/x" } });
+    expect(onChange.mock.lastCall![0].httpCalls[0].request).toEqual({ path: "/x" });
+  });
+});
+
+describe("retry number fields", () => {
+  it("do not append a keystroke to the default after the field is cleared", async () => {
+    // `value={x ?? 3}` + `parseInt(v) || 0`: clearing stored 0, which was
+    // rendered back, and typing 5 gave "05" at best, "-15" for a -1 default.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RetryApiCallEditor retry={{ maxRetries: 3 }} onChange={onChange} />,
+    );
+    const input = screen.getByTestId("retry-max-retries");
+    await user.clear(input);
+    expect(onChange.mock.lastCall![0].maxRetries).toBeUndefined();
+    await user.type(input, "5");
+    expect(input).toHaveValue(5);
+    expect(onChange.mock.lastCall![0].maxRetries).toBe(5);
+  });
+});
+
+describe("HTTP code filter skip list", () => {
+  /** PrePostUtils.verifyHttpCode, including its null-only default substitution. */
+  const DEFAULT_RUN = [200, 201];
+  const DEFAULT_SKIP = [0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502];
+  const runsOn = (v: { runOnHttpCode?: number[]; skipOnHttpCode?: number[] }, code: number) =>
+    (v.runOnHttpCode ?? DEFAULT_RUN).includes(code) && !(v.skipOnHttpCode ?? DEFAULT_SKIP).includes(code);
+
+  /** A parent that keeps what the editor writes, as the real editors do. */
+  function Harness({ initial }: { initial: PropertyInstruction[] }) {
+    const [instructions, setInstructions] = useState(initial);
+    latest = instructions;
+    return <PropertyInstructionsEditor instructions={instructions} onChange={setInstructions} />;
+  }
+  let latest: PropertyInstruction[] = [];
+  const row = (httpCodeValidator?: PropertyInstruction["httpCodeValidator"]): PropertyInstruction[] => [
+    { name: "found", valueString: "false", scope: "step", fromObjectPath: "a", httpCodeValidator },
+  ];
+
+  it("runs on 404 after 'Add filter', typing 404 in Run and leaving Skip empty", async () => {
+    // With the skip list left absent the default skip list — which contains
+    // 404 — would cancel the run code and the instruction would never run.
+    const user = userEvent.setup();
+    renderWithProviders(<Harness initial={row()} />);
+    await user.click(screen.getByTestId("add-http-code-filter"));
+    await user.type(screen.getByTestId("http-code-filter-run"), "404");
+
+    const written = latest[0]!.httpCodeValidator!;
+    expect(written).toEqual({ runOnHttpCode: [404], skipOnHttpCode: [] });
+    expect(runsOn(written, 404)).toBe(true);
+    expect(screen.queryByTestId("http-code-filter-conflict")).not.toBeInTheDocument();
+  });
+
+  it("writes an emptied skip field as [] (skip nothing), not as absent", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Harness initial={row({ runOnHttpCode: [404], skipOnHttpCode: [500] })} />);
+    await user.clear(screen.getByTestId("http-code-filter-skip"));
+    expect(latest[0]!.httpCodeValidator!.skipOnHttpCode).toEqual([]);
+  });
+
+  it("warns when a run code is in the effective skip list", () => {
+    // Stored by the previous version of this editor: run 404, skip absent.
+    renderWithProviders(<Harness initial={row({ runOnHttpCode: [404] })} />);
+    expect(screen.getByTestId("http-code-filter-conflict")).toHaveTextContent("404");
+  });
+
+  it("shows a stored empty skip list as 'skip nothing', and can restore the default list", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Harness initial={row({ skipOnHttpCode: [] })} />);
+    const skip = screen.getByTestId("http-code-filter-skip");
+    expect(skip).toHaveValue("");
+    expect(skip.getAttribute("placeholder")).toMatch(/none/i);
+    expect(screen.getByTestId("http-code-filter-skip-hint")).toHaveTextContent(/skips nothing/);
+
+    await user.click(screen.getByTestId("http-code-filter-default-skip"));
+    expect(latest[0]!.httpCodeValidator!.skipOnHttpCode).toBeUndefined();
+    expect(screen.getByTestId("http-code-filter-skip").getAttribute("placeholder")).toContain("404");
   });
 });
