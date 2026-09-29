@@ -43,9 +43,9 @@ class RestRagIngestionTest {
         var config = new RagConfiguration();
         config.setName("product-docs");
         when(restRagStore.readRag("rag-123", 1)).thenReturn(config);
-        when(ragIngestionService.ingest(anyString(), anyString(), anyString(), any())).thenReturn("ingestion-abc");
+        when(ragIngestionService.ingest(anyString(), anyString(), anyString(), any(), anyBoolean())).thenReturn("ingestion-abc");
 
-        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", "Hello world");
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", false, "Hello world");
 
         assertEquals(202, response.getStatus());
         @SuppressWarnings("unchecked")
@@ -60,27 +60,27 @@ class RestRagIngestionTest {
         var config = new RagConfiguration();
         config.setName("product-docs");
         when(restRagStore.readRag("rag-123", 1)).thenReturn(config);
-        when(ragIngestionService.ingest(eq("custom-kb"), anyString(), anyString(), any())).thenReturn("ingestion-xyz");
+        when(ragIngestionService.ingest(eq("custom-kb"), anyString(), anyString(), any(), anyBoolean())).thenReturn("ingestion-xyz");
 
-        Response response = restRagIngestion.ingestDocument("rag-123", 1, "custom-kb", "test.txt", "Hello world");
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, "custom-kb", "test.txt", false, "Hello world");
 
         assertEquals(202, response.getStatus());
         @SuppressWarnings("unchecked")
         Map<String, Object> body = (Map<String, Object>) response.getEntity();
         assertEquals("custom-kb", body.get("kbId"));
-        verify(ragIngestionService).ingest(eq("custom-kb"), anyString(), anyString(), any());
+        verify(ragIngestionService).ingest(eq("custom-kb"), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
     void ingestDocument_blankContent_shouldReturn400() {
-        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", "");
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", false, "");
 
         assertEquals(400, response.getStatus());
     }
 
     @Test
     void ingestDocument_nullContent_shouldReturn400() {
-        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", null);
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "test.txt", false, null);
 
         assertEquals(400, response.getStatus());
     }
@@ -89,9 +89,51 @@ class RestRagIngestionTest {
     void ingestDocument_configNotFound_shouldReturn404() {
         when(restRagStore.readRag("missing", 1)).thenThrow(new RuntimeException("Not found"));
 
-        Response response = restRagIngestion.ingestDocument("missing", 1, null, "test.txt", "Content");
+        Response response = restRagIngestion.ingestDocument("missing", 1, null, "test.txt", false, "Content");
 
         assertEquals(404, response.getStatus());
+    }
+
+    @Test
+    void ingestDocument_replace_isPassedThrough() {
+        var config = new RagConfiguration();
+        config.setName("product-docs");
+        when(restRagStore.readRag("rag-123", 1)).thenReturn(config);
+        when(ragIngestionService.ingest(anyString(), anyString(), anyString(), any(), anyBoolean())).thenReturn("ingestion-abc");
+
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "policy.txt", true, "Refunds within 47 days.");
+
+        assertEquals(202, response.getStatus());
+        verify(ragIngestionService).ingest(eq("product-docs"), anyString(), eq("policy.txt"), any(), eq(true));
+    }
+
+    /**
+     * Replacement is keyed on the name, and every unnamed document shares "unnamed"
+     * — so replacing without a name would delete all of them.
+     */
+    @Test
+    void ingestDocument_replaceWithoutAName_isRefused() {
+        for (String name : new String[]{"unnamed", "", " ", null}) {
+            Response response = restRagIngestion.ingestDocument("rag-123", 1, null, name, true, "Content");
+
+            assertEquals(400, response.getStatus(), "documentName=" + name);
+        }
+        verify(ragIngestionService, never()).ingest(any(), any(), any(), any(), anyBoolean());
+        verify(restRagStore, never()).readRag(any(), any());
+    }
+
+    @Test
+    void getIngestionStatus_carriesTheWarningWhenThereIsOne() {
+        when(ragIngestionService.getStatus("ing-1")).thenReturn("completed");
+        when(ragIngestionService.getWarning("ing-1")).thenReturn("previous version still retrievable");
+
+        Response response = restRagIngestion.getIngestionStatus("rag-123", "ing-1");
+
+        assertEquals(200, response.getStatus());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getEntity();
+        assertEquals("completed", body.get("status"));
+        assertEquals("previous version still retrievable", body.get("warning"));
     }
 
     @Test

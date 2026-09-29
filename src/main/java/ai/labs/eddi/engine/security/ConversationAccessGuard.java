@@ -7,8 +7,10 @@ package ai.labs.eddi.engine.security;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
@@ -41,6 +43,12 @@ public class ConversationAccessGuard {
     private static final Logger LOGGER = Logger.getLogger(ConversationAccessGuard.class);
     private static final String RESOURCE_TYPE = "conversation";
 
+    /**
+     * Conversation descriptors are written once and updated in place, so they never
+     * leave version 0 — the archived copy a soft delete leaves keeps it too.
+     */
+    private static final int DESCRIPTOR_VERSION = 0;
+
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IConversationDescriptorStore conversationDescriptorStore;
@@ -58,27 +66,98 @@ public class ConversationAccessGuard {
      * Asserts that the caller owns the conversation, or holds {@code eddi-admin}. A
      * conversation whose descriptor records no owner (legacy data) is left
      * accessible — {@link OwnershipValidator#requireOwnerOrAdmin} decides that.
+     * <p>
+     * The owner is resolved from the live descriptor, and — when that is gone —
+     * from its archived copy. A soft delete ({@code DELETE
+     * /conversationstore/conversations/{id}} without {@code deletePermanently})
+     * archives the descriptor but keeps the memory snapshot, so a missing live
+     * descriptor does <em>not</em> mean a missing conversation. This method used to
+     * answer {@code null} ("allowed") in that case, which opened every conversation
+     * endpoint — raw memory, {@code say} as the owner, SSE, the tool history, the
+     * MCP tools and the audit trail — to every authenticated caller as soon as the
+     * owner deleted the conversation.
+     * <p>
+     * When no descriptor exists at all — the conversation was permanently deleted,
+     * swept by retention, never existed, or its descriptor was never written — only
+     * an admin is let through (so an operator can still reach the leftovers: an
+     * orphaned snapshot, the audit trail of a deleted conversation). Everyone else
+     * gets a {@link NotFoundException}: there is no owner to compare against, and
+     * an unverifiable owner is not an absent one.
      *
-     * @return the conversation owner's userId, or {@code null} when the descriptor
-     *         was not found (the caller's actual operation then produces the 404).
+     * @return the conversation owner's userId; {@code null} for a legacy unowned
+     *         conversation, or for an admin addressing a conversation that has no
+     *         descriptor (the caller's actual operation then produces the 404).
      * @throws ForbiddenException
      *             if the caller is neither the owner nor an admin, or if the
      *             descriptor cannot be loaded at all (fail-closed: an unverifiable
      *             owner is not an absent owner).
+     * @throws NotFoundException
+     *             if no descriptor exists at all and the caller is not an admin
      */
     public String requireConversationOwner(String conversationId) {
-        try {
-            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
-            if (descriptor == null) {
-                LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
+        var descriptor = resolveDescriptor(conversationId);
+        if (descriptor == null) {
+            if (ownershipValidator.isAdmin(identity)) {
+                // Also true when authorization is disabled — unchanged behaviour there.
+                LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
                 return null;
             }
-            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), RESOURCE_TYPE);
-            return descriptor.getUserId();
-        } catch (ForbiddenException e) {
-            throw e;
+            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
+            throw new NotFoundException("Conversation not found");
+        }
+        ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), RESOURCE_TYPE);
+        return descriptor.getUserId();
+    }
+
+    /**
+     * As {@link #requireConversationOwner}, but a conversation that has no
+     * descriptor at all is a {@link NotFoundException} for every caller, admins
+     * included.
+     * <p>
+     * {@code requireConversationOwner} returns null for two different situations:
+     * an admin addressing a conversation without a descriptor, or a conversation
+     * that exists but is unowned (a legacy row, which {@code OwnershipValidator}
+     * deliberately admits). A caller that merely invokes the guard for its side
+     * effect therefore cannot tell "no such conversation" from "allowed", and
+     * proceeds in both cases. That is harmless where the underlying store 404s on
+     * its own, but not for attachments: blobs can outlive the conversation that
+     * owned them, so a deleted conversation's id would still reach the store with
+     * no ownership established.
+     * <p>
+     * Use this wherever "the conversation is gone" must stop the request.
+     *
+     * @return the owner id, which may still be null for a legacy unowned
+     *         conversation the caller is allowed to access
+     */
+    public String requireExistingConversationOwner(String conversationId) {
+        var descriptor = resolveDescriptor(conversationId);
+        if (descriptor == null) {
+            throw new NotFoundException("Conversation not found");
+        }
+        ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), RESOURCE_TYPE);
+        return descriptor.getUserId();
+    }
+
+    /**
+     * The live descriptor, else its archived (soft-deleted) copy, else
+     * {@code null}. Every guard variant resolves the owner through this one method
+     * so they cannot disagree about whether a conversation still has one.
+     *
+     * @throws ForbiddenException
+     *             when the store fails — fail closed
+     */
+    private ConversationDescriptor resolveDescriptor(String conversationId) {
+        try {
+            try {
+                var live = conversationDescriptorStore.readDescriptor(conversationId, DESCRIPTOR_VERSION);
+                if (live != null) {
+                    return live;
+                }
+            } catch (ResourceNotFoundException e) {
+                // Fall through to the archive: a soft delete drops only the live row.
+            }
+            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, DESCRIPTOR_VERSION);
         } catch (ResourceNotFoundException e) {
-            LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
             return null;
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
@@ -87,38 +166,87 @@ public class ConversationAccessGuard {
     }
 
     /**
-     * As {@link #requireConversationOwner}, but a conversation that does not exist
-     * is a {@link NotFoundException} rather than a {@code null} return.
+     * Strict variant of {@link #requireConversationOwner} for irreversible,
+     * state-changing operations (conversation deletion, soft or permanent): a
+     * conversation whose descriptor records <em>no</em> owner (legacy data) is
+     * refused rather than admitted. {@link #requireConversationOwner} deliberately
+     * admits an unowned conversation to any named caller, which for a delete means
+     * any authenticated token could remove a legacy no-owner conversation.
+     * Fail-closed here instead — only an admin may act on an unowned conversation.
      * <p>
-     * {@code requireConversationOwner} returns null for two different situations:
-     * the descriptor is missing, or the conversation exists but is unowned (a
-     * legacy row, which {@code OwnershipValidator} deliberately admits). A caller
-     * that merely invokes the guard for its side effect therefore cannot tell "no
-     * such conversation" from "allowed", and proceeds in both cases. That is
-     * harmless where the underlying store 404s on its own, but not for attachments:
-     * blobs can outlive the conversation that owned them, so a deleted
-     * conversation's id would still reach the store with no ownership established.
-     * <p>
-     * Use this wherever "the conversation is gone" must stop the request.
+     * The owner is resolved exactly as in {@link #requireConversationOwner} (live
+     * descriptor, else the archived copy a soft delete leaves), and a conversation
+     * with no descriptor anywhere is admitted to an admin only; everyone else gets
+     * a {@link NotFoundException}. So a soft-deleted conversation cannot be
+     * permanently deleted by anyone but its owner or an admin.
      *
-     * @return the owner id, which may still be null for a legacy unowned
-     *         conversation the caller is allowed to access
+     * @return the conversation owner's userId, or {@code null} for an admin acting
+     *         on an unowned conversation or one with no descriptor (the caller's
+     *         actual operation then produces the 404)
+     * @throws ForbiddenException
+     *             if the caller is neither the owner nor an admin, the conversation
+     *             is unowned and the caller is not an admin, or the descriptor
+     *             cannot be loaded (fail-closed)
+     * @throws NotFoundException
+     *             if no descriptor exists at all and the caller is not an admin
      */
-    public String requireExistingConversationOwner(String conversationId) {
-        try {
-            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
-            if (descriptor == null) {
-                throw new NotFoundException("Conversation not found");
+    public String requireConversationOwnerStrict(String conversationId) {
+        return requireConversationOwnerStrict(conversationId, null);
+    }
+
+    /**
+     * Where the owner of a pre-v5.1.6 conversation is recorded when its descriptor
+     * has none: the memory snapshot's {@code userId}. The listing path
+     * ({@code RestConversationStore.populateDataToDescriptor}) already falls back
+     * to it, so the strict check must as well — otherwise the recorded owner of a
+     * legacy conversation could see it listed but never delete it.
+     */
+    @FunctionalInterface
+    public interface LegacyOwnerLookup {
+        /** The owner recorded outside the descriptor, or null when there is none. */
+        String ownerOf(String conversationId) throws Exception;
+    }
+
+    /**
+     * As {@link #requireConversationOwnerStrict(String)}, but when the resolved
+     * descriptor (live or archived) records no owner, the owner is looked up
+     * through {@code legacyOwnerLookup} before the strict decision. The looked-up
+     * owner is then checked exactly like a descriptor owner — the owner or an admin
+     * passes, anyone else is refused. When the lookup establishes no owner either
+     * (none recorded, or the lookup failed), the conversation stays unowned and
+     * only an admin may act on it: a lookup failure never widens access.
+     *
+     * @param legacyOwnerLookup
+     *            fallback owner source for a descriptor without a userId; may be
+     *            null (no fallback)
+     */
+    public String requireConversationOwnerStrict(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {
+        var descriptor = resolveDescriptor(conversationId);
+        if (descriptor == null) {
+            if (ownershipValidator.isAdmin(identity)) {
+                LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
+                return null;
             }
-            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), RESOURCE_TYPE);
-            return descriptor.getUserId();
-        } catch (ForbiddenException | NotFoundException e) {
-            throw e;
-        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
             throw new NotFoundException("Conversation not found");
-        } catch (ResourceStoreException e) {
-            LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
-            throw new ForbiddenException("Access denied: unable to verify conversation ownership");
+        }
+        String owner = descriptor.getUserId();
+        if ((owner == null || owner.isBlank()) && legacyOwnerLookup != null) {
+            owner = lookUpLegacyOwner(conversationId, legacyOwnerLookup);
+        }
+        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
+        return owner;
+    }
+
+    private static String lookUpLegacyOwner(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {
+        try {
+            return legacyOwnerLookup.ownerOf(conversationId);
+        } catch (Exception e) {
+            // Fail closed: an owner we could not read is treated as no owner, which the
+            // strict check admits to an admin only.
+            LOGGER.warnf("Could not resolve the legacy owner of conversation %s: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return null;
         }
     }
 
@@ -153,6 +281,23 @@ public class ConversationAccessGuard {
      */
     public boolean seesAllConversations() {
         return ownershipValidator.isAdmin(identity);
+    }
+
+    /**
+     * The calling principal's name, to attribute an action on a conversation in the
+     * audit trail (G4) — e.g. the {@code hitl.approval} cancellation written when a
+     * delete or bulk end terminates a pending approval. Falls back to
+     * {@code fallbackActor} when there is no named caller: anonymous, a nameless
+     * token, or no request context at all.
+     */
+    public String callerActor(String fallbackActor) {
+        try {
+            var principal = identity == null || identity.isAnonymous() ? null : identity.getPrincipal();
+            String name = principal == null ? null : principal.getName();
+            return name == null || name.isBlank() ? fallbackActor : name;
+        } catch (ContextNotActiveException e) {
+            return fallbackActor;
+        }
     }
 
     /**

@@ -301,7 +301,7 @@ class ToolLoopResumer {
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
-                jsonPolicy);
+                jsonPolicy, null);
 
         // ── Step 5: merge the pre-pause trace with the resume trace ──
         List<Map<String, Object>> mergedTrace = new ArrayList<>();

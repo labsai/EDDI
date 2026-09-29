@@ -184,9 +184,9 @@ class DocumentedRestPathsTest {
      */
     private static Set<String> allowedMentions() {
         return Set.of(
-                // AGENTS.md §5.5 explains that legacy URIs are auto-normalized on
+                // agent-config-authoring.md explains that legacy URIs are auto-normalized on
                 // import, which cannot be written without naming one.
-                "AGENTS.md → /botstore/bots",
+                "docs/agent-config-authoring.md → /botstore/bots",
                 // metrics.md warns readers off this exact prefix. The warning is the
                 // reason the entry above it exists: six tool endpoints were documented
                 // under /langchain/tools, all of which answered — LegacyPathRewriteFilter

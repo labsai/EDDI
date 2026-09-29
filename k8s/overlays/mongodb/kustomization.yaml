@@ -9,3 +9,4 @@ resources:
   - ../../base
   - mongodb-statefulset.yaml
   - mongodb-service.yaml
+  - mongodb-networkpolicy.yaml

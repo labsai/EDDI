@@ -21,10 +21,30 @@ public interface IPropertiesHandler {
     IUserMemoryStore getUserMemoryStore();
 
     /**
-     * User memory config from agent configuration. {@code null} when advanced
-     * memory tools (Dream, guardrails, recall settings) are not enabled.
+     * User memory config from agent configuration — recall settings, default
+     * visibility, guardrails. {@code null} when the agent declares no
+     * {@code userMemoryConfig} and does not enable the memory tools.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
+        return null;
+    }
+
+    /**
+     * Whether the LLM memory tools are enabled ({@code enableMemoryTools}).
+     * Defaults to "a config is present" — the meaning the config alone used to
+     * carry.
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
+    }
+
+    /**
+     * Verifies a {@code groupId} found only on an earlier step before the
+     * {@code longTerm} boundary scopes group-visible properties to it — see
+     * {@link ConversationGroups#resolveGroupIds(IConversationMemory, ConversationGroups.MembershipCheck)}.
+     * {@code null} (the default) trusts only the current step's {@code groupId}.
+     */
+    default ConversationGroups.MembershipCheck getGroupMembershipCheck() {
         return null;
     }
 

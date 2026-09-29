@@ -86,6 +86,11 @@ public class RestToolHistory {
         conversationAccessGuard.requireConversationOwner(conversationId);
         try {
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null) {
+                // The store answers null for an unknown id — a 404, not the 500 that
+                // dereferencing it below produced.
+                return conversationNotFound();
+            }
             ToolExecutionTrace trace = new ToolExecutionTrace();
             List<ToolCall> toolCalls = new ArrayList<>();
 
@@ -121,10 +126,14 @@ public class RestToolHistory {
             return Response.ok(trace).build();
 
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Conversation not found")).build();
+            return conversationNotFound();
         } catch (Exception e) {
             return internalError("Error retrieving tool history", e);
         }
+    }
+
+    private static Response conversationNotFound() {
+        return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Conversation not found")).build();
     }
 
     /**

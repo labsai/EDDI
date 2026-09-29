@@ -3,6 +3,8 @@ import {
   deployedEnvironments,
   isAnyEnvironmentBusy,
   preferredChatEnvironment,
+  withAnyDeployedVersion,
+  isLiveAtRequestedVersion,
 } from "../deployment-environments";
 import type { EnvironmentStatus } from "@/lib/api/agents";
 
@@ -85,5 +87,109 @@ describe("preferredChatEnvironment", () => {
     // Matches the backend's own @DefaultValue("production") rather than
     // inventing a third behaviour for a case the caller should not reach.
     expect(preferredChatEnvironment([])).toBe("production");
+  });
+});
+
+describe("withAnyDeployedVersion", () => {
+  const notLive: EnvironmentStatus[] = [
+    { environment: "production", status: "NOT_FOUND" },
+    { environment: "test", status: "NOT_FOUND" },
+  ];
+
+  it("adopts an older READY version and says which", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a1", agentVersion: 3, status: "READY" }] },
+      "a1",
+      4,
+    );
+    expect(merged).toEqual([
+      { environment: "production", status: "READY", deployedVersion: 3 },
+      { environment: "test", status: "NOT_FOUND" },
+    ]);
+    expect(deployedEnvironments(merged)).toEqual(["production"]);
+    expect(isLiveAtRequestedVersion(merged![0])).toBe(false);
+  });
+
+  it("never lets another agent's deployment stand in", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a12", agentVersion: 1, status: "READY" }] },
+      "a1",
+      4,
+    );
+    expect(deployedEnvironments(merged)).toEqual([]);
+  });
+
+  it("keeps a version-exact READY and ignores older ERROR rows", () => {
+    const merged = withAnyDeployedVersion(
+      [
+        { environment: "production", status: "READY" },
+        { environment: "test", status: "NOT_FOUND" },
+      ],
+      {
+        production: [{ environment: "production", agentId: "a1", agentVersion: 1, status: "READY" }],
+        test: [{ environment: "test", agentId: "a1", agentVersion: 1, status: "ERROR" }],
+      },
+      "a1",
+      4,
+    );
+    expect(merged).toEqual([
+      { environment: "production", status: "READY" },
+      { environment: "test", status: "NOT_FOUND" },
+    ]);
+    expect(isLiveAtRequestedVersion(merged![0])).toBe(true);
+  });
+
+  it("never adopts a listing IN_PROGRESS — it is unpolled and would pin the toggle busy", () => {
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a1", agentVersion: 3, status: "IN_PROGRESS" }] },
+      "a1",
+      4,
+    );
+    expect(merged).toEqual(notLive);
+    expect(isAnyEnvironmentBusy(merged)).toBe(false);
+  });
+
+  it("never adopts a listing row at the asked-for version — it contradicts the exact NOT_FOUND", () => {
+    // Undeploying v4 sets the exact status to NOT_FOUND optimistically while
+    // the shared listing is still cached with v4 READY. Adopting that row
+    // reported the version just undeployed as live again until the refetch.
+    const merged = withAnyDeployedVersion(
+      notLive,
+      { production: [{ environment: "production", agentId: "a1", agentVersion: 4, status: "READY" }] },
+      "a1",
+      4,
+    );
+    expect(merged).toEqual(notLive);
+    expect(deployedEnvironments(merged)).toEqual([]);
+  });
+
+  it("keeps an ERROR visible rather than covering it with an older READY", () => {
+    // v4 failed while v3 still serves: a green production chip would hide the
+    // failure the reader most needs to see.
+    const statuses: EnvironmentStatus[] = [
+      { environment: "production", status: "ERROR" },
+      { environment: "test", status: "NOT_FOUND" },
+    ];
+    const merged = withAnyDeployedVersion(
+      statuses,
+      {
+        production: [{ environment: "production", agentId: "a1", agentVersion: 3, status: "READY" }],
+        test: [{ environment: "test", agentId: "a1", agentVersion: 3, status: "READY" }],
+      },
+      "a1",
+      4,
+    );
+    expect(merged).toEqual([
+      { environment: "production", status: "ERROR" },
+      // NOT_FOUND is still filled in — only ERROR is off limits.
+      { environment: "test", status: "READY", deployedVersion: 3 },
+    ]);
+  });
+
+  it("passes undefined through while statuses load", () => {
+    expect(withAnyDeployedVersion(undefined, {}, "a1", 4)).toBeUndefined();
   });
 });

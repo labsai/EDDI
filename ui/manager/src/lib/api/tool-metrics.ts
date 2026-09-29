@@ -38,13 +38,35 @@ export interface CacheStats {
   details: string;
 }
 
+/**
+ * One call in a conversation's tool history — backend `ToolExecutionTrace.ToolCall`.
+ * `arguments` is the JSON string the model sent (secret-redacted), not an object.
+ */
 export interface ToolHistoryEntry {
   toolName: string;
-  args: Record<string, unknown>;
+  arguments: string | null;
   result: string | null;
-  durationMs: number;
+  executionTimeMs: number;
+  error: string | null;
+  success: boolean;
   cost: number;
-  timestamp: string;
+  fromCache: boolean;
+  timestamp: number;
+}
+
+/**
+ * Matches the backend RestToolHistory.getToolHistory() response — a
+ * `ToolExecutionTrace` OBJECT with the calls under `toolCalls` and totals beside
+ * them. It was typed as a bare array of entries, which the backend never sends.
+ */
+export interface ToolHistory {
+  toolCalls: ToolHistoryEntry[];
+  totalExecutionTimeMs: number;
+  hasErrors: boolean;
+  totalCost: number;
+  cacheHits: number;
+  cacheMisses: number;
+  toolMetrics: Record<string, unknown>;
 }
 
 /**
@@ -93,9 +115,9 @@ export async function getCacheStats(): Promise<CacheStats> {
 /** Get tool execution history for a conversation. */
 export async function getToolHistory(
   conversationId: string,
-): Promise<ToolHistoryEntry[]> {
-  return api.get<ToolHistoryEntry[]>(
-    `${TOOLS_BASE}/history/${conversationId}`,
+): Promise<ToolHistory> {
+  return api.get<ToolHistory>(
+    `${TOOLS_BASE}/history/${encodeURIComponent(conversationId)}`,
   );
 }
 

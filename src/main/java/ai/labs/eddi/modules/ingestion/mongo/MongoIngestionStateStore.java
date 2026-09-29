@@ -90,6 +90,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_GENERATION = "generation";
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_STARTED_AT = "startedAt";
+    private static final String FIELD_STALE_AFTER = "staleAfter";
     private static final String FIELD_FINISHED_AT = "finishedAt";
     private static final String FIELD_DOCS_SEEN = "documentsSeen";
     private static final String FIELD_DOCS_INGESTED = "documentsIngested";
@@ -210,6 +211,19 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified) {
+        translating("record a document as seen",
+                () -> documents.updateOne(ownedDocument(sourceId, documentId, runId),
+                        Updates.combine(
+                                Updates.set(FIELD_LAST_RUN_ID, runId),
+                                Updates.set(FIELD_MISSED_RUNS, 0),
+                                Updates.set(FIELD_TOMBSTONED, false),
+                                Updates.set(FIELD_ETAG, etag),
+                                Updates.set(FIELD_LAST_MODIFIED, lastModified)),
+                        new UpdateOptions().upsert(false)));
+    }
+
+    @Override
     public void recordUnreachable(String sourceId, String documentId, String runId) {
         // Only the run marker: the miss counter and the tombstone flag are left
         // exactly as they were, so this run neither condemns the document nor
@@ -255,6 +269,16 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void invalidateContent(String sourceId) {
+        translating("invalidate a source's content", () -> documents.updateMany(
+                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                Updates.combine(
+                        Updates.set(FIELD_CONTENT_HASH, null),
+                        Updates.set(FIELD_ETAG, null),
+                        Updates.set(FIELD_LAST_MODIFIED, null))));
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         return translating("list a source's documents", () -> {
             List<DocumentState> states = new ArrayList<>();
@@ -275,7 +299,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public Optional<String> startRun(String sourceId) {
+    public Optional<String> startRun(String sourceId, Instant staleAfter) {
         String runId = UUID.randomUUID().toString();
         long generation = nextGeneration(sourceId);
         Document run = new Document(FIELD_RUN_ID, runId)
@@ -283,6 +307,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 .append(FIELD_STATUS, IngestionRun.Status.RUNNING.name())
                 .append(FIELD_GENERATION, generation)
                 .append(FIELD_STARTED_AT, Date.from(Instant.now()));
+        if (staleAfter != null) {
+            run.append(FIELD_STALE_AFTER, Date.from(staleAfter));
+        }
         // Inside translating, like every other operation on this store: only the
         // duplicate-key case is special, and handling it here rather than around
         // the helper means a connection failure, a timeout or a step-down during
@@ -348,7 +375,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     public List<IngestionRun> listRuns(String sourceId, int limit) {
         return translating("list a source's runs", () -> {
             List<IngestionRun> history = new ArrayList<>();
-            for (Document document : runs.find(Filters.eq(FIELD_SOURCE_ID, sourceId))
+            for (Document document : runs.find(Filters.and(Filters.eq(FIELD_SOURCE_ID, sourceId),
+                    Filters.ne(FIELD_STATUS, IngestionRun.Status.MAINTENANCE.name())))
                     .sort(Sorts.descending(FIELD_STARTED_AT))
                     .limit(Math.max(1, limit))) {
                 history.add(toRun(document));
@@ -395,10 +423,15 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
      */
     private List<String> doReap(String sourceId, Instant startedBefore) {
         return translating("reap stale runs", () -> {
+            // A run's own deadline decides when it has one; the start-time cut-off only
+            // for runs claimed before deadlines were recorded.
             var stale = Filters.and(
                     Filters.eq(FIELD_SOURCE_ID, sourceId),
                     Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name()),
-                    Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore)));
+                    Filters.or(
+                            Filters.lt(FIELD_STALE_AFTER, Date.from(Instant.now())),
+                            Filters.and(Filters.exists(FIELD_STALE_AFTER, false),
+                                    Filters.lt(FIELD_STARTED_AT, Date.from(startedBefore)))));
             var fail = Updates.combine(
                     Updates.set(FIELD_STATUS, IngestionRun.Status.FAILED.name()),
                     Updates.set(FIELD_FINISHED_AT, Date.from(Instant.now())),
@@ -490,7 +523,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         return new IngestionRun(
                 document.getString(FIELD_RUN_ID),
                 document.getString(FIELD_SOURCE_ID),
-                IngestionRun.Status.valueOf(document.getString(FIELD_STATUS)),
+                IngestionRun.Status.parse(document.getString(FIELD_STATUS)),
                 toInstant(document.getDate(FIELD_STARTED_AT)),
                 toInstant(document.getDate(FIELD_FINISHED_AT)),
                 intOrZero(document, FIELD_DOCS_SEEN),

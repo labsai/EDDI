@@ -60,6 +60,10 @@ describe("useSendMessage 409 rollback (with re-renders)", () => {
   it("removes the optimistic user message when the send is rejected with 409", async () => {
     server.use(
       http.post("*/agents/*", () => new HttpResponse(null, { status: 409 })),
+      // A 409 is read as a pause only when the conversation says so.
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+      ),
     );
 
     const Wrapper = createWrapper();

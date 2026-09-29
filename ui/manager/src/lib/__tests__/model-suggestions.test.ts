@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MODEL_SUGGESTIONS,
+  acceptsOptionalToken,
   isBaseUrlRequired,
+  isProvisionableBySetup,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
@@ -78,5 +80,22 @@ describe("model suggestions", () => {
         `provider "${provider.id}" offers the user nothing to start from`,
       ).toBe(true);
     }
+  });
+});
+
+describe("setup-provisionable providers", () => {
+  // gemini-vertex needs projectId and location; neither setup request can carry
+  // them, so an agent created on it failed on its first message.
+  it("excludes gemini-vertex and keeps every other listed provider", () => {
+    expect(isProvisionableBySetup("gemini-vertex")).toBe(false);
+    for (const provider of LLM_PROVIDERS.filter((p) => p.id !== "gemini-vertex")) {
+      expect(isProvisionableBySetup(provider.id), provider.id).toBe(true);
+    }
+  });
+
+  it("offers an optional token for Jlama only", () => {
+    expect(acceptsOptionalToken("jlama")).toBe(true);
+    expect(acceptsOptionalToken("ollama")).toBe(false);
+    expect(acceptsOptionalToken("anthropic")).toBe(false);
   });
 });

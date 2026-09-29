@@ -164,8 +164,16 @@ kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
 **Using Helm:**
 
 ```bash
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
+  --namespace eddi --create-namespace
 ```
+
+That is the local, port-forward-only shape (no OIDC); the chart refuses to render
+without each of those values. Enable OIDC for anything others can reach.
 
 See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.
 

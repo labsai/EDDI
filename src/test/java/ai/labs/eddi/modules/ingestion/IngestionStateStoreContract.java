@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -464,6 +465,27 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a run is judged by the deadline recorded at its claim, not by a later cut-off")
+    default void recordedDeadlineGoverns() {
+        // The cut-off a budget lowered mid-run produces: everything started before a
+        // minute from now. Judged by it, the live run below would be reaped and its
+        // worker fenced while still working.
+        store().startRun(SOURCE, Instant.now().plusSeconds(3600)).orElseThrow();
+
+        assertEquals(0, store().reapStaleRuns(SOURCE, Instant.now().plusSeconds(60)));
+        assertTrue(store().activeRun(SOURCE).isPresent());
+    }
+
+    @Test
+    @DisplayName("a run whose recorded deadline has passed is reaped, whatever the cut-off")
+    default void passedDeadlineIsReaped() {
+        store().startRun(SOURCE, Instant.now().minusSeconds(1)).orElseThrow();
+
+        assertEquals(1, store().reapStaleRuns(SOURCE, Instant.now().minusSeconds(3600)));
+        assertTrue(store().activeRun(SOURCE).isEmpty());
+    }
+
+    @Test
     @DisplayName("a healthy run is not reaped")
     default void healthyRunSurvivesReaping() {
         openRun(SOURCE);
@@ -728,6 +750,108 @@ public interface IngestionStateStoreContract {
         store().recordIngested(longSource, DOC, "hash-1", longEtag, "Wed, 21 Oct 2026 07:28:00 GMT", runId);
 
         assertEquals(longEtag, store().lookup(longSource, DOC).orElseThrow().etag());
+    }
+
+    @Test
+    @DisplayName("a re-downloaded, unchanged document takes the validators of the response that proved it")
+    default void revalidatedDocumentRefreshesItsValidators() {
+        // The first ingest's ETag used to be kept for ever. A server that rotated it
+        // without changing the text then answered every later conditional request
+        // with a full 200, because the validator sent back was one it no longer knew.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", "Wed, 21 Oct 2026 07:28:00 GMT", first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+
+        String second = openRun(SOURCE);
+        store().recordSeen(SOURCE, DOC, second, "\"v2\"", null);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertEquals("\"v2\"", state.etag());
+        assertEquals(null, state.lastModified(), "a validator the server stopped sending is not sent back");
+        assertEquals("hash-1", state.contentHash(), "seeing a document never changes what was embedded");
+        assertEquals(second, state.lastRunId());
+    }
+
+    @Test
+    @DisplayName("refreshing validators is fenced like every other document write")
+    default void staleRunCannotRefreshValidators() {
+        String stale = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", null, stale);
+        forceDocumentOwner(SOURCE, DOC, "the-run-that-replaced-it");
+
+        store().recordSeen(SOURCE, DOC, stale, "\"stale\"", null);
+
+        assertEquals("\"v1\"", store().lookup(SOURCE, DOC).orElseThrow().etag());
+    }
+
+    @Test
+    @DisplayName("a released maintenance claim frees the source but never shows up as a run")
+    default void maintenanceClaimsAreNotRuns() {
+        // Deleting a file takes the run slot and used to release it as a COMPLETED
+        // run with zeroes everywhere, so the source's "last run" became an empty
+        // success and hid the real one.
+        String run = openRun(SOURCE);
+        closeRun(run, SOURCE, IngestionRun.Status.FAILED);
+        String claim = openRun(SOURCE);
+        closeRun(claim, SOURCE, IngestionRun.Status.MAINTENANCE);
+
+        List<IngestionRun> history = store().listRuns(SOURCE, 10);
+
+        assertEquals(1, history.size());
+        assertEquals(run, history.get(0).runId());
+        assertTrue(store().activeRun(SOURCE).isEmpty(), "the claim must be released");
+        assertTrue(store().startRun(SOURCE).isPresent());
+    }
+
+    @Test
+    @DisplayName("a run after a maintenance claim still owns the documents the claim stamped")
+    default void runAfterAMaintenanceClaimOwnsItsDocuments() {
+        // The claim's row is kept, not deleted, because it carries the generation the
+        // next run has to count past. Deleting it let the next run compute the same
+        // generation, find every document already stamped with it, and be fenced out
+        // of every write it made.
+        String first = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, first);
+        closeRun(first, SOURCE, IngestionRun.Status.COMPLETED);
+        String claim = openRun(SOURCE);
+        closeRun(claim, SOURCE, IngestionRun.Status.MAINTENANCE);
+
+        String next = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, next);
+
+        assertEquals("hash-2", store().lookup(SOURCE, DOC).orElseThrow().contentHash());
+    }
+
+    // === invalidating content ===
+
+    @Test
+    @DisplayName("invalidating a source's content makes every document re-embed, whichever run owns it")
+    default void invalidatedContentIsReEmbedded() {
+        // How a run that wrote into a renamed knowledge base's old store is settled
+        // when another run already holds the source and the purge is refused. It
+        // must land on rows that run owns — hence unfenced — and must survive that
+        // run noting the page as seen, or its verdict "unchanged" comes back.
+        String owner = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"v1\"", "Mon, 01 Jan 2024 00:00:00 GMT", owner);
+        String otherRun = openRun(OTHER_SOURCE);
+        store().recordIngested(OTHER_SOURCE, DOC, "hash-2", "\"v2\"", null, otherRun);
+
+        store().invalidateContent(SOURCE);
+
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertTrue(state.hasChanged("hash-1"), "the next run must embed the document again");
+        assertNull(state.etag(), "a conditional request would earn a 304 and skip it");
+        assertNull(state.lastModified());
+        assertFalse(state.tombstoned(), "its vectors may still be there; a tombstone would hide them from the reaper");
+        assertEquals("hash-2", store().lookup(OTHER_SOURCE, DOC).orElseThrow().contentHash(),
+                "another source is untouched");
+
+        store().recordSeen(SOURCE, DOC, owner);
+        assertTrue(store().lookup(SOURCE, DOC).orElseThrow().hasChanged("hash-1"));
+
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, owner);
+        assertFalse(store().lookup(SOURCE, DOC).orElseThrow().hasChanged("hash-1"),
+                "embedding it again settles it");
     }
 
     // === purge ===

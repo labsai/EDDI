@@ -75,6 +75,13 @@ public class ConversationSummarizer {
             Do NOT repeat these — focus only on context they don't capture:
             %s""";
 
+    /**
+     * The new turns must get at least {@code 1/MIN_TURN_SHARE_DIVISOR} of
+     * {@code maxCharsPerUpdate}; a previous summary that leaves less skips the
+     * update rather than being cut.
+     */
+    private static final int MIN_TURN_SHARE_DIVISOR = 4;
+
     private final SummarizationService summarizationService;
 
     @Inject
@@ -141,24 +148,73 @@ public class ConversationSummarizer {
         LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", sanitize(memory.getConversationId()),
                 alreadySummarized, summarizeThroughStep, recentWindow);
 
-        // Build content to summarize: previous summary + new unsummarized turns
-        String existingSummary = readSummary(memory);
-        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        // Bound the batch (M-L3). An unbounded backlog eventually outgrew the
+        // summarizer's context window, and from then on every turn made a failing,
+        // billed summarizer call. Catch up at most maxTurnsPerUpdate turns at a time,
+        // then shrink the batch until the whole request fits maxCharsPerUpdate.
+        summarizeThroughStep = Math.min(summarizeThroughStep, alreadySummarized + config.getMaxTurnsPerUpdate());
+        int maxChars = config.getMaxCharsPerUpdate();
 
-        String contentToSummarize;
-        if (existingSummary != null && !existingSummary.isEmpty()) {
-            contentToSummarize = "## Previous Summary (turns 1-" + alreadySummarized + "):\n" + existingSummary + "\n\n## New Turns (turns "
-                    + (alreadySummarized + 1) + "-" + summarizeThroughStep + "):\n" + newTurnsText;
-        } else {
-            contentToSummarize = newTurnsText;
+        // The budget covers the complete request, not just the new turns: the
+        // previous summary and its section headings are sent too. Reserve their
+        // share up front. The headings are measured at the batch's largest end
+        // step, so shortening the batch can only make them shorter.
+        String existingSummary = readSummary(memory);
+        boolean hasSummary = existingSummary != null && !existingSummary.isEmpty();
+        int reserved = hasSummary ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, "").length() : 0;
+        int turnBudget = maxChars - reserved;
+
+        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        while (newTurnsText.length() > turnBudget && summarizeThroughStep > alreadySummarized + 1) {
+            summarizeThroughStep--;
+            newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
         }
 
-        // Guard: don't call LLM with empty content (e.g., malformed outputs with no
-        // text)
-        if (contentToSummarize.isBlank()) {
-            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, skipping.", alreadySummarized, summarizeThroughStep);
+        // Guard: don't call the LLM for a window with no text (e.g. malformed
+        // outputs). Checked on the new turns alone — combined with a previous
+        // summary the content is never blank, and re-summarizing an unchanged
+        // summary would cost a call and, on an empty reply, retry the same blank
+        // window every turn.
+        if (newTurnsText.isBlank()) {
+            // Nothing to condense in this window — but still move past it. Now that a
+            // batch is bounded, returning without advancing would re-read the same
+            // blank window on every turn and never reach the later turns that do
+            // have text. No LLM call, and the summary is left untouched.
+            LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, advancing past them.", alreadySummarized, summarizeThroughStep);
+            memory.getConversationProperties().put(PROP_SUMMARY_THROUGH_STEP,
+                    new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
             return;
         }
+
+        if (hasSummary && turnBudget < maxChars / MIN_TURN_SHARE_DIVISOR) {
+            // The previous summary alone leaves too little room for new turns. It is
+            // never cut to make room: it is the only record of the turns it covers, and
+            // the reply replaces it. Skip the update instead, with no model call: the
+            // boundary stays put, so the turns past it keep reaching the model verbatim
+            // (the same fallback as a failed summarizer call) until maxCharsPerUpdate is
+            // raised. Lowering maxSummaryTokens cannot release it: that limit only shapes
+            // the NEXT summary, and no next summary is produced while this summary is
+            // stored — it only keeps summaries small once updates resume.
+            LOGGER.warnf("[SUMMARY] Skipping the rolling summary update for conversation='%s': the previous summary and its headings "
+                    + "take %d of maxCharsPerUpdate=%d chars, leaving less than a quarter for new turns. "
+                    + "Raise maxCharsPerUpdate to at least %d so updates resume (the stored summary is not shortened by lowering "
+                    + "maxSummaryTokens, which only bounds summaries written after that).", sanitize(memory.getConversationId()), reserved,
+                    maxChars, reserved * MIN_TURN_SHARE_DIVISOR / (MIN_TURN_SHARE_DIVISOR - 1) + 1);
+            return;
+        }
+
+        if (newTurnsText.length() > turnBudget) {
+            // A single turn larger than the whole budget: summarize its head.
+            // The notice counts toward the budget too, so the input stays within it.
+            String notice = "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
+            notice = notice.substring(0, Math.min(notice.length(), turnBudget));
+            newTurnsText = newTurnsText.substring(0, turnBudget - notice.length()) + notice;
+        }
+
+        // Build content to summarize: previous summary + new unsummarized turns
+        String contentToSummarize = hasSummary
+                ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, newTurnsText)
+                : newTurnsText;
 
         String instructions = buildPrompt(config, propertiesContext);
         String summary = summarizationService.summarize(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
@@ -207,6 +263,16 @@ public class ConversationSummarizer {
     }
 
     /**
+     * The request sent when a previous summary exists: the summary and the new
+     * turns under their section headings.
+     */
+    private static String composeContent(String existingSummary, int alreadySummarized, int summarizeThroughStep, String newTurnsText) {
+        // Numbered by step, as renderTurns labels the turns: step 0 is the opening.
+        return "## Previous Summary (turns 0-" + (alreadySummarized - 1) + "):\n" + existingSummary + "\n\n## New Turns (turns " + alreadySummarized
+                + "-" + (summarizeThroughStep - 1) + "):\n" + newTurnsText;
+    }
+
+    /**
      * Render conversation turns in range [fromStep, toStep) as readable text. Uses
      * the conversation outputs (the same data that ConversationLogGenerator uses).
      */
@@ -219,11 +285,13 @@ public class ConversationSummarizer {
             var input = output.get("input", String.class);
             var outputText = ConversationOutputUtils.extractOutputText(output);
 
-            if (input != null) {
-                sb.append("Turn ").append(i + 1).append(" — User: ").append(input).append('\n');
+            // Labelled by step, as the recall tool reads them: turn 0 is the opening
+            // step, turn 1 the user's first message.
+            if (input != null && !input.isBlank()) {
+                sb.append("Turn ").append(i).append(" — User: ").append(input).append('\n');
             }
             if (outputText != null && !outputText.isEmpty()) {
-                sb.append("Turn ").append(i + 1).append(" — Agent: ").append(outputText).append('\n');
+                sb.append("Turn ").append(i).append(" — Agent: ").append(outputText).append('\n');
             }
         }
 

@@ -5,18 +5,25 @@
 package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.Settings;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.TemplateLimitExceededException;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.Template;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -67,10 +74,35 @@ public class TemplatingEngine implements ITemplatingEngine {
             .expireAfterAccess(Duration.ofMinutes(30)).build();
 
     private final Engine engine;
+    private final Settings settings;
 
+    /**
+     * Production constructor. The injected Quarkus engine is only the SOURCE of
+     * EDDI's template extensions; every template is rendered by the restricted
+     * engine {@link RuntimeTemplateEngineFactory} builds from it — never by the
+     * Quarkus engine itself, whose {@code config:}, {@code inject:} and reflection
+     * features must not be reachable from agent configuration.
+     */
     @Inject
-    public TemplatingEngine(Engine engine) {
-        this.engine = engine;
+    public TemplatingEngine(Engine quarkusEngine,
+            @ConfigProperty(name = "eddi.templating.max-output-chars", defaultValue = "2000000") int maxOutputChars,
+            @ConfigProperty(name = "eddi.templating.max-iterations", defaultValue = "100000") int maxIterations,
+            @ConfigProperty(name = "quarkus.qute.strict-rendering", defaultValue = "false") boolean strictRendering,
+            @ConfigProperty(name = "quarkus.qute.remove-standalone-lines", defaultValue = "true") boolean removeStandaloneLines,
+            @ConfigProperty(name = "quarkus.qute.iteration-metadata-prefix", defaultValue = "<alias_>") String iterationMetadataPrefix,
+            @ConfigProperty(name = "quarkus.qute.timeout", defaultValue = "10000") long timeoutMillis) {
+        this(quarkusEngine, new Settings(maxOutputChars, maxIterations, strictRendering, removeStandaloneLines, iterationMetadataPrefix,
+                timeoutMillis));
+    }
+
+    /** Restricted engine built from {@code source} with the shipped defaults. */
+    public TemplatingEngine(Engine source) {
+        this(source, Settings.defaults());
+    }
+
+    public TemplatingEngine(Engine source, Settings settings) {
+        this.settings = settings;
+        this.engine = RuntimeTemplateEngineFactory.build(source, settings);
     }
 
     @Override
@@ -92,17 +124,60 @@ public class TemplatingEngine implements ITemplatingEngine {
                 if (escapedAttributes != null) {
                     escapedAttributes.forEach(instance::data);
                 }
-                return instance.render();
+                instance.setAttribute(BoundedLoopSectionHelperFactory.ITERATION_BUDGET_ATTRIBUTE, new AtomicLong());
+                var output = new BoundedOutput(settings.maxOutputChars());
+                instance.consume(output).toCompletableFuture().get(settings.timeoutMillis(), TimeUnit.MILLISECONDS);
+                return output.toString();
             } else {
                 return template;
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            Throwable failure = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
             String preview = template.length() > 200 ? template.substring(0, 200) + "…" : template;
-            String cause = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String cause = failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName();
             String message = "Template rendering failed: " + cause
                     + " | Template preview: " + preview;
-            throw new TemplateEngineException(message, e);
+            throw new TemplateEngineException(message, failure);
         }
+    }
+
+    /**
+     * Collects the rendered output and fails the render as soon as it grows past
+     * {@code maxChars} ({@code <= 0}: unbounded).
+     */
+    private static final class BoundedOutput implements Consumer<String> {
+        private final StringBuilder output = new StringBuilder();
+        private final int maxChars;
+
+        private BoundedOutput(int maxChars) {
+            this.maxChars = maxChars;
+        }
+
+        @Override
+        public void accept(String chunk) {
+            if (maxChars > 0 && output.length() + chunk.length() > maxChars) {
+                throw new TemplateLimitExceededException(
+                        "The rendered template exceeded the limit of " + maxChars + " characters (eddi.templating.max-output-chars)");
+            }
+            output.append(chunk);
+        }
+
+        @Override
+        public String toString() {
+            return output.toString();
+        }
+    }
+
+    /**
+     * Number of compiled templates currently held by the cache — a diagnostic, and
+     * what tests use to prove a template is parsed once and reused.
+     */
+    public long compiledTemplateCount() {
+        compiledTemplates.cleanUp();
+        return compiledTemplates.estimatedSize();
     }
 
     private boolean containsTemplatingControlCharacters(String template) {

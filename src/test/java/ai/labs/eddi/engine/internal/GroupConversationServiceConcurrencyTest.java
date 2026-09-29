@@ -40,6 +40,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -66,6 +67,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -409,10 +411,11 @@ class GroupConversationServiceConcurrencyTest {
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
+        var listener = mock(GroupDiscussionEventListener.class);
         long startNanos = System.nanoTime();
         try {
             invoke(parallelPhaseMethod(), gc, config(members), members,
-                    phase(PhaseType.OPINION, TurnOrder.PARALLEL), protocol(2), QUESTION, 0, null,
+                    phase(PhaseType.OPINION, TurnOrder.PARALLEL), protocol(2), QUESTION, 0, listener,
                     new AtomicInteger(0), 50);
         } finally {
             release.countDown();
@@ -427,6 +430,18 @@ class GroupConversationServiceConcurrencyTest {
         assertEquals(5L, gc.getTranscript().stream()
                 .filter(e -> e.type() == TranscriptEntryType.SKIPPED).count(),
                 "every hanging member is recorded as SKIPPED exactly once");
+        // A timed-out member used to be an anonymous "unknown" entry with no
+        // speaker_complete, so a client showed it typing forever.
+        assertEquals(members.stream().map(GroupMember::agentId).toList(),
+                gc.getTranscript().stream().map(TranscriptEntry::speakerAgentId).toList(),
+                "each timeout is attributed to the member it belongs to");
+        var completed = ArgumentCaptor.forClass(GroupConversationEventSink.SpeakerCompleteEvent.class);
+        verify(listener, times(members.size())).onSpeakerComplete(completed.capture());
+        completed.getAllValues().forEach(event -> {
+            assertEquals(GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT, event.outcome(),
+                    "a timeout is flagged as such, so a client can tell it from something the member said");
+            assertNull(event.response(), "and carries no content");
+        });
     }
 
     @Test
@@ -610,7 +625,7 @@ class GroupConversationServiceConcurrencyTest {
 
     @SuppressWarnings("unchecked")
     private Map<String, DiscussionControlToken> controlTokens() throws Exception {
-        var field = GroupConversationService.class.getDeclaredField("activeTokens");
+        var field = GroupConversationService.class.getDeclaredField("discussionControls");
         field.setAccessible(true);
         return (Map<String, DiscussionControlToken>) field.get(service);
     }
