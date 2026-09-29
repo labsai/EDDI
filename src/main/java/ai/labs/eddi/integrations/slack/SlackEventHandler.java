@@ -135,7 +135,7 @@ public class SlackEventHandler {
      * to prevent unbounded growth — follow-ups are only useful shortly after a
      * discussion finishes.
      */
-    private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
+    private final ICache<String, GroupFollowUp> activeGroupListeners;
 
     /**
      * Persisted record of every approval card posted, keyed by
@@ -237,9 +237,32 @@ public class SlackEventHandler {
      *            routed to that integration's default target rather than to an
      *            arbitrary one. {@code null} when routing goes by channel, or the
      *            signer was a legacy connector
+     * @param verifiedSigningSecret
+     *            the signing secret that verified the event (the channel owner's,
+     *            or for an unowned channel the signer's). Every route the event
+     *            takes — including a thread lock or a group follow-up, both found
+     *            by a timestamp the sender chooses — must belong to an integration
+     *            or legacy connector holding this secret. {@code null} only for an
+     *            event with no channel (which is dropped anyway); with no secret no
+     *            route matches. A resolved secret, so never logged
      */
-    public record EventOrigin(String teamId, String signingIntegrationName) {
-        public static final EventOrigin UNKNOWN = new EventOrigin(null, null);
+    public record EventOrigin(String teamId, String signingIntegrationName, String verifiedSigningSecret) {
+        /** Nothing verified: such an event routes nowhere. */
+        public static final EventOrigin UNKNOWN = new EventOrigin(null, null, null);
+
+        @Override
+        public String toString() {
+            return "EventOrigin[teamId=" + teamId + ", signingIntegrationName=" + signingIntegrationName + "]";
+        }
+    }
+
+    /**
+     * A group discussion's agent message, registered for follow-up routing: the
+     * listener that holds its context, the route that started the discussion (its
+     * credentials, and the app a follow-up must come from) and the channel it ran
+     * in.
+     */
+    record GroupFollowUp(SlackGroupDiscussionListener listener, ResolvedTarget route, String channelId) {
     }
 
     /**
@@ -292,6 +315,16 @@ public class SlackEventHandler {
      * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
      * between it and the handler, so a top-level {@code instanceof} would miss it.
      */
+    /**
+     * Whether {@code route} belongs to the app whose signing secret verified the
+     * event: its integration's (or legacy connector's) secret equals the verified
+     * one. Fails closed when nothing was verified.
+     */
+    static boolean routeMatchesSigner(ResolvedTarget route, EventOrigin origin) {
+        return route != null && origin != null
+                && ChannelTargetRouter.secretsEqual(route.signingSecret(), origin.verifiedSigningSecret());
+    }
+
     private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             if (type.isInstance(c)) {
@@ -376,11 +409,25 @@ public class SlackEventHandler {
 
         if (parentTs != null) {
             resolved = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+            if (resolved != null && resolved.integration() == null && resolved.legacySigningSecret() == null) {
+                // A channel no integration owns (a DM) gives the lock no credentials.
+                // Take those of an integration or legacy connector that holds the
+                // verifying secret AND has the locked target among its own targets;
+                // otherwise one app's secret could continue a thread locked to
+                // another app's agent.
+                resolved = channelTargetRouter.threadCredentialsForDm("slack", resolved.target(),
+                        origin.verifiedSigningSecret());
+                if (resolved == null) {
+                    LOGGER.warnf("[SLACK] Thread %s in channel %s is locked to a target the sending app does not "
+                            + "serve — ignoring", sanitize(parentTs), sanitize(channelId));
+                    return;
+                }
+            }
         }
 
         // 2. Check group follow-up (thread root was a group discussion)
         if (resolved == null && parentTs != null
-                && tryHandleAgentFollowUp(parentTs, channelId, user, text, threadTs)) {
+                && tryHandleAgentFollowUp(parentTs, channelId, user, text, threadTs, origin)) {
             return;
         }
 
@@ -394,12 +441,28 @@ public class SlackEventHandler {
         // target
         if (resolved == null && isDirectMessage) {
             // Route to the integration whose secret signed this DM (the webhook
-            // established it), not to whichever integration happens to be first.
-            resolved = channelTargetRouter.resolveDefaultForDm("slack", text, origin.signingIntegrationName());
+            // established it), not to whichever integration happens to be first. A
+            // DM signed by a legacy connector goes to a legacy connector with that
+            // secret — never to the first new-style integration.
+            if (origin.signingIntegrationName() == null && origin.verifiedSigningSecret() != null) {
+                resolved = channelTargetRouter.resolveLegacyDefaultForDm(text, origin.verifiedSigningSecret());
+            } else {
+                resolved = channelTargetRouter.resolveDefaultForDm("slack", text, origin.signingIntegrationName());
+            }
         }
 
         if (resolved == null) {
             postHelp(channelId, threadTs, null);
+            return;
+        }
+
+        // 5. The route must belong to the app that signed the event. The webhook
+        // bound the signature to the channel's owner, but a route can come from
+        // elsewhere — the DM fallback, a thread lock — so without this an event
+        // signed by one app could run another app's target with its bot token.
+        if (!routeMatchesSigner(resolved, origin)) {
+            LOGGER.warnf("[SLACK] Event for channel %s resolved to a route of a different app — ignoring",
+                    sanitize(channelId));
             return;
         }
 
@@ -902,8 +965,14 @@ public class SlackEventHandler {
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
-        if (integrationName == null || integrationName.isBlank()) {
-            includeButtons = false; // unbindable — a decision on it would be refused
+        if (!SlackHitlSupport.isBindableIntegrationName(integrationName)) {
+            // Unbindable — a decision on it would be refused. A name containing '|'
+            // (stored before the save-time rule) would split the button value.
+            if (integrationName != null && !integrationName.isBlank()) {
+                LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot carry "
+                        + "— posting the approval card without buttons; rename the integration", sanitize(integrationName));
+            }
+            includeButtons = false;
         } else {
             try {
                 if (!approvalRecords.tryRecord(integrationName, conversationId, pauseEpoch, cardId, approvalChannel)) {
@@ -1035,7 +1104,7 @@ public class SlackEventHandler {
             // Only register for follow-up routing in expanded mode (compact has no
             // channel-level messages)
             if (listener.isExpandedMode()) {
-                executorService.submit(() -> registerAgentThreadMappings(listener));
+                executorService.submit(() -> registerAgentThreadMappings(listener, resolved, channelId));
             }
 
         } catch (Exception e) {
@@ -1050,7 +1119,8 @@ public class SlackEventHandler {
      * Wait for the group discussion to complete, then register all agent message ts
      * mappings for follow-up routing.
      */
-    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
+    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener, ResolvedTarget route,
+                                             String channelId) {
         // Wait for the group discussion to complete via the listener's latch
         int groupTimeout = slackConfig.getGroupCompletionTimeoutSeconds();
         boolean completed = listener.awaitCompletion(groupTimeout, TimeUnit.SECONDS);
@@ -1064,7 +1134,7 @@ public class SlackEventHandler {
 
         // Register all agent message ts → listener for follow-up detection
         for (String ts : listener.getAgentMessageTsMap().values()) {
-            activeGroupListeners.put(ts, listener);
+            activeGroupListeners.put(ts, new GroupFollowUp(listener, route, channelId));
             LOGGER.debugf("Registered agent thread ts=%s for follow-up routing", ts);
         }
     }
@@ -1078,12 +1148,24 @@ public class SlackEventHandler {
      * @return true if this was handled as a follow-up, false otherwise
      */
     private boolean tryHandleAgentFollowUp(String parentTs, String channelId,
-                                           SlackUser user, String text, String threadTs)
+                                           SlackUser user, String text, String threadTs,
+                                           EventOrigin origin)
             throws Exception {
-        SlackGroupDiscussionListener listener = activeGroupListeners.get(parentTs);
-        if (listener == null) {
+        GroupFollowUp followUp = activeGroupListeners.get(parentTs);
+        if (followUp == null) {
             return false; // Not a thread from a group discussion
         }
+        // The key is a bare Slack timestamp the sender chooses, so the reply must
+        // also be in the discussion's channel and come from the app whose route
+        // started it — otherwise another app could run the discussion's agent, with
+        // its context, in a channel of its own.
+        if (!channelId.equals(followUp.channelId()) || !routeMatchesSigner(followUp.route(), origin)) {
+            LOGGER.warnf("[SLACK] Follow-up for thread %s does not match the discussion's channel or app — ignoring",
+                    sanitize(parentTs));
+            return true;
+        }
+        SlackGroupDiscussionListener listener = followUp.listener();
+        String botToken = followUp.route().botToken();
 
         String agentId = listener.getAgentIdForMessageTs(parentTs);
         if (agentId == null) {
@@ -1106,42 +1188,43 @@ public class SlackEventHandler {
         // Route to the specific agent from the group discussion
         String intent = "channel:followup:" + channelId + ":" + parentTs;
         ThreadConversation thread = openThreadConversation(agentId, user, intent);
-        announceReplacement(thread, channelId, threadTs, null);
+        announceReplacement(thread, channelId, threadTs, botToken);
         try {
-            deliverFollowUp(thread.conversationId(), channelId, threadTs, enrichedInput);
+            deliverFollowUp(thread.conversationId(), channelId, threadTs, enrichedInput, botToken);
         } catch (IConversationService.ConversationEndedException e) {
             // Ended between opening and sending — once, like sendInThread.
             ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, thread.conversationId(),
                     endReasonOf(thread.conversationId()));
-            announceReplacement(fresh, channelId, threadTs, null);
-            deliverFollowUp(fresh.conversationId(), channelId, threadTs, enrichedInput);
+            announceReplacement(fresh, channelId, threadTs, botToken);
+            deliverFollowUp(fresh.conversationId(), channelId, threadTs, enrichedInput, botToken);
         }
 
         return true;
     }
 
     /**
-     * Send a follow-up and post its outcome. Follow-ups have no
-     * ResolvedTarget/integration config, so no approver notification is sent — but
-     * the pause notice and "still awaiting" handling still apply so the user is
-     * never left with a generic error.
+     * Send a follow-up and post its outcome, as the app that started the
+     * discussion. Follow-ups carry no approver configuration, so no approver
+     * notification is sent — but the pause notice and "still awaiting" handling
+     * still apply so the user is never left with a generic error.
      *
      * @throws IConversationService.ConversationEndedException
      *             if the conversation has ended, so the caller can replace it
      */
-    private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput)
+    private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
+                                 String botToken)
             throws Exception {
         try {
             SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
             if (snapshot == SKIPPED_STILL_AWAITING) {
-                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
                 return;
             }
             if (snapshot == SKIPPED_ENDED) {
                 throw new IConversationService.ConversationEndedException("Conversation has ended!");
             }
             if (snapshot == SKIPPED_NOT_ACTIVE) {
-                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, null);
+                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
                 return;
             }
             boolean paused = snapshot != null
@@ -1149,14 +1232,14 @@ public class SlackEventHandler {
             String response = SlackHitlSupport.extractSlackResponseText(snapshot);
             if (paused) {
                 if (response != null && !response.startsWith("_")) {
-                    postMessageChunked(channelId, threadTs, response, null);
+                    postMessageChunked(channelId, threadTs, response, botToken);
                 }
-                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), null);
+                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
             } else {
-                postMessageChunked(channelId, threadTs, response, null);
+                postMessageChunked(channelId, threadTs, response, botToken);
             }
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         }
     }
 

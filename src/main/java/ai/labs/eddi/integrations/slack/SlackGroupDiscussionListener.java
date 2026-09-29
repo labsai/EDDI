@@ -458,7 +458,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(event.pausedAt());
             boolean recorded = false;
             if (includeButtons) {
-                if (approvalRecords == null || integrationName == null || integrationName.isBlank()) {
+                if (approvalRecords == null || !SlackHitlSupport.isBindableIntegrationName(integrationName)) {
+                    if (integrationName != null && integrationName.contains("|")) {
+                        LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot "
+                                + "carry — posting the approval card without buttons; rename the integration",
+                                LogSanitizer.sanitize(integrationName));
+                    }
                     includeButtons = false;
                 } else {
                     try {

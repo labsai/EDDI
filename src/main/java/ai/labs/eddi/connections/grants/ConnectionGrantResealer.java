@@ -73,6 +73,26 @@ public class ConnectionGrantResealer implements SealedDataRotationParticipant {
     }
 
     /**
+     * Deletes the tenant's grants when its vault is reset. Their tokens were sealed
+     * with DEKs that are about to be deleted; a user who had linked an account sees
+     * it as disconnected and links it again, which is the only honest outcome once
+     * the key is gone.
+     */
+    @Override
+    public int discardAll(String tenantId) {
+        int discarded = 0;
+        for (ConnectionGrant grant : grantStore.findByTenant(tenantId)) {
+            if (grantStore.delete(tenantId, grant.getConnectionName(), grant.getPrincipal())) {
+                discarded++;
+            }
+        }
+        if (discarded > 0) {
+            LOGGER.infof("Vault reset: discarded %d OAuth connection grant(s) sealed with the tenant's deleted DEKs", discarded);
+        }
+        return discarded;
+    }
+
+    /**
      * Moves one grant onto the active generation.
      * <p>
      * On a lost guard the row is re-read once. If it now names the active

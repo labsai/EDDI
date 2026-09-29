@@ -250,6 +250,29 @@ class ConnectionGrantResealerTest {
     }
 
     /**
+     * L-S3: a vault reset deletes every DEK generation of the tenant, and the next
+     * DEK is generation 1 again with the same dekId these grants name — so leaving
+     * them in place made every later refresh open them with the wrong key and fail
+     * authentication on every request. They are discarded instead, and only the
+     * reset tenant's.
+     */
+    @Test
+    @DisplayName("discardAll deletes the reset tenant's grants and nobody else's")
+    void discardAllDeletesOnlyTheResetTenantsGrants() {
+        store.upsert(grant("jira", "alice", GEN_1, true));
+        store.upsert(grant("drive", "bob", GEN_2, false));
+        var otherTenant = grant("jira", "carol", EncryptedDek.dekId("other", 1), true);
+        otherTenant.setTenantId("other");
+        store.upsert(otherTenant);
+
+        assertEquals(2, resealer.discardAll(TENANT));
+
+        assertTrue(store.findByTenant(TENANT).isEmpty());
+        assertTrue(store.find("other", "jira", "carol").isPresent(), "another tenant's grants must survive");
+        assertEquals(0, resealer.discardAll(TENANT), "a second reset finds nothing left");
+    }
+
+    /**
      * Lands a concurrent write in the window between the sweep's read and its
      * guarded write — the only window the version guard exists to cover.
      */
