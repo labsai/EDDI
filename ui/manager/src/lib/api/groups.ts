@@ -1761,7 +1761,7 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
  */
 async function streamRefusalMessage(response: Response): Promise<string> {
   const status = `Group streaming failed: ${response.status} ${response.statusText}`.trim();
-  let body = "";
+  let body: string;
   try {
     body = (await response.text()).trim();
   } catch {
