@@ -762,12 +762,20 @@ export function ChatWidget() {
   // the name setting: it is about the person's data, not decoration. An EDDI
   // older than the profile endpoint answers 404, and there is nothing to announce.
   useEffect(() => {
+    // A new target starts without the previous one's notice, and a slower answer
+    // for the previous target cannot overwrite the new one's.
+    dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
     if (isDemo || !agentId) return;
+    let cancelled = false;
     fetchAgentProfile(agentId, environment ?? "production")
-      .then((profile) => dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null }))
+      .then((profile) => {
+        if (!cancelled) dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+      })
       .catch(() => { /* no profile endpoint: no notice */ });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, isDemo]);
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, environment, isDemo, dispatch]);
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(

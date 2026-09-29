@@ -266,7 +266,13 @@ public class VaultGrantChecker {
         if (agentConfiguration.getWorkflows() != null) {
             for (URI workflowUri : agentConfiguration.getWorkflows()) {
                 WorkflowConfiguration workflow = readWorkflow(workflowUri);
-                if (workflow == null || workflow.getWorkflowSteps() == null) {
+                if (workflow == null) {
+                    // Fail closed: "could not read it" is not "it names no tenant", and a
+                    // workflow cached from an earlier build can still resolve whatever it
+                    // names at runtime.
+                    throw new UnverifiableReferencesException("workflow " + workflowUri);
+                }
+                if (workflow.getWorkflowSteps() == null) {
                     continue;
                 }
                 for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
@@ -274,9 +280,14 @@ public class VaultGrantChecker {
                     if (step.getType() == null || configuredUri == null) {
                         continue;
                     }
-                    Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
+                    String stepType = step.getType().toString();
+                    Object extensionConfig = readExtensionConfig(stepType, configuredUri.toString());
                     if (extensionConfig != null) {
                         collectTenants(extensionConfig, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
+                    } else if (isScannedStepType(stepType)) {
+                        // Only a scanned type's null means "unreadable"; parser, rules and
+                        // output steps are null by design.
+                        throw new UnverifiableReferencesException("extension configuration " + configuredUri);
                     }
                 }
             }
@@ -403,6 +414,26 @@ public class VaultGrantChecker {
             LOGGER.debugf("Could not read workflow %s while checking vault grants: %s", sanitize(String.valueOf(workflowUri)),
                     sanitize(e.getMessage()));
             return null;
+        }
+    }
+
+    /**
+     * Whether {@link #readExtensionConfig} reads this step type — the extensions
+     * where {@code ${vault:…}} and {@code ${vars:…}} are resolved.
+     */
+    private static boolean isScannedStepType(String stepType) {
+        return stepType.contains("ai.labs.llm") || stepType.contains("ai.labs.httpcalls") || stepType.contains("ai.labs.apicalls")
+                || stepType.contains("ai.labs.mcpcalls") || stepType.contains("ai.labs.rag");
+    }
+
+    /**
+     * A resource the space-reference check needed to read could not be read, so
+     * which tenants the agent names is unknown. The deployment is refused rather
+     * than let through.
+     */
+    public static final class UnverifiableReferencesException extends IllegalStateException {
+        public UnverifiableReferencesException(String what) {
+            super("Could not read the " + what + " to check which spaces' secrets and variables it uses");
         }
     }
 

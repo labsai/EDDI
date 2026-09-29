@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -636,6 +637,24 @@ class VaultGrantCheckerTest {
 
             assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
                     "an agent that names only the connection must still count as using finance's secret");
+        }
+
+        @Test
+        @DisplayName("an unreadable workflow or scanned config fails closed; an unscanned step type does not")
+        void unreadableResourcesFailClosed() throws Exception {
+            // "Could not read it" is not "it names no tenant" — a workflow cached from an
+            // earlier build can still resolve whatever it names.
+            agentWhoseCallCarries("unused");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            // An output step is not read by design, so it is not "unreadable".
+            var agent = agentWithStep("ai.labs.output", LLM_ID);
+            when(agentStore.read("output-agent-0000000000", 1)).thenReturn(agent);
+            assertTrue(checker.referencedTenants("output-agent-0000000000", 1).isEmpty());
         }
 
         @Test

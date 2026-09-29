@@ -55,7 +55,13 @@ public class SpaceReferenceGuard {
         if (!accessGuard.settings().isEnforcing() || accessGuard.isAdmin()) {
             return;
         }
-        Set<String> referenced = checker.referencedTenants(agentId, agentVersion);
+        Set<String> referenced;
+        try {
+            referenced = checker.referencedTenants(agentId, agentVersion);
+        } catch (VaultGrantChecker.UnverifiableReferencesException e) {
+            LOGGER.warnf("Deployment of agent '%s' v%s refused: %s", sanitize(agentId), agentVersion, sanitize(e.getMessage()));
+            throw new ForbiddenException(e.getMessage() + ". Try again once it can be read, or ask an administrator to deploy it.");
+        }
         if (referenced.isEmpty()) {
             return;
         }

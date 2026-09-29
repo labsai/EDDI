@@ -246,6 +246,16 @@ class SpaceResourcesTest {
         }
 
         @Test
+        @DisplayName("is refused when what the agent references cannot be read")
+        void unverifiableRefused() {
+            when(checker.referencedTenants("agent-1", 1)).thenThrow(new VaultGrantChecker.UnverifiableReferencesException("workflow w"));
+
+            // Quarkus's ForbiddenException, as in nonMemberRefused.
+            var refusal = assertThrows(RuntimeException.class, () -> sut.requireMayDeploy("agent-1", 1));
+            assertTrue(refusal.getClass().getSimpleName().contains("Forbidden"), refusal.getClass().getName());
+        }
+
+        @Test
         @DisplayName("is not checked for an administrator, or without enforcement")
         void exemptions() {
             when(checker.referencedTenants("agent", 1)).thenReturn(Set.of(SpaceTenants.tenantFor(FINANCE)));
