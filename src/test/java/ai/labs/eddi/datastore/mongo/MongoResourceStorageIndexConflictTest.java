@@ -147,7 +147,44 @@ class MongoResourceStorageIndexConflictTest extends MongoTestBase {
         Document holder = indexNamed(descriptors, "resource_1");
         assertNotNull(holder, "the foreign index was not dropped");
         assertEquals(new Document("somethingElse", 1), holder.get("key", Document.class));
-        assertTrue(indexesOn(descriptors, new Document("resource", 1)).isEmpty(), "nothing was built under a clashing name");
+        var onResource = indexesOn(descriptors, new Document("resource", 1));
+        assertEquals(1, onResource.size());
+        assertEquals("resource_1_eddi", onResource.getFirst().getString("name"), "ours is built under another name");
+        assertDescriptorRoundTrip(store);
+    }
+
+    @Test
+    @DisplayName("a foreign index holding the name does not keep a legacy unique index on {resource: 1} in place")
+    void foreignNameHolderAndLegacyUniqueIndex() throws Exception {
+        var descriptors = getDatabase().getCollection(DESCRIPTORS);
+        descriptors.createIndex(Indexes.ascending("somethingElse"), new IndexOptions().name("resource_1"));
+        descriptors.createIndex(Indexes.ascending("resource"), new IndexOptions().name("legacy_resource").unique(true));
+
+        var store = assertDoesNotThrow(MongoResourceStorageIndexConflictTest::constructStore);
+
+        assertEquals(new Document("somethingElse", 1), indexNamed(descriptors, "resource_1").get("key", Document.class));
+        var onResource = indexesOn(descriptors, new Document("resource", 1));
+        assertEquals(1, onResource.size(), "the unique legacy index is gone: " + onResource);
+        assertFalse(onResource.getFirst().getBoolean("unique", false));
+        assertDescriptorRoundTrip(store);
+    }
+
+    /**
+     * A partial index on the key serves only queries that carry its filter, and
+     * this store's queries do not, so it is no stand-in for the full index.
+     */
+    @Test
+    @DisplayName("a partial index on the key is replaced by the full one, not taken for an equivalent")
+    void partialIndexIsNotEquivalent() throws Exception {
+        var history = getDatabase().getCollection(DESCRIPTORS_HISTORY);
+        var nestedId = Indexes.ascending("_id._id", "_id._version");
+        history.createIndex(nestedId, new IndexOptions().partialFilterExpression(new Document("_id._version", new Document("$gt", 0))));
+
+        var store = assertDoesNotThrow(MongoResourceStorageIndexConflictTest::constructStore);
+
+        var onKey = indexesOn(history, new Document("_id._id", 1).append("_id._version", 1));
+        assertEquals(1, onKey.size());
+        assertFalse(onKey.getFirst().containsKey("partialFilterExpression"), "the full index replaced the partial one");
         assertDescriptorRoundTrip(store);
     }
 

@@ -94,4 +94,22 @@ class V6QuteMigrationUnconvertibleTest extends MongoTestBase {
                 converted.getList("httpCalls", Document.class).getFirst().get("request", Document.class).getString("body"));
         verify(migrationLog).createMigrationLog(any());
     }
+
+    /**
+     * A directive the conversion patterns do not match — here one with a compound
+     * condition — survives conversion. The check for that must accept the same
+     * opener shape the patterns do, extra whitespace included.
+     */
+    @Test
+    @DisplayName("a directive left after conversion keeps the document untouched, whatever the whitespace after [#")
+    void directiveLeftAfterConversionIsReported() {
+        var apicalls = getDatabase().getCollection("apicalls");
+        Document broken = apiCall(BROKEN, "[#  th:if=\"${a} and ${b}\"]yes[/]", "fixed");
+        apicalls.insertOne(broken);
+
+        new V6QuteMigration(getDatabase(), migrationLog, new TemplateSyntaxMigrator(), true).runIfNeeded();
+
+        assertEquals(broken, apicalls.find(new Document("_id", BROKEN)).first());
+        verify(migrationLog, never()).createMigrationLog(any());
+    }
 }

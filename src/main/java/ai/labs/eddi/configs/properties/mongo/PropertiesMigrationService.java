@@ -106,6 +106,32 @@ public class PropertiesMigrationService {
         return value;
     }
 
+    /**
+     * Whether {@code key}, or the name of any field nested in {@code value}, is a
+     * credential name. The scrubber alone misses {@code apiKey: {value: "…"}}: it
+     * judges {@code value} by its own name, not by the credential-named field that
+     * encloses it.
+     */
+    static boolean hasCredentialName(String key, Object value) {
+        if (SecretScrubber.isCredentialFieldName(key)) {
+            return true;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (var entry : map.entrySet()) {
+                if (hasCredentialName(String.valueOf(entry.getKey()), entry.getValue())) {
+                    return true;
+                }
+            }
+        } else if (value instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> && hasCredentialName("", item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     void onStartup(@Observes StartupEvent event) {
         if (!"mongodb".equals(datastoreType)) {
             LOGGER.debug("[MIGRATION] Skipping properties migration — not in MongoDB mode");
@@ -180,7 +206,7 @@ public class PropertiesMigrationService {
                     continue;
                 }
                 Object value = doc.get(key);
-                if (secretScrubber.containsCredential(new Document(key, withoutObjectIds(value)).toJson())) {
+                if (hasCredentialName(key, value) || secretScrubber.containsCredential(new Document(key, withoutObjectIds(value)).toJson())) {
                     skippedAsCredential.merge(key, 1, Integer::sum);
                     continue;
                 }

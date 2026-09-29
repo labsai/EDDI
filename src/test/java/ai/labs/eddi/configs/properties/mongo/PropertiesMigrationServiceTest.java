@@ -493,6 +493,26 @@ class PropertiesMigrationServiceTest {
         }
 
         /**
+         * The scrubber judges a string by the name it sits under. For {@code apiKey:
+         * {value: "hunter2"}} that is {@code value}, so the credential name one level
+         * up has to be checked by the migration itself.
+         */
+        @Test
+        @DisplayName("a credential-named key is skipped whatever its value's shape, at any depth")
+        void credentialNameWithObjectValueIsSkipped() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user")
+                    .append("apiKey", new Document("value", "hunter2"))
+                    .append("settings", new Document("integration", new Document("password", new Document("plain", "hunter2"))))
+                    .append("accounts", List.of(new Document("token", new Document("v", "hunter2"))))
+                    .append("lang", "de");
+
+            var entries = migrate(service(), legacy);
+
+            assertEquals(List.of("lang"), entries.stream().map(UserMemoryEntry::key).toList());
+            assertFalse(everythingMigrated(entries).contains("hunter2"));
+        }
+
+        /**
          * A BSON ObjectId is an identifier by type. As extended JSON it is a
          * random-looking 24-character hex string, which the scrubber's entropy rule
          * would take for a key.
