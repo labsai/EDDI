@@ -2797,6 +2797,13 @@ jobs:
           COMMIT_MSG=$(printf '%s' "$COMMIT_MSG_RAW" | head -1 | cut -c1-80)
 
           # Build JSON payload safely with jq to prevent any injection via user-controlled values
+          #
+          # Slack's Block Kit caps a section block at 10 `fields`, and rejects the
+          # whole message (invalid_blocks) over it — with `curl -sf` below, that
+          # was every failure and release notification failing silently once an
+          # eleventh status was added. The statuses are therefore split into two
+          # sections: build and test gates, then scan and publish gates.
+          # BuildQualityGatesTest counts them.
           PAYLOAD=$(jq -n \
             --arg header "${OVERALL_ICON}  EDDI CI: ${OVERALL_TEXT}" \
             --arg branch "$REF" \
@@ -2835,12 +2842,17 @@ jobs:
                     { type: "mrkdwn", text: ($it_icon + " Integration Tests") },
                     { type: "mrkdwn", text: ($ui_icon + " UI Gate") },
                     { type: "mrkdwn", text: ($image_icon + " Build Image") },
-                    { type: "mrkdwn", text: ($e2e_icon + " Backend E2E") },
-                    { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
-                    { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
+                    { type: "mrkdwn", text: ($e2e_icon + " Backend E2E") }
+                  ]
+                },
+                {
+                  type: "section",
+                  fields: [
                     { type: "mrkdwn", text: ($gitleaks_icon + " Secret Scan") },
                     { type: "mrkdwn", text: ($trivy_icon + " Vuln Scan") },
                     { type: "mrkdwn", text: ($codeql_icon + " CodeQL SAST") },
+                    { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
+                    { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
                     { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
                   ]
                 },

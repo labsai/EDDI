@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-  Database,
   Search,
   Trash2,
   RefreshCw,
@@ -12,6 +11,7 @@ import {
   ToggleRight,
   List,
   Braces,
+  Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -75,7 +75,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
-            <Database className="h-5 w-5 text-indigo-500" />
+            <Tags className="h-5 w-5 text-indigo-500" />
           </div>
           {t("properties.title", "User Properties")}
         </h1>
@@ -126,7 +126,7 @@ export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
       {/* Empty state */}
       {!debouncedUserId && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-muted-foreground">
-          <Database className="h-12 w-12 opacity-30" />
+          <Tags className="h-12 w-12 opacity-30" />
           <p className="mt-4 text-sm">{t("properties.enterUserId", "Enter a User ID to view their properties")}</p>
         </div>
       )}

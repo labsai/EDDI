@@ -636,7 +636,10 @@ describe("ChatWidget — round-3 regressions", () => {
     );
     const composer = screen.getByTestId("chat-input") as HTMLInputElement;
     expect(composer.type).toBe("password");
-    expect(screen.getByTestId("chat-secret-toggle")).toHaveTextContent("🔒");
+    expect(screen.getByTestId("chat-secret-toggle")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Secret mode ON"),
+    );
     expect(screen.queryByText("hunter2")).toBeNull();
   });
 });

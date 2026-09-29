@@ -1,6 +1,6 @@
 /* ──────────────────────────────────────────────
    ChatInput — Auto-growing textarea + send button
-   With 🔒 secret mode toggle for client-initiated secret input.
+   With a secret-mode (lock) toggle for client-initiated secret input.
    ────────────────────────────────────────────── */
 
 import {
@@ -11,6 +11,7 @@ import {
   useMemo,
   type KeyboardEvent,
 } from "react";
+import { Eye, EyeOff, LoaderCircle, Lock, LockOpen, Paperclip, SendHorizontal, X } from "lucide-react";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
 import {
   uploadAttachment,
@@ -328,7 +329,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
               data-testid="attachment-chip"
             >
               <span className="chat-attachments__name">
-                <span aria-hidden="true">📎</span> {a.fileName}
+                <Paperclip className="chat-attachments__icon" size="1em" /> {a.fileName}
               </span>
               <button
                 type="button"
@@ -346,7 +347,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                 }
                 data-testid="attachment-remove"
               >
-                ×
+                <X size="1em" />
               </button>
               {/* Last, so it takes its own row below the name — see the CSS. */}
               {a.forwardableInline === false && (
@@ -368,9 +369,9 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
               data-testid="attachment-chip-uploading"
             >
               <span className="chat-attachments__name">
-                <span aria-hidden="true">⏳</span> {u.name}
+                <LoaderCircle className="chat-attachments__icon chat-icon-spin" size="1em" /> {u.name}
               </span>
-              {/* The ⏳ is the only visual difference from a staged chip. */}
+              {/* The spinner is the only visual difference from a staged chip. */}
               <span className="chat-sr-only">Uploading</span>
             </span>
           ))}
@@ -386,7 +387,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         onChange={handleAttach}
         data-testid="chat-file-input"
       />
-      {/* 📎 Attach button */}
+      {/* Attach button */}
       <button
         ref={attachBtnRef}
         type="button"
@@ -399,9 +400,13 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         data-testid="chat-attach-btn"
         aria-label={isUploading ? "Attach file (upload in progress)" : "Attach file"}
       >
-        <span aria-hidden="true">{isUploading ? "⏳" : "📎"}</span>
+        {isUploading ? (
+          <LoaderCircle className="chat-icon-spin" size="1em" />
+        ) : (
+          <Paperclip size="1em" />
+        )}
       </button>
-      {/* 🔒 Secret mode toggle */}
+      {/* Secret mode toggle */}
       <button
         type="button"
         className={`chat-input__secret-toggle ${isSecretMode ? "chat-input__secret-toggle--active" : ""}`}
@@ -410,7 +415,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         data-testid="chat-secret-toggle"
         aria-label="Toggle secret mode"
       >
-        {isSecretMode ? "🔒" : "🔓"}
+        {isSecretMode ? <Lock size="1em" /> : <LockOpen size="1em" />}
       </button>
 
       {isSecretMode ? (
@@ -435,7 +440,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             aria-label={secretVisible ? "Hide secret" : "Show secret"}
             data-testid="chat-eye-toggle"
           >
-            {secretVisible ? "👁" : "👁‍🗨"}
+            {/* Shows the action, like the aria-label: an open eye reveals. */}
+            {secretVisible ? <EyeOff size="1em" /> : <Eye size="1em" />}
           </button>
         </div>
       ) : (
@@ -466,7 +472,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         {isProcessing ? (
           <span className="chat-input__spinner" />
         ) : (
-          "➤"
+          <SendHorizontal size="1em" />
         )}
       </button>
     </div>

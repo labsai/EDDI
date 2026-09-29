@@ -9,7 +9,6 @@ import {
   Bot,
   Workflow,
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Plus,
@@ -30,6 +29,7 @@ import {
   ArrowUpCircle,
   Sparkles,
   Info,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -68,7 +68,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 const envLabels: Record<string, string> = {

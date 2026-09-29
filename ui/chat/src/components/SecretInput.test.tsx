@@ -21,6 +21,7 @@ describe("SecretInput", () => {
     const { onSend, field } = renderField("password");
     expect(field.type).toBe("password");
     expect(screen.getByTestId("secret-input-eye")).toBeInTheDocument();
+    expect(screen.getByTestId("secret-input-label").querySelector(".secret-input__label-icon")).not.toBeNull();
     expect(onSend).toHaveBeenCalledWith("value-1", true);
   });
 
@@ -35,7 +36,7 @@ describe("SecretInput", () => {
     const { onSend, field } = renderField("email");
     expect(field.type).toBe("email");
     expect(screen.queryByTestId("secret-input-eye")).not.toBeInTheDocument();
-    expect(screen.getByTestId("secret-input-label")).not.toHaveTextContent("🔒");
+    expect(screen.getByTestId("secret-input-label").querySelector(".secret-input__label-icon")).toBeNull();
     expect(onSend).toHaveBeenCalledWith("value-1", false);
   });
 
