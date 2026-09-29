@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.schedule.mongo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -19,6 +20,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
 import org.bson.Document;
@@ -740,6 +742,49 @@ class MongoScheduleStoreTest {
         verify(scheduleCollection).find(filter.capture());
         assertFalse(filter.getValue().toString().contains("hitlType"),
                 "an admin listing must not be filtered: " + filter.getValue());
+    }
+
+    /**
+     * The owner scope, like the HITL redaction, is part of the filter: a
+     * post-filter counted limit/offset over other users' rows and handed a
+     * non-admin a short page the paging contract reads as the end.
+     */
+    @Test
+    @DisplayName("readAllSchedules — owner scope is an $or of own + shared owners in the filter")
+    void readAllSchedulesOwnerScopedFiltersInTheQuery() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, true, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        BsonDocument rendered = encodedFilter(filter.getValue());
+        assertRedactsHitlTimeouts(filter.getValue());
+        BsonArray owners = null;
+        for (BsonValue clause : rendered.getArray("$and")) {
+            if (clause.asDocument().containsKey("$or")) {
+                owners = clause.asDocument().getArray("$or");
+            }
+        }
+        assertNotNull(owners, "the owner scope must be ANDed into the filter: " + rendered.toJson());
+        List<BsonValue> userIds = owners.stream().map(o -> o.asDocument().get("userId")).toList();
+        assertEquals(4, userIds.size(), rendered.toJson());
+        assertTrue(userIds.get(0).isNull(), "no owner is shared (also matches a missing field)");
+        assertEquals("^\\s*$", userIds.get(1).asRegularExpression().getPattern(), "a blank owner is shared");
+        assertEquals(ScheduleOwnerScope.SHARED_OWNER, userIds.get(2).asString().getValue());
+        assertEquals("editor-1", userIds.get(3).asString().getValue());
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — an unrestricted scope adds no owner filter")
+    void readAllSchedulesUnrestrictedScopeHasNoOwnerFilter() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.ALL);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertFalse(filter.getValue().toString().contains("userId"), "unrestricted must not filter owners: " + filter.getValue());
     }
 
     // ==================== readSchedulesByAgentId ====================

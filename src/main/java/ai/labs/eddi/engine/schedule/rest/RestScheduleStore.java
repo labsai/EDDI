@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.schedule.rest;
 
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -118,19 +119,24 @@ public class RestScheduleStore implements IRestScheduleStore {
             // sort newest-first) while later pages held their own schedules — and the
             // documented "a full page may be truncated, ask for the next one" rule then
             // told a well-behaved client to stop paging.
-            boolean excludeHitlTimeouts = !ownershipValidator.isAdmin(identity);
+            boolean admin = ownershipValidator.isAdmin(identity);
+            boolean excludeHitlTimeouts = !admin;
+            // Owner-scope the listing IN THE QUERY for the same reason: a non-admin
+            // sees only schedules that run as themselves plus unowned/system ones, and
+            // filtering a fetched page counted limit/offset over other users' rows —
+            // a short or empty page while their own schedules sat on later pages,
+            // which the documented paging rule (only a full page may be truncated)
+            // tells a client to treat as the end. Admins, and every caller when
+            // authorization is disabled, get no owner filter.
+            ScheduleOwnerScope ownerScope = admin ? ScheduleOwnerScope.ALL : ScheduleOwnerScope.visibleTo(callerIdForOwnerScope());
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByAgentId(agentId, pageSize, pageOffset, excludeHitlTimeouts);
+                schedules = scheduleStore.readSchedulesByAgentId(agentId, pageSize, pageOffset, excludeHitlTimeouts, ownerScope);
             } else {
-                schedules = scheduleStore.readAllSchedules(pageSize, pageOffset, excludeHitlTimeouts);
+                schedules = scheduleStore.readAllSchedules(pageSize, pageOffset, excludeHitlTimeouts, ownerScope);
             }
-            // Owner-scope the listing: a non-admin sees only schedules that run as
-            // themselves plus unowned/system ones. Admins (and every caller when
-            // authorization is disabled) match canAccessScheduleOwner unconditionally,
-            // so their listing is unchanged. As with the HITL-timeout redaction above,
-            // a page filtered below 'limit' may still have more behind it — the
-            // documented "request the next page" rule already covers that.
+            // Defence in depth only: the query above already returned just the rows
+            // canAccessScheduleOwner allows, so this drops nothing.
             List<ScheduleConfiguration> visible = schedules.stream().filter(this::canAccessScheduleOwner).toList();
             // Enrich with cron descriptions
             visible.forEach(this::enrichCronDescription);
@@ -801,6 +807,20 @@ public class RestScheduleStore implements IRestScheduleStore {
             return true;
         }
         return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, owner);
+    }
+
+    /**
+     * The single identity form {@link OwnershipValidator#isOwner} compares a
+     * schedule owner against, for a non-admin listing's {@link ScheduleOwnerScope}:
+     * the principal name, or {@code null} for an anonymous or nameless caller (who
+     * owns nothing, so only shared schedules are listed). Only meaningful with
+     * authorization enabled, where isOwner is not short-circuited.
+     */
+    private String callerIdForOwnerScope() {
+        if (identity == null || identity.isAnonymous()) {
+            return null;
+        }
+        return OwnershipValidator.principalName(identity);
     }
 
     /**

@@ -80,6 +80,33 @@ class ConverseWithAgentToolOwnershipTest {
     }
 
     @Test
+    @DisplayName("with no bound user, refuses a supplied conversation id — even one owned by someone — without driving it")
+    void suppliedConversationId_noBoundUser_refused() throws Exception {
+        lenient().when(conversationService.getConversationMemorySnapshot("conv-victim")).thenReturn(snapshotOwnedBy("user-B"));
+
+        for (String unbound : new String[]{null, "", "  "}) {
+            var tool = new ConverseWithAgentTool(conversationService, unbound);
+
+            String result = tool.converseWithAgent("agent-2", "hello", "conv-victim");
+
+            assertTrue(result.contains("ownership could not be verified"), "expected a fail-closed refusal, got: " + result);
+        }
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("with no bound user, a new conversation (no id) is still started")
+    void newConversation_noBoundUser_allowed() throws Exception {
+        var tool = new ConverseWithAgentTool(conversationService, null);
+
+        String result = tool.converseWithAgent("agent-2", "hello", null);
+
+        assertFalse(result.contains("ownership could not be verified"), "a new conversation must not be refused: " + result);
+        verify(conversationService, times(1))
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
     @DisplayName("continues a conversation the bound user owns")
     void suppliedConversationId_ownedBySameUser_allowed() throws Exception {
         when(conversationService.getConversationMemorySnapshot("conv-own")).thenReturn(snapshotOwnedBy("user-A"));

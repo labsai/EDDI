@@ -21,14 +21,20 @@ keep working, while the missing owner/role/redaction checks are added.
   longer continue another user's conversation by supplying its id. New conversations
   (started as the bound user) and internal group-orchestrator callers are unaffected.
   A conversation that records no owner is refused too (fail closed): its ownership
-  cannot be established, and the model supplied the id.
+  cannot be established, and the model supplied the id. So is any supplied id when the
+  tool has no bound user (the parent conversation records none): there is nothing to
+  compare the owner against. Starting a new conversation is unaffected.
 - **Schedule `persistentConversationId`.** Create now nulls a caller-supplied
   `persistentConversationId` (mirroring import); the fire path additionally refuses to
   reuse a persistent conversation owned by a different user than the schedule.
 - **Schedule ownership.** Reads (`readSchedule`, `readAllSchedules`) and the remaining
   state-changers (`delete`, `enable`, `disable`, `retry`, `dismiss`) now apply the same
   owner check `create`/`update`/`fire` already used, so an editor cannot see or mutate
-  another user's schedule; unowned/system schedules stay shared.
+  another user's schedule; unowned/system schedules stay shared. The listing's owner
+  filter is pushed into the store query (`ScheduleOwnerScope`, Mongo and Postgres), like
+  the HITL-timeout redaction, so `limit`/`offset` count only the caller's visible rows: a
+  non-admin gets a full page of their own schedules rather than a short or empty one that
+  the paging contract would read as the end of the list.
 - **Agent-trigger ownership.** Triggers carry no owner field, so `delete`/`update` are
   now gated on USE access to the agents the stored trigger routes to — a foreign editor
   can no longer re-point or remove another team's trigger.
@@ -72,7 +78,8 @@ keep working, while the missing owner/role/redaction checks are added.
 ### Tests
 
 Focused unit tests added/extended, each mutation-checked (revert the fix, confirm the
-test fails, restore): `RestScheduleStoreTest`, `ConverseWithAgentToolOwnershipTest`,
+test fails, restore): `RestScheduleStoreTest`, `ScheduleOwnerScopeTest`, the Mongo and Postgres
+`ScheduleStoreTest` container tests, `ConverseWithAgentToolOwnershipTest`,
 `UserMemoryToolTest`, `RestAgentTriggerStoreTest`, `ConversationMemoryUtilitiesTest`,
 `ConversationAccessGuardTest`, `SecurityAccessControlAnnotationsTest`,
 `RestSemanticParserTest`, `A2ATaskHandlerTest`, `RestConversationStoreOwnershipTest`,

@@ -343,19 +343,28 @@ public class ConverseWithAgentTool {
      * than the one this tool is bound to.
      *
      * <p>
-     * Decidable only when the tool is bound to a real user (authorization enabled).
-     * A conversation that cannot be found is left to the downstream
-     * {@code say(...)} call to surface; any other verification failure — including
-     * a conversation that records no owner — fails closed: the conversation is not
-     * driven unless ownership could be confirmed.
+     * Without a bound identity (the parent conversation records no user) nothing
+     * can be compared, so a supplied id is refused outright: otherwise an anonymous
+     * parent could continue any user's conversation by id. Starting a new
+     * conversation (no id) is unaffected. A conversation that cannot be found is
+     * left to the downstream {@code say(...)} call to surface; any other
+     * verification failure — including a conversation that records no owner — fails
+     * closed: the conversation is not driven unless ownership could be confirmed.
      *
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
      */
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     private String refuseIfNotOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
-            // No bound identity to compare against (authorization disabled).
-            return null;
+            // Fail closed: with no bound identity there is nothing to compare the
+            // owner against, and the agent-id say(...) overload checks only the agent
+            // match — so allowing this would let an anonymous parent conversation
+            // continue any user's conversation by id.
+            LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': no bound user to verify ownership against",
+                    conversationId);
+            return OWNERSHIP_UNVERIFIED.formatted(conversationId);
         }
         try {
             var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
@@ -366,8 +375,7 @@ public class ConverseWithAgentTool {
                 // (legacy) conversation would otherwise be drivable by any bound user.
                 LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': ownership could not be established",
                         conversationId);
-                return "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified."
-                        .formatted(conversationId);
+                return OWNERSHIP_UNVERIFIED.formatted(conversationId);
             }
             if (!owner.equals(userId)) {
                 LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s' owned by another user", conversationId);
