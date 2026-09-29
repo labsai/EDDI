@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -18,7 +19,9 @@ import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.UUID;
 
@@ -178,6 +181,49 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             assertEquals(1, store.readSchedulesByAgentId("agentB").size());
             assertEquals(0, store.readSchedulesByAgentId("agentC").size());
         }
+
+        @Test
+        @DisplayName("owner scope is part of the query: limit/offset count only the caller's own and shared schedules")
+        void ownerScopedPaging() throws Exception {
+            for (int i = 0; i < 5; i++) {
+                store.createSchedule(owned(createCronSchedule("other" + i, "a", "t"), "victim-42"));
+            }
+            for (int i = 0; i < 3; i++) {
+                store.createSchedule(owned(createCronSchedule("own" + i, "a", "t"), "editor-1"));
+            }
+            store.createSchedule(createCronSchedule("unowned", "a", "t"));
+            store.createSchedule(owned(createCronSchedule("blank", "a", "t"), "  "));
+            store.createSchedule(owned(createCronSchedule("system", "a", "t"), ScheduleOwnerScope.SHARED_OWNER));
+            store.createSchedule(owned(createCronSchedule("own-other-agent", "b", "t"), "editor-1"));
+
+            var editor = ScheduleOwnerScope.visibleTo("editor-1");
+            // excludeHitlTimeouts=true as well, so the two clauses are composed
+            var firstPage = store.readAllSchedules(4, 0, true, editor);
+            var secondPage = store.readAllSchedules(4, 4, true, editor);
+            assertEquals(4, firstPage.size(), "a full first page of the caller's visible rows");
+            assertEquals(3, secondPage.size());
+            var seen = new HashSet<String>();
+            firstPage.forEach(s -> seen.add(s.getName()));
+            secondPage.forEach(s -> seen.add(s.getName()));
+            assertEquals(Set.of("own0", "own1", "own2", "unowned", "blank", "system", "own-other-agent"), seen);
+
+            assertEquals(4, store.readAllSchedules(4, 0, false, editor).size(), "owner clause alone, as the WHERE");
+
+            var byAgent = store.readSchedulesByAgentId("a", 100, 0, true, editor);
+            assertEquals(6, byAgent.size());
+            assertTrue(byAgent.stream().noneMatch(s -> "victim-42".equals(s.getUserId())));
+            assertEquals(6, store.readSchedulesByAgentId("a", 100, 0, false, editor).size());
+
+            assertEquals(3, store.readAllSchedules(100, 0, true, ScheduleOwnerScope.visibleTo(null)).size(),
+                    "a caller with no id sees only shared schedules");
+            assertEquals(12, store.readAllSchedules(100, 0, false, ScheduleOwnerScope.ALL).size());
+            assertEquals(12, store.readAllSchedules(100, 0, false).size(), "the unscoped overload filters nothing");
+        }
+    }
+
+    private static ScheduleConfiguration owned(ScheduleConfiguration cfg, String userId) {
+        cfg.setUserId(userId);
+        return cfg;
     }
 
     // ─── Enable/Disable ─────────────────────────────────────────
