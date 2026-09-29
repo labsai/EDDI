@@ -74,8 +74,10 @@ more than was checked. Every change has a regression test that fails without it.
 ### Compatibility
 
 - Works against current `main` and against #836 / #839: `pauseId` is sent only when approval-status
-  reports one; rotation sends the grant explicitly, which #836 treats the same as omitting it. No
-  backend change in this branch. No UI surface here depends
+  reports one. Rotation sends the grant it re-read explicitly, so it keeps working on both; this is
+  not equivalent to omitting it, since a grant narrowed by another admin between that read and the
+  PUT is widened again — a race that remains until rotation stops sending the grant (see
+  Follow-ups). No backend change in this branch. No UI surface here depends
   on #838 or #840.
 - Behaviour change: saving a channel whose stored token is plaintext is refused until it is replaced by
   a vault reference.
