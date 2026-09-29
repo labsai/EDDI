@@ -353,7 +353,7 @@ class ConversationHitlService {
             populateToolApprovalsConfig(memory);
 
             IConversation conversation = agent.continueConversation(memory,
-                    conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()),
+                    conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     handler != null ? returnMemory -> {
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
                         memorySnapshot.setEnvironment(environment);

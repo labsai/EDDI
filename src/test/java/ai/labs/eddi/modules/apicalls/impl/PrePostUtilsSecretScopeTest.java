@@ -14,7 +14,6 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -61,7 +60,7 @@ class PrePostUtilsSecretScopeTest {
         var templatingEngine = mock(ITemplatingEngine.class);
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(invocation -> invocation.getArgument(0));
         prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), templatingEngine, new DataFactory(),
-                new SecretPropertyVault(secretProvider, mock(SecretResolver.class), new DataFactory()));
+                new SecretPropertyVault(secretProvider, new DataFactory()));
         memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
         templateData = new HashMap<>();
         templateData.put("tokenResponse", Map.of("access_token", TOKEN, "claims", Map.of("sub", "u")));
@@ -81,7 +80,8 @@ class PrePostUtilsSecretScopeTest {
         prePostUtils.executePropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")), 200, false, memory, templateData);
 
         Property stored = memory.getConversationProperties().get("accessToken");
-        assertEquals("${vault:agent-1.aabbccddeeff112233445566.accessToken}", stored.getValueString());
+        assertTrue(stored.getValueString().matches("\\$\\{vault:agent-1\\.u[0-9a-f]{16}\\.[0-9a-f]{12}\\.accessToken}"),
+                "a per-write slot of this user: " + stored.getValueString());
         assertEquals(Scope.conversation, stored.getScope());
         assertEquals(Boolean.TRUE, stored.getAutoVaulted());
         verify(secretProvider).store(any(), eq(TOKEN), anyString(), anyList());

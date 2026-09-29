@@ -49,6 +49,8 @@ public class Conversation implements IConversation {
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_PROPERTIES = "properties";
     private static final String KEY_SECRET_INPUT = "secretInput";
+    /** The conversation-output key the parser echoes its expressions under. */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
     private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private static final String CONVERSATION_START = "CONVERSATION_START";
     private static final String CONVERSATION_END = "CONVERSATION_END";
@@ -74,6 +76,9 @@ public class Conversation implements IConversation {
      * are persisted regardless of the diff.
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
+
+    /** Serialized properties at the start of this turn — the undo baseline. */
+    private Map<String, Map<String, Object>> propertiesAtTurnStart;
 
     /**
      * Keys of the context entries this turn's client marked {@code "secret": true}.
@@ -108,14 +113,24 @@ public class Conversation implements IConversation {
     /**
      * Secret string values from this length up to
      * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} are replaced where a property,
-     * datum, list element, map value or audit field equals them exactly. Before, a
-     * short secret — a PIN, a four-digit code — copied into a property by a
-     * template was stored verbatim, in {@code longTerm} user memory and the audit
-     * trail included. Only a context entry whose whole value is a string qualifies
-     * (see {@link #secretContextStrings}); below this length a value is not a
-     * credential, and {@code true}/{@code false} are never treated as one.
+     * datum, list element, map value or audit field equals them exactly
+     * ({@link SecretValueScrubber#scrubDeepExact}). Before, a short secret — a PIN,
+     * a four-digit code — copied into a property by a template was stored verbatim,
+     * in {@code longTerm} user memory and the audit trail included. Only a context
+     * entry whose whole value is a string qualifies (see
+     * {@link #secretContextStrings}); below this length a value is not a
+     * credential, and {@code true}/{@code false} are never treated as one. The same
+     * floor as {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH}.
      */
-    static final int MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH = 4;
+    static final int MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH = SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH;
+
+    /**
+     * The raw message of this turn when the client flagged it {@code secretInput},
+     * otherwise {@code null}. Tasks see the plaintext while the turn runs; when it
+     * stops, {@link #scrubSecretClientInput} removes it from everything that
+     * outlives the turn.
+     */
+    private String secretClientInput;
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -149,6 +164,9 @@ public class Conversation implements IConversation {
         if (memoryConfig != null) {
             conversationMemory.setUserMemoryConfig(memoryConfig);
         }
+        // Separate from the config: the config now arrives for every agent that
+        // declares one, but only enableMemoryTools may attach the LLM memory tool.
+        conversationMemory.setMemoryToolsEnabled(propertiesHandler.isMemoryToolsEnabled());
     }
 
     /**
@@ -270,6 +288,40 @@ public class Conversation implements IConversation {
      * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
      * defaults.
      */
+    /**
+     * One entry per key. A key can be visible more than once — the shared
+     * {@code global} row and this agent's own {@code self} or {@code group} row are
+     * different documents, and they coexist, for instance when an agent whose
+     * {@code defaultVisibility} is {@code self} writes a key that an older version
+     * stored globally. Each lands in the same property slot, so without a choice
+     * the last one listed won — for a recall ordered by update time, the OLDER
+     * value. The most specific scope wins ({@code self}, then {@code group}, then
+     * {@code global}), the newest breaking a tie; the shared row itself is left
+     * untouched, since other agents may still read it.
+     */
+    static List<UserMemoryEntry> mostSpecificPerKey(List<UserMemoryEntry> entries) {
+        Map<String, UserMemoryEntry> byKey = new LinkedHashMap<>();
+        for (UserMemoryEntry entry : entries) {
+            byKey.merge(entry.key(), entry, (kept, candidate) -> precedes(candidate, kept) ? candidate : kept);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    private static boolean precedes(UserMemoryEntry a, UserMemoryEntry b) {
+        int byScope = Integer.compare(scopeRank(a.visibility()), scopeRank(b.visibility()));
+        if (byScope != 0) {
+            return byScope < 0;
+        }
+        return a.updatedAt() != null && (b.updatedAt() == null || a.updatedAt().isAfter(b.updatedAt()));
+    }
+
+    private static int scopeRank(Visibility visibility) {
+        if (visibility == Visibility.self) {
+            return 0;
+        }
+        return visibility == Visibility.group ? 1 : 2;
+    }
+
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
@@ -296,7 +348,7 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+            List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
 
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);
@@ -397,6 +449,8 @@ public class Conversation implements IConversation {
 
             if (startNewStep) {
                 startNextStep();
+                // The turn's starting point for undo — see recordPropertyChanges.
+                propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
 
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
@@ -432,6 +486,13 @@ public class Conversation implements IConversation {
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
         removeOldInvalidProperties();
+        if (propertiesAtTurnStart != null && conversationMemory instanceof ConversationMemory cm) {
+            // After the step-scope cleanup, so only what outlives the turn is recorded.
+            // A turn completed through a HITL resume runs in a new Conversation without
+            // this snapshot and records nothing — undo then leaves its properties as
+            // they are, which is the behaviour every turn had before.
+            cm.recordPropertyChanges(propertiesAtTurnStart);
+        }
         storePropertiesPermanently();
     }
 
@@ -495,6 +556,7 @@ public class Conversation implements IConversation {
         }
 
         boolean isSecretInput = isSecretInputFlagged(contexts);
+        secretClientInput = isSecretInput && !isNullOrEmpty(message) && !message.isBlank() ? message : null;
         storeUserInputInMemory(message, lifecycleData, isSecretInput);
         return lifecycleData;
     }
@@ -578,7 +640,11 @@ public class Conversation implements IConversation {
             // First, so nothing below — the audit flush, the longTerm write, the
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
+            // Also before the audit flush: TurnAuditBuffer redacts the recorded user
+            // input exactly when input:initial reads as the placeholder.
+            Set<String> secretInputForms = scrubSecretClientInput();
             if (auditBuffer != null) {
+                auditBuffer.addSecretInputForms(secretInputForms);
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
             }
             // BEFORE the persist decision below, and on every exit including the
@@ -733,17 +799,7 @@ public class Conversation implements IConversation {
         String agentId = conversationMemory.getAgentId();
         String conversationId = conversationMemory.getConversationId();
 
-        // Determine the agent's configured default visibility (from UserMemoryConfig).
-        // Falls back to global if no config (matches legacy unscoped behavior).
         AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
-        Visibility configDefault = Visibility.global;
-        if (config != null) {
-            try {
-                configDefault = Visibility.valueOf(config.getDefaultVisibility());
-            } catch (IllegalArgumentException e) {
-                configDefault = Visibility.global;
-            }
-        }
 
         // Writes owed by an earlier turn that never reached this method. They are
         // indistinguishable from "unchanged" by value, so they are driven by the
@@ -751,10 +807,26 @@ public class Conversation implements IConversation {
         // and whatever is left is written back — a store failure halfway through the
         // loop therefore retries only the keys that were not written.
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        // The groups this conversation belongs to — a group-visible property must
+        // carry them, or no reader (the writer included) can ever match it.
+        List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory, propertiesHandler.getGroupMembershipCheck());
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
                 if (property == null || property.getScope() != Scope.longTerm) {
+                    continue;
+                }
+                if (IUserMemoryStore.isReservedKey(propertyEntry.getKey())) {
+                    // GDPR bookkeeping (the Art. 18 flag is loaded like any global entry)
+                    // is never written back from a turn: the store refuses it, and a
+                    // property setter naming such a key would otherwise fail every turn
+                    // of the agent instead of just this one write.
+                    if (!property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                        LOGGER.warnf("Not persisting longTerm property '%s' of conversation %s: keys starting with '%s' are reserved "
+                                + "for GDPR bookkeeping", sanitize(propertyEntry.getKey()), sanitize(conversationId),
+                                IUserMemoryStore.RESERVED_KEY_PREFIX);
+                    }
+                    pending.remove(propertyEntry.getKey());
                     continue;
                 }
                 boolean writeOwed = pending.contains(propertyEntry.getKey());
@@ -764,8 +836,12 @@ public class Conversation implements IConversation {
                     continue;
                 }
                 // Apply visibility at persistence boundary only
-                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
+                if (vis == Visibility.self && property.getVisibility() == Visibility.group) {
+                    LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
+                            + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                }
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
             }
@@ -918,8 +994,16 @@ public class Conversation implements IConversation {
 
         PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
         if (pendingToolCalls != null && anythingToFind) {
-            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, exact,
-                    MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            PendingToolCallBatch cleaned = needles.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            PendingToolCallBatch current = cleaned != null ? cleaned : pendingToolCalls;
+            PendingToolCallBatch exactCleaned = exact.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTypedExact(current, PendingToolCallBatch.class, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            if (exactCleaned != null) {
+                cleaned = exactCleaned;
+            }
             if (cleaned != null) {
                 conversationMemory.setHitlPendingToolCalls(cleaned);
             }
@@ -954,11 +1038,162 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * {@code value} with the secrets replaced, or {@code null} when it carries
-     * none.
+     * Removes the plaintext of a turn the client flagged {@code secretInput} from
+     * everything that outlives the turn, on every exit (completed, stopped, paused,
+     * failed).
+     * <p>
+     * {@code storeUserInputInMemory} writes the placeholder to the displayed
+     * {@code input}, but the parser — the first task of practically every workflow
+     * — overwrites that entry with the normalized plaintext, and
+     * {@code input:initial} was never masked at all. Only a {@code scope:"secret"}
+     * property scrubbed them, so for any other agent the secret stayed in the
+     * stored step, the audit ledger, and every snapshot and streamed {@code done}
+     * frame that carries the turn's output. The display {@code input} is therefore
+     * re-asserted here, and its contract is "the masked display copy": a client may
+     * rely on it reading {@link MemoryKeys#SECRET_INPUT_PLACEHOLDER} for a secret
+     * turn.
+     * <p>
+     * Replaced wholesale: {@code input:initial}, {@code input:normalized}, the
+     * displayed {@code input}, and the parsed forms derived from the secret.
+     * Searched for (raw and normalized, from
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} characters —
+     * deliberately lower than the context-value floor, and deliberately not zero):
+     * every other datum of the step and its conversation output — a template may
+     * have echoed the input. Deliberately NOT touched: conversation properties and
+     * their step mirrors. A property that captured the input
+     * ({@code {memory.current.input}}) is the agent designer's explicit choice —
+     * the wizard pattern hands it to a later turn — and {@code scope:"secret"} is
+     * how a designer asks for it to be vaulted.
+     * <p>
+     * Forms shorter than the floor are searched for too, but only where they stand
+     * as a whole token (no letter or digit directly before or after), and only in
+     * values, never map keys ({@link SecretValueScrubber#scrubDeepTokens}): a PIN
+     * copied into a reply is removed, while the same digits inside a longer number
+     * or a field named like the secret are left alone.
+     * <p>
+     * A task that runs after a HITL resume of this turn sees the placeholder, as it
+     * does for a secret context value.
+     *
+     * @return the plaintext forms found (raw and normalized), for the audit
+     *         redaction; empty when the turn was not flagged secret
+     */
+    private Set<String> scrubSecretClientInput() {
+        String raw = secretClientInput;
+        if (raw == null) {
+            return Set.of();
+        }
+        var step = conversationMemory.getCurrentStep();
+        if (step == null) {
+            return Set.of(raw);
+        }
+        Set<String> plaintexts = new LinkedHashSet<>();
+        plaintexts.add(raw);
+        plaintexts.add(raw.trim());
+        for (IData<?> datum : step.getAllElements()) {
+            if (MemoryKeys.INPUT_NORMALIZED.key().equals(datum.getKey()) && datum.getResult() instanceof String normalized) {
+                plaintexts.add(normalized);
+            }
+        }
+        // The client-input floor, not the context-value one: see
+        // SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH for why it is four.
+        List<String> needles = plaintexts.stream()
+                .filter(value -> value.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
+                .sorted(Comparator.comparingInt(String::length).reversed())
+                .toList();
+        // Shorter forms: whole tokens only (see above).
+        List<String> tokens = plaintexts.stream()
+                .filter(value -> !value.isBlank() && value.length() < SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH)
+                .toList();
+        boolean searched = !needles.isEmpty() || !tokens.isEmpty();
+
+        // A tool-call pause persists its batch: the transcript the model saw
+        // (built from the display input, which the parser had overwritten with
+        // the normalized text), the gated call's arguments, and the redacted
+        // arguments an approver is shown. A resume replays and executes from it,
+        // so it is scrubbed like the step — the resumed turn sees the placeholder.
+        PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
+        if (pendingToolCalls != null && searched) {
+            PendingToolCallBatch cleaned = needles.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, SECRET_INPUT_PLACEHOLDER);
+            PendingToolCallBatch current = cleaned != null ? cleaned : pendingToolCalls;
+            PendingToolCallBatch tokenCleaned = tokens.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTypedTokens(current, PendingToolCallBatch.class, tokens, SECRET_INPUT_PLACEHOLDER);
+            if (tokenCleaned != null) {
+                cleaned = tokenCleaned;
+            }
+            if (cleaned != null) {
+                conversationMemory.setHitlPendingToolCalls(cleaned);
+            }
+        }
+
+        for (IData<?> datum : step.getAllElements()) {
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            String key = datum.getKey();
+            if (INPUT_INITIAL.key().equals(key) || MemoryKeys.INPUT_NORMALIZED.key().equals(key)) {
+                writable.setResult(SECRET_INPUT_PLACEHOLDER);
+                writable.setPossibleResults(null);
+            } else if (MemoryKeys.EXPRESSIONS_PARSED.key().equals(key)) {
+                writable.setResult("");
+                writable.setPossibleResults(null);
+            } else if (MemoryKeys.EXPRESSIONS_MATCHES.key().equals(key) || MemoryKeys.INTENTS.key().equals(key)
+                    || MemoryKeys.PROPERTIES_EXTRACTED.key().equals(key)) {
+                writable.setResult(List.of());
+                writable.setPossibleResults(null);
+            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":")) {
+                Object cleaned = scrubSecretInputFrom(datum.getResult(), needles, tokens);
+                if (cleaned != null) {
+                    writable.setResult(cleaned);
+                }
+                if (scrubSecretInputFrom(writable.getPossibleResults(), needles, tokens) instanceof List<?> cleanedPossible) {
+                    writable.setPossibleResults(castList(cleanedPossible));
+                }
+            }
+        }
+
+        step.removeConversationOutput(KEY_EXPRESSIONS_OUTPUT);
+        step.removeConversationOutput(MemoryKeys.INTENTS.key());
+        var conversationOutput = step.getConversationOutput();
+        if (conversationOutput != null && searched) {
+            for (var entry : conversationOutput.entrySet()) {
+                if (INPUT.key().equals(entry.getKey()) || KEY_PROPERTIES.equals(entry.getKey())) {
+                    continue;
+                }
+                Object cleaned = scrubSecretInputFrom(entry.getValue(), needles, tokens);
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
+        }
+        step.resetConversationOutput(INPUT.key());
+        step.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+        return plaintexts;
+    }
+
+    /**
+     * {@code value} with the secret-input forms removed — {@code needles} verbatim,
+     * {@code tokens} as whole tokens in values only — or {@code null} when it
+     * carries none of them.
+     */
+    private static Object scrubSecretInputFrom(Object value, List<String> needles, List<String> tokens) {
+        Object cleaned = needles.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, needles, SECRET_INPUT_PLACEHOLDER);
+        Object current = cleaned != null ? cleaned : value;
+        Object tokenCleaned = tokens.isEmpty() ? null : SecretValueScrubber.scrubDeepTokens(current, tokens, SECRET_INPUT_PLACEHOLDER);
+        return tokenCleaned != null ? tokenCleaned : cleaned;
+    }
+
+    /**
+     * {@code value} with the secrets replaced — {@code needles} wherever they
+     * occur, {@code exact} only where a value is one of them — or {@code null} when
+     * it carries none.
      */
     private static Object scrubSecretsFrom(Object value, List<String> needles, List<String> exact) {
-        return SecretValueScrubber.scrubDeep(value, needles, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        Object cleaned = needles.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        Object current = cleaned != null ? cleaned : value;
+        Object exactCleaned = exact.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        return exactCleaned != null ? exactCleaned : cleaned;
     }
 
     private static void scrubProperty(Property property, List<String> needles, List<String> exact) {

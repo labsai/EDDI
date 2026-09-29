@@ -454,4 +454,48 @@ describe("ChatInput — attachments", () => {
       expect(screen.getByTestId("chat-attach-btn")).toHaveFocus(),
     );
   });
+
+  it("moves focus to the attach button even when the chip's own effects are still pending", async () => {
+    // The race behind the CI flake, made deterministic. The upload resolves
+    // OUTSIDE act, so React commits the new chip but defers that commit's
+    // passive effects to a scheduler task. If the remove click lands before
+    // that task runs, React flushes the stale effect first — and it used to
+    // consume the focus intent while the chip was still in the DOM, focusing
+    // the very button about to unmount. Focus then fell to <body>.
+    //
+    // Whether the scheduler task ran before the test clicked depended on
+    // setImmediate-vs-setTimeout ordering in Node, which flips under CPU load.
+    // Here the click is issued natively (no act) the moment the chip appears,
+    // so the effect is always still pending.
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const prev = g.IS_REACT_ACT_ENVIRONMENT;
+    renderInput({ conversationId: "conv-1" });
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const chipAppeared = new Promise<HTMLButtonElement>((resolve) => {
+        const observer = new MutationObserver(() => {
+          const btn = document.querySelector<HTMLButtonElement>(
+            '[data-testid="attachment-remove"]',
+          );
+          if (btn) {
+            observer.disconnect();
+            resolve(btn);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+      fireEvent.change(screen.getByTestId("chat-file-input"), {
+        target: { files: [pdf("race.pdf")] },
+      });
+      const removeBtn = await chipAppeared;
+      removeBtn.click();
+    } finally {
+      g.IS_REACT_ACT_ENVIRONMENT = prev;
+    }
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("chat-attach-btn")).toHaveFocus();
+  });
 });

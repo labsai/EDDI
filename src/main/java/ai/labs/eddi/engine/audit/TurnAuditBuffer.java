@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -60,9 +61,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     /**
      * Shorter inputs are not searched for elsewhere in an entry: replacing every
-     * "ok" in a model response would destroy the record for no gain.
+     * "ok" in a model response would destroy the record for no gain. The same floor
+     * as the turn-end scrub of the stored step, so the two agree on what is
+     * removed.
      */
-    static final int MIN_REDACTED_INPUT_LENGTH = 4;
+    static final int MIN_REDACTED_INPUT_LENGTH = SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH;
 
     private static final String USER_INPUT = "userInput";
 
@@ -103,6 +106,17 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                 && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(recorded)) {
             recordedInputs.add(recorded);
         }
+    }
+
+    /**
+     * Add input forms to redact when the turn's input turns out to be a secret —
+     * forms no entry recorded as its {@code userInput}, such as the parser's
+     * normalized copy of a client-flagged secret message.
+     */
+    public synchronized void addSecretInputForms(Collection<String> forms) {
+        forms.stream()
+                .filter(form -> form != null && !form.isEmpty() && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(form))
+                .forEach(recordedInputs::add);
     }
 
     /**
@@ -212,7 +226,7 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
         if (map == null) {
             return null;
         }
-        Object cleaned = SecretValueScrubber.scrubDeep(map, List.of(), exactValues, placeholder);
+        Object cleaned = SecretValueScrubber.scrubDeepExact(map, exactValues, placeholder);
         return cleaned instanceof Map<?, ?> cleanedMap ? (Map<String, Object>) cleanedMap : map;
     }
 

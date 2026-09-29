@@ -11,14 +11,19 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -53,7 +58,7 @@ class CreateSubAgentToolHitlTest {
         SetupResult setupResult = SetupResult.builder()
                 .action("setup_complete").agentId("sub-1").agentName("parent-1/helper")
                 .provider("openai").model("gpt-4o").deployed(true).deploymentStatus("READY").build();
-        when(agentSetupService.setupAgent(any())).thenReturn(setupResult);
+        when(agentSetupService.setupAgent(any(), any())).thenReturn(setupResult);
 
         // A fresh conversation is started for the initial message
         when(conversationService.startConversation(any(), eq("sub-1"), any(), any()))
@@ -81,6 +86,22 @@ class CreateSubAgentToolHitlTest {
         assertTrue(result.contains("busy"), result);
         assertTrue(result.contains("not delivered"), result);
         assertFalse(result.contains("PAUSED_FOR_APPROVAL"), result);
+    }
+
+    @Test
+    void modelWrittenSystemPromptIsStoredAsLiteralText() throws Exception {
+        // The parent model writes this prompt (a chat user can steer it) and it becomes
+        // the sub-agent's system prompt, which LlmTask renders as a template every
+        // turn.
+        String prompt = "You help. Key: {vars.apiKey} {#for i in 3}x{/for}";
+
+        tool.createSubAgent("helper", prompt, null, null, null, false);
+
+        ArgumentCaptor<SetupAgentRequest> request = ArgumentCaptor.forClass(SetupAgentRequest.class);
+        verify(agentSetupService).setupAgent(request.capture(), any());
+        String rendered = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())
+                .processTemplate(request.getValue().systemPrompt(), Map.of("vars", Map.of("apiKey", "s3cret")));
+        assertEquals(prompt, rendered, "the stored prompt must render to exactly what the model wrote");
     }
 
     @Test

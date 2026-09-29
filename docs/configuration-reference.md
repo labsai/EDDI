@@ -75,9 +75,10 @@ applies in dev mode only.
 | Property | Default | Description |
 |---|---|---|
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are closed after this many days |
-| `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days |
+| `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
+| `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds` and `delegationDepth` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
 | `eddi.coordinator.max-dead-letters` | `1000` | Retained dead-letter entries. `-1` unbounded, `0` retain none |
 
@@ -168,6 +169,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 |---|---|---|
 | `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
+| `eddi.vault.allow-weak-master-key` | `false` | Opt-out for the startup master-key strength gate, mirroring `eddi.security.allow-unauthenticated`. A weak or publicly-known master key (too short, too low-entropy, or a known demo/placeholder) normally **fails startup in production**; setting this `true` downgrades that to a WARN so a deployment already on a weak key can boot, rotate to a strong key via `POST /secretstore/secrets/admin/rotate-kek`, then remove the flag. Dev/test always warn regardless |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
 | `eddi.setup.vault-key-reuse` | `checksum` | `checksum` reuses an existing vault entry when the value matches; `never` always writes a new one. A typo fails startup |
@@ -235,14 +237,20 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.budget.enforce-by-default` | `false` | Enforce per-conversation tool cost ceilings without a per-task `enforceBudget` flag. See [langchain.md](langchain.md) |
 | `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
+| `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
+| `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
+| `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
+| `eddi.httpcalls.batch.max-size-ceiling` | `1000` | Highest `maxBatchSize` an http call may set. Saving a config above it is refused (`400`); one stored before the ceiling was lowered runs at the ceiling, with a WARN |
 | `eddi.httpcalls.default-max-response-size-bytes` | `2000000` | Response-body ceiling. Deliberately above the memory cap, so an over-long body is truncated into memory rather than failing the turn |
 | `eddi.mcpcalls.default-rate-limit` | `100` | Default per-minute limit for MCP tool calls |
 | `eddi.ollama.default-base-url` | `http://localhost:11434` | Used when an Ollama LLM config omits `baseUrl` |
+| `eddi.templating.max-output-chars` | `2000000` | Upper bound for what one template render may produce, and for any single string an expression evaluates to while rendering. `0` disables it. See [security.md](security.md#runtime-template-engine) |
+| `eddi.templating.max-iterations` | `100000` | Upper bound for loop iterations per template render, summed over nested loops. `0` disables it |
 
 ---
 
@@ -259,6 +267,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
+| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document |
 
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
@@ -274,6 +283,9 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 |---|---|---|
 | `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+| `eddi.backup.import.max-entries` | `10000` | Most entries (files and directories) an imported or synced agent archive may hold. A larger archive is refused with `413` |
+| `eddi.backup.import.max-entry-bytes` | `33554432` (32 MiB) | Most bytes one archive entry may inflate to, counted from what is actually decompressed rather than from the entry header. The importer reads each entry whole into memory, so this also bounds the heap one import can take per file |
+| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import` |
 | `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
 | `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
 | `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
@@ -329,6 +341,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 
 ### OpenAI-compatible API
 
@@ -344,6 +357,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed |
 | `eddi.openai-compat.environment` | `production` | Deployment environment agents are resolved from |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Also list `…-stateless` model ids |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |

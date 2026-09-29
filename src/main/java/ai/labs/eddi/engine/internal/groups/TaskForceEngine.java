@@ -70,7 +70,7 @@ import java.util.stream.Collectors;
  * snapshot.</li>
  * </ul>
  * Shares the facade's virtual-thread {@link ExecutorService} and
- * {@code activeTokens} map by reference (not ownership) — see
+ * {@code discussionControls} map by reference (not ownership) — see
  * {@link PhaseExecutionEngine}'s Javadoc for why.
  *
  * @author ginccc
@@ -84,19 +84,19 @@ public class TaskForceEngine {
     private final IJsonSerialization jsonSerialization;
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
-    private final Map<String, DiscussionControlToken> activeTokens;
+    private final Map<String, DiscussionControlToken> discussionControls;
     private final int defaultAgentTimeoutSeconds;
     private final int memberTurnCancelDrainSeconds;
 
     public TaskForceEngine(MemberTurnExecutor memberTurnExecutor, ITemplatingEngine templatingEngine,
             IJsonSerialization jsonSerialization, ExecutorService executorService, CallerIdentityContext callerIdentityContext,
-            Map<String, DiscussionControlToken> activeTokens, int defaultAgentTimeoutSeconds, int memberTurnCancelDrainSeconds) {
+            Map<String, DiscussionControlToken> discussionControls, int defaultAgentTimeoutSeconds, int memberTurnCancelDrainSeconds) {
         this.memberTurnExecutor = memberTurnExecutor;
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.executorService = executorService;
         this.callerIdentityContext = callerIdentityContext;
-        this.activeTokens = activeTokens;
+        this.discussionControls = discussionControls;
         this.defaultAgentTimeoutSeconds = defaultAgentTimeoutSeconds;
         this.memberTurnCancelDrainSeconds = memberTurnCancelDrainSeconds;
     }
@@ -362,7 +362,7 @@ public class TaskForceEngine {
         // in the next wave. This handles dependsOn chains across any depth.
         for (int wave = 0; wave < maxWaves; wave++) {
             // NEW-3: Check control token at top of wave loop
-            var token = activeTokens.get(gc.getId());
+            var token = discussionControls.get(gc.getId());
             if (token != null && token.isCancelled()) {
                 LOGGER.infof("EXECUTE wave loop cancelled via control token at wave %d", wave);
                 break;

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -29,6 +30,8 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.utils.PathNavigator;
+
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -49,6 +52,7 @@ public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
     public static final TaskId TASK_ID = new TaskId(ID);
 
+    private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
     private static final String ACTIONS_IDENTIFIER = "actions";
     private static final String CATCH_ANY_INPUT_AS_PROPERTY_ACTION = "CATCH_ANY_INPUT_AS_PROPERTY";
@@ -68,7 +72,9 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String FROM_OBJECT_PATH = "fromObjectPath";
     private static final String SCOPE = "scope";
     private static final String OVERRIDE = "override";
+    private static final String VISIBILITY = "visibility";
     private static final String KEY_URI = "uri";
+    private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
     private final IExpressionProvider expressionProvider;
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
@@ -88,6 +94,21 @@ public class PropertySetterTask implements ILifecycleTask {
         this.resourceClientLibrary = resourceClientLibrary;
         this.objectMapper = objectMapper;
         this.secretPropertyVault = secretPropertyVault;
+    }
+
+    /**
+     * Carries the instruction's {@code visibility} onto the property it produced.
+     * <p>
+     * Every branch below used to build {@code new Property(name, value, scope)},
+     * which dropped it — so a {@code "visibility": "self"} or {@code "group"} on a
+     * {@code longTerm} property never reached the persistence boundary, and the
+     * property was stored under the agent-wide default (for most agents
+     * {@code global}, readable by every other agent of the user) whatever the
+     * configuration said.
+     */
+    private static Property withInstructionVisibility(Property property, PropertyInstruction instruction) {
+        property.setVisibility(instruction.getVisibility());
+        return property;
     }
 
     @Override
@@ -158,36 +179,48 @@ public class PropertySetterTask implements ILifecycleTask {
                                         PathNavigator.setValue(toObjectPath, templateDataObjects, templatedObj);
                                     } else if (scope == Scope.secret) {
                                         // Every path honours scope:secret, or refuses: this one used to
-                                        // store the looked-up value as a plaintext property.
-                                        Object value = templatedObj instanceof String text
-                                                ? templatingEngine.processTemplate(text, templateDataObjects)
-                                                : templatedObj;
-                                        if (value != null) {
-                                            conversationProperties.put(name, secretPropertyVault.vault(memory, name, value));
+                                        // store the looked-up value as a plaintext property. Not rendered
+                                        // again, for the reason given on the string branch below; a value
+                                        // that is not a string is refused by the vault and fails the turn.
+                                        if (templatedObj != null
+                                                && !(templatedObj instanceof String text && isScrubbedPlaceholder(name, text, scope))) {
+                                            conversationProperties.put(name, secretPropertyVault.vault(memory, name, templatedObj));
                                         }
-                                    } else if (templatedObj instanceof String) {
-                                        templateString = templatingEngine.processTemplate(templatedObj.toString(), templateDataObjects);
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                    } else if (templatedObj instanceof String valueString) {
+                                        // Stored as resolved, NOT rendered again. The path points into
+                                        // conversation data — memory.current.input, an HTTP response, a
+                                        // context value — so the string is whatever the user or an upstream
+                                        // API sent. Rendering it would evaluate their "{vars.x}" or
+                                        // "{#for ...}" with the server's template data. valueString is the
+                                        // authored alternative and is still templated below.
+                                        if (!isScrubbedPlaceholder(name, valueString, scope)) {
+                                            conversationProperties.put(name,
+                                                    withInstructionVisibility(new Property(name, valueString, scope), property));
+                                        }
                                     } else if (templatedObj instanceof Map<?, ?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueMap = (Map<String, Object>) templatedObj;
-                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, new LinkedHashMap<>(valueMap), scope), property));
                                     } else if (templatedObj instanceof List<?>) {
                                         @SuppressWarnings("unchecked")
                                         var valueList = (List<Object>) templatedObj;
-                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, new ArrayList<>(valueList), scope), property));
                                     } else if (templatedObj instanceof Integer valueInt) {
-                                        conversationProperties.put(name, new Property(name, valueInt, scope));
+                                        conversationProperties.put(name, withInstructionVisibility(new Property(name, valueInt, scope), property));
                                     } else if (templatedObj instanceof Float valueFloat) {
-                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
+                                        conversationProperties.put(name, withInstructionVisibility(new Property(name, valueFloat, scope), property));
                                     } else if (templatedObj instanceof Boolean valueBoolean) {
-                                        conversationProperties.put(name, new Property(name, valueBoolean, scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, valueBoolean, scope), property));
                                     }
-                                } else if (scope == Scope.secret) {
-                                    // Only a string can be vaulted. The typed value fields used to be
-                                    // stored under scope:secret as plaintext properties; they are
-                                    // refused here and rejected when the configuration is saved.
-                                    if (hasTypedValue(property)) {
+                                } else {
+                                    if (scope == Scope.secret && hasTypedValue(property)) {
+                                        // Only a string can be vaulted. The typed value fields used to be
+                                        // stored under scope:secret as plaintext properties; they are
+                                        // refused here and rejected when the configuration is saved
+                                        // (SecretScopeValidation).
                                         throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret': only "
                                                 + "valueString can be vaulted, not valueObject, valueList, valueInt, valueFloat or "
                                                 + "valueBoolean. Refusing to persist the value in plaintext.");
@@ -195,44 +228,52 @@ public class PropertySetterTask implements ILifecycleTask {
                                     var valueString = property.getValueString();
                                     if (!isNullOrEmpty(valueString)) {
                                         templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        // Auto-vault: store the plaintext in the vault and replace it
-                                        // with a vault reference in conversation properties.
-                                        conversationProperties.put(name, secretPropertyVault.vault(memory, name, templateString));
-                                    }
-                                } else {
-                                    var valueString = property.getValueString();
-                                    if (!isNullOrEmpty(valueString)) {
-                                        templateString = templatingEngine.processTemplate(valueString, templateDataObjects);
-                                        // NOTE: Do NOT resolve vault references here — they must stay as-is
-                                        // in conversation properties (which are persisted to DB).
-                                        // Vault refs are resolved at point-of-use by downstream consumers
-                                        // (ChatModelRegistry, ApiCallExecutor) to prevent secret leakage.
-                                        conversationProperties.put(name, new Property(name, templateString, scope));
+                                        if (isScrubbedPlaceholder(name, templateString, scope)) {
+                                            // Neither vaulted nor stored — see isScrubbedPlaceholder.
+                                            continue;
+                                        }
+                                        if (scope == Scope.secret) {
+                                            // Auto-vault: store the plaintext in the vault and replace it
+                                            // with a vault reference in conversation properties
+                                            // (SecretPropertyVault — shared with the httpcall, MCP and LLM
+                                            // property instructions).
+                                            conversationProperties.put(name, secretPropertyVault.vault(memory, name, templateString));
+                                        } else {
+                                            // NOTE: Do NOT resolve vault references here — they must stay as-is
+                                            // in conversation properties (which are persisted to DB).
+                                            // Vault refs are resolved at point-of-use by downstream consumers
+                                            // (ChatModelRegistry, ApiCallExecutor) to prevent secret leakage.
+                                            conversationProperties.put(name,
+                                                    withInstructionVisibility(new Property(name, templateString, scope), property));
+                                        }
                                     }
 
                                     var valueMap = property.getValueObject();
                                     if (valueMap != null) {
-                                        conversationProperties.put(name, new Property(name, new LinkedHashMap<>(valueMap), scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, new LinkedHashMap<>(valueMap), scope), property));
                                     }
 
                                     var valueList = property.getValueList();
                                     if (valueList != null) {
-                                        conversationProperties.put(name, new Property(name, new ArrayList<>(valueList), scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, new ArrayList<>(valueList), scope), property));
                                     }
 
                                     var valueInt = property.getValueInt();
                                     if (valueInt != null) {
-                                        conversationProperties.put(name, new Property(name, valueInt, scope));
+                                        conversationProperties.put(name, withInstructionVisibility(new Property(name, valueInt, scope), property));
                                     }
 
                                     var valueFloat = property.getValueFloat();
                                     if (valueFloat != null) {
-                                        conversationProperties.put(name, new Property(name, valueFloat, scope));
+                                        conversationProperties.put(name, withInstructionVisibility(new Property(name, valueFloat, scope), property));
                                     }
 
                                     var valueBoolean = property.getValueBoolean();
                                     if (valueBoolean != null) {
-                                        conversationProperties.put(name, new Property(name, valueBoolean, scope));
+                                        conversationProperties.put(name,
+                                                withInstructionVisibility(new Property(name, valueBoolean, scope), property));
                                     }
                                 }
 
@@ -261,7 +302,8 @@ public class PropertySetterTask implements ILifecycleTask {
                     IData<String> initialInputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
                     if (initialInputData != null) {
                         String initialInput = initialInputData.getResult();
-                        if (initialInput != null && !initialInput.isEmpty()) {
+                        if (initialInput != null && !initialInput.isEmpty()
+                                && !isScrubbedPlaceholder(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation)) {
                             properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
                         }
                     }
@@ -273,12 +315,6 @@ public class PropertySetterTask implements ILifecycleTask {
             currentStep.storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
             properties.forEach(property -> conversationProperties.put(property.getName(), property));
         }
-    }
-
-    /** Whether the instruction sets any value field other than valueString. */
-    static boolean hasTypedValue(Property property) {
-        return property.getValueObject() != null || property.getValueList() != null || property.getValueInt() != null
-                || property.getValueFloat() != null || property.getValueBoolean() != null;
     }
 
     private Expressions extractContextProperties(List<IData<Context>> contextDataList) {
@@ -400,9 +436,57 @@ public class PropertySetterTask implements ILifecycleTask {
                 propertyInstruction.setScope(Scope.valueOf(property.getOrDefault(SCOPE, conversation).toString()));
             }
 
+            if (property.get(VISIBILITY) != null) {
+                String visibility = property.get(VISIBILITY).toString().trim();
+                try {
+                    propertyInstruction.setVisibility(Property.Visibility.valueOf(visibility));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("Invalid visibility '" + visibility + "' for property '" + propertyInstruction.getName()
+                            + "' — expected self, group or global", e);
+                }
+            }
+
             propertyInstruction.setOverride(parseBoolean(property.getOrDefault(OVERRIDE, true).toString()));
 
             return propertyInstruction;
         }).toList();
+    }
+
+    /**
+     * True when a property value resolved to a scrub placeholder instead of the
+     * value it was meant to capture, which means that value had already been
+     * scrubbed. This happens when a turn the client flagged {@code secretInput}
+     * paused on a RULE pause and this setter runs after the resume:
+     * {@code Conversation} scrubs a secret input when the turn stops, so
+     * {@code {memory.current.input}} then reads the placeholder.
+     * <ul>
+     * <li>Any scope: a value that IS {@code <secret input>}. Storing it would
+     * silently configure the agent with that literal text.</li>
+     * <li>{@code scope:"secret"}: a value that CONTAINS either placeholder
+     * ({@code <secret input>} or the secret-context one). Vaulting it would
+     * overwrite the stored secret with the placeholder; the plaintext is
+     * deliberately not carried across a pause, so the user must submit the
+     * credential again.</li>
+     * </ul>
+     * The property is left unset instead, and the reason logged.
+     */
+    private static boolean isScrubbedPlaceholder(String keyName, String value, Scope scope) {
+        if (value == null) {
+            return false;
+        }
+        boolean scrubbed = SECRET_INPUT_PLACEHOLDER.equals(value.trim()) || scope == Scope.secret
+                && (value.contains(SECRET_INPUT_PLACEHOLDER) || value.contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
+        if (scrubbed) {
+            LOGGER.warnf("Property '%s' resolved to a scrub placeholder, not the value it captures: that value was already scrubbed "
+                    + "(typically a capture that runs after a HITL resume of a secretInput turn). The property is not set "
+                    + "and nothing is vaulted. Capture the input before the pause.", keyName);
+        }
+        return scrubbed;
+    }
+
+    /** Whether the instruction sets any value field other than valueString. */
+    static boolean hasTypedValue(PropertyInstruction property) {
+        return property.getValueObject() != null || property.getValueList() != null || property.getValueInt() != null
+                || property.getValueFloat() != null || property.getValueBoolean() != null;
     }
 }

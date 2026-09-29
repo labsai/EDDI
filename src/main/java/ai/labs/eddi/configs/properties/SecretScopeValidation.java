@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
-import ai.labs.eddi.secrets.model.AutoVaultReference;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 
 import java.util.List;
 
@@ -59,7 +59,7 @@ public final class SecretScopeValidation {
                         + "valueBoolean. Only a string value can be vaulted — use valueString or fromObjectPath.");
             }
             String name = instruction.getName();
-            if (name != null && !name.contains("{") && !AutoVaultReference.isEmbeddable(name)) {
+            if (name != null && !name.contains("{") && !AutoVaultedSecrets.isEmbeddable(name)) {
                 throw new IllegalArgumentException(location + " has scope 'secret' but its name cannot be part of a vault reference: it "
                         + "must not contain '/', '{', '}' or '$'.");
             }

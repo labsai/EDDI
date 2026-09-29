@@ -31,28 +31,23 @@ public interface IAgent {
                                     IConversationOutputRenderer outputProvider)
             throws InstantiationException, IllegalAccessException, LifecycleException;
 
-    /**
-     * {@link #startConversation(String, Map, IPropertiesHandler, IConversationOutputRenderer)}
-     * for a conversation whose id was allocated before its first turn (see
-     * {@code IConversationMemoryStore#newConversationId}). The default ignores the
-     * id, for implementations that have no memory of their own to give it to.
-     */
-    default IConversation startConversation(String conversationId, String userId, Map<String, Context> context,
-                                            IPropertiesHandler propertiesHandler, IConversationOutputRenderer outputProvider)
-            throws InstantiationException, IllegalAccessException, LifecycleException {
-        return startConversation(userId, context, propertiesHandler, outputProvider);
-    }
-
     IConversation continueConversation(IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
                                        IConversationOutputRenderer outputProvider)
             throws InstantiationException, IllegalAccessException;
 
     /**
-     * User memory config from agent deployment. {@code null} when memory is
-     * disabled.
+     * User memory config from agent deployment. {@code null} when the agent
+     * declares no {@code userMemoryConfig} and does not enable the memory tools.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
+    }
+
+    /**
+     * Whether the agent enables the LLM memory tools ({@code enableMemoryTools}).
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
     }
 
     /**

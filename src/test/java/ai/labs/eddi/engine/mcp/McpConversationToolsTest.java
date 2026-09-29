@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Set;
 
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.NotFoundException;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -687,6 +688,46 @@ class McpConversationToolsTest {
         tools.chatManaged("support", "user1", "Hello!", "production");
 
         // Should clean up stale mapping and create a new one
+        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).createUserConversation(any());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_purgedConversation_guardNotFound_recreatesFresh() throws Exception {
+        // Regression (review #1): once the mapped conversation is permanently deleted
+        // or swept by retention, the conversation guard answers a non-admin with a
+        // JAX-RS NotFoundException, not ConversationNotFoundException. That used to
+        // escape before the stale mapping was removed, failing every later call.
+        var existing = new UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, "purged-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        when(RestAgentEngine.getConversationState("purged-conv-id"))
+                .thenThrow(new NotFoundException("Conversation not found"));
+
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("new-conv-id", URI.create("eddi://conv/new-conv-id")));
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq("new-conv-id"), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"new-conv-id\"}");
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertFalse(result.contains("\"error\""), "expected a reply, got: " + result);
         verify(userConversationStore).deleteUserConversation("support", "user1");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());

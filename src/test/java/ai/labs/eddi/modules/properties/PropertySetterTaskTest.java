@@ -24,7 +24,6 @@ import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -98,7 +97,7 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
 
         propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine, dataFactory, resourceClientLibrary,
-                new ObjectMapper(), new SecretPropertyVault(secretProvider, mock(SecretResolver.class), dataFactory));
+                new ObjectMapper(), new SecretPropertyVault(secretProvider, dataFactory));
     }
 
     // ==================== Identity Tests ====================

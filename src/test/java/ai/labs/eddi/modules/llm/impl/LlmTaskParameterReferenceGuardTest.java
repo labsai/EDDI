@@ -88,11 +88,11 @@ class LlmTaskParameterReferenceGuardTest {
     @Test
     @DisplayName("this conversation's auto-vaulted property, named by the template, is allowed")
     void autoVaultedPropertyAllowed() throws Exception {
-        var property = new Property("endpointKey", "${vault:agent1.conv1.endpointKey}", Scope.conversation);
+        var property = new Property("endpointKey", "${vault:agent1.endpointKey}", Scope.conversation);
         property.setAutoVaulted(Boolean.TRUE);
         var configured = Map.of("customHeader", "{properties.endpointKey}");
         var data = new HashMap<String, Object>(DATA);
-        data.put("properties", Map.of("endpointKey", "${vault:agent1.conv1.endpointKey}"));
+        data.put("properties", Map.of("endpointKey", "${vault:agent1.endpointKey}"));
 
         assertDoesNotThrow(() -> LlmTask.guardRenderedParameters(configured, render(configured, data), data, Map.of("endpointKey", property)));
     }

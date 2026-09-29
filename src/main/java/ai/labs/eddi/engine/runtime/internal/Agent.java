@@ -30,6 +30,7 @@ public class Agent implements IAgent {
 
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
 
@@ -48,21 +49,7 @@ public class Agent implements IAgent {
     public IConversation startConversation(final String userId, final Map<String, Context> context, IPropertiesHandler propertiesHandler,
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
-        return startConversation(null, userId, context, propertiesHandler, outputProvider);
-    }
-
-    @Override
-    public IConversation startConversation(final String conversationId, final String userId, final Map<String, Context> context,
-                                           IPropertiesHandler propertiesHandler, final IConversation.IConversationOutputRenderer outputProvider)
-            throws LifecycleException, IllegalAccessException {
-        ConversationMemory conversationMemory;
-        if (conversationId != null) {
-            conversationMemory = new ConversationMemory(conversationId, agentId, agentVersion, userId);
-            // Allocated, not stored: the first write inserts under this id.
-            conversationMemory.setUnpersisted(true);
-        } else {
-            conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
-        }
+        var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }
@@ -113,6 +100,15 @@ public class Agent implements IAgent {
 
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
         this.userMemoryConfig = userMemoryConfig;
+    }
+
+    @Override
+    public boolean isMemoryToolsEnabled() {
+        return memoryToolsEnabled;
+    }
+
+    public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        this.memoryToolsEnabled = memoryToolsEnabled;
     }
 
     public void setToolApprovalsConfig(ToolApprovalsConfig toolApprovalsConfig) {

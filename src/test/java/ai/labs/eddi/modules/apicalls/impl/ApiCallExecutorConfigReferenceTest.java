@@ -105,7 +105,7 @@ class ApiCallExecutorConfigReferenceTest {
             String value = inv.getArgument(0);
             return value == null
                     ? null
-                    : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.conv1.apiKey}", AUTO_VAULTED).replace("${vault:user}",
+                    : value.replace("${vault:api-key}", SECRET).replace("${vault:agent1.apiKey}", AUTO_VAULTED).replace("${vault:user}",
                             SHORT_SECRET);
         });
         globalVariableResolver = mock(GlobalVariableResolver.class);
@@ -133,7 +133,7 @@ class ApiCallExecutorConfigReferenceTest {
         // SecretPropertyVault.vault stores one: the vault reference,
         // conversation scope, marked.
         conversationProperties = new ConversationProperties(memory);
-        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.conv1.apiKey}"));
+        conversationProperties.put("apiKey", autoVaulted("apiKey", "${vault:agent1.apiKey}"));
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
 
         request = mock(IRequest.class);
@@ -174,7 +174,7 @@ class ApiCallExecutorConfigReferenceTest {
         var data = new HashMap<String, Object>();
         data.put("memory", Map.of("current", Map.of("input", userInput)));
         data.put("conversationInfo", Map.of("agentId", "agent1", "conversationId", "conv1"));
-        data.put("properties", Map.of("apiKey", "${vault:agent1.conv1.apiKey}"));
+        data.put("properties", Map.of("apiKey", "${vault:agent1.apiKey}"));
         return data;
     }
 
@@ -253,14 +253,14 @@ class ApiCallExecutorConfigReferenceTest {
         // autoVaultSecret — a valueString of {memory.current.input} and a user who
         // typed the reference is enough — so it carries no marker, and the value alone
         // cannot tell the two apart.
-        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.conv1.apiKey}", Property.Scope.conversation));
+        conversationProperties.put("apiKey", new Property("apiKey", "${vault:agent1.apiKey}", Property.Scope.conversation));
 
         var failure = assertThrows(LifecycleException.class,
                 () -> executor.execute(call(Map.of("Authorization", "Bearer {properties.apiKey}"), "{}"), memory, data("hi"), SERVER));
 
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.conv1.apiKey}"), failure.getMessage());
-        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.conv1.apiKey}"));
+        assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.apiKey}"), failure.getMessage());
+        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"));
         verify(request, never()).send();
     }
 

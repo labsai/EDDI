@@ -21,7 +21,9 @@ import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -170,7 +172,7 @@ class OpenAiAuthFilterTest {
         run(OpenAiTestFixtures.config(b -> b.apiKey = KEY));
 
         verify(requestContext, never()).abortWith(any());
-        assertEquals("alice", resolvedUserId());
+        assertEquals("openwebui:alice", resolvedUserId());
     }
 
     @Test
@@ -180,7 +182,7 @@ class OpenAiAuthFilterTest {
         run(OpenAiTestFixtures.enabledConfig());
 
         verify(requestContext, never()).abortWith(any());
-        assertEquals("alice", resolvedUserId());
+        assertEquals("openwebui:alice", resolvedUserId());
     }
 
     // ─── identity resolution ───
@@ -233,6 +235,37 @@ class OpenAiAuthFilterTest {
         assertEquals(401, abortedResponse().getStatus());
     }
 
+    @Test
+    void headerUserId_isNamespaced_soItCannotEqualABareOidcPrincipal() {
+        // The core of item 4: a shared-key holder sets the header to an OIDC user's
+        // principal ("oidc-subject"). The resolved EDDI userId must NOT be that bare
+        // principal — otherwise the caller reaches that OIDC user's conversations and
+        // memories. Namespacing guarantees the two identities can never collide.
+        String oidcPrincipal = "oidc-subject";
+        headers.put(HttpHeaders.AUTHORIZATION, "Bearer " + KEY);
+        headers.put(OpenAiAuthFilter.HEADER_USER_ID, oidcPrincipal);
+
+        run(OpenAiTestFixtures.config(b -> b.apiKey = KEY));
+
+        String resolved = resolvedUserId();
+        assertNotEquals(oidcPrincipal, resolved,
+                "a header-supplied id must never resolve to a bare OIDC principal");
+        assertEquals("openwebui:" + oidcPrincipal, resolved);
+        assertTrue(OpenAiUserIdentity.isNamespaced(resolved));
+    }
+
+    @Test
+    void namespacing_isIdempotent_soAHeaderCannotForgeADeeperNamespace() {
+        // A caller who already writes "openwebui:x" gets exactly that, not
+        // "openwebui:openwebui:x" — but still, crucially, a namespaced id.
+        headers.put(HttpHeaders.AUTHORIZATION, "Bearer " + KEY);
+        headers.put(OpenAiAuthFilter.HEADER_USER_ID, "openwebui:x");
+
+        run(OpenAiTestFixtures.config(b -> b.apiKey = KEY));
+
+        assertEquals("openwebui:x", resolvedUserId());
+    }
+
     // ─── OIDC mode ───
 
     @Test
@@ -252,6 +285,26 @@ class OpenAiAuthFilterTest {
         verify(requestContext, never()).abortWith(any());
         assertEquals("oidc-subject", resolvedUserId(),
                 "the OIDC principal must win over a client-supplied user header");
+    }
+
+    @Test
+    void oidcMode_refusesAPrincipalCarryingTheReservedOpenWebUiPrefix() {
+        // An OIDC user named "openwebui:alice" would be the same EDDI identity as the
+        // shared-key caller who sends X-OpenWebUI-User-Id: alice. The prefix is
+        // reserved for header-derived ids, so such a principal is refused outright —
+        // not served as itself, and not downgraded to the anonymous default either.
+        Principal principal = mock(Principal.class);
+        when(principal.getName()).thenReturn("openwebui:alice");
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(principal);
+
+        run(OpenAiTestFixtures.config(b -> {
+            b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED;
+            b.allowAnonymous = true;
+        }));
+
+        assertEquals(401, abortedResponse().getStatus());
+        assertNull(resolvedUserId());
     }
 
     @Test

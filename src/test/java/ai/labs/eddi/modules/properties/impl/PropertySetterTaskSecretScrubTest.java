@@ -20,12 +20,14 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -33,6 +35,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,6 +45,9 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -90,8 +96,7 @@ class PropertySetterTaskSecretScrubTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter, templatingEngine,
-                new DataFactory(), resourceClientLibrary, new ObjectMapper(),
-                new SecretPropertyVault(secretProvider, mock(SecretResolver.class), new DataFactory()));
+                new DataFactory(), resourceClientLibrary, new ObjectMapper(), new SecretPropertyVault(secretProvider, new DataFactory()));
     }
 
     /**
@@ -193,6 +198,34 @@ class PropertySetterTaskSecretScrubTest {
     }
 
     @Test
+    @DisplayName("a copy of the RAW input elsewhere in the step is scrubbed when the resolved value is the normalized one")
+    void rawInputCopyIsScrubbedWithNormalizedValue() throws Exception {
+        IWritableConversationStep step = stepWithParsedInput();
+        step.storeData(new Data<>("output:text:echo", List.of("you typed " + RAW_INPUT)));
+
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+
+        assertEquals(List.of("you typed " + PLACEHOLDER), step.getData("output:text:echo").getResult());
+        assertNoPlaintextAnywhere(step);
+    }
+
+    @Test
+    @DisplayName("a scrubbed placeholder (e.g. after a RULE approval pause) is never vaulted over the real secret")
+    void placeholderIsNeverVaulted() throws Exception {
+        // After a RULE pause the turn's finally already replaced the input; on resume
+        // {memory.current.input} resolves to the placeholder, not the credential.
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", PLACEHOLDER));
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+
+        task.execute(memory, secretPropertySetter(PLACEHOLDER));
+
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+        assertNull(memory.getConversationProperties().get("apiKey"),
+                "the property must be left unset rather than pointing at a vaulted placeholder");
+    }
+
+    @Test
     @DisplayName("the stored vault reference carries the auto-vault provenance marker")
     void autoVaultedPropertyIsMarked() throws Exception {
         stepWithParsedInput();
@@ -200,7 +233,8 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.aabbccddeeff112233445566.apiKey}", stored.getValueString());
+        assertTrue(stored.getValueString().matches("\\$\\{vault:agent-1\\.u[0-9a-f]{16}\\.[0-9a-f]{12}\\.apiKey}"),
+                "a per-write slot of this user: " + stored.getValueString());
         // Scope alone says nothing: a secret instruction stores its reference as a
         // plain conversation property, exactly like a template that copied user input
         // into one. The marker is the only thing that separates the two, and
@@ -219,7 +253,7 @@ class PropertySetterTaskSecretScrubTest {
         var instruction = new PropertyInstruction();
         instruction.setName("apiKey");
         // The value a user could type, written by an instruction with no secret scope.
-        instruction.setValueString("${vault:agent-1.aabbccddeeff112233445566.apiKey}");
+        instruction.setValueString("${vault:agent-1.apiKey}");
         instruction.setScope(Scope.conversation);
         instruction.setOverride(true);
         var setOnActions = new SetOnActions();
@@ -232,8 +266,7 @@ class PropertySetterTaskSecretScrubTest {
         task.execute(memory, propertySetter);
 
         var stored = memory.getConversationProperties().get("apiKey");
-        assertEquals("${vault:agent-1.aabbccddeeff112233445566.apiKey}", stored.getValueString(),
-                "byte-identical to what SecretPropertyVault writes");
+        assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "a vault-reference-shaped value, stored verbatim");
         assertNull(stored.getAutoVaulted(), "nothing but SecretPropertyVault may mark a property");
     }
 
@@ -293,5 +326,103 @@ class PropertySetterTaskSecretScrubTest {
 
         assertEquals("ok", step.<String>getData("input:initial").getResult(),
                 "a two-character input must not be wiped because it happens to appear inside the secret");
+    }
+
+    @Test
+    @DisplayName("the same holds for a non-secret scope: the literal placeholder is not stored as the value")
+    void placeholderIsNotStoredAsConversationValue() throws Exception {
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("actions", List.of("store_secret")));
+        var instruction = new PropertyInstruction();
+        instruction.setName("apiKey");
+        instruction.setValueString(PLACEHOLDER);
+        instruction.setScope(Scope.conversation);
+        instruction.setOverride(true);
+        var setOnActions = new SetOnActions();
+        setOnActions.setActions(List.of("store_secret"));
+        setOnActions.setSetProperties(List.of(instruction));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+        task.execute(memory, propertySetter);
+
+        assertNull(memory.getConversationProperties().get("apiKey"));
+    }
+
+    /**
+     * Runs the task for a turn whose previous step emitted
+     * {@code CATCH_ANY_INPUT_AS_PROPERTY}, with {@code input:initial} as given.
+     */
+    private void runCatchAnyInput(String initialInput) throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("CATCH_ANY_INPUT_AS_PROPERTY")));
+        memory.startNextStep();
+        IWritableConversationStep step = memory.getCurrentStep();
+        step.storeData(new Data<>("input:initial", initialInput));
+        step.storeData(new Data<>("expressions:parsed", ""));
+        var propertySetter = mock(IPropertySetter.class);
+        when(propertySetter.getSetOnActionsList()).thenReturn(List.of());
+        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+        task.execute(memory, propertySetter);
+    }
+
+    @Test
+    @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY does not store the <secret input> placeholder as user_input")
+    void catchAnyInputSkipsThePlaceholder() throws Exception {
+        runCatchAnyInput(PLACEHOLDER);
+
+        assertNull(memory.getConversationProperties().get("user_input"));
+    }
+
+    @Test
+    @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY still stores an ordinary input as user_input")
+    void catchAnyInputStoresOrdinaryInput() throws Exception {
+        runCatchAnyInput("John");
+
+        assertEquals("John", memory.getConversationProperties().get("user_input").getValueString());
+    }
+
+    // =================================================================
+    // Slot isolation — the slot used to be <agentId>.<name>, shared by every
+    // user and conversation of the agent: the last writer's secret was what
+    // everyone's reference resolved to.
+    // =================================================================
+
+    @Test
+    @DisplayName("two users of the same agent get different vault slots — neither can resolve the other's secret")
+    void twoUsersOfOneAgentNeverShareASlot() throws Exception {
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String alice = memory.getConversationProperties().get("apiKey").getValueString();
+
+        memory = new ConversationMemory("aabbccddeeff112233445577", "agent-1", 1, "user-2");
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String bob = memory.getConversationProperties().get("apiKey").getValueString();
+
+        assertNotEquals(alice, bob);
+        var refs = ArgumentCaptor.forClass(SecretReference.class);
+        verify(secretProvider, times(2)).store(refs.capture(), anyString(), anyString(), any());
+        assertNotEquals(refs.getAllValues().get(0).keyName(), refs.getAllValues().get(1).keyName());
+        assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(0).keyName(), "user-1"));
+        assertTrue(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(1).keyName(), "user-2"));
+        assertFalse(AutoVaultedSecrets.belongsToUser(refs.getAllValues().get(0).keyName(), "user-2"));
+    }
+
+    @Test
+    @DisplayName("overwriting a secret property keeps the slot it pointed to before — undo restores that reference")
+    void overwriteKeepsThePreviousSlot() throws Exception {
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String first = memory.getConversationProperties().get("apiKey").getValueString();
+
+        stepWithParsedInput();
+        task.execute(memory, secretPropertySetter(NORMALIZED_INPUT));
+        String second = memory.getConversationProperties().get("apiKey").getValueString();
+
+        assertNotEquals(first, second);
+        // Deleting it here left undo restoring a reference to a slot that no longer
+        // existed; it is deleted with the conversation instead.
+        verify(secretProvider, never()).delete(any());
     }
 }

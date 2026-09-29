@@ -94,11 +94,30 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
-     * Get the user memory configuration for this conversation. Returns {@code null}
-     * when persistent user memory is disabled.
+     * Get the user memory configuration for this conversation — recall order and
+     * size, default visibility, guardrails. Present whenever the agent declares a
+     * {@code userMemoryConfig} block (or enables the memory tools), whether or not
+     * the LLM memory tools are on: those settings govern the {@code longTerm}
+     * property path every agent uses. Returns {@code null} when the agent declares
+     * neither.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
+    }
+
+    /**
+     * Whether the agent enabled the LLM memory tools ({@code enableMemoryTools}).
+     * This — not the presence of a config — is what attaches
+     * {@code UserMemoryTool}. Defaults to "a config is present", the meaning the
+     * config alone used to carry.
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
+    }
+
+    /** Set whether the LLM memory tools are enabled for this conversation. */
+    default void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        // no-op by default
     }
 
     /**
@@ -353,26 +372,6 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
-    /**
-     * Whether this memory carries a conversation id that has not been written to
-     * the store yet.
-     * <p>
-     * A new conversation is given its id BEFORE its CONVERSATION_START turn runs
-     * (see {@code IConversationMemoryStore#newConversationId}), so everything that
-     * turn does can already name the conversation — a {@code scope: "secret"}
-     * property is vaulted under a key that contains it. The store inserts such a
-     * memory under the id it carries instead of treating the id as "update the
-     * existing document", and clears the flag once it has.
-     */
-    default boolean isUnpersisted() {
-        return false;
-    }
-
-    /** See {@link #isUnpersisted()}. */
-    default void setUnpersisted(boolean unpersisted) {
-        // no-op by default
-    }
-
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 
@@ -387,10 +386,29 @@ public interface IConversationMemory extends Serializable {
 
         IConversationStep peek();
 
+        /**
+         * One entry per step, oldest first: that step's latest data whose key
+         * <em>starts with</em> {@code prefix}, or {@code null}. Prefix semantics —
+         * {@code "context:groupId"} also matches {@code context:groupIdSuffix}. For a
+         * key whose writer matters (an engine-reserved context key, see
+         * {@code ClientContextGuard}) use {@link #getExactDataPerStep(String)}.
+         */
         <T> List<IData<T>> getAllLatestData(String prefix);
+
+        /**
+         * One entry per step, oldest first: that step's data stored under exactly
+         * {@code key}, or {@code null} when the step has none. The exact-key
+         * counterpart of {@link #getAllLatestData(String)}, with the same shape, so two
+         * such lists can be paired by index.
+         */
+        <T> List<IData<T>> getExactDataPerStep(String key);
     }
 
     interface IConversationStep extends Serializable {
+        /**
+         * The data stored under exactly {@code key}, or {@code null}. Unlike
+         * {@link #getLatestData(String)} this is not a prefix match.
+         */
         <T> IData<T> getData(String key);
 
         /** Type-safe variant of {@link #getData(String)}. */
@@ -413,6 +431,15 @@ public interface IConversationMemory extends Serializable {
 
         boolean isEmpty();
 
+        /**
+         * The most recently stored data whose key <em>starts with</em> {@code prefix}.
+         * Prefix semantics: {@code getLatestData("context:groupId")} also returns a
+         * {@code context:groupIdSuffix} entry, and returns it first if it was stored
+         * later. Never use it to read a key whose writer matters — an engine-reserved
+         * context key ({@code ClientContextGuard}) in particular, since the client
+         * chooses its own context key names. Use {@link #getData(String)}, which is
+         * exact, for those.
+         */
         <T> IData<T> getLatestData(String prefix);
 
         /** Type-safe variant of {@link #getLatestData(String)}. */

@@ -108,4 +108,144 @@ spec:
         - protocol: TCP
           port: {{ . }}
         {{- end }}
+{{- /*
+  Backend-side isolation. The policy above locks down the EDDI pod; these lock
+  down the stateful pods so ONLY the EDDI pod may open a data connection to them.
+  Without them a compromised or mislabelled pod in the namespace could talk
+  straight to MongoDB, PostgreSQL, NATS or Keycloak. The EDDI pod is identified by
+  the same selector the deployment carries (selectorLabels + component: server).
+  MongoDB and PostgreSQL use exec probes, so a strict ingress rule does not touch
+  their readiness; NATS and Keycloak use httpGet probes, so their monitoring/
+  management port is additionally left open to same-namespace callers (the kubelet
+  and Prometheus), matching how the EDDI policy above trusts the namespace.
+*/}}
+{{- if .Values.mongodb.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-mongodb
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 27017
+{{- end }}
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "eddi.fullname" . }}-postgres
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-postgres
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
+{{- if .Values.nats.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "eddi.fullname" . }}-nats
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: messaging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-nats
+  policyTypes:
+    - Ingress
+  ingress:
+    # Client protocol: EDDI only.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 4222
+    # Monitoring/health (8222): same-namespace callers (kubelet httpGet probe,
+    # Prometheus), so the strict client rule above does not stop the pod becoming
+    # Ready.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - protocol: TCP
+          port: 8222
+{{- end }}
+{{- if .Values.keycloak.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "eddi.fullname" . }}-keycloak
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: auth
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    # OIDC/HTTP (8080): EDDI's backchannel plus same-namespace callers — the
+    # Manager SPA reaches Keycloak through the browser (ingress/port-forward),
+    # which arrives from the ingress controller's namespace; add it to
+    # networkPolicy.allowedIngressNamespaces if it lives elsewhere.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+        {{- range .Values.networkPolicy.allowedIngressNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Management/health (9000): same-namespace (kubelet httpGet probe).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+      ports:
+        - protocol: TCP
+          port: 9000
+{{- end }}
 {{- end }}

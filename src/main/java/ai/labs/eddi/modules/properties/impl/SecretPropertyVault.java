@@ -12,24 +12,17 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.secrets.model.AutoVaultReference;
-import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.time.Instant;
-import java.util.Collection;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.function.Predicate;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -43,25 +36,15 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * the apicall reference guard can tell it apart from the same string arriving
  * through conversation data. Every copy of the plaintext is then scrubbed from
  * the current conversation step, so the document persisted for the turn holds
- * none.
+ * none. Every write goes to its own slot — see {@link AutoVaultedSecrets}.
  * <p>
- * <b>One vault entry per conversation.</b> The key is
- * {@code <agentId>.<conversationId>.<property>} under the default tenant (see
- * {@link AutoVaultReference}). It used to be {@code <agentId>.<property>},
- * shared by every conversation of the agent: the vault write is an upsert, so
- * the second user to enter a key replaced the first user's, and the first
- * user's calls went out with the second user's credential. The tenant used to
- * come from a {@code tenantId} conversation property, which a client can set
- * through a context expression; it is no longer consulted.
+ * This is the vaulting and step scrub {@code PropertySetterTask} used to do
+ * itself, moved here unchanged so the other property paths share it: they used
+ * to store a {@code scope: "secret"} value as a plaintext property.
  * <p>
- * The resolver cache is invalidated after every write: re-entering a secret in
- * the same conversation overwrites the same entry, and the cached previous
- * plaintext would otherwise keep being sent for the cache TTL.
- * <p>
- * Fails closed throughout: a disabled vault, a value that is not a string, a
- * property name that cannot be embedded in a reference, or a conversation
- * without an id all abort the turn with a {@link LifecycleException} after the
- * plaintext has been scrubbed. The value is never stored as a plaintext
+ * Fails closed throughout: a disabled vault, a value that is not a string, or a
+ * property name that cannot be embedded in a reference all abort the turn with
+ * a {@link LifecycleException}. The value is never stored as a plaintext
  * property.
  */
 @ApplicationScoped
@@ -94,22 +77,13 @@ public class SecretPropertyVault {
      */
     private static final int MIN_NORMALIZED_MATCH_LENGTH = 4;
     private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
-    /**
-     * Written into the description of every entry this class stores, followed by
-     * the conversation id. Together with the key shape it is what
-     * {@link #deleteConversationSecrets} matches on, so a secret an operator
-     * created under a similar-looking name is never removed.
-     */
-    static final String AUTO_VAULT_DESCRIPTION_PREFIX = "Auto-vaulted from conversation ";
 
     private final ISecretProvider secretProvider;
-    private final SecretResolver secretResolver;
     private final IDataFactory dataFactory;
 
     @Inject
-    public SecretPropertyVault(ISecretProvider secretProvider, SecretResolver secretResolver, IDataFactory dataFactory) {
+    public SecretPropertyVault(ISecretProvider secretProvider, IDataFactory dataFactory) {
         this.secretProvider = secretProvider;
-        this.secretResolver = secretResolver;
         this.dataFactory = dataFactory;
     }
 
@@ -143,152 +117,96 @@ public class SecretPropertyVault {
                     + "but the instruction produced " + (value == null ? "null" : "a " + value.getClass().getSimpleName())
                     + ". Refusing to persist it in plaintext.");
         }
-        SecretReference ref = AutoVaultReference.of(memory.getAgentId(), memory.getConversationId(), name);
-        if (ref == null) {
+        if (!AutoVaultedSecrets.isEmbeddable(name)) {
             scrubSecretInput(memory, name, plaintext);
             throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret': the property name must not contain "
-                    + "'/', '{', '}' or '$', and the conversation must have an agent and conversation id. Refusing to persist "
-                    + "the value in plaintext.");
+                    + "'/', '{', '}' or '$'. Refusing to persist the value in plaintext.");
         }
-
-        try {
-            secretProvider.store(ref, plaintext, AUTO_VAULT_DESCRIPTION_PREFIX + memory.getConversationId(), List.of(memory.getAgentId()));
-        } catch (ISecretProvider.SecretProviderException e) {
-            // Fail CLOSED. The historical behaviour returned the plaintext, which was then
-            // persisted TWICE — as a conversation property and (because the scrub below
-            // was skipped) as the raw input:initial data. A disabled vault is the default
-            // (eddi.vault.master-key ships empty), so that was the common path.
-            // Scrub the raw input BEFORE aborting so the plaintext cannot survive in the
-            // conversation document that is persisted for the failed turn either.
-            scrubSecretInput(memory, name, plaintext);
-            LOGGER.errorf("Failed to store secret in vault for property '%s': %s", name, e.getMessage());
-            throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret': the secrets vault is unavailable or "
-                    + "disabled (set EDDI_VAULT_MASTER_KEY). Refusing to persist the value in plaintext.", e);
-        }
-        // The entry is per conversation, so re-entering the secret overwrites it: the
-        // previous plaintext must not keep resolving from the cache.
-        secretResolver.invalidateCache(ref);
-
-        scrubSecretInput(memory, name, plaintext);
-
-        var vaulted = new Property(name, ref.toReferenceString(), conversation);
         // The ONLY place this marker is ever set. It is what lets ConfigReferenceGuard
         // tell this reference apart from the identical string arriving through
         // conversation data — the scope it is stored under is conversation either way,
         // so nothing else can.
+        var vaulted = new Property(name, autoVaultSecret(memory, name, plaintext), conversation);
         vaulted.setAutoVaulted(Boolean.TRUE);
         return vaulted;
     }
 
     /**
-     * Delete the vault entries the secret properties of these conversations were
-     * stored under — called when conversations are permanently deleted (explicit
-     * delete, the ended-conversation retention sweep).
+     * Store a plaintext secret in the vault and return the vault reference string.
+     * Also scrubs the raw user input from conversation memory to prevent leakage.
      * <p>
-     * One entry per conversation means one entry more for every conversation that
-     * entered a secret; without this they would outlive their conversations
-     * forever. An entry qualifies only when its key carries the conversation id as
-     * {@code <agentId>.<conversationId>.<property>} AND its description is the one
-     * {@link #vault} writes, so nothing an operator created is touched. Entries are
-     * found with one listing for the whole batch. Best effort: a failure is logged
-     * and never stops the conversation delete.
+     * <b>Agent designers never see vault references for auto-vaulted secrets.</b>
+     * They simply write {@code { "name": "userApiKey", "scope": "secret" }} in the
+     * PropertySetter config. This method transparently vaults the user input and
+     * stores a vault reference in conversation properties. Templates use
+     * {@code {properties.userApiKey}} — the SecretResolver resolves transparently.
+     * <p>
+     * Every write goes to its own slot,
+     * {@code <agentId>.u<userHash>.<nonce>.<keyName>} (see
+     * {@link AutoVaultedSecrets}), so no other user or conversation can resolve it;
+     * the slot the property pointed to before is kept for undo and deleted with the
+     * conversation. Since the tenant is typically "default", the short-form syntax
+     * is used.
      *
-     * @return the number of entries deleted
+     * @param memory
+     *            the conversation memory (used for agentId and input scrubbing)
+     * @param keyName
+     *            the property name used as the vault key
+     * @param plaintext
+     *            the secret value to store
+     * @return the vault reference string, e.g.
+     *         {@code ${vault:69c687.u1a2b3c4d5e6f7a8b.0f1e2d3c4b5a.userApiKey}}
+     * @throws LifecycleException
+     *             when the vault is unavailable or disabled. This method fails
+     *             CLOSED: the raw input is scrubbed first and the plaintext is
+     *             never stored as a conversation property, so a
+     *             {@code scope: "secret"} property can never silently degrade to a
+     *             plaintext secret persisted twice (property +
+     *             {@code input:initial} ) in the conversation document.
      */
-    public int deleteConversationSecrets(Collection<String> conversationIds) {
-        if (conversationIds == null || conversationIds.isEmpty() || !secretProvider.isAvailable()) {
-            return 0;
-        }
-        Set<String> ids = new HashSet<>(conversationIds);
-        return deleteMatching(entry -> ids.contains(conversationIdOf(entry)),
-                "the secrets of " + conversationIds.size() + " deleted conversation(s)");
-    }
-
-    /**
-     * Delete the auto-vaulted entries whose conversation no longer exists — the
-     * reconciliation behind {@link #deleteConversationSecrets}, run by the
-     * retention sweep.
-     * <p>
-     * That call is best effort and runs after the conversation is gone, so a vault
-     * failure at that moment used to leave the entry behind for good. Two more
-     * paths never call it at all: a start turn that vaults a secret and then fails
-     * before the conversation is first stored, and an erasure that removes
-     * conversations in bulk. This sweep finds all three by what they have in common
-     * — an entry {@link #vault} wrote whose conversation is not in the store — so a
-     * missed delete is retried on the next run instead of being lost.
-     * <p>
-     * Only entries last written before {@code writtenBefore} qualify: a
-     * conversation's first turn writes its entry before the conversation is stored,
-     * and must not lose it to a sweep that runs in between. An entry without a
-     * timestamp, or whose conversation cannot be looked up, is kept.
-     *
-     * @param conversationExists
-     *            whether the conversation with this id is still stored
-     * @return the number of entries deleted
-     */
-    public int deleteOrphanedConversationSecrets(Predicate<String> conversationExists, Instant writtenBefore) {
-        if (conversationExists == null || writtenBefore == null || !secretProvider.isAvailable()) {
-            return 0;
-        }
-        return deleteMatching(entry -> {
-            String conversationId = conversationIdOf(entry);
-            Instant lastWritten = entry.lastRotatedAt() != null ? entry.lastRotatedAt() : entry.createdAt();
-            if (conversationId == null || lastWritten == null || !lastWritten.isBefore(writtenBefore)) {
-                return false;
+    private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) throws LifecycleException {
+        // Determine tenantId — use conversation property if set, else "default"
+        var conversationProperties = memory.getConversationProperties();
+        String tenantId = "default";
+        if (conversationProperties.containsKey("tenantId")) {
+            Property tenantProp = conversationProperties.get("tenantId");
+            if (tenantProp.getValueString() != null) {
+                tenantId = tenantProp.getValueString();
             }
-            try {
-                return !conversationExists.test(conversationId);
-            } catch (RuntimeException e) {
-                LOGGER.debugf("Kept vault entry of conversation '%s': its conversation could not be looked up (%s)", sanitize(conversationId),
-                        e.getMessage());
-                return false;
-            }
-        }, "orphaned conversation secrets");
-    }
+        }
 
-    /**
-     * Deletes every default-tenant entry {@code selected} accepts, found with one
-     * listing. Best effort: a failure is logged and never thrown.
-     */
-    private int deleteMatching(Predicate<SecretMetadata> selected, String what) {
-        List<SecretMetadata> entries;
+        String agentId = memory.getAgentId();
+        // A fresh slot per write, attributable to the user (see AutoVaultedSecrets).
+        // The slot used to be <agentId>.<keyName> — shared by every user and every
+        // conversation of the agent, so the last writer's secret was what every
+        // conversation's reference resolved to.
+        String qualifiedKeyName = AutoVaultedSecrets.newSlotName(agentId, memory.getUserId(), keyName);
+        var ref = new SecretReference(tenantId, qualifiedKeyName);
+
+        // Store the plaintext in the vault (encrypted at rest)
         try {
-            entries = secretProvider.listKeys(SecretReference.DEFAULT_TENANT);
+            secretProvider.store(ref, plaintext, "Auto-vaulted from conversation", List.of(agentId));
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.warnf("Could not list vault entries to remove %s: %s", what, e.getMessage());
-            return 0;
+            // Fail CLOSED. The previous behaviour returned the plaintext, which was then
+            // persisted TWICE — as a conversation property and (because the scrub below
+            // was skipped) as the raw input:initial data. A disabled vault is the default
+            // (eddi.vault.master-key ships empty), so that was the common path.
+            // Scrub the raw input BEFORE aborting so the plaintext cannot survive in the
+            // conversation document that is persisted for the failed turn either.
+            scrubSecretInput(memory, keyName, plaintext);
+            LOGGER.errorf("Failed to store secret in vault for property '%s': %s", keyName, e.getMessage());
+            throw new LifecycleException("Cannot store property '" + keyName + "' with scope 'secret': the secrets vault is unavailable or "
+                    + "disabled (set EDDI_VAULT_MASTER_KEY). Refusing to persist the value in plaintext.", e);
         }
-        int deleted = 0;
-        for (SecretMetadata entry : entries) {
-            if (!selected.test(entry)) {
-                continue;
-            }
-            var ref = new SecretReference(SecretReference.DEFAULT_TENANT, entry.keyName());
-            try {
-                secretProvider.delete(ref);
-                secretResolver.invalidateCache(ref);
-                deleted++;
-            } catch (ISecretProvider.SecretNotFoundException e) {
-                // already gone — nothing to do
-            } catch (ISecretProvider.SecretProviderException e) {
-                LOGGER.warnf("Could not delete vault entry '%s' of conversation '%s': %s", sanitize(entry.keyName()),
-                        sanitize(conversationIdOf(entry)), e.getMessage());
-            }
-        }
-        return deleted;
-    }
 
-    /**
-     * The conversation an auto-vaulted entry belongs to, or {@code null} when the
-     * entry is not one {@link #vault} wrote.
-     */
-    private static String conversationIdOf(SecretMetadata entry) {
-        String description = entry.description();
-        if (description == null || !description.startsWith(AUTO_VAULT_DESCRIPTION_PREFIX) || entry.keyName() == null) {
-            return null;
-        }
-        String conversationId = description.substring(AUTO_VAULT_DESCRIPTION_PREFIX.length());
-        return entry.keyName().contains("." + conversationId + ".") ? conversationId : null;
+        scrubSecretInput(memory, keyName, plaintext);
+
+        // The slot the property pointed at before is NOT deleted: this turn's property
+        // delta records it, and undo restores that reference. It is deleted with the
+        // conversation, which sweeps every version in the step history and redo cache.
+
+        // Return the vault reference to be stored in properties instead of plaintext
+        return ref.toReferenceString();
     }
 
     /**
@@ -315,9 +233,9 @@ public class SecretPropertyVault {
      * stripped).</li>
      * </ol>
      * A scrub that finds nothing is logged at WARN (never silently ignored): the
-     * value may legitimately come from a static config literal or data that was
-     * never in the step, but if it came from the user it means the raw input is
-     * still in the document.
+     * value may legitimately come from a static config literal or a non-string
+     * context, but if it came from the user it means the raw input is still in the
+     * document.
      *
      * @param keyName
      *            property name, for the diagnostic only — never the value
@@ -329,11 +247,16 @@ public class SecretPropertyVault {
         var currentStep = memory.getCurrentStep();
         boolean inputScrubbed = false;
         boolean anythingScrubbed = false;
+        // The resolved value plus every input form replaced below: when the match is
+        // normalization-insensitive, a copy of the differently formatted raw input
+        // elsewhere in the step does not contain the resolved value verbatim.
+        List<String> needles = new ArrayList<>(List.of(plaintext));
 
         // (1) The known input-carrying keys of this step.
         for (String inputKey : List.of(INPUT_INITIAL_IDENTIFIER, INPUT_NORMALIZED_IDENTIFIER)) {
             IData<String> inputData = currentStep.getLatestData(inputKey);
             if (inputData != null && carriesSecret(inputData.getResult(), plaintext)) {
+                needles.add(inputData.getResult());
                 storeScrubbed(currentStep, inputKey, SECRET_INPUT_PLACEHOLDER);
                 inputScrubbed = true;
                 anythingScrubbed = true;
@@ -349,7 +272,7 @@ public class SecretPropertyVault {
             if (INPUT_INITIAL_IDENTIFIER.equals(key) || INPUT_NORMALIZED_IDENTIFIER.equals(key)) {
                 continue;
             }
-            Object cleaned = SecretValueScrubber.scrubValue(data.getResult(), plaintext, SECRET_INPUT_PLACEHOLDER);
+            Object cleaned = SecretValueScrubber.scrubAll(data.getResult(), needles, SECRET_INPUT_PLACEHOLDER);
             if (cleaned != null) {
                 storeScrubbed(currentStep, key, cleaned);
                 anythingScrubbed = true;
@@ -361,7 +284,7 @@ public class SecretPropertyVault {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = SecretValueScrubber.scrubValue(outputEntry.getValue(), plaintext, SECRET_INPUT_PLACEHOLDER);
+                Object cleaned = SecretValueScrubber.scrubAll(outputEntry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;

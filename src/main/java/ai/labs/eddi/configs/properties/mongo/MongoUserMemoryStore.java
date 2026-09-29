@@ -54,6 +54,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_ID = "_id";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_KEY = "key";
+    /**
+     * Anchored match for {@link IUserMemoryStore#isReservedKey}; the prefix has no
+     * regex metacharacters.
+     */
+    private static final String RESERVED_KEY_REGEX = "^" + RESERVED_KEY_PREFIX;
     private static final String FIELD_VALUE = "value";
     private static final String FIELD_CATEGORY = "category";
     private static final String FIELD_VISIBILITY = "visibility";
@@ -125,6 +130,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             return;
         }
 
+        // Refused before the first write, so a rejected call leaves nothing half
+        // merged behind.
+        properties.keySet().forEach(IUserMemoryStore::rejectReservedKey);
+
         // Upsert each key-value pair as a global entry in usermemories
         Instant now = Instant.now();
         for (Map.Entry<String, Object> entry : properties.entrySet()) {
@@ -145,8 +154,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public void deleteProperties(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
-        // Delete all global entries for this user
-        memoriesCollection.deleteMany(and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name())));
+        // Delete all global entries for this user — except the GDPR bookkeeping keys,
+        // which only the admin unrestrict path and the erasure cascade may remove.
+        memoriesCollection.deleteMany(and(eq(FIELD_USER_ID, userId), eq(FIELD_VISIBILITY, Visibility.global.name()),
+                Filters.not(Filters.regex(FIELD_KEY, RESERVED_KEY_REGEX))));
     }
 
     // === Structured entries ===
@@ -154,6 +165,20 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public String upsert(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entry, "entry");
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        return write(entry);
+    }
+
+    @Override
+    public String upsertReserved(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        if (!IUserMemoryStore.isReservedKey(entry.key())) {
+            throw new IllegalArgumentException("upsertReserved accepts only reserved keys, got '" + entry.key() + "'");
+        }
+        return write(entry);
+    }
+
+    private String write(UserMemoryEntry entry) {
         RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
@@ -401,20 +426,61 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // cleanup
         Bson filter = and(
                 Filters.lt(FIELD_UPDATED_AT, cutoff.toString()),
-                Filters.not(Filters.regex(FIELD_KEY, "^_gdpr_")));
+                Filters.not(Filters.regex(FIELD_KEY, RESERVED_KEY_REGEX)));
         DeleteResult result = memoriesCollection.deleteMany(filter);
         return result.getDeletedCount();
     }
 
     // === Document conversion ===
 
-    private Bson buildUpsertFilter(UserMemoryEntry entry) {
+    /**
+     * Atomic: every field is {@code $setOnInsert}, so an existing entry at the
+     * identity is left exactly as it is — a writer that lands between a lookup and
+     * this call can no longer be overwritten.
+     */
+    @Override
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
+        RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
+        // Same refusal as upsert: reserved keys are written only through
+        // upsertReserved.
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        String now = Instant.now().toString();
+        Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
+                Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),
+                Updates.setOnInsert(FIELD_VISIBILITY, entry.visibility().name()),
+                Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
+                Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
+                Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
+        var upserted = memoriesCollection.updateOne(buildUpsertFilter(entry), insertOnly, new UpdateOptions().upsert(true)).getUpsertedId();
+        return upserted != null ? upserted.asObjectId().getValue().toHexString() : null;
+    }
+
+    /**
+     * The document an upsert of {@code entry} replaces.
+     * <p>
+     * Global entries are one shared document per {@code (userId, key)}. Self and
+     * group entries are one document per {@code (userId, key, sourceAgentId)} among
+     * the agent's <em>non-global</em> entries — the same identity PostgreSQL
+     * enforces with its partial unique index
+     * {@code (user_id, key, source_agent_id) WHERE visibility != 'global'}.
+     * <p>
+     * The visibility term is load-bearing. Without it a self write matched the
+     * global entry the same agent had created (a global entry keeps its creator in
+     * {@code sourceAgentId}), and the {@code $set} flipped the shared memory to
+     * {@code self} — every other agent silently lost it. A model saving "a private
+     * note" under a key it had once shared was enough to trigger it.
+     */
+    static Bson buildUpsertFilter(UserMemoryEntry entry) {
         if (entry.visibility() == Visibility.global) {
             // Global: single shared entry per (userId, key)
             return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_VISIBILITY, Visibility.global.name()));
         }
-        // Self/Group: per-agent entries
-        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()));
+        // Self/Group: per-agent entries, never the shared global one
+        return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                ne(FIELD_VISIBILITY, Visibility.global.name()));
     }
 
     private UserMemoryEntry documentToEntry(Document doc) {

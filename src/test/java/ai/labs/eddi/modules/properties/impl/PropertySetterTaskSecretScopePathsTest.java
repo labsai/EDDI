@@ -19,7 +19,6 @@ import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -85,7 +84,7 @@ class PropertySetterTaskSecretScopePathsTest {
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter, templatingEngine, new DataFactory(),
                 mock(IResourceClientLibrary.class), new ObjectMapper(),
-                new SecretPropertyVault(secretProvider, mock(SecretResolver.class), new DataFactory()));
+                new SecretPropertyVault(secretProvider, new DataFactory()));
 
         var step = memory.getCurrentStep();
         step.storeData(new Data<>("actions", List.of("store_secret")));
@@ -120,7 +119,8 @@ class PropertySetterTaskSecretScopePathsTest {
         task.execute(memory, setterFor(instruction));
 
         Property stored = memory.getConversationProperties().get("accessToken");
-        assertEquals("${vault:agent-1.aabbccddeeff112233445566.accessToken}", stored.getValueString());
+        assertTrue(stored.getValueString().matches("\\$\\{vault:agent-1\\.u[0-9a-f]{16}\\.[0-9a-f]{12}\\.accessToken}"),
+                "a per-write slot of this user: " + stored.getValueString());
         assertEquals(Scope.conversation, stored.getScope());
         assertEquals(Boolean.TRUE, stored.getAutoVaulted());
         verify(secretProvider).store(any(), eq(TOKEN), anyString(), anyList());

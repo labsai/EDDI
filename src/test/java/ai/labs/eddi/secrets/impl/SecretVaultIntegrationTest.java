@@ -10,6 +10,7 @@ import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -65,6 +66,9 @@ class SecretVaultIntegrationTest {
     @BeforeEach
     void setUp() {
         persistence = mock(ISecretPersistence.class);
+        // The checksum key must be durably stored before a keyed checksum is written;
+        // a bare mock keeps no metadata, so accept the insert and hand the value back.
+        lenient().when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
         meterRegistry = new SimpleMeterRegistry();
         dekStore.clear();
         secretStore.clear();
@@ -404,7 +408,16 @@ class SecretVaultIntegrationTest {
 
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
 
-            assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.rotateKek("wrong-old-key", "new-key"));
+            clearInvocations(persistence); // only the rotation's own writes count below
+
+            // A STRONG replacement key, so the new-key strength gate cannot be what fails:
+            // the failure asserted here must come from the wrong old key not unwrapping
+            // the DEK (a CryptoException in the verification phase).
+            var thrown = assertThrows(ISecretProvider.SecretProviderException.class,
+                    () -> provider.rotateKek("wrong-old-key", "replacement-master-key-Xq7vR2mK9pL4"));
+            assertEquals("KEK rotation failed", thrown.getMessage());
+            assertInstanceOf(EnvelopeCrypto.CryptoException.class, thrown.getCause(), "the wrong old key must fail to unwrap the DEK");
+            verify(persistence, never()).upsertDek(any());
         }
     }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -16,9 +17,16 @@ import jakarta.ws.rs.core.MediaType;
 
 /**
  * Standalone semantic parser endpoint for NLP evaluation.
+ * <p>
+ * Role-gated to the same management tier as the parser configuration store
+ * ({@code eddi-admin}/{@code eddi-editor}); the implementation additionally
+ * enforces {@code VIEW} on the specific parser configuration, so a caller
+ * cannot exercise a parser they may not read. Previously carried no role at
+ * all, so any authenticated token could run any parser configuration by id.
  */
 @Path("/parser")
 @Tag(name = "Tools / NLP", description = "Standalone semantic parser")
+@RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestSemanticParser {
 
     @POST

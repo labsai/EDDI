@@ -43,6 +43,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -131,11 +132,26 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     private final IDeploymentStore deploymentStore;
     private final LiveDiscussionRegistry liveDiscussionRegistry;
     private final IAgentGroupStore agentGroupStore;
+    /**
+     * M-A1: {@code (agentId, principal) -> may that principal use that agent}.
+     * Handed to {@link RecruitAgentTool}; {@code null} means no check (direct
+     * construction in tests — CDI always supplies one).
+     */
+    private final BiPredicate<String, String> useCheck;
 
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
             IAgentGroupStore agentGroupStore) {
+        this(agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore, deploymentStore,
+                liveDiscussionRegistry, agentGroupStore, null);
+    }
+
+    DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
+            IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck) {
+        this.useCheck = useCheck;
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
         this.conversationService = conversationService;
@@ -267,13 +283,18 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // agents already created in this conversation so the cap actually bounds
         // the discussion.
         List<String> sharedCreatedIds = new CopyOnWriteArrayList<>(seedCreatedAgentIds(memory));
-        Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
         // Seeded like sharedCreatedIds so a teardown recorded on an earlier turn is
         // still known on this one — otherwise a torn-down id would be subtracted from
         // the seed once and then re-appear the turn after.
         Set<String> sharedTornDownIds = ConcurrentHashMap.newKeySet();
         sharedTornDownIds.addAll(collectFromAllSteps(memory, KEY_DYNAMIC_TORN_DOWN_AGENT_IDS));
+        // M-T2: this set used to start empty every turn, so retain=true lasted one
+        // turn — on the next, teardown_agent no longer saw the flag and deleted an
+        // agent the model had explicitly asked to keep.
+        Set<String> sharedRetainedIds = ConcurrentHashMap.newKeySet();
+        sharedRetainedIds.addAll(seedRetainedAgentIds(memory, sharedCreatedIds));
         String parentAgentId = memory.getAgentId();
+        String callerConversationId = memory.getConversationId();
         String userId = memory.getUserId();
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
 
@@ -281,7 +302,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
@@ -291,7 +312,22 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // consult no guardrails at all — allowDelegation was never read and
             // nothing bounded delegation depth or target.
             int delegationDepth = resolveDelegationDepth(memory);
-            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth));
+            // M-A1: a delegation talks to a model-chosen agent as this user, through the
+            // engine-internal start and say, which run no USE gate — so the gate runs
+            // here, for a new conversation and a continued one alike (the continued one
+            // is only ownership-checked). An agent this conversation (or its
+            // discussion) created is exempt: the engine built it for this user, and a
+            // setup-created agent may carry no descriptor to check. "Created" is
+            // proven by the agent's own dynamicOrigin, not by the tracked list
+            // alone: that list is seeded from earlier steps, which a conversation
+            // stored before the reserved-context fix may have filled from forged
+            // client context. Same proof teardown_agent requires.
+            BiPredicate<String, String> delegationUseCheck = useCheck == null
+                    ? null
+                    : (agentId, principal) -> (sharedCreatedIds.contains(agentId)
+                            && createdHere(agentId, callerConversationId, groupConversationId))
+                            || useCheck.test(agentId, principal);
+            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
@@ -321,7 +357,6 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // before here. A guard only on this line implied a nullability the rest of the
         // method does not honour, which reads as though one path were safe and the
         // others overlooked.
-        String callerConversationId = memory.getConversationId();
         if (allows(whitelist, whitelistOmitted, "recruit_agent") && dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()
                 && groupConversationId != null && liveDiscussionRegistry != null) {
             var liveDiscussion = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
@@ -331,7 +366,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             var roster = liveDiscussion.flatMap(this::configuredMemberIds);
             if (liveDiscussion.isPresent() && roster.isPresent()) {
                 tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
-                        dynamicConfig, deploymentStore, roster.get()));
+                        dynamicConfig, deploymentStore, roster.get(), useCheck));
                 LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                 anyDynamicToolAdded = true;
             } else if (liveDiscussion.isPresent()) {
@@ -347,7 +382,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "teardown_agent") && dynamicConfig.isEnabled()
                 && agentFactory != null && agentStore != null) {
             tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds,
-                    sharedTornDownIds));
+                    sharedTornDownIds, callerConversationId, groupConversationId));
             LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
             anyDynamicToolAdded = true;
         }
@@ -391,7 +426,15 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         return collected;
     }
 
-    /** Context key {@code MemberTurnExecutor} injects the group's policy under. */
+    /**
+     * Context key {@code MemberTurnExecutor} injects the group's policy under.
+     * <p>
+     * Every reserved context key in this class is read with an exact-key lookup
+     * ({@code getData} / {@code getExactDataPerStep}). The prefix-matching
+     * {@code getLatestData} would also return a client-sent
+     * {@code context:dynamicAgentConfigX} — not a reserved key by name — and hand a
+     * standalone agent a group policy of the client's choosing.
+     */
     static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:dynamicAgentConfig";
 
     /**
@@ -418,12 +461,80 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * inversion both guards exist to prevent.
      */
     static boolean hasGroupPolicy(IConversationMemory memory) {
+        return groupPolicyContext(memory) != null;
+    }
+
+    /**
+     * The group policy context entry governing this turn, or {@code null} for a
+     * standalone conversation.
+     * <p>
+     * The current step is consulted first — that is where
+     * {@code MemberTurnExecutor} puts the policy on every member turn. Earlier
+     * steps are the fallback: a member conversation belongs to the user who started
+     * the discussion, so that user can also send a turn into it directly, and such
+     * a turn carries no group context at all. Reading the current step alone
+     * resolved that turn to "standalone" and handed it the permissive default — a
+     * group's disabled policy disappeared exactly when the group was not the one
+     * driving the turn. Once a conversation has been governed by a group, the most
+     * recent policy it received keeps governing it. (A client cannot supply this
+     * key itself — see {@code ClientContextGuard}.)
+     * <p>
+     * Both reads are exact ({@code getData} / {@code getExactDataPerStep}): the
+     * prefix-matching lookups would also return a client-sent
+     * {@code context:dynamicAgentConfigX} and hand a standalone agent a policy of
+     * the client's choosing.
+     */
+    private static Context groupPolicyContext(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return false;
+        if (currentStep != null) {
+            Context current = policyEntry(currentStep.getData(CONTEXT_DYNAMIC_AGENT_CONFIG));
+            if (current != null) {
+                return current;
+            }
         }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        return contextData != null && contextData.getResult() instanceof Context ctx && ctx.getValue() != null;
+        var allSteps = memory.getAllSteps();
+        if (allSteps != null) {
+            List<IData<Object>> entries = allSteps.getExactDataPerStep(CONTEXT_DYNAMIC_AGENT_CONFIG);
+            if (entries != null) {
+                // Oldest step first — walk backwards for the most recent policy.
+                for (int i = entries.size() - 1; i >= 0; i--) {
+                    Context found = policyEntry(entries.get(i));
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * One step's policy entry, read for PRESENCE: {@code null} only when the step
+     * holds nothing under the key (no entry, no result, or a {@link Context} with
+     * no value). Anything else is a policy that is present — and a result that is
+     * not a {@link Context} at all is present but malformed, so it comes back as a
+     * {@link MalformedPolicy} marker that {@link #resolveDynamicAgentConfig}
+     * resolves to the disabled config. Skipping it instead would fall back to an
+     * older (possibly more permissive) policy or to the permissive standalone
+     * default — failing open on exactly the entry we could not read.
+     */
+    private static Context policyEntry(IData<?> entry) {
+        if (entry == null || entry.getResult() == null) {
+            return null;
+        }
+        if (entry.getResult() instanceof Context ctx) {
+            return ctx.getValue() != null ? ctx : null;
+        }
+        return new Context(Context.ContextType.object, new MalformedPolicy(entry.getResult().getClass().getName()));
+    }
+
+    /**
+     * Marks a group-policy entry that was present but not a {@link Context}.
+     *
+     * @param type
+     *            the class that was found under the key, for the log line
+     */
+    private record MalformedPolicy(String type) {
     }
 
     /**
@@ -464,18 +575,19 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      *         standalone default only when none is present at all
      */
     static DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
-        var currentStep = memory.getCurrentStep();
-        if (currentStep == null) {
-            return createDefaultDynamicConfig();
-        }
-        var contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_AGENT_CONFIG);
-        if (contextData == null || !(contextData.getResult() instanceof Context ctx) || ctx.getValue() == null) {
-            // No group context — a standalone agent whose operator whitelisted these
-            // tools deliberately.
+        Context ctx = groupPolicyContext(memory);
+        if (ctx == null) {
+            // No group context on this or any earlier turn — a standalone agent whose
+            // operator whitelisted these tools deliberately.
             return createDefaultDynamicConfig();
         }
 
         Object value = ctx.getValue();
+        if (value instanceof MalformedPolicy malformed) {
+            LOGGER.warnf("[DYNAMIC] The group DynamicAgentConfig entry for agent='%s' held a %s instead of a context entry — "
+                    + "disabling dynamic agent capabilities for this turn", sanitize(memory.getAgentId()), sanitize(malformed.type()));
+            return disabledDynamicConfig();
+        }
         if (value instanceof DynamicAgentConfig groupConfig) {
             LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
             return groupConfig;
@@ -537,6 +649,26 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     /**
+     * Whether the agent's current configuration carries a {@code dynamicOrigin}
+     * naming this conversation or its discussion. Anything unreadable is
+     * {@code false}, so the caller falls back to the ordinary USE check.
+     */
+    private boolean createdHere(String agentId, String conversationId, String groupConversationId) {
+        if (agentStore == null) {
+            return false;
+        }
+        try {
+            var current = agentStore.getCurrentResourceId(agentId);
+            var configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            var origin = configuration != null ? configuration.getDynamicOrigin() : null;
+            return origin != null && origin.namesConversationOrDiscussion(conversationId, groupConversationId);
+        } catch (Exception e) {
+            LOGGER.debugf("[DYNAMIC] Could not read agent '%s' to verify its origin: %s", sanitize(agentId), e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Context key carrying the discussion-wide created-agent total into a member
      * turn. Written by {@code MemberTurnExecutor}, read by
      * {@link #seedCreatedAgentIds}.
@@ -572,7 +704,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            IData<Object> contextData = currentStep.getLatestData(CONTEXT_DYNAMIC_CREATED_AGENT_IDS);
+            IData<Object> contextData = currentStep.getData(CONTEXT_DYNAMIC_CREATED_AGENT_IDS);
             if (contextData != null && contextData.getResult() instanceof Context ctx) {
                 collectAgentIds(ctx.getValue(), seeded);
             }
@@ -587,6 +719,38 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         seeded.removeAll(collectFromAllSteps(memory, KEY_DYNAMIC_TORN_DOWN_AGENT_IDS));
 
         return new ArrayList<>(seeded);
+    }
+
+    /**
+     * M-T2: the retained set as the most recent turn that recorded one left it.
+     * <p>
+     * The latest entry, not the union over all steps like the created list: a
+     * retain flag can be <em>removed</em> ({@code unretain_agent}), and a union
+     * would resurrect it from the turn that set it. Each turn stores the full set
+     * it was seeded with plus its own changes, so the latest entry is the whole
+     * state. Narrowed to agents still tracked as created — which excludes torn-down
+     * ones, since {@link #seedCreatedAgentIds} already subtracted those — because a
+     * retain flag on an agent this conversation no longer tracks means nothing.
+     */
+    static Set<String> seedRetainedAgentIds(IConversationMemory memory, Collection<String> createdAgentIds) {
+        Set<String> retained = new LinkedHashSet<>();
+        var allSteps = memory.getAllSteps();
+        if (allSteps == null) {
+            return retained;
+        }
+        List<IData<Object>> entries = allSteps.getAllLatestData(KEY_DYNAMIC_RETAINED_AGENT_IDS);
+        if (entries == null) {
+            return retained;
+        }
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            IData<Object> entry = entries.get(i);
+            if (entry != null && entry.getResult() != null) {
+                collectAgentIds(entry.getResult(), retained);
+                break;
+            }
+        }
+        retained.retainAll(createdAgentIds);
+        return retained;
     }
 
     /**
@@ -623,7 +787,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
-            Integer depth = parseDelegationDepth(currentStep.getLatestData(contextKey));
+            Integer depth = parseDelegationDepth(currentStep.getData(contextKey));
             if (depth != null) {
                 return depth;
             }
@@ -631,7 +795,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
         var allSteps = memory.getAllSteps();
         if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
+            List<IData<Object>> priorEntries = allSteps.getExactDataPerStep(contextKey);
             if (priorEntries != null) {
                 int deepest = 0;
                 for (IData<Object> entry : priorEntries) {

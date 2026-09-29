@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.lang.reflect.Field;
@@ -155,15 +156,6 @@ public class ConversationMemorySnapshot {
      * @see ai.labs.eddi.engine.memory.IConversationMemory#getPersistedStepCount()
      */
     private transient int persistedStepCount = UNKNOWN_PERSISTED_STEP_COUNT;
-
-    /**
-     * The conversation id was allocated before the first write and no document
-     * exists under it yet, so the store must INSERT under that id rather than
-     * update. Never persisted, like {@link #persistedStepCount}.
-     *
-     * @see ai.labs.eddi.engine.memory.IConversationMemory#isUnpersisted()
-     */
-    private transient boolean unpersisted;
 
     /**
      * "The persisted step count is not known", which forces a full-document write.
@@ -376,6 +368,15 @@ public class ConversationMemorySnapshot {
         private String originWorkflowId;
         private boolean isPublic;
         private boolean committed = true;
+        /**
+         * {@code IData#isVerbatim()}, carried through a save and reload: a tool-call
+         * HITL resume reloads memory and re-enters the pipeline after the output task,
+         * so an entry that lost the flag here would be rendered by a later templating
+         * task. Omitted from the stored document while false, so existing documents and
+         * the common case are unchanged.
+         */
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        private boolean verbatim;
 
         @Override
         public boolean equals(Object o) {
@@ -473,10 +474,20 @@ public class ConversationMemorySnapshot {
             this.committed = committed;
         }
 
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        public boolean isVerbatim() {
+            return verbatim;
+        }
+
+        public void setVerbatim(boolean verbatim) {
+            this.verbatim = verbatim;
+        }
+
         @Override
         public String toString() {
             return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp
-                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ")";
+                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ", verbatim=" + verbatim
+                    + ")";
         }
     }
 
@@ -661,16 +672,5 @@ public class ConversationMemorySnapshot {
     @JsonIgnore
     public void setPersistedStepCount(int persistedStepCount) {
         this.persistedStepCount = persistedStepCount;
-    }
-
-    /** See {@link #unpersisted}. */
-    @JsonIgnore
-    public boolean isUnpersisted() {
-        return unpersisted;
-    }
-
-    @JsonIgnore
-    public void setUnpersisted(boolean unpersisted) {
-        this.unpersisted = unpersisted;
     }
 }
