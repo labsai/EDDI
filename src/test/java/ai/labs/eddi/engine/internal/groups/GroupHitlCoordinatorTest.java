@@ -362,7 +362,7 @@ class GroupHitlCoordinatorTest {
         assertEquals(1, bookmark.phaseIdx());
         assertEquals(2, bookmark.speakerIdx());
         assertEquals(GroupConversation.RESUME_KIND_HUMAN_TURN, bookmark.pauseKind());
-        verify(conversationStore).update(gc);
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
         var scheduleCaptor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
         verify(scheduleStore).createSchedule(scheduleCaptor.capture());
         assertEquals(HitlSchedules.SURFACE_GROUP_HUMAN,
@@ -505,7 +505,7 @@ class GroupHitlCoordinatorTest {
         assertEquals(0, bookmark.repeatIdx());
         assertEquals(-1, bookmark.speakerIdx(), "the shared +1 advance lands the resume at speaker 0");
         assertEquals(GroupConversation.RESUME_KIND_HUMAN_TURN, bookmark.pauseKind());
-        verify(conversationStore).update(gc);
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
         verify(scheduleStore).createSchedule(any());
         verify(listener).onHumanInputRequested(any(GroupConversationEventSink.HumanInputRequestedEvent.class));
     }

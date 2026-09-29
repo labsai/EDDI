@@ -30,6 +30,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
@@ -40,6 +43,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Supports both single-turn (fire-and-forget) and multi-turn conversations.
  * When a {@code conversationId} is provided, the tool continues an existing
  * conversation; otherwise it starts a new one.
+ * <p>
+ * Every delegation, new or continued, is gated on the bound user being allowed
+ * to use the target agent ({@link #useCheck}), the same USE rule the REST, MCP
+ * and {@code /v1} starts apply: the engine-internal start and {@code say} this
+ * tool drives run no such gate of their own.
  *
  * @since 6.0.0
  */
@@ -68,6 +76,13 @@ public class ConverseWithAgentTool {
      * {@code maxDelegationsPerTask} — finding I4.
      */
     private final AtomicInteger delegationCount = new AtomicInteger();
+
+    /**
+     * {@code (agentId, principal) -> may that principal use that agent}, asked
+     * before any delegation. {@code null} skips it (direct construction;
+     * {@code DynamicAgentToolsProvider} always supplies one under CDI).
+     */
+    private final BiPredicate<String, String> useCheck;
 
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
         this(conversationService, userId, permissiveDefault(), 0);
@@ -100,6 +115,19 @@ public class ConverseWithAgentTool {
      *            human started it)
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth) {
+        this(conversationService, userId, config, currentDepth, null);
+    }
+
+    /**
+     * @param useCheck
+     *            {@code (agentId, principal) -> boolean}: whether this user may use
+     *            the target agent. Without it the model could open — or, through a
+     *            conversation this user owns, keep talking to — any deployed agent
+     *            in any workspace. {@code null} skips the check.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck) {
+        this.useCheck = useCheck;
         this.conversationService = conversationService;
         this.userId = userId;
         this.config = config != null ? config : permissiveDefault();
@@ -136,6 +164,15 @@ public class ConverseWithAgentTool {
                     && allowedTargets.stream().filter(Objects::nonNull).noneMatch(t -> t.equals(agentId))) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: not in allowedDelegationTargets", agentId);
                 return "⚠️ Agent '%s' is not an allowed delegation target. Allowed: %s".formatted(agentId, allowedTargets);
+            }
+
+            // --- Guardrail: the user may use the target (M-A1) ---
+            // For a continuation too: the ownership check below admits any conversation
+            // of this user's, which says nothing about whether the user may still use the
+            // agent behind it. Before the per-task counter, so a refusal burns no slot.
+            if (useCheck != null && !useCheck.test(agentId, userId)) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the user has no access to it", sanitize(agentId));
+                return "⚠️ Agent '%s' is not available to this user, so it cannot be consulted.".formatted(agentId);
             }
 
             // --- Guardrail: delegation depth (finding F18) ---

@@ -785,7 +785,7 @@ public class Conversation implements IConversation {
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
         // The groups this conversation belongs to — a group-visible property must
         // carry them, or no reader (the writer included) can ever match it.
-        List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory);
+        List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory, propertiesHandler.getGroupMembershipCheck());
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();

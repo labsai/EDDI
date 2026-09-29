@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -329,6 +330,23 @@ class CallerIdentityContextTest {
     @DisplayName("nothing to offer means no identity at all")
     void capturesNothingWhenNeitherTokenNorPrincipal() {
         assertNull(captureFrom(null, null));
+    }
+
+    @Test
+    @DisplayName("the admin role is recorded, and vouches only for the admin's own user id")
+    void capturesTheAdminRole() {
+        var securityIdentity = mock(SecurityIdentity.class);
+        when(securityIdentity.isAnonymous()).thenReturn(false);
+        when(securityIdentity.getPrincipal()).thenReturn(() -> "admin-1");
+        when(securityIdentity.hasRole("eddi-admin")).thenReturn(true);
+
+        var identity = new CallerIdentityContext(securityIdentity, null).capture();
+
+        assertNotNull(identity);
+        assertTrue(identity.admin());
+        assertTrue(identity.isAdminActingAs("admin-1"));
+        assertFalse(identity.isAdminActingAs("alice"), "an admin's identity must never vouch for another principal");
+        assertFalse(captureFrom(null, "alice").admin(), "no role, no admin");
     }
 
     @Test
