@@ -142,6 +142,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.caller-identity.self-release.enabled` | `true` | Also releases `${caller:token}` to this deployment's own address (`eddi.self.base-url`), not only to the caller's origin — how the Platform Operator's tools call EDDI as the chatting user. The self address bypasses any reverse proxy in front of EDDI, so set `false` if that proxy enforces restrictions EDDI's own authorization does not. See [httpcalls.md](httpcalls.md) |
 | `eddi.self.base-url` | *(derived: `http://127.0.0.1:${quarkus.http.port}`)* | The address EDDI can reach **itself** at — what the Platform Operator's generated tools target. A bare `scheme://host[:port]`; a path, query, fragment or credentials make it ignored. Set it only when loopback is wrong (TLS terminated in-process, a mesh-required service name) or when SSRF protection is on — the value must then pass the full SSRF target policy. Required with `quarkus.http.port=0`, where nothing can be derived. Served at `GET /administration/operator/self-url` |
 | `eddi.keycloak.public.url` | *(empty)* | Browser-facing Keycloak URL when it differs from the in-cluster one |
+| `eddi.http.limits.default-max-body-size` | `25M` | Largest request body any endpoint accepts, **except** a knowledge base's file upload (`POST /ragstore/rags/{id}/sources/{sourceId}/files`, matched below `quarkus.http.root-path`), which keeps `quarkus.http.limits.max-body-size` (60 MB). Raised automatically to what an attachment at `eddi.attachments.max-size-bytes` takes base64-encoded in a JSON body (4/3 plus 1 MB — about 27.7 MB for the default 20 MB), so raising the attachment limit never leaves inline attachments refused here — up to `quarkus.http.limits.max-body-size`, which refuses a larger request before any endpoint sees it. An attachment limit above about 44 MB needs more than the 60 MB ceiling once base64-encoded: raise `quarkus.http.limits.max-body-size` with it (a 60 MiB attachment needs `82M`). EDDI logs a WARN at startup naming both settings and the ceiling needed when they disagree. A ZIP import is held to it too: raise it to import a larger archive. Judged on the declared `Content-Length` before the body is read; refusals close the connection. See [rag.md](rag.md#ingestion-sources) |
+| `eddi.http.limits.refuse-unsized-bodies` | `true` | Refuses, with 411, a chunked HTTP/1.1 request body — one sent without a `Content-Length` — on every endpoint but the file upload. Such a body cannot be measured before it is read, and counting it as it arrives is not possible where the limit is enforced. JSON clients and browsers send the length; set `false` only for a client that cannot, which leaves those bodies bounded by the global 60 MB alone. An HTTP/2 request without a `content-length` is always left to that global ceiling: at the point the limit is enforced it cannot be told apart from a request with no body |
 
 ### Workspaces & resource sharing
 
@@ -244,6 +246,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
+| `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
+| `eddi.httpcalls.batch.max-size-ceiling` | `1000` | Highest `maxBatchSize` an http call may set. Saving a config above it is refused (`400`); one stored before the ceiling was lowered runs at the ceiling, with a WARN |
 | `eddi.httpcalls.default-max-response-size-bytes` | `2000000` | Response-body ceiling. Deliberately above the memory cap, so an over-long body is truncated into memory rather than failing the turn |
 | `eddi.mcpcalls.default-rate-limit` | `100` | Default per-minute limit for MCP tool calls |
 | `eddi.ollama.default-base-url` | `http://localhost:11434` | Used when an Ollama LLM config omits `baseUrl` |
@@ -258,7 +262,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.attachments.max-size-bytes` | `20971520` (20 MB) | Largest single upload |
+| `eddi.attachments.max-size-bytes` | `20971520` (20 MB) | Largest single upload. Sent inline, an attachment travels base64-encoded (4/3 of its size, plus the message), so above about 44 MB raise `quarkus.http.limits.max-body-size` (60 MB) too, or the request is refused with a bare 413 — a WARN at startup names the ceiling needed |
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
@@ -281,6 +285,9 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 |---|---|---|
 | `eddi.backup.export.retention-minutes` | `60` | How long a finished export archive stays downloadable |
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
+| `eddi.backup.import.max-entries` | `10000` | Most entries (files and directories) an imported or synced agent archive may hold. A larger archive is refused with `413` |
+| `eddi.backup.import.max-entry-bytes` | `33554432` (32 MiB) | Most bytes one archive entry may inflate to, counted from what is actually decompressed rather than from the entry header. The importer reads each entry whole into memory, so this also bounds the heap one import can take per file |
+| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import` |
 | `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
 | `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
 | `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |

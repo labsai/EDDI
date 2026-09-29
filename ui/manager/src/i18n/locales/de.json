@@ -552,7 +552,10 @@
     "toolCount": "{{selected}} von {{total}} ausgewählt",
     "specTooLarge": "Diese Spezifikation ist zu groß, um hier geladen zu werden",
     "specUrlInvalid": "Das ist keine gültige URL",
-    "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt"
+    "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt",
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Schalten Sie die integrierten Werkzeuge aus, um alle zu deaktivieren.",
+    "hfToken": "Hugging-Face-Token",
+    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert."
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -752,6 +755,8 @@
     "errorAgentNotReady": "Dieser Agent ist in der gewählten Umgebung noch nicht bereitgestellt.",
     "errorAgentMismatch": "Dieses Gespräch gehört zu einer anderen Version des Agenten.",
     "errorQuotaUnavailable": "Die Nutzungsgrenzen konnten gerade nicht geprüft werden. Versuchen Sie es gleich erneut.",
+    "sendRejected": "Ihre Nachricht wurde nicht gesendet: {{reason}}",
+    "sendWhileLoading": "Ihre Nachricht wurde nicht gesendet: Die Konversation wird noch geladen. Versuchen Sie es gleich noch einmal.",
     "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation."
   },
   "resources": {
@@ -1320,7 +1325,8 @@
     "streamingTimeoutSeconds": "Streaming-Timeout (Sekunden)",
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
-    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet."
+    "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1668,7 +1674,13 @@
     "grantAcknowledge": "Mir ist klar, dass diese Agenten nicht mehr deployt werden können, bis sie wieder hinzugefügt werden oder ihre Konfiguration dieses Secret nicht mehr verwendet.",
     "grantSaved": "Zugriff für „{{key}}“ aktualisiert",
     "grantImpactFailed": "Es konnte nicht geprüft werden, welche deployten Agenten dieses Secret verwenden – jeder von ihnen könnte den Zugriff verlieren.",
-    "grantAcknowledgeUnchecked": "Trotzdem speichern, ohne zu wissen, welche deployten Agenten betroffen sind."
+    "grantAcknowledgeUnchecked": "Trotzdem speichern, ohne zu wissen, welche deployten Agenten betroffen sind.",
+    "rotateNotFound": "Dieses Secret existiert nicht mehr, daher gibt es nichts zu rotieren. Legen Sie es stattdessen neu an.",
+    "keyExists": "Ein Secret namens „{{key}}“ existiert bereits. Erneutes Hinzufügen würde seinen Wert ersetzen — verwenden Sie Rotieren, um den Wert zu ändern und die Berechtigungen beizubehalten.",
+    "keyExistsRotate": "Stattdessen dieses Secret rotieren",
+    "keyExistsPicker": "Ein Secret namens „{{key}}“ existiert bereits. Wählen Sie es aus der Tresorliste oder nehmen Sie einen anderen Namen.",
+    "rotateKeepsGrantAll": "Alle Agenten behalten wie bisher Zugriff.",
+    "rotateKeepsGrant": "Der Zugriff bleibt beschränkt auf: {{agents}}"
   },
   "audit": {
     "title": "Prüfprotokoll",
@@ -1702,17 +1714,36 @@
     "autoRefreshToggle": "Auto-Aktualisierung umschalten (alle 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "Alle Einträge kryptographisch signiert",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Teilweise signiertes Prüfprotokoll",
-    "integrityPartialDesc": "{{count}} von {{total}} Einträgen haben HMAC-Signaturen",
-    "integrityNone": "Unsignierte Audit-Einträge",
     "integrityNoneDesc": "Konfigurieren Sie einen Vault-Master-Key, um automatische HMAC-SHA256-Signierung fuer alle zukuenftigen Audit-Eintraege zu aktivieren.",
     "signed": "Signiert",
     "allSigned": "Alle signiert",
     "decidedBy": "von",
-    "automated": "automatisiert"
+    "automated": "automatisiert",
+    "verify": {
+      "entryInvalid": "Signatur stimmt nicht überein",
+      "entryUnproven": "Nicht verifiziert",
+      "signatureCount": "{{count}} von {{total}} geladenen Einträgen tragen eine Signatur.",
+      "loading": "Signaturen werden geprüft…",
+      "errorTitle": "Integrität nicht geprüft",
+      "errorDesc": "Die Prüfanfrage ist fehlgeschlagen, daher wurde hier nichts geprüft.",
+      "checked": "Die {{count}} neuesten Einträge wurden geprüft.",
+      "verifiedTitle": "Signaturen verifiziert",
+      "chainIntact": "In der Sequenz fehlt kein Eintrag.",
+      "chainNotApplicable": "Über Konversationen hinweg werden nur Signaturen geprüft, nicht die Sequenz.",
+      "verifiedBadge": "VERIFIZIERT",
+      "tamperedTitle": "Integritätsprüfung fehlgeschlagen",
+      "tamperedInvalid": "{{count}} Eintragssignatur(en) passen nicht zum Inhalt — die Einträge wurden nach dem Schreiben verändert.",
+      "tamperedChain": "In der Sequenz fehlen Einträge ({{sequences}}) — der Datensatz wurde gekürzt.",
+      "disabledTitle": "Signaturen können nicht geprüft werden",
+      "reasonUnsigned": "{{count}} unsignierte(r) Eintrag/Einträge",
+      "reasonUnknownKey": "{{count}} mit einem Schlüssel signiert, den diese Installation nicht mehr besitzt",
+      "reasonSkipped": "{{count}} ältere(r) Eintrag/Einträge nicht geprüft",
+      "reasonChain": "die Sequenz konnte nicht vollständig ermittelt werden",
+      "reasonDuplicates": "doppelte Sequenznummern",
+      "reasonUncovered": "{{count}} geladene Einträge älter als der geprüfte Bereich",
+      "unverifiedTitle": "Nicht vollständig verifiziert",
+      "unverifiedDesc": "Keine Signatur wurde widerlegt, aber nicht alles konnte geprüft werden: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "5-Felder-Format: Minute Stunde Tag-des-Monats Monat Wochentag",
@@ -3310,7 +3341,6 @@
     "agentIdPlaceholder": "Agenten-ID zur Nachrichtenverarbeitung",
     "botToken": "Bot-Token",
     "botTokenHint": "Bot-Benutzer-OAuth-Token. Verwenden Sie eine Tresor-Referenz für mehr Sicherheit.",
-    "botTokenPlaceholder": "xoxb-… oder ${vault:slack-bot-token}",
     "channel": "Kanal",
     "channelId": "Slack-Kanal-ID",
     "channelIdCol": "Kanal-ID",
@@ -3331,7 +3361,6 @@
     "searchPlaceholder": "Kanäle suchen…",
     "signingSecret": "Signierungsgeheimnis",
     "signingSecretHint": "Von der Seite „Grundlegende Informationen“ Ihrer Slack-App.",
-    "signingSecretPlaceholder": "Hex-String oder ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack-Einrichtungsanleitung",
     "slackSetupSummary": "Erstellen Sie eine Slack-App, konfigurieren Sie Bot-Token-Bereiche (app_mentions:read, chat:write, im:history, channels:history, groups:history) und fügen Sie die Anmeldedaten hier ein.",
     "target": "Ziel",
@@ -3385,7 +3414,9 @@
     "typeAgent": "Agent",
     "typeGroup": "Gruppe",
     "selectGroup": "Gruppe auswählen …",
-    "unknownGroup": "{{id}} (nicht gefunden)"
+    "unknownGroup": "{{id}} (nicht gefunden)",
+    "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
+    "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",
@@ -3475,7 +3506,8 @@
     "decidedProgress": "{{decided}} von {{total}} entschieden",
     "groupLinkUnavailable": "Diese Gruppe wurde nicht gefunden, daher gibt es keinen verlässlichen Link dorthin.",
     "confirmApproveGroupDescription": "Die gesamte pausierte Phase freigeben und die Diskussion fortsetzen. Jede wartende Aufgabe wird mit freigegeben — für Einzelentscheidungen die Gruppe öffnen.",
-    "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen."
+    "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen.",
+    "pauseChanged": "Diese Anfrage hat sich geändert, seit Sie sie geöffnet haben — es wurde nichts entschieden. Prüfen Sie sie erneut."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -3562,7 +3594,8 @@
     "conversationsTruncated_one": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
-    "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket."
+    "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket.",
+    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden."
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."
@@ -3709,7 +3742,8 @@
     "copyVars": "${vars:…}-Referenz kopieren",
     "refCopied": "Kopiert: {{ref}}",
     "infoLine1": "Verwenden Sie {{vars.<key>}} in System-Prompts oder ${vars:<key>} an beliebiger Stelle in Agent-Konfigurationen.",
-    "infoLine2": "Änderungen werden innerhalb von 2 Minuten wirksam (Cache-TTL). Verwenden Sie für sensible Werte stattdessen den Secrets-Vault."
+    "infoLine2": "Änderungen werden innerhalb von 2 Minuten wirksam (Cache-TTL). Verwenden Sie für sensible Werte stattdessen den Secrets-Vault.",
+    "keyExists": "Eine Variable namens „{{key}}“ existiert bereits. Bearbeiten Sie sie stattdessen in der Liste."
   },
   "workflowEditor": {
     "endpoints": "Endpunkte",
@@ -4925,7 +4959,12 @@
       "space": "Arbeitsbereich",
       "spaceHint": "Alle im Arbeitsbereich dieser Ressource.",
       "published": "Veröffentlicht",
-      "publishedHint": "Alle mit Zugang zu dieser Installation."
+      "publishedHint": "Alle mit Zugang zu dieser Installation.",
+      "confirmTitle": "Sichtbarkeit auf {{visibility}} ändern?",
+      "cascadeLabel": "Auch auf die referenzierten Workflows und Konfigurationen anwenden",
+      "cascadeWarning": "Jede referenzierte Ressource, die Ihnen gehört, erhält diese Sichtbarkeit und verliert ihre eigene Einstellung. Die bisherigen Einstellungen werden nicht aufbewahrt.",
+      "noCascadeWarning": "Nur diese Ressource ändert sich. Wer sie jetzt sehen kann, kann das Referenzierte eventuell trotzdem nicht öffnen.",
+      "apply": "Sichtbarkeit ändern"
     },
     "share": {
       "title": "Teilen",

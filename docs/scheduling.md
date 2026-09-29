@@ -123,12 +123,12 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `conversationStrategy` | string | varies | `new` or `persistent` |
 | `message` | string | — | Message text sent to the agent on each fire |
 | `userId` | string | `system:scheduler` | User identity for the fire |
-| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`) |
+| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active |
 | `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
-| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle) |
+| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
 
 ### Managing Schedules
 
@@ -190,7 +190,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
 | `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500) |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
-| `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry |
+| `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry, re-armed at its next regular fire. It does **not** change `enabled`: a schedule that was disabled (by `/disable`, or because its agent was undeployed) stays disabled — use `/enable` to re-arm it. `409` unless the schedule is currently `DEAD_LETTERED` — the write itself is conditional on that state, so it can never reset a running fire |
 
 ## Dream Consolidation
 
@@ -277,6 +277,20 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > consolidation fire reports its own **estimated LLM** cost. Compare a fire log
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
+
+> **A RAG ingestion fire starts a run; it does not wait for it.** The fire claims
+> the source's run and hands it to a worker of its own, then logs `COMPLETED` —
+> a crawl outlasts the scheduler's lease, and running it inside the fire meant
+> the scheduler cancelled it mid-crawl. When the run later **fails**, its worker
+> writes a second entry for the same fire with status `FAILED` and the run's
+> error, so a crawl that fails every night shows up in the fire log (and in
+> `admin/failed`). That entry does **not** raise the schedule's `failCount`, so
+> a failing crawl never retries early and never dead-letters; the run's own
+> history, under the knowledge base's source, has the detail. A fire that finds
+> a run still going logs `COMPLETED` with "already running". On a graceful
+> shutdown, runs in flight on that instance are closed as `CANCELLED`, so the
+> next fire or "Run now" is not refused until they would have been reaped. See
+> [rag.md](rag.md#ingestion-sources).
 
 ### Fire Logs and Erasure
 

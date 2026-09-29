@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -88,6 +89,14 @@ class LegacyChatExecutor {
                     return chatModel.chat(requestBuilder.build());
                 }, task, "Chat model execution (JSON mode)");
             } catch (LifecycleException e) {
+                // A transient failure (timeout, 429, 5xx — already retried) or an
+                // interrupt says nothing about JSON support. Falling back on those too
+                // re-sent the request without the format: a second full, billed
+                // attempt against a provider that is rate-limiting or down, doubling
+                // the calls exactly when it hurts most (M-L5).
+                if (e instanceof LifecycleException.LifecycleInterruptedException || RetryConfiguration.isRetryableError(e)) {
+                    throw e;
+                }
                 // Provider may not support ResponseFormat.JSON — fall back to standard call.
                 // System prompt reinforcement still provides JSON enforcement.
                 LOGGER.warn("JSON response format not supported by provider, falling back to standard mode: " + e.getMessage());

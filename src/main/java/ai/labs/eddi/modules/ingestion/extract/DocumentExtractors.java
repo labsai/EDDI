@@ -43,6 +43,12 @@ public class DocumentExtractors {
      */
     private static final int BINARY_SNIFF_WINDOW = 8192;
 
+    /**
+     * Characters an upload-time probe extracts before it stops: enough to know the
+     * file has text, and a PDF's reader stops at the first page that has some.
+     */
+    private static final int PROBE_CHARACTERS = 64;
+
     /** The types whose files carry no signature, so their extension decides. */
     private static final Set<String> TEXT_MIMES = Set.of(
             "text/plain", "text/markdown", "text/csv", "text/tab-separated-values",
@@ -129,6 +135,38 @@ public class DocumentExtractors {
                 .extract(content, limits);
     }
 
+    /**
+     * Refuses a file that would yield no text, before it is stored.
+     *
+     * <p>
+     * A scanned PDF has no text layer, and there is no OCR. It used to be accepted,
+     * listed as waiting to be indexed, and then skipped as blank by every run — so
+     * it stayed "not indexed" for good, and nothing anywhere said why. The same
+     * extraction the run performs, stopped after the first few characters, tells
+     * the uploader now.
+     *
+     * @throws UnreadableDocumentException
+     *             naming the reason, when the file cannot be read or holds no text
+     */
+    public void requireText(byte[] content, String mimeType, ExtractionLimits limits) {
+        String text = extract(content, mimeType, limits.withMaxCharacters(PROBE_CHARACTERS));
+        if (text.isBlank()) {
+            throw new UnreadableDocumentException(emptyDocumentReason(mimeType));
+        }
+    }
+
+    /**
+     * Why a file produced no text, in the uploader's terms. Shared with the run,
+     * which says the same thing about a stored file that turns out empty.
+     */
+    public static String emptyDocumentReason(String mimeType) {
+        if ("application/pdf".equalsIgnoreCase(mimeType)) {
+            return "This PDF has no text layer — it looks like a scan, and EDDI has no OCR. "
+                    + "Upload a copy with selectable text.";
+        }
+        return "This file contains no text to ingest.";
+    }
+
     public Optional<DocumentTextExtractor> extractorFor(String mimeType) {
         return extractors.stream().filter(extractor -> extractor.supports(mimeType)).findFirst();
     }
@@ -151,6 +189,13 @@ public class DocumentExtractors {
         }
         String extension = extensionOf(fileName);
         String claimed = MIME_BY_EXTENSION.get(extension);
+        if (claimed != null && !TEXT_MIMES.contains(claimed)) {
+            // The name claims a format that carries a signature, and the content has
+            // none. Taking the name's word stored a text file as a PDF or a .docx,
+            // accepted it, and then failed it on every run as a corrupt document.
+            throw new UnreadableDocumentException("This file is named " + extension + " but its content is not "
+                    + "a " + extension + " file. It may be damaged, or have been renamed.");
+        }
         // An unknown extension on readable text is still text: a .conf or a .rst is
         // worth ingesting, and refusing it would be pedantry about a file name.
         return claimed != null ? claimed : "text/plain";
