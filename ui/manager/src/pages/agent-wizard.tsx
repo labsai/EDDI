@@ -8,7 +8,6 @@ import {
   Bot,
   Globe,
   Brain,
-  Settings2,
   Rocket,
   RefreshCw,
   Upload,
@@ -25,6 +24,9 @@ import {
   ListFilter,
   Info,
   KeyRound,
+  Shapes,
+  IdCard,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -108,20 +110,20 @@ const INITIAL_STATE: WizardState = {
 
 
 const STEPS_STANDARD = [
-  { id: "type", icon: Sparkles, label: "Type" },
-  { id: "info", icon: Brain, label: "Identity" },
-  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "type", icon: Shapes, label: "Type" },
+  { id: "info", icon: IdCard, label: "Identity" },
+  { id: "llm", icon: Brain, label: "Model" },
   { id: "features", icon: Wrench, label: "Features" },
-  { id: "review", icon: Rocket, label: "Review" },
+  { id: "review", icon: ClipboardCheck, label: "Review" },
 ] as const;
 
 const STEPS_API = [
-  { id: "type", icon: Sparkles, label: "Type" },
-  { id: "info", icon: Brain, label: "Identity" },
+  { id: "type", icon: Shapes, label: "Type" },
+  { id: "info", icon: IdCard, label: "Identity" },
   { id: "apispec", icon: Globe, label: "API Spec" },
-  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "llm", icon: Brain, label: "Model" },
   { id: "features", icon: Wrench, label: "Features" },
-  { id: "review", icon: Rocket, label: "Review" },
+  { id: "review", icon: ClipboardCheck, label: "Review" },
 ] as const;
 
 /* ================================================================

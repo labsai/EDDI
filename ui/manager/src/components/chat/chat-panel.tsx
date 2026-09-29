@@ -58,9 +58,9 @@ import {
   ChevronUp,
   Hash,
   Clock,
-  Layers,
-  HandMetal,
   Wrench,
+  Hand,
+  ListOrdered,
 } from "lucide-react";
 
 export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
@@ -112,6 +112,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
   const redoConversation = useRedoConversation();
+  const stepMovePending = undoConversation.isPending || redoConversation.isPending;
 
   // Open the chat for the ?agentId= query param
   /**
@@ -141,41 +142,40 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     // instead — a different one whenever the user had continued from history.
     const conversationIdParam = searchParams.get("conversationId");
 
-    // Skip if this agent is already selected (prevents duplicate opens) —
-    // unless a specific conversation was asked for and it is not the open one.
-    if (
-      agentIdParam === selectedAgentId &&
-      (!conversationIdParam || conversationIdParam === useChatStore.getState().conversationId)
-    ) {
-      // Still clean the URL params
-      setSearchParams({}, { replace: true });
-      return;
+    // Wait for the deployed-agents list before acting, so the display name can be
+    // resolved from it (below) rather than falling back to the id and then losing
+    // the chance once the param is cleared.
+    if (deployedAgents === undefined) return;
+
+    // Deep links only PRESELECT the agent; they never start or reopen a
+    // conversation on their own. Auto-starting from URL params let a crafted
+    // link (e.g. in agent studio, /manage/chat, /workforce/chat) silently open a
+    // conversation AS THE ADMIN the moment the page loaded — a CSRF-style side
+    // effect. Starting is now always an explicit user action (agent picker,
+    // "New conversation", or sending a message).
+    if (agentIdParam !== selectedAgentId) {
+      // The display name is resolved ONLY from the deployed-agents list, never
+      // from the URL: an attacker-supplied ?agentName= must not be reflected
+      // into the UI. Falls back to the id when the agent is not listed.
+      const agentName =
+        deployedAgents.find((b) => b.id === agentIdParam)?.name || agentIdParam;
+      setSelectedAgent(agentIdParam, agentName);
     }
 
-    // Resolve agent name: URL param > deployed agents lookup > fallback to ID
-    const agentNameParam = searchParams.get("agentName");
-    const agentName =
-      agentNameParam ||
-      deployedAgents?.find((b) => b.id === agentIdParam)?.name ||
-      agentIdParam;
-
-    if (agentIdParam !== selectedAgentId) setSelectedAgent(agentIdParam, agentName);
-    if (conversationIdParam) {
+    // A named conversation is only READ (the same GET the history list uses to
+    // open one): nothing is started, resumed or sent, so the rule above holds.
+    // Skipped when it is already the open one.
+    if (conversationIdParam && conversationIdParam !== useChatStore.getState().conversationId) {
       loadConversation.mutate(
         { agentId: agentIdParam, conversationId: conversationIdParam },
         { onError: (err) => toast.error(getErrorMessage(err)) },
       );
-    } else {
-      // Auto-select and reopen the agent's last conversation (or start one)
-      openConversation.mutate(
-        { agentId: agentIdParam, environment: environmentFor(agentIdParam) },
-        { onError: (err) => toast.error(getErrorMessage(err)) },
-      );
     }
 
-    // Remove query params so refresh doesn't re-open
+    // Remove query params so a refresh does not re-trigger, and so the
+    // (ignored) agentName does not linger in the URL.
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, openConversation, loadConversation, setSearchParams, environmentFor]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, loadConversation, setSearchParams]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -318,6 +318,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
   // ── Rerun last step ──
   const rerunConversation = useRerunConversation();
+  // Undo, redo and rerun each finish by replacing the whole transcript with a
+  // fresh read. While one is in flight nothing else may change the
+  // conversation — a send, quick reply or other move racing it would either be
+  // wiped by that read or be read half-done — so every entry point below waits.
+  const conversationBusy = stepMovePending || rerunConversation.isPending;
   const lastMessage = messages[messages.length - 1];
   const showRerun = lastMessage?.role === "agent" && (lastMessage.content ?? "").includes("⚠️ Error");
 
@@ -497,7 +502,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               </button>
             </div>
             <div className="flex items-center gap-1" title="Steps">
-              <Layers className="h-3 w-3" />
+              <ListOrdered className="h-3 w-3" />
               <span>{messages.filter((m) => m.role === "user").length} {t("chat.context.stepCount", "turns")}</span>
             </div>
             <div className="flex items-center gap-1" title="Started">
@@ -556,6 +561,21 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                         t("chat.emptyConversation", "This conversation has no messages yet.")
                       : t("chat.empty")}
                 </p>
+                {/* A deep link (?agentId=) only preselects the agent and never starts
+                    a conversation by itself, so offer the explicit start here —
+                    otherwise the input stays disabled and "New conversation" is
+                    hidden until the user re-picks the same agent. */}
+                {!conversationId && !startConversation.isPending && !openConversation.isPending && !loadConversation.isPending && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAgent(selectedAgentId, selectedAgentName ?? selectedAgentId)}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    data-testid="open-chat"
+                  >
+                    <MessageSquarePlus className="h-4 w-4" />
+                    {t("commandPalette.openChat")}
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -582,7 +602,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 ))}
 
               {/* Rerun button — shown when last message is an error */}
-              {showRerun && !isProcessing && (
+              {showRerun && !isProcessing && !stepMovePending && (
                 <div className="flex justify-center py-2">
                   <button
                     onClick={handleRerun}
@@ -630,7 +650,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && (
+        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -655,7 +675,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs"
             data-testid="chat-pause-banner"
           >
-            <HandMetal className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+            <Hand className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
             <span className="text-amber-600 dark:text-amber-400">
               {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
             </span>
@@ -681,12 +701,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             // The send clears the field itself, and hands it back if the
             // backend refuses the message without consuming it.
             onSend={(val) => handleSend(val, true)}
-            disabled={isProcessing || isPaused || isLoadingConversation}
+            disabled={isProcessing || isPaused || isLoadingConversation || conversationBusy}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId || isPaused || isLoadingConversation}
+            disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
@@ -698,8 +718,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={removeAttachment}
             hasReadyAttachment={hasReadyAttachment}
-            onUndo={conversationId && undoAvailable && !isProcessing ? () => undoConversation.mutate() : undefined}
-            onRedo={conversationId && redoAvailable && !isProcessing ? () => redoConversation.mutate() : undefined}
+            // Disabled while either move (or a rerun) is pending: the flags
+            // only change after the re-read, so a double click would otherwise
+            // undo a second turn.
+            onUndo={conversationId && undoAvailable && !isProcessing && !conversationBusy
+              ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
+              : undefined}
+            onRedo={conversationId && redoAvailable && !isProcessing && !conversationBusy
+              ? () => redoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
+              : undefined}
             embedded={embedded}
           />
         )}

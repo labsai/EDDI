@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.properties;
 
+import java.util.Objects;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -28,6 +30,52 @@ import java.util.Optional;
  * @since 6.0.0
  */
 public interface IUserMemoryStore {
+
+    /**
+     * Prefix of the keys EDDI keeps for its own GDPR bookkeeping, such as the Art.
+     * 18 processing-restriction flag. See {@link #isReservedKey}.
+     */
+    String RESERVED_KEY_PREFIX = "_gdpr_";
+
+    /**
+     * Whether a key belongs to EDDI's GDPR bookkeeping rather than to the user's
+     * memories. Such keys are written only through {@link #upsertReserved}, are
+     * never evicted, pruned or consolidated, and survive
+     * {@link #deleteOlderThan}/{@link #deleteProperties}; only the erasure cascade
+     * ({@link #deleteAllForUser}) and the admin unrestrict path remove them.
+     * <p>
+     * Exact prefix match, case-sensitive, like the retention sweep's filter.
+     */
+    static boolean isReservedKey(String key) {
+        return key != null && key.startsWith(RESERVED_KEY_PREFIX);
+    }
+
+    /**
+     * Refuses a {@linkplain #isReservedKey reserved key}. For callers that validate
+     * before reaching the store (REST, MCP, the LLM tool) so they can answer with a
+     * readable refusal rather than a store failure.
+     *
+     * @throws ReservedMemoryKeyException
+     *             if {@code key} is reserved
+     */
+    static void rejectReservedKey(String key) {
+        if (isReservedKey(key)) {
+            throw new ReservedMemoryKeyException(key);
+        }
+    }
+
+    /**
+     * A write named a key reserved for GDPR bookkeeping. Unchecked, and an
+     * {@link IllegalArgumentException}, because it is a caller error that no retry
+     * fixes — REST surfaces map it to 400.
+     */
+    final class ReservedMemoryKeyException extends IllegalArgumentException {
+
+        public ReservedMemoryKeyException(String key) {
+            super("Memory keys starting with '" + RESERVED_KEY_PREFIX + "' are reserved for GDPR bookkeeping and cannot be written "
+                    + "or deleted here (key: '" + key + "').");
+        }
+    }
 
     /** Recall order that ranks primarily by {@code accessCount}. */
     String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
@@ -84,8 +132,19 @@ public interface IUserMemoryStore {
 
     Properties readProperties(String userId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Upserts each pair as a {@code global} entry. Refuses a
+     * {@linkplain #isReservedKey reserved key} with
+     * {@link ReservedMemoryKeyException} before writing anything.
+     */
     void mergeProperties(String userId, Properties properties) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Deletes the user's {@code global} entries, <strong>except</strong>
+     * {@linkplain #isReservedKey reserved ones}: a "clear my properties" call must
+     * not lift a GDPR Art. 18 restriction that only the admin unrestrict endpoint
+     * may lift, and must not do it without an audit entry.
+     */
     void deleteProperties(String userId) throws IResourceStore.ResourceStoreException;
 
     // === Structured entries ===
@@ -97,9 +156,51 @@ public interface IUserMemoryStore {
      * <li>{@code global}: {@code (userId, key)}</li>
      * </ul>
      *
+     * <strong>Refuses a {@linkplain #isReservedKey reserved key}</strong> with
+     * {@link ReservedMemoryKeyException}, whatever the entry's category. Those keys
+     * are GDPR bookkeeping written only through {@link #upsertReserved}; a global
+     * entry is keyed on {@code (userId, key)}, so an ordinary upsert of
+     * {@code _gdpr_processing_restricted} would not merely add a row — it would
+     * overwrite the admin's restriction in place. The check sits here, at the
+     * store, so that every write path (LLM tool, property setter, MCP, REST,
+     * migration, Dream) is covered, including the ones added later.
+     *
      * @return the entry ID (generated or existing)
      */
     String upsert(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Writes {@code entry} only when nothing exists yet at its upsert identity —
+     * {@code (userId, key)} for a {@code global} entry, {@code (userId, key,
+     * sourceAgentId)} for a self or group one — and never replaces a value that is
+     * there. For writers whose value must lose to anything already stored, such as
+     * a migration of frozen legacy data, or that must never land on an entry they
+     * did not account for, such as Dream's newly consolidated entries.
+     * <p>
+     * This default checks and then writes, so a concurrent writer can slip in
+     * between; stores that can do it atomically override it.
+     *
+     * @return the id of the inserted entry, or {@code null} when one already
+     *         existed
+     */
+    default String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        boolean global = entry.visibility() == Visibility.global;
+        boolean exists = getAllEntries(entry.userId()).stream()
+                .anyMatch(e -> entry.key().equals(e.key()) && (global
+                        ? e.visibility() == Visibility.global
+                        : e.visibility() != Visibility.global && Objects.equals(entry.sourceAgentId(), e.sourceAgentId())));
+        return exists ? null : upsert(entry);
+    }
+
+    /**
+     * The one write path for {@linkplain #isReservedKey reserved keys}, for
+     * {@code GdprComplianceService} alone. Refuses any other key with
+     * {@link ReservedMemoryKeyException}, so it cannot be used as a way around the
+     * checks {@link #upsert} applies to ordinary entries.
+     *
+     * @return the entry ID (generated or existing)
+     */
+    String upsertReserved(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException;
 
     void deleteEntry(String entryId) throws IResourceStore.ResourceStoreException;
 
@@ -156,7 +257,36 @@ public interface IUserMemoryStore {
 
     // === GDPR ===
 
+    /**
+     * Deletes every entry of the user, reserved keys included. For the GDPR erasure
+     * cascade; a "delete all my memories" surface uses
+     * {@link #deleteAllExceptReserved} instead.
+     */
     void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Deletes every entry of the user except the {@linkplain #isReservedKey
+     * reserved ones}, for the REST and MCP "delete all memories" surfaces. Those
+     * are memory housekeeping, not an Art. 17 erasure: going through
+     * {@link #deleteAllForUser} let a restricted user lift their own Art. 18
+     * restriction by clearing their memories, with no admin and no audit entry.
+     * <p>
+     * Entry by entry rather than one filtered delete so the contract needs no new
+     * query in every backend; a user's memories are bounded by
+     * {@code maxEntriesPerUser}.
+     *
+     * @return how many entries were deleted
+     */
+    default long deleteAllExceptReserved(String userId) throws IResourceStore.ResourceStoreException {
+        long deleted = 0;
+        for (UserMemoryEntry entry : getAllEntries(userId)) {
+            if (entry.id() != null && !isReservedKey(entry.key())) {
+                deleteEntry(entry.id());
+                deleted++;
+            }
+        }
+        return deleted;
+    }
 
     long countEntries(String userId) throws IResourceStore.ResourceStoreException;
 

@@ -21,6 +21,13 @@ public interface IGroupConversationStore {
 
     GroupConversation read(String id) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
+    /**
+     * Replaces an existing document. <strong>Never creates one</strong>: a document
+     * that no longer exists raises {@link GroupConversationGoneException}. The
+     * write used to be an upsert, so a discussion still running when its document
+     * was deleted — by a GDPR erasure, or by the delete endpoint — wrote the whole
+     * transcript back on its next phase and undid the deletion.
+     */
     void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException;
 
     void delete(String id) throws IResourceStore.ResourceStoreException;

@@ -92,12 +92,19 @@ public class PropertiesMigrationService {
         int userCount = 0;
         int entryCount = 0;
         int failedCount = 0;
+        int unownedDocuments = 0;
+        int keptNewerEntries = 0;
 
         for (Document doc : legacyCollection.find()) {
             String userId = doc.getString("userId");
             if (userId == null) {
-                LOGGER.warnf("[MIGRATION] Skipping document without userId: %s", doc.getObjectId("_id"));
-                failedCount++;
+                // Not a failure: a document with no owner can never be migrated, on this
+                // boot or any other. Counting it as one held the rename back forever,
+                // re-running the migration on every startup. Its contents stay readable
+                // in the backup collection the source is renamed to.
+                LOGGER.warnf("[MIGRATION] Skipping document without userId: %s — it remains in '%s' after the rename.",
+                        doc.getObjectId("_id"), BACKUP_COLLECTION);
+                unownedDocuments++;
                 continue;
             }
 
@@ -105,6 +112,13 @@ public class PropertiesMigrationService {
                 // Skip MongoDB internal fields and the userId field itself
                 if ("_id".equals(key) || "userId".equals(key))
                     continue;
+                if (IUserMemoryStore.isReservedKey(key)) {
+                    // The store refuses these, and counting the refusal as a failure
+                    // would keep the legacy collection from ever being retired. A legacy
+                    // property can never have been a GDPR flag, which postdates it.
+                    LOGGER.warnf("[MIGRATION] Skipping legacy key='%s' for userId='%s': reserved for GDPR bookkeeping", key, userId);
+                    continue;
+                }
 
                 Object value = doc.get(key);
                 UserMemoryEntry entry = new UserMemoryEntry(null, // id — generated on insert
@@ -119,9 +133,19 @@ public class PropertiesMigrationService {
                         null // updatedAt — set by upsert
                 );
 
+                // A user who already has a GLOBAL entry for this key wrote it after the
+                // v5 data was frozen — or a previous (partial) run of this migration did.
+                // Either way the existing entry wins: upserting the legacy value over it
+                // replaced a newer answer with a stale one, on every retry. Only the
+                // global identity counts — a self or group entry with the same key is a
+                // different memory and does not stand in for the shared one. The insert
+                // is atomic, so a value another node writes meanwhile cannot be lost.
                 try {
-                    userMemoryStore.upsert(entry);
-                    entryCount++;
+                    if (userMemoryStore.insertIfAbsent(entry) != null) {
+                        entryCount++;
+                    } else {
+                        keptNewerEntries++;
+                    }
                 } catch (Exception e) {
                     failedCount++;
                     LOGGER.warnf("[MIGRATION] Failed to migrate key='%s' for userId='%s': %s", key, userId, e.getMessage());
@@ -131,7 +155,8 @@ public class PropertiesMigrationService {
         }
 
         // Only retire the source once every key made it across. The loop is idempotent
-        // — upsert is keyed on (userId, key) — so leaving the collection in place lets
+        // — a key already present in usermemories is skipped — so leaving the
+        // collection in place lets
         // the next boot retry the entries that failed. Renaming on a partial run made
         // the migration a permanent no-op afterwards (collectionExists is then false),
         // so a transient Mongo error on three of four hundred users silently stranded
@@ -154,7 +179,8 @@ public class PropertiesMigrationService {
                 }
             }
             legacyCollection.renameCollection(new MongoNamespace(database.getName(), BACKUP_COLLECTION));
-            LOGGER.infof("[MIGRATION] Complete: migrated %d entries for %d users. " + "Old collection renamed to '%s'", entryCount, userCount,
+            LOGGER.infof("[MIGRATION] Complete: migrated %d entries for %d users (%d keys kept their newer usermemories value, "
+                    + "%d documents had no userId). Old collection renamed to '%s'", entryCount, userCount, keptNewerEntries, unownedDocuments,
                     BACKUP_COLLECTION);
         } catch (Exception e) {
             LOGGER.warnf("[MIGRATION] Migration data written but failed to rename collection: %s", e.getMessage());

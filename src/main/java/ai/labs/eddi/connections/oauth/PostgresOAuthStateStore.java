@@ -157,6 +157,20 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
     }
 
     @Override
+    public int deleteByPrincipal(String principal) {
+        createSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement("DELETE FROM connection_oauth_states WHERE principal = ?")) {
+            statement.setString(1, principal);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            // Thrown, not swallowed like the expiry sweep: an erasure step that failed
+            // must be reported as failed.
+            throw new IllegalStateException("Failed to delete pending OAuth states", e);
+        }
+    }
+
+    @Override
     public int deleteExpired() {
         createSchema();
         // Same clock as claim(), for the same reason: a sweep on the DB clock could

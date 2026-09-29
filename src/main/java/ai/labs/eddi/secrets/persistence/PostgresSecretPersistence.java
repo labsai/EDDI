@@ -430,6 +430,26 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public String setMetaValueIfAbsent(String key, String value) {
+        ensureSchema();
+        // DO NOTHING on conflict: an existing value is never replaced, and the primary
+        // key makes the insert atomic, so concurrent creators converge on one winner.
+        String sql = """
+                INSERT INTO secret_vault_meta (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ps.setString(2, value);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+        return getMetaValue(key);
+    }
+
     // ─── Conversion helpers ───
 
     @SuppressWarnings("unchecked")

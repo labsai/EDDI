@@ -102,6 +102,41 @@ class SummarizationServiceInheritanceTest {
         assertEquals("gpt-4o", parentParams.get("modelName"), "the parent task's params must survive intact");
     }
 
+    /**
+     * Live-reproduced: a Dream cycle with {@code llmProvider: "ollama"} failed on
+     * every run with {@code "model is required"} — the model was written as
+     * {@code modelName}, which the Ollama builder never reads.
+     */
+    @Test
+    @DisplayName("the model goes under the key the provider's builder reads — model for Ollama")
+    void ollamaGetsTheModelKey() throws Exception {
+        service.summarize("content", "instructions", "ollama", "qwen2.5:3b", new HashMap<>(Map.of("baseUrl", "http://localhost:11434")));
+
+        Map<String, String> params = capturedParams();
+        assertEquals("qwen2.5:3b", params.get("model"));
+        assertNull(params.get("modelName"));
+    }
+
+    @Test
+    @DisplayName("modelId for Bedrock, HuggingFace and Vertex; deploymentName for Azure; modelName otherwise")
+    void providerModelKeys() {
+        assertEquals("modelId", SummarizationService.modelParameterKey("bedrock"));
+        assertEquals("modelId", SummarizationService.modelParameterKey("huggingface"));
+        assertEquals("modelId", SummarizationService.modelParameterKey("gemini-vertex"));
+        assertEquals("deploymentName", SummarizationService.modelParameterKey("azure-openai"));
+        assertEquals("modelName", SummarizationService.modelParameterKey("anthropic"));
+        assertEquals("modelName", SummarizationService.modelParameterKey("openai"));
+        assertEquals("modelName", SummarizationService.modelParameterKey(null));
+    }
+
+    @Test
+    @DisplayName("no summarizer model given — the inherited model is kept, not overwritten with null")
+    void blankModelKeepsTheInheritedOne() throws Exception {
+        service.summarize("content", "instructions", "ollama", null, new HashMap<>(Map.of("model", "llama3.2")));
+
+        assertEquals("llama3.2", capturedParams().get("model"));
+    }
+
     @Test
     @DisplayName("the legacy 4-arg call still works and passes only the model name")
     void legacyCallPassesModelNameOnly() throws Exception {

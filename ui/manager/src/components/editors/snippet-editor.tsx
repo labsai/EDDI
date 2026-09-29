@@ -6,7 +6,7 @@ import {
   Puzzle,
   Tag,
   FileText,
-  Code2,
+  Braces,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { EditorSection } from "./editor-section";
@@ -239,7 +239,7 @@ export function SnippetEditor({
               className="h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid="snippet-template-enabled"
             />
-            <Code2 className="h-3.5 w-3.5 text-muted-foreground" />
+            <Braces className="h-3.5 w-3.5 text-muted-foreground" />
             {t("snippetEditor.templateEnabled", "Enable template resolution")}
           </label>
           <p className="text-[10px] text-muted-foreground ps-5 -mt-1">
