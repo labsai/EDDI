@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -13,7 +15,11 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionExceptio
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore.SlackApprovalRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
@@ -21,6 +27,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,11 +43,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * raw-body signature has been verified.
  * <p>
  * Handles {@code block_actions} with action ids {@code hitl_approve} /
- * {@code hitl_reject}. The button value carries the owning integration name
- * followed by the subject: {@code <integrationName>|<conversationId>} for a
- * single conversation resume, or {@code <integrationName>|group:<gcId>} for a
- * group discussion resume. Legacy bare values (no integration name) are treated
- * as unbindable and rejected.
+ * {@code hitl_reject}. The button value carries the owning integration name,
+ * the subject and the id of the card it was posted on:
+ * {@code <integrationName>|<conversationId>|<cardId>} for a single conversation
+ * resume, or {@code <integrationName>|group:<gcId>|<cardId>} for a group
+ * discussion resume. Legacy bare values (no integration name) are treated as
+ * unbindable and rejected, and so are values without a card id.
  * <p>
  * The owning integration — resolved by NAME from the button value, not by a
  * channel lookup — governs both signature verification (see
@@ -52,6 +61,23 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * owning integration's {@code hitlApproverUserIds}. {@code decidedBy} is always
  * derived server-side ({@code slack:<userId>}) — never trusted from the
  * payload.
+ * <p>
+ * <b>Subject binding.</b> The signature and the approver list prove the
+ * decision came from the owning integration, not that the SUBJECT belongs to
+ * it: the value is just a string in a payload. So a decision is accepted only
+ * if that integration posted an approval card for the subject — recorded in
+ * {@link ISlackApprovalRecordStore} when the card was posted — AND the card was
+ * posted for the pause the subject is in right now. A subject this integration
+ * never notified is refused and logged; a card from an earlier pause of the
+ * same subject is treated as already resolved. This holds for group decisions
+ * too.
+ * <p>
+ * <b>Card binding.</b> Subject and pause alone would let an OLD card of the
+ * same subject resolve a NEW pause — an approver clicking a stale "delete file
+ * A" card would approve a later "delete everything" they never saw. So the
+ * decision must also carry the card id recorded for the current pause; a stale
+ * card's id belongs to an earlier pause's record, and a button with no card id
+ * is refused.
  *
  * @since 6.1.0
  */
@@ -66,6 +92,7 @@ public class SlackInteractivityHandler {
     private final IGroupConversationService groupConversationService;
     private final SlackWebApiClient slackApi;
     private final ObjectMapper objectMapper;
+    private final ISlackApprovalRecordStore approvalRecords;
     private final ExecutorService executorService;
 
     @Inject
@@ -73,7 +100,9 @@ public class SlackInteractivityHandler {
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             SlackWebApiClient slackApi,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ISlackApprovalRecordStore approvalRecords) {
+        this.approvalRecords = approvalRecords;
         this.channelTargetRouter = channelTargetRouter;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
@@ -172,6 +201,64 @@ public class SlackInteractivityHandler {
         }
 
         String auth = botToken != null && !botToken.isBlank() ? "Bearer " + botToken : null;
+
+        // SUBJECT + CARD BINDING: the decision must come from a card THIS integration
+        // posted for the subject, and that card must be for the pause the subject is
+        // in now. A button without a card id predates card binding and cannot be tied
+        // to one card, so it is refused.
+        String subject = parsed.value().subject();
+        String cardId = parsed.value().cardId();
+        if (cardId == null) {
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button is not "
+                    + "bound to an approval card",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            return;
+        }
+        List<SlackApprovalRecord> records;
+        try {
+            records = approvalRecords.findBySubject(integration.getName(), subject);
+        } catch (RuntimeException e) {
+            // Fail closed, and leave the card intact so the approver can retry.
+            LOGGER.warnf("Could not read Slack HITL approval records for %s — decision refused: %s",
+                    sanitize(subject), e.getMessage());
+            return;
+        }
+        if (records.isEmpty()) {
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=no approval card "
+                    + "was posted for this subject by this integration",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            return;
+        }
+        SlackApprovalRecord card = records.stream().filter(r -> r.matchesCard(cardId)).findFirst().orElse(null);
+        if (card == null) {
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button does not "
+                    + "belong to an approval card this integration posted for this subject",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            return;
+        }
+        // Residual TOCTOU (review Finding D, accepted): reading the pause and resuming
+        // are two steps, so a resume+re-pause landing between them is not detected.
+        // Closing it fully needs an expected-pausedAt threaded into
+        // resumeConversation/resumeDiscussion and a CAS there — disproportionate here.
+        PauseState pause = currentPause(parsed.value());
+        if (pause == PauseState.UNKNOWN) {
+            return; // could not read the subject — leave the card so it can be retried
+        }
+        if (!pause.paused()) {
+            finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            return;
+        }
+        if (!card.matchesPause(pause.pausedAt())) {
+            // A card from an EARLIER pause of this subject: that pause was resolved,
+            // and this card must not approve the one that followed it — even when a
+            // newer card for the current pause exists.
+            LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=card was posted "
+                    + "for an earlier pause",
+                    sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
+            finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            return;
+        }
+
         if (parsed.value().isGroup()) {
             resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(),
                     auth, parsed.approvalChannelId(), parsed.messageTs());
@@ -285,6 +372,54 @@ public class SlackInteractivityHandler {
         } catch (Exception e) {
             LOGGER.warnf("Failed to resume group discussion %s from Slack: %s",
                     sanitize(groupConversationId), e.getMessage());
+        }
+    }
+
+    /**
+     * Whether the decision's subject is paused right now, and since when.
+     * {@link #UNKNOWN} means it could not be read (a transient store failure).
+     */
+    private record PauseState(boolean paused, Instant pausedAt) {
+        static final PauseState UNKNOWN = new PauseState(false, null);
+        static final PauseState NOT_PAUSED = new PauseState(false, Instant.EPOCH);
+    }
+
+    /**
+     * Read the subject's current pause identity: a conversation's
+     * {@code hitlPausedAt} while it is {@code AWAITING_HUMAN}, or a group's
+     * {@code pausedAt} while it is {@code AWAITING_APPROVAL}. A subject that is
+     * gone reads as not paused (idempotent "already resolved").
+     */
+    private PauseState currentPause(SlackHitlSupport.ActionValue value) {
+        if (value.isGroup()) {
+            String groupConversationId = value.groupConversationId();
+            try {
+                GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+                if (gc == null || gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+                    return PauseState.NOT_PAUSED;
+                }
+                return new PauseState(true, gc.getPausedAt());
+            } catch (IResourceStore.ResourceNotFoundException | GroupConversationGoneException e) {
+                return PauseState.NOT_PAUSED;
+            } catch (Exception e) {
+                LOGGER.warnf("Could not read group discussion %s for a Slack HITL decision: %s",
+                        sanitize(groupConversationId), e.getMessage());
+                return PauseState.UNKNOWN;
+            }
+        }
+        String conversationId = value.subject();
+        try {
+            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            if (snapshot == null || snapshot.getConversationState() != ConversationState.AWAITING_HUMAN) {
+                return PauseState.NOT_PAUSED;
+            }
+            return new PauseState(true, snapshot.getHitlPausedAt());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return PauseState.NOT_PAUSED;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read conversation %s for a Slack HITL decision: %s",
+                    sanitize(conversationId), e.getMessage());
+            return PauseState.UNKNOWN;
         }
     }
 

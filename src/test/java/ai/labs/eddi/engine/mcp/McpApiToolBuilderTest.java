@@ -793,4 +793,102 @@ class McpApiToolBuilderTest {
         assertTrue(description.contains("test"), description);
         assertTrue(description.contains("Default: production"), description);
     }
+
+    @Test
+    @DisplayName("a spec location on the cloud metadata service is refused before any fetch")
+    void specLocationOnMetadataServiceIsRefused() {
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> McpApiToolBuilder.parseSpec("http://169.254.169.254/latest/meta-data/openapi.json"));
+        assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a non-http spec location is still refused (no file:// or classpath fetch)")
+    void specLocationMustBeHttp() {
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("file:///etc/passwd"));
+        assertTrue(e.getMessage().contains("http or https"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an inline spec with a filesystem $ref is refused before parsing (setSafelyResolveURL does not cover relative refs)")
+    void inlineSpecWithFilesystemRefIsRefused() {
+        String spec = """
+                {
+                  "openapi": "3.0.3",
+                  "info": { "title": "Evil", "version": "1.0.0" },
+                  "paths": {
+                    "/x": { "get": { "responses": { "200": {
+                      "description": "ok",
+                      "content": { "application/json": { "schema": { "$ref": "/etc/passwd" } } } } } } }
+                  }
+                }
+                """;
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(spec));
+        assertTrue(e.getMessage().contains("external $ref"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("the inline-ref guard allows internal (#/...) and http(s) references")
+    void inlineRefGuardAllowsInternalAndHttp() {
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"#/components/schemas/Thing\"}"));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"https://example.com/defs.json#/Thing\"}"));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "$ref: ./local.yaml"));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"$ref\": \"file:///etc/hosts\"}"));
+    }
+
+    /**
+     * A JSON/YAML escape for the dollar sign, built at runtime so no escape sits in
+     * the source.
+     */
+    private static final String ESCAPED_DOLLAR = "\\" + "u0024";
+
+    @Test
+    @DisplayName("an escaped $ref key (JSON unicode escape) cannot slip a filesystem ref past the inline guard")
+    void escapedRefKeyInJsonIsRefused() {
+        String spec = """
+                {
+                  "openapi": "3.0.3",
+                  "info": { "title": "Evil", "version": "1.0.0" },
+                  "paths": {
+                    "/x": { "get": { "responses": { "200": {
+                      "description": "ok",
+                      "content": { "application/json": { "schema": { "KEYref": "/etc/passwd" } } } } } } }
+                  }
+                }
+                """.replace("KEY", ESCAPED_DOLLAR);
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(spec));
+        assertTrue(e.getMessage().contains("external $ref '/etc/passwd'"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an escaped $ref key in a double-quoted YAML key is refused too")
+    void escapedRefKeyInYamlIsRefused() {
+        String spec = """
+                openapi: 3.0.3
+                info: { title: Evil, version: 1.0.0 }
+                paths:
+                  /x:
+                    get:
+                      responses:
+                        '200':
+                          description: ok
+                          content:
+                            application/json:
+                              schema:
+                                "KEYref": ./local.yaml
+                """.replace("KEY", ESCAPED_DOLLAR);
+        var e = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeInlineRefs(spec));
+        assertTrue(e.getMessage().contains("external $ref './local.yaml'"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an escaped key with an internal ref still parses (the tree walk allows #/ refs)")
+    void escapedInternalRefIsAllowed() {
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeInlineRefs(
+                "{\"KEYref\": \"#/components/schemas/Thing\"}".replace("KEY", ESCAPED_DOLLAR)));
+    }
 }

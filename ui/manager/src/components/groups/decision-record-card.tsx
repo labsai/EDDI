@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, Gavel, MessageSquareWarning, Scale } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -100,7 +101,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
             )}
           >
             {/* No rehypeRaw: an arbitrator's ruling is model output, so raw HTML stays escaped. */}
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(view.body)}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(view.body)}</ReactMarkdown>
           </div>
           {bodyCollapsible && (
             <Button
@@ -177,7 +178,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
           </p>
           {/* Terms are a party's own words, markdown and all. No rehypeRaw: untrusted. */}
           <div className="prose prose-sm dark:prose-invert mt-0.5 max-w-none text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(view.terms)}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(view.terms)}</ReactMarkdown>
           </div>
         </div>
       )}
@@ -209,7 +210,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
           className="prose prose-sm dark:prose-invert mt-3 max-w-none text-muted-foreground"
           data-testid="decision-details"
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{view.details}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{view.details}</ReactMarkdown>
         </div>
       )}
 

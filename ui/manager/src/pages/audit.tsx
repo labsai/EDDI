@@ -1,4 +1,5 @@
 import { formatUsd } from "@/lib/utils";
+import { displayUserInput } from "@/lib/api/conversations";
 import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
@@ -9,13 +10,6 @@ import {
   DollarSign,
   ChevronDown,
   ChevronRight,
-  Brain,
-  Zap,
-  Eye,
-  Cpu,
-  FileOutput,
-  Settings,
-  Hash,
   Loader2,
   Shield,
   RefreshCw,
@@ -27,8 +21,10 @@ import {
   Fingerprint,
   ShieldAlert,
   ShieldX,
-  HandMetal,
+  Hand,
 } from "lucide-react";
+import { extensionTypeForTask, getExtensionIcon } from "@/lib/api/extensions";
+import { UNKNOWN_RESOURCE_TYPE_ICON } from "@/lib/resource-type-icons";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import { useAuditVerification } from "@/hooks/use-audit-verification";
 import {
@@ -45,17 +41,28 @@ import { useDeployedAgents } from "@/hooks/use-chat";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TASK_TYPE_STYLES: Record<string, { bg: string; text: string; icon: typeof Brain }> = {
-  langchain:    { bg: "bg-purple-500/15", text: "text-purple-400",  icon: Brain },
-  behavior:     { bg: "bg-blue-500/15",   text: "text-blue-400",    icon: Zap },
-  output:       { bg: "bg-emerald-500/15", text: "text-emerald-400", icon: FileOutput },
-  expressions:  { bg: "bg-amber-500/15",  text: "text-amber-400",   icon: Eye },
-  httpcalls:    { bg: "bg-orange-500/15",  text: "text-orange-400",  icon: Cpu },
-  propertysetter: { bg: "bg-teal-500/15", text: "text-teal-400",    icon: Settings },
-  hitl:         { bg: "bg-amber-500/15",  text: "text-amber-500",   icon: HandMetal },
+/**
+ * Badge colours per step kind, keyed by extension type. The icon is NOT here:
+ * it comes from the shared resource-type table, so a step looks the same in the
+ * audit trail as in the pipeline. (This table used to carry its own icons — and
+ * was keyed on "behavior"/"httpcalls"/"propertysetter", which the backend never
+ * sends, so those rows all rendered as the default.)
+ */
+const TASK_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
+  "eddi://ai.labs.llm":      { bg: "bg-purple-500/15",  text: "text-purple-400" },
+  "eddi://ai.labs.rules":    { bg: "bg-blue-500/15",    text: "text-blue-400" },
+  "eddi://ai.labs.output":   { bg: "bg-emerald-500/15", text: "text-emerald-400" },
+  "eddi://ai.labs.parser":   { bg: "bg-amber-500/15",   text: "text-amber-400" },
+  "eddi://ai.labs.apicalls": { bg: "bg-orange-500/15",  text: "text-orange-400" },
+  "eddi://ai.labs.property": { bg: "bg-teal-500/15",    text: "text-teal-400" },
+  "eddi://ai.labs.mcpcalls": { bg: "bg-rose-500/15",    text: "text-rose-400" },
+  "eddi://ai.labs.rag":      { bg: "bg-indigo-500/15",  text: "text-indigo-400" },
 };
 
-const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: Hash };
+/** Human-in-the-loop decisions are not a pipeline step; they get the HITL hand. */
+const HITL_STYLE = { bg: "bg-amber-500/15", text: "text-amber-500", icon: Hand };
+
+const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: UNKNOWN_RESOURCE_TYPE_ICON };
 
 const PAGE_SIZE = 100;
 
@@ -71,7 +78,10 @@ const AuditProblemsContext = createContext<ReadonlyMap<string, AuditEntryStatus>
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getTaskStyle(taskType: string) {
-  return TASK_TYPE_STYLES[taskType] ?? DEFAULT_STYLE;
+  if (taskType === "hitl") return HITL_STYLE;
+  const extensionType = extensionTypeForTask(taskType);
+  const colors = TASK_BADGE_COLORS[extensionType];
+  return colors ? { ...colors, icon: getExtensionIcon(extensionType) } : DEFAULT_STYLE;
 }
 
 function formatDuration(ms: number): string {
@@ -366,7 +376,7 @@ function StepGroup({
           {/* Show user input if available */}
           {stepEntries[0]?.input?.["input:initial"] != null && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
-              &ldquo;{String(stepEntries[0].input["input:initial"] as string)}&rdquo;
+              &ldquo;{displayUserInput(String(stepEntries[0].input["input:initial"] as string))}&rdquo;
             </p>
           )}
         </div>

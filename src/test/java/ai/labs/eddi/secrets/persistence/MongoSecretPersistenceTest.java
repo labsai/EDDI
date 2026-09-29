@@ -533,6 +533,36 @@ class MongoSecretPersistenceTest {
         verify(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
     }
 
+    // ==================== setMetaValueIfAbsent ====================
+
+    @Test
+    @DisplayName("setMetaValueIfAbsent — writes with $setOnInsert only, never $set")
+    void setMetaValueIfAbsentNeverOverwrites() {
+        when(metaCollection.updateOne(any(Bson.class), any(Bson.class), any())).thenReturn(mock(UpdateResult.class));
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "existing"));
+
+        assertEquals("existing", persistence.setMetaValueIfAbsent("k", "mine"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(metaCollection).updateOne(any(Bson.class), update.capture(), any());
+        BsonDocument rendered = update.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), rendered.keySet(), "an existing value must never be replaced: " + rendered);
+    }
+
+    @Test
+    @DisplayName("setMetaValueIfAbsent — a lost insert race returns the winner's value")
+    void setMetaValueIfAbsentDuplicateKeyReturnsWinner() {
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress(), Set.of()))
+                .when(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "winner"));
+
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+    }
+
     // ==================== Helpers ====================
 
     /** A server-side command failure carrying a specific error code. */

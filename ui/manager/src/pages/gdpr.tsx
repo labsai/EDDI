@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ShieldAlert,
   Download,
   Trash2,
   AlertTriangle,
@@ -11,6 +10,7 @@ import {
   CheckCircle2,
   Ban,
   ShieldCheck,
+  ShieldUser,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -144,7 +144,7 @@ export function GdprPage() {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10">
-            <ShieldAlert className="h-5 w-5 text-red-500" />
+            <ShieldUser className="h-5 w-5 text-red-500" />
           </div>
           {t("gdpr.title", "Privacy & Compliance")}
         </h1>

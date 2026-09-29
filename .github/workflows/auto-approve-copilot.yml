@@ -224,8 +224,40 @@ jobs:
                   continue;
                 }
 
+                // Never auto-approve a PR that touches CI/CD or any workflow config.
+                // A change under .github/** can weaken the very gates this job trusts
+                // (the required-checks list, branch protection wiring) or edit this
+                // file to approve itself, and the checks above would still be green.
+                // These need a human reviewer regardless of Copilot + CI status.
+                const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
+                  owner, repo, pull_number: number, per_page: 100,
+                });
+                // previous_filename too: a rename reports only its DESTINATION in
+                // `filename`, so moving a workflow out of .github/ (which disables it)
+                // would otherwise read as a change outside CI config entirely.
+                const touchesGithub = f => [f.filename, f.previous_filename]
+                  .some(p => typeof p === 'string' && p.startsWith('.github/'));
+                // The files endpoint stops at 3,000 entries, in no guaranteed order.
+                // At that size the list may be missing the very .github/** path the
+                // check below looks for, so fail closed instead of trusting it.
+                const LIST_FILES_CAP = 3000;
+                if (changedFiles.length >= LIST_FILES_CAP) {
+                  core.info(`PR #${number}: ${changedFiles.length} changed files reaches the list-files cap `
+                    + `(${LIST_FILES_CAP}); the .github/** check cannot be trusted. Leaving to a human reviewer.`);
+                  continue;
+                }
+                if (changedFiles.some(touchesGithub)) {
+                  core.info(`PR #${number}: modifies .github/** (CI/workflow config); leaving to a human reviewer.`);
+                  continue;
+                }
+
                 await github.rest.pulls.createReview({
-                  owner, repo, pull_number: number, event: 'APPROVE',
+                  // commit_id pins the approval to the exact commit that satisfied
+                  // every gate above. Omitted, GitHub records the approval against
+                  // whatever the PR head is at the moment of the call — so a commit
+                  // pushed in the window between the CI/Copilot checks and this API
+                  // call would be approved without ever having been reviewed or built.
+                  owner, repo, pull_number: number, event: 'APPROVE', commit_id: headSha,
                   body: 'Auto-approved: GitHub Copilot reviewed with no unresolved comments and all CI checks passed.\n\n'
                     + '_This approval satisfies the review requirement only; branch protection still governs merge._',
                 });

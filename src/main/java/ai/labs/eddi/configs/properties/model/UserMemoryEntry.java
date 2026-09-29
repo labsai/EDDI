@@ -37,6 +37,22 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
                                                Visibility defaultVisibility) {
+        Visibility visibility = property.getVisibility() != null ? property.getVisibility() : defaultVisibility;
+        return fromProperty(property, userId, agentId, conversationId, visibility, List.of());
+    }
+
+    /**
+     * Creates an entry with an already RESOLVED visibility, for a conversation that
+     * belongs to {@code groupIds}. Unlike the overload above, the property's own
+     * visibility is not consulted again — the caller decided, possibly narrowing a
+     * {@code group} property to {@code self} because the conversation has no group.
+     * <p>
+     * A {@code group} entry is only reachable through an overlap with the reader's
+     * group ids, so one stored with none — which is what every {@code longTerm}
+     * property got — could be read by nobody, the writing agent included.
+     */
+    public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId, Visibility visibility,
+                                               List<String> groupIds) {
         Object value;
         if (property.getValueString() != null) {
             value = property.getValueString();
@@ -54,13 +70,11 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
             value = null;
         }
 
-        Visibility vis = property.getVisibility() != null ? property.getVisibility() : defaultVisibility;
-        if (vis == null) {
-            vis = Visibility.self;
-        }
+        Visibility vis = visibility != null ? visibility : Visibility.self;
 
-        return new UserMemoryEntry(null, userId, property.getName(), value, "fact", vis, agentId, List.of(), conversationId, false, 0, Instant.now(),
-                Instant.now());
+        List<String> entryGroupIds = vis == Visibility.group && groupIds != null ? List.copyOf(groupIds) : List.of();
+        return new UserMemoryEntry(null, userId, property.getName(), value, "fact", vis, agentId, entryGroupIds, conversationId, false, 0,
+                Instant.now(), Instant.now());
     }
 
     /**

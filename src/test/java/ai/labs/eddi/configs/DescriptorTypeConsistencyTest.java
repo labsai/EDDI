@@ -42,10 +42,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the Manager included — saw nothing at all.
  * <p>
  * The mismatch is possible because the legacy config-file names and the v6 URI
- * names differ (AGENTS.md §5.5) and each store restated its type as a literal.
- * The fix derives the type from the store's own {@code resourceURI}; this test
- * guards the remaining freedom to hard-code one anyway, by reading the sources
- * rather than the runtime — nothing else fails when the two drift apart.
+ * names differ (docs/agent-config-authoring.md) and each store restated its
+ * type as a literal. The fix derives the type from the store's own
+ * {@code resourceURI}; this test guards the remaining freedom to hard-code one
+ * anyway, by reading the sources rather than the runtime — nothing else fails
+ * when the two drift apart.
  */
 @DisplayName("descriptor type matches the store's own URI namespace")
 class DescriptorTypeConsistencyTest {

@@ -1160,6 +1160,10 @@ back into the full text through the `conversationRecall` built-in tool.
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 
+Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
+the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A requested range such as
+`turns 3-5` is inclusive.
+
 > **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
 > not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
@@ -1714,8 +1718,8 @@ All LLM tools execute **inside a conversation pipeline**. The full execution pat
 
 ```
 LlmTask.execute(memory)
-  └─→ AgentOrchestrator.buildToolList(memory, config)
-      └─→ Constructs tool instances with conversation context
+  └─→ AgentOrchestrator.buildToolSetup(task, memory)
+      └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -1723,7 +1727,7 @@ LlmTask.execute(memory)
 
 ### Implicit Context
 
-`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it from their `ToolSourceProvider`, which gets the memory in the `ToolAssemblyContext` at tool-assembly time.
 
 This means:
 - **No ThreadLocal** or request-scoped beans needed

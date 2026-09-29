@@ -4,16 +4,17 @@
  */
 package ai.labs.eddi.engine.httpclient.bootstrap;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
+import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.ext.web.client.WebClient;
-import io.vertx.ext.web.client.WebClientSession;
 import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
@@ -21,6 +22,7 @@ import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.util.Locale;
 import java.util.function.Function;
 
 @ApplicationScoped
@@ -70,10 +72,20 @@ public class HttpClientModule {
         options.setDecompressionSupported(true);
 
         // What WebClient.create(vertx, options) does, with the HttpClient kept in hand.
+        //
+        // Deliberately a plain WebClient and NOT a WebClientSession. A session keeps
+        // a single, application-scoped cookie store, and this client is the one and
+        // only client behind every agent's httpcalls — so a Set-Cookie returned to
+        // one user's call was stored and then replayed on the next user's call to the
+        // same host, leaking a session credential across users. A plain WebClient
+        // holds no cookie jar, so nothing is carried between calls. httpcalls already
+        // strips Set-Cookie from what it records (ApiCallExecutor); this removes the
+        // live jar that was the actual replay vector. If a future feature needs
+        // cookies, scope a WebClientSession per conversation/principal rather than
+        // sharing one here.
         WebClient webClient = WebClient.wrap(guardedHttpClient(vertx, options), options);
-        WebClientSession webClientSession = WebClientSession.create(webClient);
 
-        return new VertxHttpClient(vertx, webClientSession, webClient);
+        return new VertxHttpClient(vertx, webClient, webClient);
     }
 
     /**
@@ -83,8 +95,87 @@ public class HttpClientModule {
      */
     static HttpClient guardedHttpClient(Vertx vertx, HttpClientOptions options) {
         HttpClient httpClient = vertx.createHttpClient(options);
-        httpClient.redirectHandler(refusingMetadataHops(vertx, httpClient.redirectHandler()));
+        // Two guards wrap the default redirect handler: it must not land on the cloud
+        // metadata service, and it must not replay a credential header to another
+        // origin. Order does not matter — one vetoes the destination, the other
+        // scrubs the hop's headers.
+        httpClient.redirectHandler(strippingCrossOriginCredentials(refusingMetadataHops(vertx, httpClient.redirectHandler())));
         return httpClient;
+    }
+
+    /**
+     * Wraps the redirect handler so that credential headers are stripped from any
+     * cross-origin hop.
+     * <p>
+     * Vert.x's default redirect handler copies <em>every</em> request header onto
+     * the next hop and removes only {@code Content-Length} — it does not strip
+     * {@code Authorization}, {@code Cookie} or anything else. So with
+     * {@code eddi.security.ssrf-protection.enabled} off (the shipped default, where
+     * redirects are followed), a public URL answering {@code 302 Location:} to
+     * another host replayed whatever credential the httpcall carried — a static
+     * {@code Bearer}/{@code X-Api-Key}/{@code Cookie} in the config just as much as
+     * a resolved
+     * {@code ${vault:…}}/{@code ${connection:…}}/{@code ${caller:token}}. This
+     * scrubs {@link SafeHttpClient#SENSITIVE_HEADERS} on every hop whose origin
+     * differs from the request that produced it, so the fix does not depend on
+     * knowing where the credential came from.
+     */
+    static Function<HttpClientResponse, Future<RequestOptions>> strippingCrossOriginCredentials(
+                                                                                                Function<HttpClientResponse, Future<RequestOptions>> delegate) {
+        return response -> {
+            Future<RequestOptions> next = delegate.apply(response);
+            if (next == null) {
+                return null;
+            }
+            return next.map(options -> {
+                if (options != null) {
+                    stripCredentialsIfCrossOrigin(response.request(), options);
+                }
+                return options;
+            });
+        };
+    }
+
+    /**
+     * Removes every {@link SafeHttpClient#SENSITIVE_HEADERS} entry from
+     * {@code next} when it targets a different origin (scheme, host or effective
+     * port) than {@code original}. Same-origin hops keep their headers, so an
+     * in-service redirect still authenticates.
+     */
+    static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
+        if (original == null) {
+            // Cannot prove same-origin, so fail safe and strip.
+            SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
+            return;
+        }
+        if (!sameOrigin(original, next)) {
+            SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
+        }
+    }
+
+    private static boolean sameOrigin(HttpClientRequest original, RequestOptions next) {
+        String originalUri = original.absoluteURI();
+        boolean originalHttps = originalUri != null && originalUri.toLowerCase(Locale.ROOT).startsWith("https");
+        boolean nextHttps = next.isSsl() != null ? next.isSsl() : originalHttps;
+        if (originalHttps != nextHttps) {
+            return false;
+        }
+        String originalHost = original.getHost();
+        String nextHost = next.getHost();
+        if (originalHost == null || nextHost == null || !originalHost.equalsIgnoreCase(nextHost)) {
+            return false;
+        }
+        int originalPort = effectivePort(original.getPort(), originalHttps);
+        Integer nextPortValue = next.getPort();
+        int nextPort = effectivePort(nextPortValue != null ? nextPortValue : -1, nextHttps);
+        return originalPort == nextPort;
+    }
+
+    private static int effectivePort(int port, boolean https) {
+        if (port > 0) {
+            return port;
+        }
+        return https ? 443 : 80;
     }
 
     /**
@@ -136,7 +227,9 @@ public class HttpClientModule {
         if (client.getWebClient() != null) {
             client.getWebClient().close();
         }
-        if (client.getUnderlyingClient() != null) {
+        // The web client and the underlying client are the same instance now (no
+        // session wrapper), so close it once.
+        if (client.getUnderlyingClient() != null && client.getUnderlyingClient() != client.getWebClient()) {
             client.getUnderlyingClient().close();
         }
     }

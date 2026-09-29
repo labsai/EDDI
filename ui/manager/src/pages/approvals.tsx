@@ -3,18 +3,18 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  HandMetal,
   CheckCircle2,
   Clock,
   AlertTriangle,
   MessageSquare,
-  Boxes,
   RefreshCw,
   Search,
   ExternalLink,
   Wrench,
   ChevronDown,
   UserCheck,
+  Hand,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -161,7 +161,7 @@ function ApprovalQueueRow({
               : "bg-purple-500/10 text-purple-600"
           )}>
             {item.groupId ? (
-              <><Boxes className="h-3 w-3" /> {t("hitl.group", "Group")}</>
+              <><Users className="h-3 w-3" /> {t("hitl.group", "Group")}</>
             ) : (
               <><MessageSquare className="h-3 w-3" /> {t("hitl.regular", "Conversation")}</>
             )}
@@ -721,7 +721,7 @@ export function ApprovalsPage() {
       <div className="space-y-6">
         <div className="space-y-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <HandMetal className="h-8 w-8 text-primary" />
+            <Hand className="h-8 w-8 text-primary" />
             {t("pages.approvals", "Pending Approvals")}
           </h1>
           <p className="text-muted-foreground">
@@ -740,7 +740,7 @@ export function ApprovalsPage() {
     return (
       <div className="space-y-6">
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-          <HandMetal className="h-8 w-8 text-primary" />
+          <Hand className="h-8 w-8 text-primary" />
           {t("pages.approvals", "Pending Approvals")}
         </h1>
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
@@ -760,7 +760,7 @@ export function ApprovalsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <HandMetal className="h-8 w-8 text-primary" />
+            <Hand className="h-8 w-8 text-primary" />
             {t("pages.approvals", "Pending Approvals")}
           </h1>
           <p className="text-muted-foreground">
