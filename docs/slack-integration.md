@@ -203,6 +203,12 @@ with HTTP 403 — so the holder of one integration's secret cannot drive another
 integration's agents. An owned channel whose owner has no signing secret is
 rejected rather than re-admitted through the pool. An event in a channel nobody
 owns (a DM) is attributed to the integration whose secret actually signed it.
+Every route the event then takes must belong to an integration (or legacy
+connector) holding the verifying secret, including the two that are found by a
+timestamp the sender chooses: a **thread lock** in a DM takes its credentials
+only from the app that signed the reply *and* serves the locked target, and a
+**group-discussion follow-up** must be posted in the discussion's own channel by
+the app that started it. Anything else is dropped and logged.
 
 ---
 
@@ -226,7 +232,7 @@ Send a message directly to the bot — no @mention needed:
 Hello, what can you do?
 ```
 
-DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. (Only when a legacy per-agent connector signed the DM does EDDI fall back to the first available integration's default target.)
+DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. A DM signed by a legacy per-agent connector goes to the legacy connector holding that secret, never to a new-style integration. Replies in a DM thread keep the thread's agent and are answered with the credentials of the app that signed them, provided that app serves the agent.
 
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
