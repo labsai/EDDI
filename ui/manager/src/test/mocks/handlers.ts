@@ -737,24 +737,23 @@ function workspaceSettings(defaultSpace: string | null, legacyVisibility: string
   };
 }
 
-const SPACE_STORE_KEY = "eddi-e2e-space-resources";
+/**
+ * What the space-store mock holds, per tenant and kind, for the page's lifetime.
+ * In memory on purpose: it holds secret metadata, and nothing that describes a
+ * secret belongs in localStorage, mock or not.
+ */
+const spaceStore = new Map<string, Map<string, unknown>>();
 
 function readSpaceStore(request: Request, kind: "secrets" | "variables"): unknown[] {
-  const all = readSeed<Record<string, Record<string, unknown>>>(SPACE_STORE_KEY) ?? {};
-  return Object.values(all[`${tenantOf(request)}/${kind}`] ?? {});
+  return [...(spaceStore.get(`${tenantOf(request)}/${kind}`)?.values() ?? [])];
 }
 
 function writeSpaceStore(request: Request, kind: "secrets" | "variables", key: string, value: unknown | null) {
-  try {
-    const all = readSeed<Record<string, Record<string, unknown>>>(SPACE_STORE_KEY) ?? {};
-    const bucket = { ...(all[`${tenantOf(request)}/${kind}`] ?? {}) };
-    if (value === null) delete bucket[key];
-    else bucket[key] = value;
-    all[`${tenantOf(request)}/${kind}`] = bucket;
-    localStorage.setItem(SPACE_STORE_KEY, JSON.stringify(all));
-  } catch {
-    // No localStorage (the node tier): nothing to remember.
-  }
+  const bucketKey = `${tenantOf(request)}/${kind}`;
+  const bucket = spaceStore.get(bucketKey) ?? new Map<string, unknown>();
+  if (value === null) bucket.delete(key);
+  else bucket.set(key, value);
+  spaceStore.set(bucketKey, bucket);
 }
 
 type SeededNotification = { id: string; readAt?: string | null } & Record<string, unknown>;
