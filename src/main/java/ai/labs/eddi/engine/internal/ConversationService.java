@@ -209,6 +209,7 @@ public class ConversationService implements IConversationService, UserErasurePar
     private final Counter counterConversationProcessing;
     private final Counter counterConversationUndo;
     private final Counter counterConversationRedo;
+    private final Counter counterAgentVersionSwitch;
     final Counter counterHitlPause;
     private final Counter counterHitlResume;
     /**
@@ -290,6 +291,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+        this.counterAgentVersionSwitch = meterRegistry.counter("eddi_conversation_agent_version_switch_count");
         this.counterConversationStoreConflict = meterRegistry.counter("eddi_conversation_store_conflict_count");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
@@ -704,7 +706,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -882,7 +889,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -1490,6 +1502,13 @@ public class ConversationService implements IConversationService, UserErasurePar
     private void applyAgentMemoryConfig(Environment environment, IConversationMemory memory) {
         try {
             IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+            if (agent == null && memory.getCompatibilityGeneration() != null) {
+                // Its version may have been undeployed since the last turn; any version it
+                // may follow is equally its configuration. Read-only: undo is not a turn,
+                // so the conversation does not move here.
+                agent = agentFactory.getLatestReadyAgentOfGeneration(environment, memory.getAgentId(),
+                        memory.getCompatibilityGeneration());
+            }
             if (agent != null) {
                 memory.setUserMemoryConfig(agent.getUserMemoryConfig());
             }
@@ -1615,6 +1634,53 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         var principal = new ResolutionPrincipal(conversationMemory.getUserId(), conversationMemory.getResolutionProvenance());
         return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
+    }
+
+    /**
+     * The agent version the next turn of this conversation runs on.
+     * <p>
+     * A conversation with a compatibility generation runs on the highest version of
+     * that generation that is {@code READY} on this node, moving to it if that is
+     * not where it is — a newer compatible version as soon as it is deployed, or an
+     * older one when the newer one was undeployed (a rollback) or has not reached
+     * this node yet. "Compatible" is declared in both directions for exactly that
+     * reason.
+     * <p>
+     * Everything else takes today's path, {@link #getAgent}: a conversation without
+     * a generation (pinned), a paused one (a resume must finish on the version that
+     * paused it; {@code say} refuses those anyway), and one whose generation has no
+     * version ready here — which deploys its own version on demand, as it always
+     * did.
+     */
+    IAgent resolveConversationAgent(Environment environment, IConversationMemory memory) throws ServiceException, IllegalAccessException {
+        Integer generation = memory.getCompatibilityGeneration();
+        if (generation != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+            IAgent candidate = agentFactory.getLatestReadyAgentOfGeneration(environment, memory.getAgentId(), generation);
+            if (candidate != null) {
+                if (!Objects.equals(candidate.getAgentVersion(), memory.getAgentVersion())) {
+                    moveToAgentVersion(memory, candidate.getAgentVersion(), generation);
+                }
+                return candidate;
+            }
+        }
+        return getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+    }
+
+    private void moveToAgentVersion(IConversationMemory memory, Integer toVersion, Integer generation) {
+        Integer fromVersion = memory.getAgentVersion();
+        memory.switchAgentVersion(toVersion);
+        counterAgentVersionSwitch.increment();
+        LOGGER.infof("Conversation %s moves from version %s to version %s of agent %s (compatibility generation %s)",
+                sanitize(memory.getConversationId()), fromVersion, toVersion, sanitize(memory.getAgentId()), generation);
+        // The descriptor names the agent version too, and conversation listings filter
+        // on it. Best-effort: if this fails the listing is stale until the next move,
+        // and the conversation itself runs on the right version either way.
+        try {
+            conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), toVersion);
+        } catch (Exception e) {
+            LOGGER.warnf("Conversation %s moved to version %s of agent %s, but its descriptor still names the old version: %s",
+                    sanitize(memory.getConversationId()), toVersion, sanitize(memory.getAgentId()), e.getMessage());
+        }
     }
 
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {

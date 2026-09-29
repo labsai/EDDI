@@ -124,10 +124,10 @@ Resolution runs where the turn binds its memory and agent today, so the conversa
 
 1. Sets the new version on the memory (`agentVersion` stops being `final`). Both conversation stores already persist `agentVersion` on every save (Postgres `UPDATE … SET AGENT_VERSION = ?`, Mongo `replaceOne`), so the active-conversation queries stay correct without store changes.
 2. Updates the agent URI in the conversation descriptor.
-3. Stores a small marker in the current step, `agentVersionChange: {from, to}`, so the debugger and the conversation view can show where the version changed.
+3. Stores a small marker on the step the new version runs, `agent:switch = {from, to}` (`MemoryKeys.AGENT_VERSION_CHANGE`), so the debugger and the conversation view can show where the version changed. Not `agent:version…`: step lookups match keys by prefix, so it would shadow the per-step key below.
 4. Increments `eddi_conversation_agent_version_switch_total{agentId}` and logs once at INFO with conversation id, agent id, from and to.
 
-In addition, **every step records the agent version that produced it** (a small field on `ConversationStep`), so "which version gave this answer?" has an answer even with the audit ledger switched off. The audit ledger and `{conversationInfo.agentVersion}` already read the memory's version per turn, so they become correct automatically.
+In addition, **every step records the agent version that produced it** (step data `agent:version`, `MemoryKeys.AGENT_VERSION` — data rather than a new step field, so no store or snapshot schema changes), so "which version gave this answer?" has an answer even with the audit ledger switched off. The audit ledger and `{conversationInfo.agentVersion}` already read the memory's version per turn, so they become correct automatically.
 
 `compatibilityGeneration` is also stored on the conversation memory — written at creation and on every switch — so resolution never has to read an undeployed version's config to find out which chain the conversation is on. Conversations that exist before this feature have none and stay pinned.
 

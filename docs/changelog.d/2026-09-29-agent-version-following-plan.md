@@ -1,3 +1,27 @@
+## ✨ feat(conversations): conversations follow compatible versions of their agent (2026-09-29)
+
+**Repo:** EDDI (`feat/agent-version-following`) — Phase 2 of
+[`planning/agent-version-following-plan.md`](../../planning/agent-version-following-plan.md)
+
+### What changed
+
+- **Per-turn resolution** (`ConversationService.resolveConversationAgent`, used by `say` and
+  `sayStreaming`): a conversation with a compatibility generation runs on the highest `READY`
+  version of that generation on this node, moving to it if it is elsewhere — forward when a
+  compatible version is deployed, back when the newer one is undeployed (a rollback) or has not
+  reached this node yet. A conversation without a generation, a paused one, and one whose
+  generation has nothing ready here take the old path unchanged (`getAgent`, including its
+  on-demand deploy).
+- **Memory**: `compatibilityGeneration` on the conversation (set from the version it starts on,
+  persisted on the snapshot); `agentVersion` is no longer final. `IAgentFactory` gains
+  `getLatestReadyAgentOfGeneration`.
+- **Every step records its version** as step data `agent:version`, and the first step after a
+  move records `agent:switch = {from, to}`. The marker is not `agent:version…` because step
+  lookups match keys by prefix — the first name tried shadowed the version key in the tests.
+- A move updates the conversation descriptor's agent URI (best-effort; listings filter on it),
+  logs at INFO and increments `eddi_conversation_agent_version_switch_count`. Undo/redo read the
+  memory config from any version of the generation when the conversation's own is gone.
+
 ## ✨ feat(agents): each agent version records whether it is compatible with the previous one (2026-09-29)
 
 **Repo:** EDDI (`feat/agent-version-following`) — Phase 1 of

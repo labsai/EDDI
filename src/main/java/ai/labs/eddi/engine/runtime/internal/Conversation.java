@@ -228,6 +228,7 @@ public class Conversation implements IConversation {
         setConversationState(ConversationState.READY);
 
         addConversationStartAction(conversationMemory.getCurrentStep());
+        recordAgentVersion();
 
         // The config is applied in the constructor, which every turn goes through —
         // init() is only the first of them. Re-applying is harmless but pointless.
@@ -428,6 +429,9 @@ public class Conversation implements IConversation {
                 // The turn's starting point for undo — see recordPropertyChanges.
                 propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
+            // A rerun re-executes the current step, possibly on another version than
+            // the one that first ran it — so the version is recorded on every run.
+            recordAgentVersion();
 
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
             executeConversationStep(lifecycleData, restartTaskTypes);
@@ -470,6 +474,24 @@ public class Conversation implements IConversation {
             cm.recordPropertyChanges(propertiesAtTurnStart);
         }
         storePropertiesPermanently();
+    }
+
+    /**
+     * Records which agent version runs the current step, and — on the first step
+     * after the conversation moved to another compatible version — where it moved
+     * from. See {@link MemoryKeys#AGENT_VERSION}.
+     */
+    private void recordAgentVersion() {
+        Integer agentVersion = conversationMemory.getAgentVersion();
+        if (agentVersion == null) {
+            return;
+        }
+        var currentStep = conversationMemory.getCurrentStep();
+        currentStep.set(MemoryKeys.AGENT_VERSION, agentVersion);
+        Integer previousVersion = conversationMemory.takePreviousAgentVersion();
+        if (previousVersion != null) {
+            currentStep.set(MemoryKeys.AGENT_VERSION_CHANGE, Map.of("from", previousVersion, "to", agentVersion));
+        }
     }
 
     private void startNextStep() {

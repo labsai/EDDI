@@ -51,6 +51,9 @@ public class Agent implements IAgent {
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
         var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        // Which versions the conversation may follow. Null on a version stored before
+        // generations existed: the conversation then stays on this version.
+        conversationMemory.setCompatibilityGeneration(compatibilityGeneration);
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }

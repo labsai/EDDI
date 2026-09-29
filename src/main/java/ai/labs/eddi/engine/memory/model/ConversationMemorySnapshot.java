@@ -106,6 +106,13 @@ public class ConversationMemorySnapshot {
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
+    /**
+     * The compatibility generation of {@link #agentVersion} — see
+     * {@code IConversationMemory#getCompatibilityGeneration()}. Absent in documents
+     * written before it existed, which deserialize to {@code null}: those
+     * conversations stay on their version.
+     */
+    private Integer compatibilityGeneration;
     private String userId;
     /**
      * How {@link #userId} came to be, fixed at creation. Absent in documents
@@ -514,6 +521,14 @@ public class ConversationMemorySnapshot {
 
     public void setAgentVersion(Integer agentVersion) {
         this.agentVersion = agentVersion;
+    }
+
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
     }
 
     public String getUserId() {

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Central registry of well-known memory keys used across the EDDI lifecycle
@@ -211,6 +212,31 @@ public final class MemoryKeys {
 
     /** ApiCalls prefix key. Used for dynamic keys like "httpCalls:callName". */
     public static final String HTTP_CALLS_PREFIX = "httpCalls";
+
+    // ---- Agent version ----
+
+    /**
+     * The agent version that ran this step. Written by {@code Conversation} at the
+     * start of every step, so a conversation that followed its agent across
+     * versions can say which version produced each answer — with or without the
+     * audit ledger.
+     *
+     * @since 6.5.0
+     */
+    public static final MemoryKey<Integer> AGENT_VERSION = MemoryKey.of("agent:version");
+
+    /**
+     * {@code {"from": n, "to": m}} on the first step a conversation ran after
+     * moving to another, compatible version of its agent. Absent on every other
+     * step.
+     * <p>
+     * Deliberately not {@code agent:version…}: step lookups match keys by PREFIX
+     * ({@code ConversationStep#getLatestData}), so a key starting with
+     * {@link #AGENT_VERSION}'s would be returned — and removed — in its place.
+     *
+     * @since 6.5.0
+     */
+    public static final MemoryKey<Map<String, Integer>> AGENT_VERSION_CHANGE = MemoryKey.of("agent:switch");
 
     // ---- Properties ----
 
