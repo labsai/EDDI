@@ -223,7 +223,7 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Also accepts `kbId` — **see the warning below before using it** |
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). Also accepts `kbId` — **see the warning below before using it** |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
 > **Leave `kbId` unset.** It overrides the key the documents are stored under, and it defaults to the knowledge base's `name`, which is the key **retrieval always uses** — `RagContextProvider` keys the store on `ragConfig.getName()` and has no way to be pointed anywhere else. So passing a `kbId` that is anything other than the KB's exact `name` ingests into a store nothing reads: the call returns `202`, the status goes to `completed`, the documents are really embedded and really stored, and retrieval finds nothing, permanently. Ingestion *sources* are not affected — `IngestionPipeline` keys on the name and cannot diverge.
@@ -259,6 +259,27 @@ Response:
 ```
 
 Status values: `pending` → `processing` → `completed` | `failed: <error message>`
+
+**Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
+twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
+`replace=true` to supersede instead:
+
+```bash
+curl -X POST "http://localhost:7070/ragstore/rags/abc123/ingest?version=1&documentName=pricing.md&replace=true" \
+  -H "Content-Type: text/plain" --data-binary @pricing.md
+```
+
+The new chunks are stored first and the previous ones removed afterwards, so a failure part-way
+leaves the old version retrievable rather than leaving the document with no vectors. Chunks from
+before this option existed are superseded too. `replace=true` needs an explicit `documentName` and
+is refused with a `400` without one: every document ingested without a name shares `unnamed`, and
+replacing that would delete all of them. On a vector store that cannot delete by metadata, the
+ingestion still completes and the status response carries a `warning` saying the previous version is
+still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
+better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
+the originals again.
 
 ## Ingestion Sources
 
@@ -334,6 +355,7 @@ The cron is read in **UTC**, which is written onto the schedule rather than left
 | `maxDepth` | `3` | How many links from the seed |
 | `maxPages` | `200` | Pages ingested per run |
 | `excludePatterns` | empty | Globs matched against the path |
+| `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
 | `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
@@ -363,6 +385,43 @@ costs one 304.
 
 `robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. Turn
 `respectRobots` off only for a site you own.
+
+#### Sitemaps
+
+A sitemap lists a site's pages, so a crawl finds pages nothing links to and does not depend on link
+structure. Before the first page is fetched, a run reads — in this order, each at most once:
+
+1. the sitemaps in `web.sitemapUrls`, for a site that publishes one without listing it in robots.txt
+   (and for a crawl with `respectRobots` off, which reads no robots.txt at all);
+2. every `Sitemap:` line in robots.txt — a relative one is resolved against robots.txt;
+3. only when neither gave anything, the conventional `/sitemap.xml`, at the cost of one 404 where
+   there is none.
+
+Every form the [sitemap protocol](https://www.sitemaps.org/protocol.html) allows is read:
+
+| Form | What is taken |
+| --- | --- |
+| `<urlset>` | each `url/loc`. The `loc` of the image, video and news extensions sits under its own element and is **not** a page; `xhtml:link` hreflang alternates are not followed either — the scope decides which languages are crawled |
+| `<sitemapindex>` | each `sitemap/loc` **on the index's own host**, read as a further sitemap — indexes of indexes included. A child on another host is skipped, as the protocol requires, so a site cannot point the crawler at arbitrary hosts; configured and robots.txt sitemaps may be on any host |
+| RSS 2.0 / Atom | each `item/link`, or each `entry/link` whose `rel` is absent or `alternate` |
+| Plain text | one URL per line |
+| gzip | any of the above compressed (`.xml.gz`), recognised by its content rather than its name or Content-Type |
+
+Namespace prefixes (`<sm:urlset>`), entities, CDATA, surrounding whitespace, a byte-order mark and
+UTF-16 are all handled; only absolute `http(s)` URLs are taken. What a sitemap lists is held to the
+same scope as a linked page — `pathPrefix`, `sameSiteOnly` and `excludePatterns` all apply — because a
+sitemap is written by the site, not by the operator.
+
+Bounds: 20 sitemaps per run, indexes and their children included; 5,000 page URLs across all of them;
+1 MB per sitemap as fetched and 16 MB once decompressed, so a small gzip body cannot inflate without
+limit. `maxPages` still decides how many pages are ingested.
+
+A run that hit one of these bounds — or found a sitemap it could not read (a 5xx, 429, 401 or 403,
+a transport error, a body that would not parse) or that arrived cut short (past the 1 MB fetch cap,
+or an XML sitemap that does not end with its closing root tag — trailing comments, processing
+instructions and a self-closing root are fine) — **concludes nothing about deletions**, like a run
+that stopped at a limit: the unread part may list pages the crawl never queued. A sitemap answering
+404 is not such a case; that is a definite "no sitemap here".
 
 **When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
 it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
@@ -395,6 +454,14 @@ now" while one is in flight gets a 409 rather than a second crawl into the same 
 refused while a run is in flight, because it would delete the very row that guarantees this. A run
 whose process died is reaped — for that source only, so a short-budget source cannot reap the live run
 of one configured for hours.
+
+A run counts as dead once it has been in flight for its `timeBudgetMinutes` plus 15 minutes — the
+budget it was **started** under, recorded as its deadline when the run is claimed, so lowering a
+source's budget while it runs cannot have the live run declared dead. It is reaped at that point by whatever touches the source next — a run starting, **reading the run history,
+or a purge or file delete** — and shows as `FAILED` with "Run abandoned". Only a run starting used to
+reap, so on a source with no cron a dead run read as `RUNNING`, and refused purges and file deletes
+with a 409, until someone started another. Before that threshold a crashed run is indistinguishable
+from a live one on another instance, and still shows as `RUNNING`.
 
 **Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
@@ -742,7 +809,7 @@ parameter rather than ignoring it.
 
 ## Future Enhancements
 
-- More ingestion source types — sitemaps, email, Google Drive, OneDrive
+- More ingestion source types — email, Google Drive, OneDrive (sitemap discovery already ships with web sources — see [Sitemaps](#sitemaps))
 - OCR for scanned PDFs and images
 - Advanced retrieval: re-ranking, hybrid search, metadata filtering
 - ONNX in-process embeddings (air-gapped / edge deployments)

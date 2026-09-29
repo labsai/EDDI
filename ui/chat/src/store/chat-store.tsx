@@ -348,11 +348,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
       const withdrawn = msgs[targetIndex];
       restored.messages = msgs.filter((_, i) => i !== targetIndex);
-      // A secret is never handed back as plain text — the composer that would
-      // receive it is unmasked, and the secret marking would be lost.
-      restored.restoreDraft = action.wasSecret
-        ? null
-        : action.draft ?? withdrawn.content;
+      // A secret is never handed back as plain text: it goes back into the
+      // composer with secret mode ON, so it stays masked and is re-sent with
+      // `secretInput`. Dropping it instead (the earlier behaviour) made the
+      // user retype a key the server had refused without ever seeing.
+      if (action.wasSecret) {
+        restored.restoreDraft = action.draft ?? null;
+        restored.isSecretMode = action.draft ? true : state.isSecretMode;
+        return restored;
+      }
+      restored.restoreDraft = action.draft ?? withdrawn.content;
       return restored;
     }
 

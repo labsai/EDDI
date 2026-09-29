@@ -65,7 +65,11 @@ ended with **1** still pending at teardown.
 
   Run against the previous version, the two newest cases fail, naming the leaked `setTimeout(0)`
   and `requestAnimationFrame`.
-- `resource-detail-save-not-live.test.tsx`: its own undrained `toast.dismiss()` is gone.
+- `resource-detail-save-not-live.test.tsx`: its own undrained `toast.dismiss()` is gone. While
+  this PR was open, #866 fixed the same flake for this one file by waiting for the removal in the
+  file's own `afterEach`. Merging `main` in, the shared drain replaces that wait: it covers every
+  file that renders a Toaster, and the three callback paths #866's wait for the DOM could not see.
+  That wait is removed and the file's `afterEach` is synchronous again.
 
 This covers all four files that render `<Toaster>` (`resource-detail-save-not-live`,
 `channel-create-error`, `channel-detail`, `studio-save-flow`), and any later one.

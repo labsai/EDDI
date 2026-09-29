@@ -94,10 +94,16 @@ function stubCascade(onDeploy?: (url: string) => void) {
         },
       }),
     ),
-    http.get("*/agentstore/agents/:id", () =>
+    // The agent a save produced references the workflow version that save
+    // produced (v2) — the cascade checks the reference before it writes.
+    http.get("*/agentstore/agents/:id", ({ request }) =>
       HttpResponse.json({
         name: "test-agent",
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1"],
+        workflows: [
+          `eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=${
+            new URL(request.url).searchParams.get("version") === "1" ? 1 : 2
+          }`,
+        ],
       }),
     ),
     http.put("*/agentstore/agents/:id", () =>

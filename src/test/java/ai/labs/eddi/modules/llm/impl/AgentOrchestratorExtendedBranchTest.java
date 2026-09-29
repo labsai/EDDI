@@ -172,6 +172,7 @@ class AgentOrchestratorExtendedBranchTest {
 
             var config = new AgentConfiguration.UserMemoryConfig();
             when(memory.getUserMemoryConfig()).thenReturn(config);
+            lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
             when(memory.getUserId()).thenReturn("user-1");
             when(memory.getAgentId()).thenReturn("agent-1");
             when(memory.getConversationId()).thenReturn("conv-1");
@@ -195,6 +196,7 @@ class AgentOrchestratorExtendedBranchTest {
 
             var config = new AgentConfiguration.UserMemoryConfig();
             when(memory.getUserMemoryConfig()).thenReturn(config);
+            lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
             when(memory.getUserId()).thenReturn("user-1");
             when(memory.getAgentId()).thenReturn("agent-1");
             when(memory.getConversationId()).thenReturn("conv-1");
@@ -234,6 +236,7 @@ class AgentOrchestratorExtendedBranchTest {
 
             var config = new AgentConfiguration.UserMemoryConfig();
             when(memory.getUserMemoryConfig()).thenReturn(config);
+            lenient().when(memory.isMemoryToolsEnabled()).thenReturn(true);
 
             List<Object> tools = orchestratorNoStore.collectEnabledTools(task, memory);
             assertTrue(tools.isEmpty());

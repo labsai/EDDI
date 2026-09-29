@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -474,6 +475,40 @@ class ApiCallExecutorConnectionHeaderTest {
             assertEquals(RequestRedactor.REDACTED, preview.headers().get("x-custom-id"),
                     "a case difference between what the connection wrote and what the transport reports must not reopen the leak: "
                             + preview.headers());
+        }
+    }
+
+    @Nested
+    @DisplayName("A credential in a header disables redirect-following (ssrf-protection off)")
+    class RedirectFollowingWithCredentials {
+
+        @Test
+        @DisplayName("a connection-owned header disables redirect-following so the credential cannot be replayed cross-origin")
+        void connectionCredentialDisablesRedirects() throws Exception {
+            givenConnectionResolvesToJiraCredential();
+
+            executor.execute(callWithHeaders(Map.of("Authorization", JIRA_REF)), memory, templateData("alice"), SERVER);
+
+            verify(mockRequest).setFollowRedirects(false);
+        }
+
+        @Test
+        @DisplayName("positive control — plain and literal-credential headers leave redirect-following on (the client strips them cross-origin)")
+        void plainHeadersDoNotDisableRedirects() throws Exception {
+            // With ssrf-protection off and no RESOLVED credential (no ${vault:…} /
+            // ${connection:…} / ${caller:…}) in any header, the executor does not force
+            // redirects off — that stronger measure is reserved for resolved secrets.
+            // A literal credential written straight in the config (Authorization: Bearer
+            // x, X-Api-Key, Cookie) is NOT replayed cross-origin either, because the
+            // shared Vert.x client strips SafeHttpClient.SENSITIVE_HEADERS on every
+            // cross-origin redirect hop — see HttpClientModuleTest for that layer.
+            var headers = new LinkedHashMap<String, String>();
+            headers.put("Accept", "application/json");
+            headers.put("Authorization", "Bearer literal-token");
+            headers.put("X-Api-Key", "literal-key");
+            executor.execute(callWithHeaders(headers), memory, templateData("alice"), SERVER);
+
+            verify(mockRequest, never()).setFollowRedirects(anyBoolean());
         }
     }
 
