@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.compliance;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -33,7 +34,15 @@ public class ComplianceStartupChecks {
     private final String vaultMasterKey;
     private final boolean auditEnabled;
     private final boolean auditSigningRequired;
+    private final String auditHmacKey;
 
+    public ComplianceStartupChecks(Optional<List<String>> sslCertFiles, Optional<List<String>> sslKeyFiles, Optional<String> sslKeyStoreFile,
+            boolean dbEncryptionAcknowledged, Optional<String> vaultMasterKey, boolean auditEnabled, boolean auditSigningRequired) {
+        this(sslCertFiles, sslKeyFiles, sslKeyStoreFile, dbEncryptionAcknowledged, vaultMasterKey, auditEnabled, auditSigningRequired,
+                Optional.empty());
+    }
+
+    @Inject
     public ComplianceStartupChecks(
             @ConfigProperty(name = "quarkus.http.ssl.certificate.files") Optional<List<String>> sslCertFiles,
             @ConfigProperty(name = "quarkus.http.ssl.certificate.key-files") Optional<List<String>> sslKeyFiles,
@@ -43,7 +52,8 @@ public class ComplianceStartupChecks {
             @ConfigProperty(name = "eddi.vault.master-key") Optional<String> vaultMasterKey,
             @ConfigProperty(name = "eddi.audit.enabled", defaultValue = "true") boolean auditEnabled,
             @ConfigProperty(name = "eddi.compliance.audit-signing-required",
-                            defaultValue = "false") boolean auditSigningRequired) {
+                            defaultValue = "false") boolean auditSigningRequired,
+            @ConfigProperty(name = "eddi.audit.hmac-key") Optional<String> auditHmacKey) {
         // The real Quarkus keys are plural: quarkus.http.ssl.certificate.files and
         // .key-files. This check read the singular "…certificate.file", which no
         // working TLS configuration ever sets, so an operator who terminated TLS in
@@ -61,6 +71,7 @@ public class ComplianceStartupChecks {
         this.vaultMasterKey = vaultMasterKey.orElse("");
         this.auditEnabled = auditEnabled;
         this.auditSigningRequired = auditSigningRequired;
+        this.auditHmacKey = auditHmacKey.orElse("");
     }
 
     void onStartup(@Observes StartupEvent event) {
@@ -87,14 +98,16 @@ public class ComplianceStartupChecks {
      * failure instead of a warning they will scroll past.
      */
     private void checkAuditSigning() {
-        if (!auditEnabled || !vaultMasterKey.isBlank()) {
+        // Either secret signs the ledger: the vault master key, or the independent
+        // audit key (see AuditKeyring).
+        if (!auditEnabled || !vaultMasterKey.isBlank() || !auditHmacKey.isBlank()) {
             return;
         }
 
         if (auditSigningRequired) {
             throw new IllegalStateException("COMPLIANCE: eddi.compliance.audit-signing-required=true but no vault master key is configured. "
                     + "Audit ledger entries would be written WITHOUT an HMAC integrity signature and tampering would be undetectable. "
-                    + "Set EDDI_VAULT_MASTER_KEY, or disable the requirement.");
+                    + "Set EDDI_VAULT_MASTER_KEY (or the independent EDDI_AUDIT_HMAC_KEY), or disable the requirement.");
         }
 
         LOGGER.warn("""

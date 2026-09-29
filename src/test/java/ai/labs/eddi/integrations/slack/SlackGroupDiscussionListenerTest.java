@@ -468,6 +468,24 @@ class SlackGroupDiscussionListenerTest {
     }
 
     @Test
+    void onHitlPause_integrationNameContainingSeparator_postsNoButtonsAndRecordsNothing() {
+        // A name stored before '|' was refused would split the button value, so every
+        // click would be refused: the card is notification-only.
+        var records = new InMemorySlackApprovalRecordStore();
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme|victim", records);
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase",
+                Instant.ofEpochMilli(42_000L)));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        assertFalse(blocksCaptor.getValue().toString().contains(SlackHitlSupport.ACTION_APPROVE));
+        assertEquals(0, records.size());
+    }
+
+    @Test
     void onHitlPause_noApprovalChannel_noBlockMessage() {
         listener.onGroupStart(groupStart("ROUND_TABLE", 2));
         listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));

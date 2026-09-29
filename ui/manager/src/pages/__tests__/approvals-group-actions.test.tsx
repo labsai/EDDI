@@ -29,10 +29,22 @@ const HUMAN_TURN = {
   pendingMemberId: "ana",
 };
 
-function serveGroupPendings(items: unknown[]) {
+function serveGroupPendings(items: typeof PAUSED[]) {
   server.use(
     http.get("*/groups/pending-approvals", () => HttpResponse.json(items)),
     http.get("*/agents/pending-approvals", () => HttpResponse.json([])),
+    // The group's own view of each pause agrees with the queue row — a queue
+    // decision re-reads it and refuses to go through if it has changed.
+    ...items.map((item) =>
+      http.get(`*/groups/:groupId/conversations/${item.conversationId}/approval-status`, () =>
+        HttpResponse.json({
+          groupConversationId: item.conversationId,
+          state: "AWAITING_APPROVAL",
+          pausedAt: item.pausedAt,
+          pauseType: item.pauseType,
+        }),
+      ),
+    ),
   );
 }
 
