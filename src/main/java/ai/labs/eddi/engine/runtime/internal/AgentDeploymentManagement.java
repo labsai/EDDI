@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
@@ -44,6 +45,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -51,6 +54,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -96,6 +101,36 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * happens exactly once.
      */
     private final AtomicBoolean readinessDeferred = new AtomicBoolean();
+
+    /** The wait before the first retry of a deployment that failed. */
+    static final Duration FIRST_RETRY_DELAY = Duration.ofSeconds(10);
+    /** The longest wait between two retries of a deployment that keeps failing. */
+    static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(5);
+
+    /**
+     * Deployments that failed, and when each may be tried again.
+     *
+     * <p>
+     * A deployment used to be recorded as handled whatever its outcome:
+     * {@code deployAgent} reports some failures by leaving the agent in ERROR and
+     * returning normally, so the record went into {@link #deploymentInfos} and no
+     * later sweep looked at it again. The agent stayed in ERROR until a restart,
+     * even after its cause — a missing index, a vault secret — had been fixed under
+     * the running instance. It is now recorded only once it is READY, and a failure
+     * is retried with a doubling delay, capped at {@link #MAX_RETRY_DELAY}, for as
+     * long as its deployment record says it should be deployed. The ERROR is logged
+     * once when the deployment starts failing and once more when it recovers, not
+     * on every retry.
+     * </p>
+     */
+    private final Map<DeploymentInfo, RetryState> failingDeployments = new ConcurrentHashMap<>();
+
+    /** What is known about one failing deployment. */
+    record RetryState(int failures, Instant nextAttempt) {
+    }
+
+    /** Replaced in tests, so that the backoff can be stepped through. */
+    Clock clock = Clock.systemUTC();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -230,9 +265,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             return;
         }
         try {
-            deploymentStore.readDeploymentInfos(deployed).stream()
-                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
+            List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
+            // A deployment that is no longer meant to be deployed is no longer failing.
+            failingDeployments.keySet().retainAll(meantToBeDeployed);
+            Instant now = clock.instant();
+            meantToBeDeployed.stream()
+                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
+                    .filter(deploymentInfo -> isRetryDue(deploymentInfo, now)).forEach(deploymentInfo -> {
                         try {
                             // A deployment record can outlive its Agent. deployAgent reports that by
                             // logging an ERROR and returning normally, so the catch blocks below never
@@ -254,16 +294,20 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
+                            if (endedInError(deploymentInfo)) {
+                                recordFailure(deploymentInfo, "the deployment ended in ERROR — its cause is logged above", null);
+                                return;
+                            }
+                            recordSuccess(deploymentInfo);
                             this.deploymentInfos.add(deploymentInfo);
 
                             lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
                         } catch (ServiceException | IllegalAccessException e) {
-                            LOGGER.error(e.getLocalizedMessage(), e);
+                            recordFailure(deploymentInfo, e.getLocalizedMessage(), e);
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
-                                    deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
+                            recordFailure(deploymentInfo, e.getMessage(), null);
 
                             // If the root cause is a missing resource, auto-clean the stale record
                             if (isCausedByResourceNotFound(e)) {
@@ -283,9 +327,68 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             if (readinessDeferred.compareAndSet(true, false)) {
                 reportReady();
             }
+            agentsReadiness.setAgentsInError(failingDeployments.keySet().stream()
+                    .map(info -> info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion()).sorted().toList());
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    private boolean isRetryDue(DeploymentInfo deploymentInfo, Instant now) {
+        RetryState state = failingDeployments.get(deploymentInfo);
+        return state == null || !now.isBefore(state.nextAttempt());
+    }
+
+    /**
+     * Whether {@code deployAgent} returned normally but left the agent in ERROR —
+     * the way it reports a workflow that cannot be built. A status that cannot be
+     * read is not taken for an error: the call returned, and the previous behaviour
+     * (recording it as done) is kept.
+     */
+    private boolean endedInError(DeploymentInfo deploymentInfo) {
+        try {
+            var agent = agentFactory.getAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
+            return agent != null && agent.getDeploymentStatus() == Deployment.Status.ERROR;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void recordFailure(DeploymentInfo deploymentInfo, String cause, Throwable error) {
+        RetryState previous = failingDeployments.get(deploymentInfo);
+        int failures = previous == null ? 1 : previous.failures() + 1;
+        Duration delay = retryDelay(failures);
+        failingDeployments.put(deploymentInfo, new RetryState(failures, clock.instant().plus(delay)));
+        String message = format("Agent %s version %d (%s) failed to deploy: %s. Retrying with a growing delay (next in %ds, at most "
+                + "every %d min) while its deployment record says it is deployed.", deploymentInfo.getAgentId(),
+                deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), cause, delay.toSeconds(), MAX_RETRY_DELAY.toMinutes());
+        if (previous == null) {
+            // Once per state change: the retries below would otherwise repeat this
+            // every few seconds for as long as the agent stays broken.
+            LOGGER.error(message, error);
+        } else {
+            LOGGER.debugf("%s (failure %d)", message, failures);
+        }
+    }
+
+    private void recordSuccess(DeploymentInfo deploymentInfo) {
+        RetryState previous = failingDeployments.remove(deploymentInfo);
+        if (previous != null) {
+            LOGGER.infof("Agent %s version %d (%s) deployed after %d failed attempt(s)", deploymentInfo.getAgentId(),
+                    deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), previous.failures());
+        }
+    }
+
+    /**
+     * {@link #FIRST_RETRY_DELAY}, doubled per further failure, capped at
+     * {@link #MAX_RETRY_DELAY}.
+     */
+    static Duration retryDelay(int failures) {
+        Duration delay = FIRST_RETRY_DELAY;
+        for (int i = 1; i < failures && delay.compareTo(MAX_RETRY_DELAY) < 0; i++) {
+            delay = delay.multipliedBy(2);
+        }
+        return delay.compareTo(MAX_RETRY_DELAY) > 0 ? MAX_RETRY_DELAY : delay;
     }
 
     /**

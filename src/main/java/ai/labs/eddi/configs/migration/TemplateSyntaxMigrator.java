@@ -47,10 +47,13 @@ public class TemplateSyntaxMigrator {
 
     /**
      * Migrate a string from Thymeleaf to Qute syntax. Returns input unchanged if no
-     * Thymeleaf patterns are found.
+     * Thymeleaf patterns are found, and also when it has a shape this converter
+     * cannot convert safely — see {@link #unconvertibleReason(String)}. Leaving a
+     * template in Thymeleaf syntax is visible and fixable; rewriting it wrongly is
+     * neither.
      */
     public String migrate(String input) {
-        if (input == null || input.isEmpty()) {
+        if (input == null || input.isEmpty() || unconvertibleReason(input) != null) {
             return input;
         }
 
@@ -311,6 +314,101 @@ public class TemplateSyntaxMigrator {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Template delimiters that must not appear inside a string literal of an
+     * expression.
+     */
+    private static final List<String> NESTED_TEMPLATE_MARKERS = List.of("[[", "[(", "${", "]]", ")]");
+
+    /** Every inline-expression opener and the closer that ends it. */
+    private static final String[][] INLINE_DELIMITERS = {{"[[", "]]"}, {"[(", ")]"}};
+
+    /**
+     * Why {@code input} cannot be converted safely, or {@code null} when it can.
+     *
+     * <p>
+     * The shape this exists for is an inline expression with a string literal that
+     * is itself template syntax — {@code [['[[${' + 'x.x' + '}]]']]}, an expression
+     * producing text that contains Thymeleaf. The converter finds the inner
+     * {@code [[${} first, takes the literal quotes around it for operands, and
+     * produced {@code [['+'x.x'+']]}: no Thymeleaf delimiter left, so nothing
+     * downstream noticed, the document was counted as migrated, and the call
+     * rendered literal text. Generating template syntax from a template has no
+     * counterpart this converter can emit, so the shape is refused instead: any
+     * string literal inside {@code [[…]]} or {@code [(…)]} that contains {@code
+     * [[}, {@code [(}, <code>${</code>, {@code ]]} or {@code )]}.
+     * </p>
+     *
+     * <p>
+     * Literals are found with the same quote and escape rules the conversion uses,
+     * so a JSON body such as {@code [["a", "b"]]} — a string literal with no
+     * delimiter in it — is not refused.
+     * </p>
+     */
+    public String unconvertibleReason(String input) {
+        if (input == null) {
+            return null;
+        }
+        for (String[] delimiters : INLINE_DELIMITERS) {
+            int from = 0;
+            while (true) {
+                int open = input.indexOf(delimiters[0], from);
+                if (open < 0) {
+                    break;
+                }
+                int bodyStart = open + delimiters[0].length();
+                int close = closingDelimiter(input, bodyStart, delimiters[1]);
+                if (close < 0) {
+                    break;
+                }
+                for (String literal : stringLiterals(input.substring(bodyStart, close))) {
+                    for (String marker : NESTED_TEMPLATE_MARKERS) {
+                        if (literal.contains(marker)) {
+                            return "a string literal inside " + delimiters[0] + "…" + delimiters[1] + " contains the template delimiter '"
+                                    + marker + "' — a template that generates template syntax, which cannot be converted to Qute safely";
+                        }
+                    }
+                }
+                from = bodyStart;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The bodies of the quoted string literals in {@code expr}, quotes excluded.
+     */
+    private static List<String> stringLiterals(String expr) {
+        var literals = new ArrayList<String>();
+        var current = new StringBuilder();
+        char openQuote = 0;
+        boolean escaped = false;
+        for (int i = 0; i < expr.length(); i++) {
+            char c = expr.charAt(i);
+            if (openQuote == 0) {
+                if (c == '\'' || c == '"') {
+                    openQuote = c;
+                    current.setLength(0);
+                }
+            } else if (escaped) {
+                current.append(c);
+                escaped = false;
+            } else if (c == ESCAPE) {
+                escaped = true;
+            } else if (c == openQuote) {
+                literals.add(current.toString());
+                openQuote = 0;
+            } else {
+                current.append(c);
+            }
+        }
+        if (openQuote != 0) {
+            // An unterminated literal runs to the end of the expression.
+            literals.add(current.toString());
+        }
+        return literals;
     }
 
     /**

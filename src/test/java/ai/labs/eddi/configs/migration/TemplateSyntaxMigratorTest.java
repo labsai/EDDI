@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.migration;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -218,14 +220,17 @@ class TemplateSyntaxMigratorTest {
     /**
      * The shape of a template found in a real configuration: three literals
      * concatenated so that the rendered output is itself a template expression, for
-     * a generated agent configuration. Malformed, never used, and it stopped the
-     * whole migration. Whatever it converts to, it must not throw.
+     * a generated agent configuration. It once stopped the whole migration by
+     * throwing, and after that was fixed it was rewritten to {@code [['+'…'+']]} —
+     * silently wrong, and counted as migrated. It must neither throw nor be
+     * rewritten: it is refused, so the migration reports it for a human.
      */
     @Test
-    void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {
+    void migrateStringConcat_nestedTemplateLiterals_isRefusedNotRewritten() {
         String input = "{\"targetServerUrl\":\"[['[[${'+'properties.apiBaseUrl'+'}]]']]\"}";
         String migrated = assertDoesNotThrow(() -> migrator.migrate(input));
-        assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
+        assertEquals(input, migrated);
+        assertNotNull(migrator.unconvertibleReason(input));
     }
 
     // --- an escaped quote inside the literal (Copilot review, PR #781) ---
@@ -366,6 +371,45 @@ class TemplateSyntaxMigratorTest {
     void migrateConcat_twoExpressionsOnOneLineBothConvert() {
         assertEquals("{a}/{b} and {c}-{d}",
                 migrator.migrate("[[${a + '/' + b}]] and [[${c + '-' + d}]]"));
+    }
+
+    // --- templates that generate template syntax ---------------------------
+
+    /**
+     * An expression whose string literal is itself Thymeleaf: its output is
+     * template text. The converter used to find the inner <code>[[${</code> first
+     * and produce {@code [['+'x.x'+']]} — no Thymeleaf delimiter left, so it was
+     * counted as migrated and rendered literal text. It must be refused and left
+     * exactly as it was.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[['[[${'+'x.x'+'}]]']]",
+            "[[\"[[${\"+\"x.x\"+\"}]]\"]]",
+            "[['it\\'s [[${' + 'x.x' + '}]] here']]",
+            "[['[['+'[[${'+'x.x'+'}]]'+']]']]",
+            "[(${'[[${' + x.x + '}]]'})]",
+            "prefix [[${a}]] then [['[(${' + 'x' + '})]']] suffix"})
+    void templateThatGeneratesTemplateSyntaxIsRefusedAndLeftUnchanged(String input) {
+        assertNotNull(migrator.unconvertibleReason(input), input);
+        assertEquals(input, migrator.migrate(input), "a refused template is never rewritten");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[[${a + '/' + b}]]",
+            "[[${a + '}' + b}]]",
+            "{\"matrix\": [[\"a\", \"b\"]], \"text\": \"[[${x}]]\"}",
+            "[# th:each=\"i : ${items}\"][[${i}]][/]",
+            "plain text"})
+    void ordinaryTemplatesAreNotRefused(String input) {
+        assertNull(migrator.unconvertibleReason(input), input);
+    }
+
+    @Test
+    void jsonArrayOfStringsBesideATemplateStillConverts() {
+        assertEquals("{\"matrix\": [[\"a\", \"b\"]], \"text\": \"{x}\"}",
+                migrator.migrate("{\"matrix\": [[\"a\", \"b\"]], \"text\": \"[[${x}]]\"}"));
     }
 
     @Test

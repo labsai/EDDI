@@ -115,7 +115,7 @@ public class V6RenameMigration {
      * corresponding ".history" rename.
      */
     private static final String[][] COLLECTION_RENAMES = {{"bots", "agents"}, {"packages", "workflows"}, {"behaviorrulesets", "rulesets"},
-            {"httpcalls", "apicalls"}, {"langchain", "llms"}, {"regulardictionaries", "dictionaries"},};
+            {"httpcalls", "apicalls"}, {"langchain", "llms"}, {"regulardictionaries", "dictionaries"}, {"bottriggers", "agenttriggers"},};
 
     /**
      * BSON field renames inside agent documents (old field → new field). Applied
@@ -274,7 +274,12 @@ public class V6RenameMigration {
         // renamed documents as it finds them.
         total = total.plus(migrateConversationStepShape());
 
-        // 5. Rewrite environment fields in deployment/conversation documents
+        // 5. The managed-conversation mappings: triggers by intent, and each user's
+        // conversation per intent.
+        total = total.plus(migrateAgentTriggers());
+        total = total.plus(migrateUserConversations());
+
+        // 6. Rewrite environment fields in deployment/conversation documents
         for (String collectionName : List.of(COLLECTION_CONVERSATIONS, COLLECTION_DEPLOYMENTS)) {
             total = total.plus(migrateEnvironments(collectionName));
         }
@@ -835,6 +840,181 @@ public class V6RenameMigration {
 
     private static Document cond(Object condition, Object then, Object otherwise) {
         return new Document("$cond", Arrays.asList(condition, then, otherwise));
+    }
+
+    private static final String COLLECTION_AGENT_TRIGGERS = "agenttriggers";
+    private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
+    private static final String FIELD_BOT_ID = "botId";
+    private static final String FIELD_BOT_DEPLOYMENTS = "botDeployments";
+    private static final String FIELD_AGENT_DEPLOYMENTS = "agentDeployments";
+
+    /**
+     * Brings the triggers that EDDI 5 kept in {@code bottriggers} (renamed to
+     * {@code agenttriggers} with the other collections) into the v6 shape:
+     * {@code botDeployments[].botId} becomes {@code agentDeployments[].agentId},
+     * and a v5 environment becomes {@code production}.
+     *
+     * <p>
+     * Without it the collection kept its v5 name, {@code agenttriggers} stayed
+     * empty, and every managed conversation by intent
+     * ({@code /agents/managed/{intent}/…}) found no trigger after the upgrade.
+     * </p>
+     *
+     * <p>
+     * The environment remap can make two entries of one trigger identical — the
+     * same agent listed for both {@code restricted} and {@code unrestricted}. The
+     * managed endpoint picks one entry at random, so a duplicate would double one
+     * agent's share; an identical duplicate is dropped, and logged. Entries that
+     * still differ (another agent, another initial context) are all kept: which one
+     * the operator meant cannot be told, so nothing is guessed. The intent is the
+     * collection's unique key and is not changed, so no two triggers can collide.
+     * </p>
+     *
+     * <p>
+     * Read and written in Java rather than server-side: triggers are a handful of
+     * small documents, and the de-duplication compares whole entries.
+     * </p>
+     */
+    private MigrationResult migrateAgentTriggers() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_AGENT_TRIGGERS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_AGENT_TRIGGERS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        int migrated = 0;
+        int failed = 0;
+        for (Document trigger : collection.find(exists(FIELD_BOT_DEPLOYMENTS))) {
+            Object intent = trigger.get("intent");
+            if (trigger.containsKey(FIELD_AGENT_DEPLOYMENTS)) {
+                LOGGER.warnf("  %s: the trigger for intent '%s' holds both '%s' and '%s' — left unchanged; merge them by hand",
+                        COLLECTION_AGENT_TRIGGERS, intent, FIELD_BOT_DEPLOYMENTS, FIELD_AGENT_DEPLOYMENTS);
+                continue;
+            }
+            List<Document> deployments = new ArrayList<>();
+            int duplicates = 0;
+            Object v5Deployments = trigger.get(FIELD_BOT_DEPLOYMENTS);
+            for (Object entry : v5Deployments instanceof List<?> list ? list : List.of()) {
+                if (!(entry instanceof Document v5)) {
+                    continue;
+                }
+                Document v6 = new Document();
+                for (var field : v5.entrySet()) {
+                    String name = FIELD_BOT_ID.equals(field.getKey()) ? FIELD_AGENT_ID : field.getKey();
+                    v6.put(name, field.getValue());
+                }
+                v6.put(FIELD_ENVIRONMENT, v6Environment(v6.get(FIELD_ENVIRONMENT)));
+                if (deployments.contains(v6)) {
+                    duplicates++;
+                } else {
+                    deployments.add(v6);
+                }
+            }
+            if (duplicates > 0) {
+                LOGGER.warnf("  %s: the trigger for intent '%s' listed %d agent deployment(s) twice once both v5 environments "
+                        + "became '%s' — kept one of each", COLLECTION_AGENT_TRIGGERS, intent, duplicates,
+                        ENVIRONMENT_REWRITES[0][1]);
+            }
+            trigger.remove(FIELD_BOT_DEPLOYMENTS);
+            trigger.put(FIELD_AGENT_DEPLOYMENTS, deployments);
+            try {
+                collection.replaceOne(eq(ID_FIELD, trigger.get(ID_FIELD)), trigger);
+                migrated++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s: the trigger for intent '%s' could not be migrated — leaving it unchanged and continuing: %s",
+                        COLLECTION_AGENT_TRIGGERS, intent, e.toString());
+            }
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d triggers", COLLECTION_AGENT_TRIGGERS, migrated);
+        }
+        return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * The v6 value of an environment, i.e. {@link #ENVIRONMENT_REWRITES} applied.
+     */
+    private static Object v6Environment(Object environment) {
+        if (environment instanceof String value) {
+            for (String[] mapping : ENVIRONMENT_REWRITES) {
+                if (value.equalsIgnoreCase(mapping[0])) {
+                    return mapping[1];
+                }
+            }
+        }
+        return environment;
+    }
+
+    /**
+     * Brings each user's conversation-per-intent mapping into the v6 shape:
+     * {@code botId} becomes {@code agentId}, and a v5 environment becomes
+     * {@code production}.
+     *
+     * <p>
+     * Without it an existing user's intent resolved to no agent, so a managed
+     * conversation either failed or started over instead of continuing the user's
+     * old one. The collection's unique key is {@code (intent, userId)}, which this
+     * does not touch, so the remap cannot make two documents collide.
+     * </p>
+     *
+     * <p>
+     * One {@code updateMany} with an aggregation pipeline. A document that already
+     * holds an {@code agentId} beside its {@code botId} is not matched — which of
+     * the two is right cannot be told — and is counted and reported instead.
+     * </p>
+     */
+    private MigrationResult migrateUserConversations() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_USER_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_USER_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<String> v5Environments = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            v5Environments.add(mapping[0]);
+        }
+        Document environment = cond(
+                new Document("$in", List.of(new Document("$toLower", new Document("$ifNull", List.of("$" + FIELD_ENVIRONMENT, ""))),
+                        v5Environments)),
+                ENVIRONMENT_REWRITES[0][1], "$" + FIELD_ENVIRONMENT);
+        Document agentId = new Document("$ifNull", List.of("$" + FIELD_AGENT_ID, "$" + FIELD_BOT_ID));
+        Bson v5Shaped = and(or(exists(FIELD_BOT_ID), new Document(FIELD_ENVIRONMENT, new Document("$in", v5Environments))),
+                or(exists(FIELD_BOT_ID, false), exists(FIELD_AGENT_ID, false)));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(v5Shaped, List.of(
+                    new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
+                    new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s could not be migrated — counted as a failure, so the migration is NOT recorded as complete "
+                    + "and runs again on the next start: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d documents", COLLECTION_USER_CONVERSATIONS, migrated);
+        }
+        try {
+            long ambiguous = collection.countDocuments(and(exists(FIELD_BOT_ID), exists(FIELD_AGENT_ID)));
+            if (ambiguous > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold both '%s' and '%s' and were left unchanged; they resolve to '%s'. "
+                        + "Remove '%s' by hand once checked.", COLLECTION_USER_CONVERSATIONS, ambiguous, FIELD_BOT_ID, FIELD_AGENT_ID,
+                        FIELD_AGENT_ID, FIELD_BOT_ID);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the documents left unmigrated: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
     }
 
     /**
