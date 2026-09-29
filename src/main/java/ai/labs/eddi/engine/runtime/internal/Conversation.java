@@ -227,9 +227,24 @@ public class Conversation implements IConversation {
         }
         properties.forEach((key, property) -> {
             if (property != null && property.getScope() == Scope.longTerm) {
-                longTermBaseline.put(key, property);
+                longTermBaseline.put(key, valueCopy(property));
             }
         });
+    }
+
+    /**
+     * An independent copy of {@code property} for the baseline. The live property
+     * can be changed in place — the turn-end secret scrub rewrites its value — and
+     * a baseline holding the same object would then still equal it, so the scrubbed
+     * value was never written and the user-memory store kept the secret.
+     */
+    private static Property valueCopy(Property property) {
+        var copy = new Property(property.getName(), property.getValueString(),
+                property.getValueObject() != null ? new LinkedHashMap<>(property.getValueObject()) : null,
+                property.getValueList() != null ? new ArrayList<>(property.getValueList()) : null, property.getValueInt(),
+                property.getValueFloat(), property.getValueBoolean(), property.getScope(), property.getVisibility());
+        copy.setAutoVaulted(property.getAutoVaulted());
+        return copy;
     }
 
     @Override

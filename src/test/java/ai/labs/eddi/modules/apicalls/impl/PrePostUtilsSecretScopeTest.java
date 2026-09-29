@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
+import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
+import ai.labs.eddi.configs.apicalls.model.PostResponse;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.model.Context;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
@@ -24,6 +32,8 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -123,5 +133,30 @@ class PrePostUtilsSecretScopeTest {
         verify(jsonSerialization).deserialize(anyString());
         verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
         assertNull(memory.getConversationProperties().get("claims"));
+    }
+
+    @Test
+    @DisplayName("a postResponse output rendered from the response never carries the token the same postResponse vaulted")
+    void outputBuiltAfterVaultingIsScrubbed() throws Exception {
+        var realEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
+        var rendering = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), realEngine, new DataFactory(),
+                new SecretPropertyVault(secretProvider, new DataFactory()));
+        var output = new OutputBuildingInstruction();
+        output.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
+        output.setOutputType("text");
+        output.setOutputValue("Your token is {tokenResponse.access_token}");
+        var postResponse = new PostResponse();
+        postResponse.setPropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")));
+        postResponse.setOutputBuildInstructions(List.of(output));
+
+        var vaulted = rendering.runPostResponse(memory, postResponse, templateData, 200, false);
+
+        assertEquals(Set.of(TOKEN), vaulted);
+        IData<Context> rendered = memory.getCurrentStep().getLatestData("context:output");
+        assertNotNull(rendered, "the postResponse output must have been stored");
+        String text = new ObjectMapper().writeValueAsString(rendered.getResult().getValue());
+        assertTrue(text.contains("Your token is"), text);
+        assertFalse(text.contains(TOKEN), text);
+        assertFalse(String.valueOf(templateData.get("tokenResponse")).contains(TOKEN), "template data after the call: " + templateData);
     }
 }

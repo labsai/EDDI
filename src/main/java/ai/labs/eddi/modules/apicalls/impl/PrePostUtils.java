@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.OutputValue;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
@@ -253,11 +255,30 @@ public class PrePostUtils {
         if (postResponse != null) {
             var propertyInstructions = postResponse.getPropertyInstructions();
             vaulted = executePropertyInstructions(propertyInstructions, httpCode, validationError, memory, templateDataObjects);
+            // The template data still holds the response the token was read from, and
+            // the output and quick-reply templates below render from it: without this, a
+            // postResponse output of {tokenResponse.access_token} put the plaintext the
+            // instruction just vaulted into the conversation output.
+            scrubTemplateData(templateDataObjects, vaulted);
 
             buildOutput(memory, templateDataObjects, httpCode, postResponse);
             buildQuickReplies(memory, templateDataObjects, httpCode, postResponse);
         }
         return vaulted;
+    }
+
+    /**
+     * Replaces, in place, every value of {@code templateDataObjects} that carries
+     * one of the {@code vaulted} plaintexts with a scrubbed copy.
+     */
+    private static void scrubTemplateData(Map<String, Object> templateDataObjects, Set<String> vaulted) {
+        if (templateDataObjects == null || vaulted == null || vaulted.isEmpty()) {
+            return;
+        }
+        templateDataObjects.replaceAll((key, value) -> {
+            Object cleaned = SecretValueScrubber.scrubDeep(value, vaulted, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+            return cleaned != null ? cleaned : value;
+        });
     }
 
     private void buildOutput(IConversationMemory memory, Map<String, Object> templateDataObjects, int httpCode, PostResponse postResponse)

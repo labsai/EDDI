@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -46,11 +47,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * A context value the client marks {@code "secret": true} is usable while its
@@ -381,5 +386,39 @@ class ConversationSecretContextTest {
         assertInstanceOf(Boolean.class, parsed.getSecret());
         assertTrue(parsed.getSecret());
         assertFalse(MAPPER.writeValueAsString(new Context(Context.ContextType.string, "x")).contains("secret"));
+    }
+
+    /**
+     * A loaded longTerm property is scrubbed in place. The baseline the turn-end
+     * write diffs against used to hold the SAME object, so the scrubbed value
+     * looked unchanged and the store was never told — it kept the secret.
+     */
+    private void initWithStoredLongTerm(String key, Object storedValue, String secret) throws Exception {
+        IUserMemoryStore store = mock(IUserMemoryStore.class);
+        when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
+        var entry = new UserMemoryEntry(null, "user1", key, storedValue, "general", Visibility.self, "agent1", List.of(), "conv0", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getVisibleEntries(anyString(), anyString(), anyList(), anyString(), anyInt())).thenReturn(List.of(entry));
+
+        conversation().init(contexts(secret, true));
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, atLeastOnce()).upsert(written.capture());
+        var forKey = written.getAllValues().stream().filter(e -> key.equals(e.key())).toList();
+        assertFalse(forKey.isEmpty(), "the scrubbed longTerm property must be written back");
+        forKey.forEach(e -> assertFalse(String.valueOf(e.value()).contains(secret), "written: " + e.value()));
+        assertTrue(String.valueOf(forKey.getLast().value()).contains(PLACEHOLDER), "written: " + forKey.getLast().value());
+    }
+
+    @Test
+    @DisplayName("a longTerm property loaded from user memory and scrubbed during init() is persisted as the placeholder")
+    void loadedLongTermScrubbedDuringInitIsPersisted() throws Exception {
+        initWithStoredLongTerm("rememberedToken", "Bearer " + TOKEN, TOKEN);
+    }
+
+    @Test
+    @DisplayName("S4: a loaded longTerm property that IS a short secret is persisted as the placeholder")
+    void loadedLongTermShortSecretScrubbedDuringInitIsPersisted() throws Exception {
+        initWithStoredLongTerm("rememberedPin", "4711", "4711");
     }
 }

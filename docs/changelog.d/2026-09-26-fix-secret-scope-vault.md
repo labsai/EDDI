@@ -97,3 +97,13 @@ Main fixed the shared auto-vault slot (C2) while this branch was open, with per-
 - Exact-match scrubbing of short secret context values. It is a new `EXACT` mode of `SecretValueScrubber` beside main's whole-token mode, and it reaches `Conversation` and `TurnAuditBuffer`.
 - The `AgentSetupService` fail-closed vaulting and the vaulting of `apiAuth`.
 
+
+### CodeRabbit review of `d44edc478`
+
+- **Scrubbed longTerm properties are written back.** `Conversation` kept the *same* `Property` objects in its longTerm baseline. The turn-end secret scrub changes a property in place, so a loaded longTerm property that it scrubbed still equalled its baseline and was never written: the user-memory store kept the secret. This was main's baseline code; the ≥ 8-character scrub hit it already, and the exact match for short values made it reachable for PINs too. The baseline now holds independent copies.
+- **`apiAuth` references are recognised, not guessed.** `AgentSetupService.vaultApiAuth` used to treat any value containing `${` as a reference and store it as given. Now:
+  - A value that is exactly a supported reference (`vault`, `eddivault`, `connection`, `vars` or `caller`), optionally after a scheme, is kept.
+  - A value that mixes a reference with other text is refused.
+  - Anything else is vaulted, so a literal such as `Bearer test-token${` no longer reaches the httpcalls in plaintext.
+- **Post-response output cannot render a token its own instructions vaulted.** `PrePostUtils.runPostResponse` scrubs the vaulted plaintexts from the template data before it builds the output and quick replies. `{tokenResponse.access_token}` in an output template no longer reaches the conversation output.
+- **An oversize JSON body is redacted before it is cut.** `ApiCallExecutor` parses and scrubs the whole application/json body first, then serializes and truncates it. Cutting first made the body invalid JSON, and the text fallback that followed misses secrets under 8 characters. A body that is genuinely invalid JSON still falls back to text redaction.

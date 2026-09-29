@@ -1345,18 +1345,32 @@ public class AgentSetupService {
      * httpcall header.
      * <p>
      * It used to be copied into the ApiCalls documents verbatim, while the LLM
-     * {@code apiKey} of the same request was vaulted. A value that already carries
-     * a reference ({@code ${vault:…}}, {@code ${connection:…}}, {@code ${vars:…}},
-     * possibly after a scheme such as {@code Bearer }) is used as-is. With the
-     * vault disabled the value passes through with a warning, exactly like
-     * {@code apiKey}; with the vault enabled a failed write fails the setup.
+     * {@code apiKey} of the same request was vaulted. A value that IS a supported
+     * reference ({@code ${vault:…}}, {@code ${eddivault:…}},
+     * {@code ${connection:…}}, {@code ${vars:…}}, {@code ${caller:…}}), optionally
+     * after a scheme such as {@code Bearer }, is used as-is
+     * ({@link #API_AUTH_REFERENCE}). A value that mixes a reference with other text
+     * is refused, because that text would be written into the httpcalls in
+     * plaintext. Anything else is a literal credential and is vaulted, even when it
+     * happens to contain {@code ${} — it used to be taken for a reference on that
+     * alone and stored in plaintext. With the vault disabled the value passes
+     * through with a warning, exactly like {@code apiKey}; with the vault enabled a
+     * failed write fails the setup.
      *
      * @return the value to put in the headers — a vault reference when vaulted
+     *
+     * @throws AgentSetupException
+     *             when the value mixes a reference with other text, or the vault
+     *             write fails
      */
     private String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources) throws AgentSetupException {
         String value = apiAuth == null ? null : apiAuth.trim();
-        if (value == null || value.isEmpty() || value.contains("${")) {
+        if (value == null || value.isEmpty() || API_AUTH_REFERENCE.matcher(value).matches()) {
             return apiAuth;
+        }
+        if (SUPPORTED_REFERENCE.matcher(value).find()) {
+            throw new AgentSetupException("apiAuth mixes a ${…} reference with other text, which would be stored in plaintext. Pass either "
+                    + "the credential itself (it is vaulted) or a reference alone, optionally after a scheme such as 'Bearer '.");
         }
         if (!secretProvider.isAvailable()) {
             LOGGER.warn("Secrets Vault is not configured — apiAuth will be stored in plaintext in the generated httpcalls. "
@@ -1663,6 +1677,19 @@ public class AgentSetupService {
      * addressable there.
      */
     private static final Pattern VALID_SECRET_NAME = Pattern.compile("[a-zA-Z0-9._-]{1,128}");
+
+    /**
+     * A reference the generated httpcalls resolve in a header: vault (and its
+     * legacy spelling), connection, global variable or caller identity.
+     */
+    private static final Pattern SUPPORTED_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|connection|vars|caller):[^}\\s]+}");
+
+    /**
+     * An {@code apiAuth} that is only a reference, optionally after an
+     * authorization scheme ({@code Bearer ${vault:crm-token}}).
+     */
+    private static final Pattern API_AUTH_REFERENCE = Pattern
+            .compile("(?:[A-Za-z][A-Za-z0-9-]*\\s+)?\\$\\{(?:vault|eddivault|connection|vars|caller):[^}\\s]+}");
 
     private static void validateSecretName(String value, String label) throws AgentSetupException {
         if (value == null || !VALID_SECRET_NAME.matcher(value).matches()) {

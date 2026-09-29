@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -724,6 +725,47 @@ class AgentSetupVaultKeyReuseTest {
         void apiAuthReferencePassesThrough() throws Exception {
             assertEquals("${connection:crm}", vaultApiAuth("${connection:crm}"));
             assertEquals("Bearer ${vault:crm-token}", vaultApiAuth("Bearer ${vault:crm-token}"));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: every supported reference form, alone or after a scheme, is used as-is")
+        void apiAuthSupportedReferencesPassThrough() throws Exception {
+            for (String reference : List.of("${vault:crm-token}", "${eddivault:crm-token}", "${vars:crm-auth}", "Bearer ${caller:token}",
+                    "Basic ${vault:tenant-a/crm-basic}")) {
+                assertEquals(reference, vaultApiAuth(reference));
+            }
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a literal that merely contains '${' is vaulted, not taken for a reference")
+        void apiAuthLiteralWithDollarBraceIsVaulted() throws Exception {
+            String literal = "Bearer test-token${";
+
+            String result = vaultApiAuth(literal);
+
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), eq(literal), anyString(), any());
+            assertEquals(ref.getValue().toReferenceString(), result);
+            assertFalse(result.contains("test-token"), result);
+        }
+
+        @Test
+        @DisplayName("apiAuth: an unsupported namespace is a literal and is vaulted")
+        void apiAuthUnsupportedNamespaceIsVaulted() throws Exception {
+            String literal = "Bearer ${unknown:thing}";
+
+            assertNotEquals(literal, vaultApiAuth(literal));
+            verify(secretProvider).store(any(), eq(literal), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: plaintext mixed with a reference is refused, never written in plaintext")
+        void apiAuthMixedIsRefused() throws Exception {
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer plain-" + KEY + "${vault:crm-token}"));
+
+            assertFalse(e.getMessage().contains(KEY), e.getMessage());
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 

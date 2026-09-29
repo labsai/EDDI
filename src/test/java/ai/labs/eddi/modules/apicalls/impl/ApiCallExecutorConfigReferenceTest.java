@@ -526,6 +526,45 @@ class ApiCallExecutorConfigReferenceTest {
         }
 
         @Test
+        @DisplayName("an oversize JSON success body is redacted as a whole tree before it is cut — a short secret does not survive the cut")
+        void oversizeJsonBodyIsRedactedBeforeTruncation() throws Exception {
+            String body = "{\"user\":\"alice\",\"echo\":\"key " + SECRET + "\",\"pad\":\"" + "x".repeat(400) + "\"}";
+            IResponse echo = respond(200, body);
+            when(echo.getHttpHeader()).thenReturn(Map.of("Content-Type", "application/json"));
+            var templateData = data("hi");
+            ApiCall call = call(Map.of("X-Api-Key", "${vault:api-key}", "X-User", "${vault:user}"), "{}");
+            call.setSaveResponse(true);
+            call.setMaxResponseSizeInBytes(120);
+
+            var result = executor.execute(call, memory, templateData, SERVER);
+
+            String stored = String.valueOf(templateData.get("response"));
+            assertTrue(stored.length() <= 120, "the size limit still applies: " + stored.length());
+            assertFalse(stored.contains("\"alice\""), "a value that IS the short secret must not survive truncation: " + stored);
+            assertFalse(stored.contains(SECRET), stored);
+            assertTrue(stored.contains(RequestRedactor.REDACTED), stored);
+            assertFalse(String.valueOf(result).contains("\"alice\""), "tool result: " + result);
+        }
+
+        @Test
+        @DisplayName("a JSON body that is genuinely invalid still falls back to text redaction and the size limit")
+        void invalidJsonBodyFallsBackToText() throws Exception {
+            IResponse echo = respond(200, "{not json, key " + SECRET + " " + "y".repeat(400));
+            when(echo.getHttpHeader()).thenReturn(Map.of("Content-Type", "application/json"));
+            var templateData = data("hi");
+            ApiCall call = call(Map.of("X-Api-Key", "${vault:api-key}"), "{}");
+            call.setSaveResponse(true);
+            call.setMaxResponseSizeInBytes(120);
+
+            executor.execute(call, memory, templateData, SERVER);
+
+            String stored = String.valueOf(templateData.get("response"));
+            assertTrue(stored.startsWith("{not json, key "), stored);
+            assertTrue(stored.length() <= 120, "the size limit still applies: " + stored.length());
+            assertFalse(stored.contains(SECRET), stored);
+        }
+
+        @Test
         @DisplayName("review #6: a token a post-response secret instruction vaulted is removed from the LLM tool result")
         void vaultedTokenLeavesToolResult() throws Exception {
             when(prePostUtils.runPostResponse(any(), any(), any(), anyInt(), anyBoolean())).thenReturn(Set.of("fresh-oauth-token-value"));

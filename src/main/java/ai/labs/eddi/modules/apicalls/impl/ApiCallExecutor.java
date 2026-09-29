@@ -360,19 +360,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                         Object responseObject;
                         if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                            String responseBody = truncateResponseBody(rawBody, resolveMaxResponseSize(call), call.getName());
-                            try {
-                                // Parsed from the UNREDACTED body and scrubbed as a tree: a secret
-                                // is removed from string values (and replaces a number only when it
-                                // IS the number), so the JSON stays valid and no digit run inside an
-                                // unrelated number is rewritten.
-                                responseObject = redactSuccessTree(jsonSerialization.deserialize(responseBody, Object.class),
-                                        built.resolvedSecrets());
-                            } catch (IOException jsonEx) {
-                                LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s",
-                                        call.getName(), jsonEx.getMessage());
-                                responseObject = redactSuccessText(responseBody, built.resolvedSecrets());
-                            }
+                            responseObject = redactedJsonResponse(rawBody, built.resolvedSecrets(), resolveMaxResponseSize(call), call.getName());
                         } else {
                             if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
                                 var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
@@ -798,6 +786,42 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * content.
      */
     // Package-private for unit testing.
+    /**
+     * An application/json success body, redacted and capped.
+     * <p>
+     * The whole body is parsed and scrubbed as a tree FIRST — from the unredacted
+     * text, so a secret is removed from string values and replaces a number only
+     * when it IS the number, the JSON stays valid and no digit run inside an
+     * unrelated number is rewritten. Only then is the size limit applied: a body
+     * over it is serialized from the scrubbed tree and cut. Cutting first made an
+     * oversize body invalid JSON, and the text fallback it then took removes only
+     * secrets of {@link #MIN_SUCCESS_BODY_REDACTION_LENGTH} characters or more, so
+     * a short credential echoed as a JSON value survived. A body that is not valid
+     * JSON at all is redacted as text, before it is cut.
+     */
+    Object redactedJsonResponse(String rawBody, Set<String> resolvedSecrets, int maxResponseSize, String callName) {
+        Object tree;
+        try {
+            tree = jsonSerialization.deserialize(rawBody, Object.class);
+        } catch (IOException jsonEx) {
+            LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s", callName,
+                    jsonEx.getMessage());
+            return truncateResponseBody(redactSuccessText(rawBody, resolvedSecrets), maxResponseSize, callName);
+        }
+        Object redacted = redactSuccessTree(tree, resolvedSecrets);
+        if (rawBody == null || rawBody.length() <= maxResponseSize) {
+            return redacted;
+        }
+        try {
+            return truncateResponseBody(jsonSerialization.serialize(redacted), maxResponseSize, callName);
+        } catch (IOException serializeEx) {
+            // The tree came out of the same serializer, so this is not expected. The raw
+            // text is redacted of every substituted secret, whatever its length.
+            LOGGER.warnf("ApiCall (%s) response could not be re-serialized after redaction: %s", callName, serializeEx.getMessage());
+            return truncateResponseBody(RequestRedactor.redactResolvedSecrets(rawBody, resolvedSecrets), maxResponseSize, callName);
+        }
+    }
+
     static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
         if (responseBody == null || responseBody.length() <= maxResponseSize) {
             return responseBody;
