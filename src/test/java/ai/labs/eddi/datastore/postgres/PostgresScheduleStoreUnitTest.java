@@ -4,13 +4,14 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.utils.LogCaptureSupport;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -715,44 +718,6 @@ class PostgresScheduleStoreUnitTest {
                 "the redaction must AND onto the agent filter: " + sql.getValue());
     }
 
-    /**
-     * H2a: owner scoping is part of the query for the same paging reason as the
-     * HITL redaction. Placeholders only; the principal is bound, never spliced.
-     */
-    @Test
-    void readAllSchedules_scopedToACaller_filtersAndBindsInTheQuery() throws Exception {
-        when(resultSet.next()).thenReturn(false);
-
-        sut.readAllSchedules(50, 10, true, new IScheduleStore.ListingScope("alice", false));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sql.capture());
-        assertTrue(sql.getValue().contains("(user_id = ? OR ((user_id IS NULL OR user_id = '' OR user_id LIKE 'system:%') "
-                + "AND created_by = ?))"), sql.getValue());
-        assertTrue(sql.getValue().indexOf("user_id = ?") < sql.getValue().indexOf("LIMIT"), sql.getValue());
-        assertFalse(sql.getValue().contains("alice"), "the principal must be bound, not spliced: " + sql.getValue());
-        verify(preparedStatement).setString(1, "alice");
-        verify(preparedStatement).setString(2, "alice");
-        verify(preparedStatement).setInt(3, 50);
-        verify(preparedStatement).setInt(4, 10);
-    }
-
-    @Test
-    void readSchedulesByAgentId_scopedIncludingUnowned_bindsAfterTheAgent() throws Exception {
-        when(resultSet.next()).thenReturn(false);
-
-        sut.readSchedulesByAgentId("agent-1", 50, 0, false, new IScheduleStore.ListingScope("alice", true));
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(connection).prepareStatement(sql.capture());
-        assertTrue(sql.getValue().contains("agent_id = ? AND (user_id = ? OR (user_id IS NULL"), sql.getValue());
-        assertFalse(sql.getValue().contains("created_by = ?"), "includeUnowned admits every unowned row: " + sql.getValue());
-        verify(preparedStatement).setString(1, "agent-1");
-        verify(preparedStatement).setString(2, "alice");
-        verify(preparedStatement).setInt(3, 50);
-        verify(preparedStatement).setInt(4, 0);
-    }
-
     @Test
     void readAllSchedules_asAdmin_addsNoRedactionClause() throws Exception {
         when(resultSet.next()).thenReturn(false);
@@ -776,6 +741,73 @@ class PostgresScheduleStoreUnitTest {
                 "paging without a deterministic order skips and repeats rows");
         verify(preparedStatement).setInt(1, 50);
         verify(preparedStatement).setInt(2, 100);
+    }
+
+    /**
+     * The owner scope, like the HITL redaction, belongs in the WHERE clause: a
+     * post-filter counted limit/offset over other users' rows and handed a
+     * non-admin a short page the paging contract reads as the end.
+     */
+    @Test
+    void readAllSchedules_ownerScoped_filtersInTheQueryAndBindsInOrder() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 100, true, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String q = sql.getValue();
+        assertTrue(q.contains(" AND (user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ? OR user_id = ?)"),
+                "owner scope must AND onto the HITL redaction: " + q);
+        assertTrue(q.indexOf("user_id IS NULL") < q.indexOf("LIMIT"), "the owner filter must precede LIMIT: " + q);
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(2, "editor-1");
+        order.verify(preparedStatement).setInt(3, 50);
+        order.verify(preparedStatement).setInt(4, 100);
+    }
+
+    @Test
+    void readAllSchedules_ownerScopedWithoutHitlRedaction_introducesTheWhere() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo(null));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("FROM eddi_schedules WHERE (user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?)"),
+                "a caller with no id gets only the shared-owner clause: " + sql.getValue());
+        verify(preparedStatement).setString(1, ScheduleOwnerScope.SHARED_OWNER);
+        verify(preparedStatement).setInt(2, 50);
+        verify(preparedStatement).setInt(3, 0);
+    }
+
+    @Test
+    void readSchedulesByAgentId_ownerScoped_bindsAfterTheAgent() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readSchedulesByAgentId("agent-1", 50, 0, false, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("agent_id = ? AND (user_id IS NULL"), sql.getValue());
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, "agent-1");
+        order.verify(preparedStatement).setString(2, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(3, "editor-1");
+        order.verify(preparedStatement).setInt(4, 50);
+        order.verify(preparedStatement).setInt(5, 0);
+    }
+
+    @Test
+    void readAllSchedules_unrestrictedScope_addsNoOwnerClause() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false, ScheduleOwnerScope.ALL);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("user_id"), "an unrestricted listing must not be owner-filtered: " + sql.getValue());
     }
 
     // ─── deleteSchedule ─────────────────────────────────────────
@@ -1053,6 +1085,21 @@ class PostgresScheduleStoreUnitTest {
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.findDueSchedules(Instant.now(),
                         Instant.now().minus(30, ChronoUnit.MINUTES), 3));
+    }
+
+    @Test
+    void findDueSchedules_ordersMostOverdueFirst() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        sut.findDueSchedules(Instant.now(), Instant.now().minus(30, ChronoUnit.MINUTES), 3);
+
+        // An unordered LIMIT returns an arbitrary subset once more rows are due than
+        // one poll batch holds; the oldest due fire must be served first.
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String normalized = sql.getValue().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("ORDER BY next_fire ASC, id ASC LIMIT ?"), normalized);
     }
 
     // ─── readAllSchedules ───────────────────────────────────────
@@ -1441,6 +1488,9 @@ class PostgresScheduleStoreUnitTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("AND fire_id=?"), "the last attempt must be fenced too: " + sql.getValue());
         verify(preparedStatement).setString(3, "sched-1_fire-a");
+        // dismissDeadLetter leaves enabled untouched on the premise that running out
+        // of retries never disables a schedule; this pins that premise.
+        assertFalse(sql.getValue().contains("enabled"), "dead-lettering must not disable the schedule: " + sql.getValue());
     }
 
     /**
@@ -1456,6 +1506,77 @@ class PostgresScheduleStoreUnitTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
         assertFalse(sql.getValue().contains("fire_id=?"), "an unfenced write must not add a predicate it cannot bind: " + sql.getValue());
+    }
+
+    @Test
+    void dismissDeadLetter_isConditionalOnDeadLetteredState() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("fire_status='DEAD_LETTERED'"),
+                "an unconditional reset would clear a live claim and double-fire the schedule: " + sql.getValue());
+        assertFalse(sql.getValue().contains("last_fired"), "nothing fired: " + sql.getValue());
+        verify(preparedStatement).setString(3, "sched-1");
+    }
+
+    /**
+     * Dead-lettering never clears {@code enabled}, so a row that is disabled was
+     * disabled on purpose (operator or undeploy). Dismissing the failure must leave
+     * that alone rather than silently re-enabling the schedule.
+     */
+    @Test
+    void dismissDeadLetter_withNextFire_leavesEnabledUntouched() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", Instant.now().plusSeconds(60));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("enabled"), "dismissal must not override an operator's enable/disable: " + sql.getValue());
+    }
+
+    @Test
+    void dismissDeadLetter_withoutNextFire_disables() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.dismissDeadLetter("sched-1", null);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("enabled=false"), sql.getValue());
+        verify(preparedStatement).setString(2, "sched-1");
+    }
+
+    /**
+     * CWE-117 (code scanning alert 556): the schedule id is a path parameter on the
+     * dismiss endpoint and reaches the "Dismissed" line, so a CRLF in it must not
+     * forge a second log record.
+     */
+    @Test
+    void dismissDeadLetter_forgedScheduleId_cannotForgeALogRecord() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        String forgedId = "sched-1" + LogCaptureSupport.FORGED_RECORD;
+
+        List<String> logged = captureLogsOf(PostgresScheduleStore.class, () -> {
+            try {
+                sut.dismissDeadLetter(forgedId, null);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+
+        assertNoForgedRecordBoundary(logged, "PostgresScheduleStore's dismissed-dead-letter line");
+        assertTrue(logged.stream().anyMatch(value -> value.contains("sched-1")), "the id is sanitized, not dropped: " + logged);
+    }
+
+    @Test
+    void dismissDeadLetter_notDeadLettered_throwsNotFound() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> sut.dismissDeadLetter("sched-1", Instant.now()));
     }
 
     private void setupResultSetForSchedule() throws Exception {

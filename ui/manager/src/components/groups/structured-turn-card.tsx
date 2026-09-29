@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { Scale, Gavel, HandCoins, Lightbulb } from "lucide-react";
 import { formatMarkdownText } from "./group-utils";
 import { cn } from "@/lib/utils";
@@ -238,7 +239,7 @@ function BargainBody({ payload, className }: { payload: BargainPayload; classNam
           data-testid="bargain-reasoning"
         >
           {/* No rehypeRaw: member output is untrusted, so raw HTML stays escaped. */}
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{formatMarkdownText(payload.reasoning)}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(payload.reasoning)}</ReactMarkdown>
         </div>
       )}
     </div>

@@ -17,6 +17,8 @@ export interface WebSource {
   maxDepth?: number;
   maxPages?: number;
   excludePatterns?: string[];
+  /** Sitemaps to seed from besides those robots.txt lists. Sitemap indexes are followed. */
+  sitemapUrls?: string[];
   requestDelayMs?: number;
   timeoutSeconds?: number;
   userAgent?: string;

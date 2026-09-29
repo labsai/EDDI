@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -116,12 +117,34 @@ public final class GroupConversationEventSink {
     public record TokenEvent(String agentId, String token) {
     }
 
+    /**
+     * A member's turn closed.
+     *
+     * @param outcome
+     *            {@code null} for a contribution (then {@code response} is the
+     *            member's content); otherwise a machine-readable reason the turn
+     *            produced none — {@link #OUTCOME_TIMEOUT}, {@link #OUTCOME_SKIPPED}
+     *            or {@link #OUTCOME_ERROR} — with {@code response} null, so a
+     *            client never renders a failure as something the member said. Raw
+     *            error text is never carried here; it stays in the log and the
+     *            transcript's {@code errorReason}.
+     */
     public record SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName,
-            String targetAgentId, String targetDisplayName) {
+            String targetAgentId, String targetDisplayName, String outcome) {
+
+        public static final String OUTCOME_TIMEOUT = "TIMEOUT";
+        public static final String OUTCOME_SKIPPED = "SKIPPED";
+        public static final String OUTCOME_ERROR = "ERROR";
+
+        /** A contribution addressed to a peer. */
+        public SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName,
+                String targetAgentId, String targetDisplayName) {
+            this(agentId, displayName, response, phaseIndex, phaseName, targetAgentId, targetDisplayName, null);
+        }
 
         /** Backward-compatible constructor (no target). */
         public SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
-            this(agentId, displayName, response, phaseIndex, phaseName, null, null);
+            this(agentId, displayName, response, phaseIndex, phaseName, null, null, null);
         }
     }
 
@@ -152,7 +175,18 @@ public final class GroupConversationEventSink {
     public record CancelledEvent(String reason, String cancelledBy) {
     }
 
-    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+    /**
+     * @param pausedAt
+     *            the pause identity ({@code GroupConversation.pausedAt}) — lets a
+     *            channel that posts an approval card bind the card to THIS pause,
+     *            so a stale card cannot resolve a later one. {@code null} when not
+     *            known.
+     */
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+            this(phaseIndex, phaseName, reason, granularity, null);
+        }
     }
 
     public record HitlResumeEvent(String verdict, String note, String decidedBy) {

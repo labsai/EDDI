@@ -110,6 +110,36 @@ eebfe898b34858918d5cbbe11e60336d1b6a916e:src/test/java/ai/labs/eddi/secrets/sani
 0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/MongoOAuthStateStoreTest.java:generic-api-key:62
 0c228141ecfcaf0270190b557dafa2aea0d09eab:src/test/java/ai/labs/eddi/connections/oauth/PostgresOAuthStateStoreUnitTest.java:generic-api-key:57
 
+# The entries from here to the PR #750 block were added on main ahead of the PRs
+# that need them: the Secret Scanning job restores .gitleaksignore from the base
+# branch, so a PR cannot allowlist its own false positives. (The PR #840 block at
+# the end of the file is byte-identical to the one that PR carries, so the two
+# merge cleanly.)
+#
+# PR #835 (fix/outbound-http-hardening): WeatherToolExtendedTest proves that the
+# operator's OpenWeatherMap key never reaches the model or the log, so it needs a
+# stand-in key, held in a constant whose name matches generic-api-key. Not a
+# credential: it is injected by reflection and only ever compared as a string.
+83925a9d79578ba48035d498809a9170cce6bc9c:src/test/java/ai/labs/eddi/modules/llm/tools/impl/WeatherToolExtendedTest.java:generic-api-key:349
+
+# PR #838 (fix/secret-scope-vault): the same fixture token in two secret-scope
+# tests, standing in for a value a user enters under scope "secret" so the tests
+# can assert it is vaulted and scrubbed, never stored in plaintext. Not a
+# credential: the vault in these tests is a mock and nothing authenticates.
+17dc35a03839d54d53899cbcd45b0f531d2dacd9:src/test/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtilsSecretScopeTest.java:generic-api-key:46
+17dc35a03839d54d53899cbcd45b0f531d2dacd9:src/test/java/ai/labs/eddi/modules/properties/impl/PropertySetterTaskSecretScopePathsTest.java:generic-api-key:57
+
+# PR #847 (fix/deployment-defaults): install.sh probes a running Grafana with the
+# factory-default admin/admin login and, if it still answers, rotates it to the
+# generated GRAFANA_ADMIN_PASSWORD. curl-auth-user matches the basic-auth flag on
+# those two requests (the probe and the password change), in the two installer
+# paths that do this (already-running and fresh install). Not a secret: it is
+# Grafana's published default, and the code exists to retire it.
+d3314417def3ce358c67a97523f222dcd043c0ae:install.sh:curl-auth-user:1391
+d3314417def3ce358c67a97523f222dcd043c0ae:install.sh:curl-auth-user:1398
+a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1798
+a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
+
 # PR #750 (fix/e2e-test-findings): fake keys in two audit-redaction test fixtures,
 # assigned to a constant whose name matches generic-api-key. Not credentials. The
 # values were rewritten to low-entropy strings in a later commit of the same PR;

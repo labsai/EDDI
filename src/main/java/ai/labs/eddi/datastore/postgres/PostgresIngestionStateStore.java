@@ -102,7 +102,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     private static final String[] ADD_FENCING_COLUMNS = {
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_run_id VARCHAR(64)",
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_generation BIGINT",
-            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0"};
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0",
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stale_after TIMESTAMP"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -230,6 +231,26 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void recordSeen(String sourceId, String documentId, String runId, String etag, String lastModified) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET last_run_id = ?, missed_runs = 0, tombstoned = FALSE, etag = ?, last_modified = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, runId);
+            statement.setString(2, etag);
+            statement.setString(3, lastModified);
+            statement.setString(4, sourceId);
+            statement.setString(5, documentId);
+            statement.setString(6, runId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a seen document", e);
+        }
+    }
+
+    @Override
     public void recordUnreachable(String sourceId, String documentId, String runId) {
         // Only the run marker — see the interface. The miss counter and the
         // tombstone flag stay as they are.
@@ -311,6 +332,21 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public void invalidateContent(String sourceId) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET content_hash = NULL, etag = NULL, last_modified = NULL
+                 WHERE source_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to invalidate a source's content", e);
+        }
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         List<DocumentState> states = new ArrayList<>();
         String sql = "SELECT * FROM rag_ingestion_documents WHERE source_id = ? LIMIT ?";
@@ -345,15 +381,15 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
-    public Optional<String> startRun(String sourceId) {
+    public Optional<String> startRun(String sourceId, Instant staleAfter) {
         String runId = UUID.randomUUID().toString();
         // The generation is derived in the statement that claims the run. Two
         // claimants racing under READ COMMITTED can still read the same MAX and
         // compute the same number, which is harmless: only one of them survives the
         // partial unique index, so only one of them ever stamps anything.
         String sql = """
-                INSERT INTO rag_ingestion_runs (run_id, source_id, status, generation, started_at)
-                SELECT ?, ?, 'RUNNING', COALESCE(MAX(generation), 0) + 1, ?
+                INSERT INTO rag_ingestion_runs (run_id, source_id, status, generation, started_at, stale_after)
+                SELECT ?, ?, 'RUNNING', COALESCE(MAX(generation), 0) + 1, ?, ?
                   FROM rag_ingestion_runs WHERE source_id = ?
                 ON CONFLICT DO NOTHING
                 RETURNING generation
@@ -364,7 +400,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 statement.setString(1, runId);
                 statement.setString(2, sourceId);
                 statement.setTimestamp(3, Timestamp.from(Instant.now()));
-                statement.setString(4, sourceId);
+                statement.setTimestamp(4, staleAfter == null ? null : Timestamp.from(staleAfter));
+                statement.setString(5, sourceId);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     // No row means the partial unique index rejected it: a run is
                     // already in flight for this source. Losing that race is expected,
@@ -435,7 +472,9 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     @Override
     public List<IngestionRun> listRuns(String sourceId, int limit) {
         List<IngestionRun> history = new ArrayList<>();
-        String sql = "SELECT * FROM rag_ingestion_runs WHERE source_id = ? ORDER BY started_at DESC LIMIT ?";
+        // Maintenance claims are rows, never runs — see IIngestionStateStore#listRuns.
+        String sql = "SELECT * FROM rag_ingestion_runs WHERE source_id = ? AND status <> 'MAINTENANCE' "
+                + "ORDER BY started_at DESC LIMIT ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, sourceId);
             statement.setInt(2, Math.max(1, limit));
@@ -456,7 +495,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 UPDATE rag_ingestion_runs
                    SET status = 'FAILED', finished_at = ?,
                        error = 'Run abandoned — no completion recorded before the stale threshold'
-                 WHERE source_id = ? AND status = 'RUNNING' AND started_at < ?
+                 WHERE source_id = ? AND status = 'RUNNING'
+                   AND ((stale_after IS NOT NULL AND stale_after < ?) OR (stale_after IS NULL AND started_at < ?))
                  RETURNING run_id
                 """;
         // Ownership is taken from the runs this call reaped, and from nobody else,
@@ -481,7 +521,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 statement.setTimestamp(1, Timestamp.from(Instant.now()));
                 statement.setString(2, sourceId);
-                statement.setTimestamp(3, Timestamp.from(startedBefore));
+                // A run's own deadline decides when it has one; the start-time cut-off
+                // only for runs claimed before deadlines were recorded.
+                statement.setTimestamp(3, Timestamp.from(Instant.now()));
+                statement.setTimestamp(4, Timestamp.from(startedBefore));
                 // RETURNING, so the ids come back from the same statement that failed
                 // the runs rather than from a read that could see a later claim.
                 try (ResultSet resultSet = statement.executeQuery()) {
@@ -558,7 +601,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         return new IngestionRun(
                 resultSet.getString("run_id"),
                 resultSet.getString("source_id"),
-                IngestionRun.Status.valueOf(resultSet.getString("status")),
+                IngestionRun.Status.parse(resultSet.getString("status")),
                 toInstant(resultSet.getTimestamp("started_at")),
                 toInstant(resultSet.getTimestamp("finished_at")),
                 resultSet.getInt("documents_seen"),

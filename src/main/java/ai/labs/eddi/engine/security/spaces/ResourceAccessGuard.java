@@ -19,6 +19,7 @@ import org.jboss.logging.Logger;
 
 import java.util.Collection;
 import java.util.Date;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -284,6 +285,55 @@ public class ResourceAccessGuard {
                 requireUseAccess(resourceId.trim(), resourceTypeLabel);
             }
         }
+    }
+
+    /**
+     * Whether the named principal — <em>not</em> the current request's caller — may
+     * use a resource. For engine code that acts on behalf of a user with no request
+     * around it: a group member's tool running on a coordinator thread holds no
+     * {@link SecurityIdentity}, so {@link #requireUseAccess} cannot answer there.
+     * <p>
+     * Deliberately narrower than the request-scoped check. The principal's team
+     * memberships are claims on a token nobody is presenting, so only the
+     * principal's own resources, direct grants to them and published resources
+     * count; a resource shared with one of their teams is refused. Never throws: an
+     * unreadable descriptor is {@code false}, the same fail-closed answer
+     * {@link #requireUseAccess} gives, and with enforcement off everything is
+     * admitted, as everywhere else.
+     * <p>
+     * An administrator is admitted only through
+     * {@link #principalMayUse(String, String, boolean)}: whether a principal holds
+     * {@code eddi-admin} is a claim on their token, which this method cannot see.
+     */
+    public boolean principalMayUse(String resourceId, String principal) {
+        return principalMayUse(resourceId, principal, false);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String)}, with the caller's word on whether
+     * {@code principal} is an administrator — which admits everything, exactly as
+     * {@link #seesEverything()} does on the request path. The flag must come from
+     * the principal's own captured identity
+     * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
+     */
+    public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        if (!settings.isEnforcing() || principalIsAdmin) {
+            return true;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return false;
+        }
+        DocumentDescriptor descriptor;
+        try {
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy();
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load descriptor for use check on %s: %s", sanitize(resourceId), e.getMessage());
+            return false;
+        }
+        AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
+        return granted != null && granted.includes(AccessLevel.USE);
     }
 
     /**

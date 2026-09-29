@@ -205,14 +205,22 @@ public interface IScheduleStore {
      */
     default List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
             throws IResourceStore.ResourceStoreException {
-        return readAllSchedules(limit, offset, excludeHitlTimeouts, ListingScope.UNRESTRICTED);
+        return readAllSchedules(limit, offset, excludeHitlTimeouts, ScheduleOwnerScope.ALL);
     }
 
     /**
-     * As {@link #readAllSchedules(int, int, boolean)}, restricted to the rows
-     * {@code scope} admits — again inside the query, for the same paging reason.
+     * {@link #readAllSchedules(int, int, boolean)} restricted to the schedules
+     * {@code ownerScope} admits. The owner filter is part of the QUERY for the same
+     * reason as {@code excludeHitlTimeouts}: filtering a fetched page counts
+     * {@code limit}/{@code offset} over other users' rows, so a non-admin's page
+     * comes back short or empty while their own schedules sit on later pages, and a
+     * short page tells a client following the documented paging rule to stop.
+     *
+     * @param ownerScope
+     *            which owners are visible; {@link ScheduleOwnerScope#ALL} for no
+     *            owner filter
      */
-    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ListingScope scope)
+    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
@@ -223,64 +231,16 @@ public interface IScheduleStore {
      */
     default List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulesByAgentId(agentId, limit, offset, excludeHitlTimeouts, ListingScope.UNRESTRICTED);
+        return readSchedulesByAgentId(agentId, limit, offset, excludeHitlTimeouts, ScheduleOwnerScope.ALL);
     }
 
     /**
-     * As {@link #readSchedulesByAgentId(String, int, int, boolean)}, restricted to
-     * the rows {@code scope} admits.
+     * Owner-scoped variant, see
+     * {@link #readAllSchedules(int, int, boolean, ScheduleOwnerScope)}.
      */
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
-                                                       ListingScope scope)
+                                                       ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException;
-
-    /**
-     * Which schedules a listing may return, expressed so both backends can push it
-     * into the query.
-     * <p>
-     * A schedule is <em>owned</em> when its {@code userId} names a real principal —
-     * it runs as that user, so it is that user's (their dream consolidation, a
-     * cadence they created). It is <em>unowned</em> when the {@code userId} is
-     * absent or a {@code system:} identity such as {@code system:scheduler}. With a
-     * {@link #principal} set, a row is admitted when it is owned by that principal,
-     * or when it is unowned and either {@link #includeUnowned} is true or the
-     * principal created it ({@code createdBy}), or — with
-     * {@link #includeTeamCadences} — when it is a team cadence schedule, whoever
-     * created it.
-     *
-     * @param principal
-     *            the caller; {@code null} admits every row
-     * @param includeUnowned
-     *            whether unowned schedules someone else created are admitted too
-     * @param includeTeamCadences
-     *            whether every team cadence schedule is admitted. A cadence runs as
-     *            its creator but belongs to its group, so the group's co-editors
-     *            must see it; the caller sets this only when it may see every group
-     *            (workspaces not enforced), because group access cannot be decided
-     *            inside a schedule query
-     */
-    record ListingScope(String principal, boolean includeUnowned, boolean includeTeamCadences) {
-
-        /** Every row — an administrator, or authorization disabled. */
-        public static final ListingScope UNRESTRICTED = new ListingScope(null, true, true);
-
-        /** A scope that admits no team cadence beyond the caller's own. */
-        public ListingScope(String principal, boolean includeUnowned) {
-            this(principal, includeUnowned, false);
-        }
-
-        /** Prefix of the non-human identities schedules run as. */
-        public static final String SYSTEM_IDENTITY_PREFIX = "system:";
-
-        public boolean isUnrestricted() {
-            return principal == null;
-        }
-
-        /** Whether a {@code userId} names nobody in particular — see the record doc. */
-        public static boolean isUnownedUserId(String userId) {
-            return userId == null || userId.isBlank() || userId.startsWith(SYSTEM_IDENTITY_PREFIX);
-        }
-    }
 
     // --- Polling & Claiming ---
 
@@ -340,10 +300,10 @@ public interface IScheduleStore {
      * the write applies to whatever claim the row currently holds.
      * <p>
      * Only for callers that hold no claim at all and are not reporting the outcome
-     * of a fire — {@code RestScheduleStore.dismissDeadLetter} is the one: it clears
-     * a DEAD_LETTERED row, where by definition no fire is running. Every caller
-     * that DID fire must pass its {@code fireId}; see
-     * {@link #markCompleted(String, String, Instant)}.
+     * of a fire. Every caller that DID fire must pass its {@code fireId}; see
+     * {@link #markCompleted(String, String, Instant)}. Clearing a dead letter is
+     * NOT such a caller any more — an unfenced write matches whatever state the row
+     * is in, including a live claim; use {@link #dismissDeadLetter}.
      */
     String UNFENCED = null;
 
@@ -446,6 +406,33 @@ public interface IScheduleStore {
      * Re-queue a dead-lettered schedule for another attempt.
      */
     void requeueDeadLetter(String scheduleId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
+    /**
+     * Clear a dead-lettered schedule WITHOUT retrying it: back to PENDING with
+     * {@code failCount} reset, the claim fields cleared and the next regular fire
+     * at {@code nextFire}. A null {@code nextFire} (a one-shot with nothing left to
+     * fire) disables the schedule instead. {@code lastFired} is left alone —
+     * nothing fired.
+     * <p>
+     * With a non-null {@code nextFire} the {@code enabled} flag is left exactly as
+     * it is. Dead-lettering never clears it, so a schedule that simply ran out of
+     * retries is still enabled and the poller picks it up at {@code nextFire}. A
+     * dead-lettered row that is disabled got that way on purpose — an operator's
+     * {@code /disable}, or the agent being undeployed — and dismissing the failure
+     * must not quietly override that. {@code /enable} is the re-arm for such a row;
+     * it also clears the failure state.
+     * <p>
+     * The write is conditional on the row being DEAD_LETTERED at the moment it
+     * lands. This used to be an unfenced {@code markCompleted}, which matched the
+     * row in any state: dismissing a schedule that had meanwhile been requeued and
+     * claimed reset the live claim to PENDING, and the next poll fired it a second
+     * time while the first fire was still running.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if no schedule with this id is currently DEAD_LETTERED
+     */
+    void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     // --- Fire Log ---
 

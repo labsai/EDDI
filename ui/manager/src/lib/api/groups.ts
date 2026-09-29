@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
+import { repairNegotiationArbitration } from "../hitl-config";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -760,6 +761,13 @@ export function normalizeGroupConfig<T extends AgentGroupConfiguration>(config: 
     }
   }
 
+  // A NEGOTIATION group materialized before the Arbitration prompt was carried
+  // stores that phase with no prompt; the next save from any editor heals it.
+  const phases = repairNegotiationArbitration(normalized.style, normalized.phases);
+  if (phases !== normalized.phases) {
+    normalized = { ...normalized, phases: phases ?? null };
+  }
+
   return normalized;
 }
 
@@ -1130,6 +1138,17 @@ export function getGroup(
     .then(normalizeGroupConfig);
 }
 
+/**
+ * The group's current (newest) version — `GET /groupstore/groups/{id}/currentversion`.
+ *
+ * One small request, for the pages that are reached without a `?version=`: they
+ * used to fall back to version 1, which reads the group's FIRST version — its
+ * original name, members and phases — for any group that had ever been saved.
+ */
+export function getGroupCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/groupstore/groups/${encodeURIComponent(id)}/currentversion`);
+}
+
 export function createGroup(
   config: AgentGroupConfiguration
 ): Promise<{ location: string }> {
@@ -1233,6 +1252,22 @@ export const MAX_GROUP_ATTACHMENTS_TOTAL_BYTES = 32 * 1024 * 1024;
 export const MAX_GROUP_QUESTION_CHARS = 50_000;
 
 /**
+ * The `userId` field of a discussion request body — present only when a caller
+ * names a user explicitly.
+ *
+ * Omitted, the backend resolves the owner itself: the signed-in caller when auth
+ * is on (`OwnershipValidator.validateAndResolveUserId`), `anonymous` when it is
+ * off. This used to fall back to the literal `"manager-user"`, and no caller ever
+ * passed a user, so with auth on every NON-admin got a 403 ("you cannot start a
+ * conversation as another user") and could not start, follow up or continue a
+ * discussion at all — while an admin's discussions were recorded as owned by
+ * "manager-user" rather than by the admin.
+ */
+function userIdField(userId?: string): { userId?: string } {
+  return userId ? { userId } : {};
+}
+
+/**
  * Body of a start/continue discussion request. `attachments` is only accepted by
  * the START endpoints — see {@link streamGroupContinue}.
  */
@@ -1243,7 +1278,7 @@ function discussBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     question,
-    userId: userId || "manager-user",
+    ...userIdField(userId),
   };
   // Omit rather than send [] — the backend treats absent and empty the same, and
   // an omitted key keeps the request byte-identical to the pre-attachment one.
@@ -1323,7 +1358,7 @@ export function followupGroupMember(
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
     `/groups/${groupId}/conversations/${gcId}/followup`,
-    { question, targetAgentId, userId: userId || "manager-user" },
+    { question, targetAgentId, ...userIdField(userId) },
   );
 }
 
@@ -1467,11 +1502,18 @@ export interface SpeakerStartPayload {
   phaseName: string;
 }
 
+/**
+ * Why a member's turn produced no contribution (`SpeakerCompleteEvent.outcome`).
+ * Absent on an ordinary contribution, and on every event from a backend that
+ * predates the field.
+ */
+export type SpeakerCompleteOutcome = "TIMEOUT" | "SKIPPED" | "ERROR";
+
 export interface SpeakerCompletePayload {
   agentId: string;
   displayName: string;
-  /** Backend field name is 'response' */
-  response: string;
+  /** Backend field name is 'response'. Null when `outcome` is set. */
+  response: string | null;
   /** Fallback alias */
   content?: string;
   phaseIndex: number;
@@ -1479,6 +1521,12 @@ export interface SpeakerCompletePayload {
   /** Peer-targeted phase: the agent this response was aimed at */
   targetAgentId?: string;
   targetDisplayName?: string;
+  /**
+   * Set when the turn produced nothing — then `response` is null, so a failure
+   * is never rendered as something the member said. The raw error text stays in
+   * the server log and the persisted transcript's `errorReason`.
+   */
+  outcome?: SpeakerCompleteOutcome | null;
 }
 
 export interface PhaseCompletePayload {
@@ -1643,8 +1691,11 @@ const NO_EVENT_TYPE = " no-event-type";
  */
 async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
-    // M5 fix: throw a proper Error, not a plain object
-    throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
+    // M5 fix: throw a proper Error, not a plain object. The backend's own
+    // sentence goes in it: a refused start ("question is required", a
+    // validation 400, an ownership 403) otherwise reached the user as a bare
+    // "400 Bad Request" with nothing to act on.
+    throw new Error(await streamRefusalMessage(response));
   }
 
   const reader = response.body?.getReader();
@@ -1701,6 +1752,35 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
   }
 }
 
+/**
+ * The message for a stream request the server refused before streaming.
+ *
+ * Plain-text bodies (the exception mappers') are the message; JSON bodies carry
+ * it under the usual keys. Markup (a proxy's error page) and anything
+ * unreadable fall back to the status line.
+ */
+async function streamRefusalMessage(response: Response): Promise<string> {
+  const status = `Group streaming failed: ${response.status} ${response.statusText}`.trim();
+  let body = "";
+  try {
+    body = (await response.text()).trim();
+  } catch {
+    return status;
+  }
+  if (!body || body.startsWith("<")) return status;
+  let message = body;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    const candidate = record?.message ?? record?.error ?? record?.detail ?? record?.errorMessage;
+    if (typeof candidate !== "string" || !candidate.trim()) return status;
+    message = candidate.trim();
+  } catch {
+    // Not JSON — the body is the message.
+  }
+  return `${message.length > 500 ? `${message.slice(0, 500)}…` : message} (HTTP ${response.status})`;
+}
+
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
 function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
   return fetch(`${api.getBaseUrl()}${path}`, {
@@ -1753,7 +1833,7 @@ export async function* streamGroupContinue(
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
     `/groups/${groupId}/conversations/${gcId}/continue/stream`,
-    { question, userId: userId || "manager-user" },
+    { question, ...userIdField(userId) },
     signal,
   );
   yield* readGroupSSE(response);
@@ -2059,6 +2139,13 @@ export async function deleteGroupWithMembers(
   }
   if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
 
+  // The group goes FIRST. It is the one delete here that can be refused (a 409
+  // when `version` is no longer current, e.g. a page still on the version it
+  // was opened with after a save), and it used to run last: every member agent
+  // was already soft-deleted when it failed, leaving a live group of deleted
+  // agents. Refused now, it throws before any member is touched.
+  await deleteGroup(groupId, version, false);
+
   // Soft-delete each agent at its current version (best-effort)
   const memberDeletes = Array.from(agentIds).map(async (agentId) => {
     try {
@@ -2070,7 +2157,4 @@ export async function deleteGroupWithMembers(
   });
 
   await Promise.allSettled(memberDeletes);
-
-  // Soft-delete the group itself
-  await deleteGroup(groupId, version, false);
 }

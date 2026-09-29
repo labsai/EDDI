@@ -266,31 +266,31 @@ class McpMemoryToolsBranchCoverageTest {
         @Test
         @DisplayName("null userId returns error")
         void nullUserId() {
-            assertTrue(tools.upsertUserMemory(null, "k", "v", "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory(null, "k", "v", "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null key returns error")
         void nullKey() {
-            assertTrue(tools.upsertUserMemory("u", null, "v", "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", null, "v", "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null value returns error")
         void nullValue() {
-            assertTrue(tools.upsertUserMemory("u", "k", null, "a", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", null, "a", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null agentId returns error")
         void nullAgentId() {
-            assertTrue(tools.upsertUserMemory("u", "k", "v", null, null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", "v", null, null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("blank agentId returns error")
         void blankAgentId() {
-            assertTrue(tools.upsertUserMemory("u", "k", "v", "  ", null, null).contains("error"));
+            assertTrue(tools.upsertUserMemory("u", "k", "v", "  ", null, null, null).contains("error"));
         }
 
         @Test
@@ -299,7 +299,7 @@ class McpMemoryToolsBranchCoverageTest {
             when(userMemoryStore.upsert(any())).thenReturn("entry-id");
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
 
-            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", "fact", null);
+            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", "fact", null, null);
             assertTrue(result.contains("upserted"));
         }
 
@@ -309,14 +309,14 @@ class McpMemoryToolsBranchCoverageTest {
             when(userMemoryStore.upsert(any())).thenReturn("entry-id");
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
 
-            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", null, "global");
+            String result = tools.upsertUserMemory("user1", "key1", "val1", "agent1", null, "global", null);
             assertTrue(result.contains("upserted"));
         }
 
         @Test
         @DisplayName("invalid visibility returns error")
         void invalidVisibility() {
-            String result = tools.upsertUserMemory("u", "k", "v", "a", null, "INVALID");
+            String result = tools.upsertUserMemory("u", "k", "v", "a", null, "INVALID", null);
             assertTrue(result.contains("error"));
         }
 
@@ -324,7 +324,7 @@ class McpMemoryToolsBranchCoverageTest {
         @DisplayName("store exception returns error")
         void storeException() throws Exception {
             when(userMemoryStore.upsert(any())).thenThrow(new RuntimeException("fail"));
-            String result = tools.upsertUserMemory("u", "k", "v", "a", null, null);
+            String result = tools.upsertUserMemory("u", "k", "v", "a", null, null, null);
             assertTrue(result.contains("error"));
         }
     }
@@ -391,18 +391,21 @@ class McpMemoryToolsBranchCoverageTest {
         @Test
         @DisplayName("success with CONFIRM")
         void success() throws Exception {
-            when(userMemoryStore.countEntries("user1")).thenReturn(5L);
+            when(userMemoryStore.deleteAllExceptReserved("user1")).thenReturn(5L);
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"deleted\"}");
 
             String result = tools.deleteAllUserMemories("user1", "CONFIRM");
             assertTrue(result.contains("deleted"));
-            verify(userMemoryStore).deleteAllForUser("user1");
+            // Memory housekeeping keeps the _gdpr_ bookkeeping rows: only the GDPR
+            // erasure cascade may call deleteAllForUser.
+            verify(userMemoryStore).deleteAllExceptReserved("user1");
+            verify(userMemoryStore, never()).deleteAllForUser(any());
         }
 
         @Test
         @DisplayName("exception returns error")
         void exception() throws Exception {
-            when(userMemoryStore.countEntries("user1")).thenThrow(new RuntimeException("fail"));
+            when(userMemoryStore.deleteAllExceptReserved("user1")).thenThrow(new RuntimeException("fail"));
             assertTrue(tools.deleteAllUserMemories("user1", "CONFIRM").contains("error"));
         }
     }

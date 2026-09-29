@@ -126,7 +126,9 @@ public class RestRagStore implements IRestRagStore {
                 LogSanitizer.sanitize(updated.getName()));
         for (var source : updated.getSources()) {
             try {
-                sourceIngestionService.purge(id, source);
+                // Not the run-claimed purge: a rename cannot wait for a run to end,
+                // and a run in flight stops once its row is gone.
+                sourceIngestionService.forgetStateAfterRename(id, source);
             } catch (RuntimeException e) {
                 LOGGER.errorf(e, "Could not clear ingestion state after renaming knowledge base %s; its sources "
                         + "will report every document as unchanged until they are purged by hand",
@@ -395,6 +397,9 @@ public class RestRagStore implements IRestRagStore {
      */
     private void requireValidCronExpressions(RagConfiguration ragConfiguration) {
         RagIngestionSchedules.requireValidCrons(ragConfiguration);
+        // The deployment's minimum interval, which every other schedule already
+        // answers to through the schedule API.
+        sourceIngestionService.requireAllowedIntervals(ragConfiguration);
     }
 
     private void assignSourceIds(RagConfiguration ragConfiguration) {

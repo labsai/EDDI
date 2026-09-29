@@ -25,6 +25,7 @@
 
 ## Agent Configuration
 
+- [Agent Config Authoring — Rules and Pitfalls](agent-config-authoring.md)
 - [Behavior Rules](behavior-rules.md)
 - [HTTP Calls / API Calls](httpcalls.md)
 - [LLM Integration](langchain.md)

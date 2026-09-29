@@ -12,7 +12,6 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
-import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -99,36 +98,6 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     }
 
     /**
-     * Authority over an EXISTING trigger: EDIT on every agent it currently routes
-     * to.
-     * <p>
-     * A trigger has no owner of its own; what it controls is how its target agents
-     * are reached. Checking only the agents a PUT <em>introduces</em> let any
-     * editor re-point another team's intent at an agent of their own and harvest
-     * the managed-conversation traffic meant for the original, and a DELETE was not
-     * checked at all. Requiring EDIT on the current targets puts the decision with
-     * whoever may change those agents — their owners and editors — and leaves a
-     * trigger nobody else can touch. A trigger that does not exist yet has no
-     * current targets and passes; the create/update USE check on the new targets
-     * still applies. A no-op while workspaces are not enforced.
-     */
-    private void requireEditOnCurrentTargets(String intent) throws IResourceStore.ResourceStoreException {
-        if (resourceAccessGuard.seesEverything()) {
-            return;
-        }
-        AgentTriggerConfiguration stored;
-        try {
-            stored = agentTriggerStore.readAgentTrigger(intent);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            return;
-        }
-        if (!holdsOnEveryTarget(stored, AccessLevel.EDIT)) {
-            throw new ForbiddenException("Access denied: this trigger routes to an agent you may not edit. "
-                    + "Ask the agent's owner to change or remove it.");
-        }
-    }
-
-    /**
      * A trigger routes inbound messages into conversations with the agents its
      * deployments name; the routing itself runs with no interactive caller and sits
      * below the USE gate. So the gate applies at authoring time: without this,
@@ -146,10 +115,36 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         }
     }
 
+    /**
+     * Requires USE access on the agents the <em>currently stored</em> trigger
+     * routes to, before it may be re-pointed or removed. Triggers carry no owner
+     * field, so "who may edit this trigger" is derived from the agents it already
+     * commands: re-pointing or deleting a trigger redirects (or drops) the managed
+     * conversations of everyone it routes for, which is exactly the act the USE
+     * gate governs on {@code /agents/{id}/start}. A trigger that is genuinely
+     * absent, or that references no agent, imposes no constraint here — the store's
+     * own not-found handling and the new-config guard cover those.
+     */
+    private void requireUseOnStoredReferencedAgents(String intent) {
+        AgentTriggerConfiguration stored;
+        try {
+            stored = agentTriggerStore.readAgentTrigger(intent);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return; // nothing stored to protect — downstream op surfaces the 404
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+        requireUseOnReferencedAgents(stored);
+    }
+
     @Override
     public Response updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
-            requireEditOnCurrentTargets(intent);
+            // Guard BOTH the agents the trigger currently routes to (may I edit this
+            // trigger at all?) and the agents the new config would route to (may I
+            // aim it there?). Guarding only the new config let any editor re-point
+            // another team's trigger — a standing bypass of the USE gate.
+            requireUseOnStoredReferencedAgents(intent);
             requireUseOnReferencedAgents(agentTriggerConfiguration);
             agentTriggerStore.updateAgentTrigger(intent, agentTriggerConfiguration);
             agentTriggersCache.put(intent, agentTriggerConfiguration);
@@ -174,7 +169,10 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     @Override
     public Response deleteAgentTrigger(String intent) {
         try {
-            requireEditOnCurrentTargets(intent);
+            // Deleting a trigger stops routing for everyone it serves — gate it on USE
+            // of the agents it currently commands, so a foreign editor cannot remove
+            // another team's trigger.
+            requireUseOnStoredReferencedAgents(intent);
             agentTriggerStore.deleteAgentTrigger(intent);
             agentTriggersCache.remove(intent);
             return Response.ok().build();

@@ -212,6 +212,68 @@ class ResourceAccessGuardTest {
     }
 
     @Nested
+    @DisplayName("principalMayUse — a named principal, no request")
+    class PrincipalMayUse {
+
+        private final WorkspaceSettings settings = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+
+        private ResourceAccessGuard guardReturning(DocumentDescriptor descriptor) throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(descriptor);
+            // The request identity is someone else entirely — it must not be consulted.
+            return guard(identity("root", "eddi-admin"), settings, store);
+        }
+
+        @Test
+        @DisplayName("the owner may use their own agent")
+        void ownerMayUse() throws Exception {
+            assertTrue(guardReturning(ownedBy("alice")).principalMayUse(RESOURCE_ID, "alice"));
+        }
+
+        @Test
+        @DisplayName("another principal may not — even while an admin is the request caller")
+        void otherPrincipalMayNot() throws Exception {
+            assertFalse(guardReturning(ownedBy("alice")).principalMayUse(RESOURCE_ID, "mallory"));
+        }
+
+        @Test
+        @DisplayName("a published agent is usable by anyone")
+        void publishedIsUsable() throws Exception {
+            var published = ownedBy("alice");
+            published.setVisibility(ResourceVisibility.published.wireName());
+            DescriptorAccess.rebuildIndex(published);
+
+            assertTrue(guardReturning(published).principalMayUse(RESOURCE_ID, "mallory"));
+        }
+
+        @Test
+        @DisplayName("review #5: an administrator acting as themselves is admitted, as on the request path")
+        void adminIsAdmitted() throws Exception {
+            var guard = guardReturning(ownedBy("alice"));
+
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "admin-1", true));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "admin-1", false));
+        }
+
+        @Test
+        @DisplayName("an unreadable descriptor is a no")
+        void storeFailureIsNo() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            assertFalse(guard(identity("alice"), settings, store).principalMayUse(RESOURCE_ID, "alice"));
+        }
+
+        @Test
+        @DisplayName("with workspaces off everything is admitted, as everywhere else")
+        void disabledAdmitsEverything() {
+            var off = settings(false, true, WorkspaceSettings.LEGACY_SHARED);
+
+            assertTrue(guard(identity(null), off, mock(IDocumentDescriptorStore.class)).principalMayUse(RESOURCE_ID, "anyone"));
+        }
+    }
+
+    @Nested
     @DisplayName("redaction")
     class Redaction {
 

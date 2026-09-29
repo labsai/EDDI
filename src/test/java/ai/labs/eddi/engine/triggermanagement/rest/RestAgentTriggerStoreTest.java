@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.triggermanagement.rest;
 
-import java.util.List;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -19,6 +18,8 @@ import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -48,6 +49,9 @@ class RestAgentTriggerStoreTest {
         doReturn(cache).when(cacheFactory).getCache("agentTriggers");
 
         resourceAccessGuard = mock(ResourceAccessGuard.class);
+        // Visibility of a stored trigger (listing and single read) is decided by
+        // hasAccess on its targets; admit everything unless a test says otherwise.
+        lenient().when(resourceAccessGuard.hasAccess(any(), any())).thenReturn(true);
         restAgentTriggerStore = new RestAgentTriggerStore(agentTriggerStore, cacheFactory, resourceAccessGuard);
     }
 
@@ -116,9 +120,11 @@ class RestAgentTriggerStoreTest {
         verify(cache, never()).remove("broken");
     }
 
-    // --- H2b: authority over an existing trigger ---
+    // --- Finding 4: a trigger carries no owner, so edit/delete is gated on USE of
+    // the agents it currently routes to (a foreign editor must not re-point or
+    // remove another team's trigger). ---
 
-    private static AgentTriggerConfiguration trigger(String intent, String agentId) {
+    private static AgentTriggerConfiguration triggerRouting(String intent, String agentId) {
         var deployment = new AgentDeployment();
         deployment.setAgentId(agentId);
         var configuration = new AgentTriggerConfiguration();
@@ -128,46 +134,32 @@ class RestAgentTriggerStoreTest {
     }
 
     @Test
-    void updateAgentTrigger_repointingAnotherTeamsIntent_refused() throws Exception {
-        // The victim's intent routes to their agent; the caller may use their own
-        // agent (the new target) but may not edit the victim's.
-        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "victimagent00000000000"));
-        when(resourceAccessGuard.hasAccess("victimagent00000000000", AccessLevel.EDIT)).thenReturn(false);
+    void deleteAgentTrigger_storedTriggerRoutesToAgentCallerMayNotUse_refused() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("greeting")).thenReturn(triggerRouting("greeting", "abcdef1234567890abcdef"));
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireAgentUseAccess("abcdef1234567890abcdef");
 
-        assertThrows(ForbiddenException.class,
-                () -> restAgentTriggerStore.updateAgentTrigger("support", trigger("support", "attackeragent000000000")));
-
-        verify(agentTriggerStore, never()).updateAgentTrigger(any(), any());
-        verify(cache, never()).put(any(), any());
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.deleteAgentTrigger("greeting"));
+        verify(agentTriggerStore, never()).deleteAgentTrigger("greeting");
+        verify(cache, never()).remove("greeting");
     }
 
     @Test
-    void updateAgentTrigger_callerMayEditTheCurrentTarget_allowed() throws Exception {
-        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "teamagent0000000000000"));
-        when(resourceAccessGuard.hasAccess("teamagent0000000000000", AccessLevel.EDIT)).thenReturn(true);
+    void updateAgentTrigger_storedTriggerRoutesToAgentCallerMayNotUse_refused() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("greeting")).thenReturn(triggerRouting("greeting", "abcdef1234567890abcdef"));
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireAgentUseAccess("abcdef1234567890abcdef");
 
-        Response response = restAgentTriggerStore.updateAgentTrigger("support", trigger("support", "teamagent0000000000000"));
-
-        assertEquals(200, response.getStatus());
-        verify(agentTriggerStore).updateAgentTrigger(eq("support"), any());
+        var newConfig = triggerRouting("greeting", "0000111122223333aaaabbbb");
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.updateAgentTrigger("greeting", newConfig));
+        verify(agentTriggerStore, never()).updateAgentTrigger(anyString(), any());
     }
 
-    @Test
-    void deleteAgentTrigger_anotherTeamsIntent_refused() throws Exception {
-        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(trigger("support", "victimagent00000000000"));
-        when(resourceAccessGuard.hasAccess("victimagent00000000000", AccessLevel.EDIT)).thenReturn(false);
-
-        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.deleteAgentTrigger("support"));
-
-        verify(agentTriggerStore, never()).deleteAgentTrigger(any());
-        verify(cache, never()).remove(any());
-    }
+    // --- Visibility: a trigger is listed and readable only by callers who may USE
+    // every agent it routes to ---
 
     @Test
     void readAllAgentTriggers_hidesTriggersRoutingToAgentsTheCallerMayNotUse() throws Exception {
         when(agentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(
-                trigger("mine", "myagent000000000000000"), trigger("theirs", "theiragent000000000000")));
-        when(resourceAccessGuard.hasAccess("myagent000000000000000", AccessLevel.USE)).thenReturn(true);
+                triggerRouting("mine", "myagent000000000000000"), triggerRouting("theirs", "theiragent000000000000")));
         when(resourceAccessGuard.hasAccess("theiragent000000000000", AccessLevel.USE)).thenReturn(false);
 
         var visible = restAgentTriggerStore.readAllAgentTriggers();
@@ -177,7 +169,7 @@ class RestAgentTriggerStoreTest {
 
     @Test
     void readAgentTrigger_anotherTeamsIntent_answersLikeAnAbsentOne() throws Exception {
-        when(agentTriggerStore.readAgentTrigger("theirs")).thenReturn(trigger("theirs", "theiragent000000000000"));
+        when(agentTriggerStore.readAgentTrigger("theirs")).thenReturn(triggerRouting("theirs", "theiragent000000000000"));
         when(resourceAccessGuard.hasAccess("theiragent000000000000", AccessLevel.USE)).thenReturn(false);
 
         var refused = assertThrows(ResourceNotFoundException.class, () -> restAgentTriggerStore.readAgentTrigger("theirs"));
@@ -186,13 +178,11 @@ class RestAgentTriggerStoreTest {
     }
 
     @Test
-    void workspacesOff_everythingBehavesAsBefore() throws Exception {
+    void readAllAgentTriggers_workspacesOff_isUnfiltered() throws Exception {
         when(resourceAccessGuard.seesEverything()).thenReturn(true);
-        when(agentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(trigger("any", "someagent0000000000000")));
+        when(resourceAccessGuard.hasAccess(any(), any())).thenReturn(false);
+        when(agentTriggerStore.readAllAgentTriggers()).thenReturn(List.of(triggerRouting("any", "someagent0000000000000")));
 
         assertEquals(1, restAgentTriggerStore.readAllAgentTriggers().size());
-        restAgentTriggerStore.deleteAgentTrigger("any");
-        verify(agentTriggerStore, never()).readAgentTrigger(any());
-        verify(agentTriggerStore).deleteAgentTrigger("any");
     }
 }

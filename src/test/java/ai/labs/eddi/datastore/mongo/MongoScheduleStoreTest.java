@@ -4,11 +4,8 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
-import java.util.stream.Collectors;
-import java.util.Set;
-import java.util.Map;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -16,7 +13,9 @@ import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import org.junit.jupiter.api.*;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -132,46 +131,44 @@ class MongoScheduleStoreTest extends MongoTestBase {
             assertEquals(2, store.readSchedulesByAgentId("a1").size());
         }
 
-        /**
-         * The owner scope runs in the query against a real database: rows owned by the
-         * caller, unowned rows the caller created, team cadences only when asked, and
-         * nothing owned by or created by somebody else.
-         */
         @Test
-        @DisplayName("scoped listing — owner, creator and cadence rules run in the query")
-        void scopedListing() throws Exception {
-            var mine = newSchedule("mine", "a1");
-            mine.setUserId("alice");
-            var theirs = newSchedule("theirs", "a1");
-            theirs.setUserId("bob");
-            var systemByAlice = newSchedule("system-by-alice", "a1");
-            systemByAlice.setUserId("system:scheduler");
-            systemByAlice.setCreatedBy("alice");
-            var systemByBob = newSchedule("system-by-bob", "a1");
-            systemByBob.setUserId("system:scheduler");
-            systemByBob.setCreatedBy("bob");
-            var legacy = newSchedule("legacy-no-user", "a1");
-            var bobsCadence = newSchedule("bobs-cadence", "a1");
-            bobsCadence.setUserId("bob");
-            bobsCadence.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", "g1", "cadenceId", "c1"));
-            for (var s : List.of(mine, theirs, systemByAlice, systemByBob, legacy, bobsCadence)) {
-                store.createSchedule(s);
+        @DisplayName("owner scope is part of the query: limit/offset count only the caller's own and shared schedules")
+        void ownerScopedPaging() throws Exception {
+            for (int i = 0; i < 5; i++) {
+                store.createSchedule(owned(newSchedule("other" + i, "a"), "victim-42"));
             }
+            for (int i = 0; i < 3; i++) {
+                store.createSchedule(owned(newSchedule("own" + i, "a"), "editor-1"));
+            }
+            store.createSchedule(newSchedule("unowned", "a"));
+            store.createSchedule(owned(newSchedule("blank", "a"), "  "));
+            store.createSchedule(owned(newSchedule("system", "a"), ScheduleOwnerScope.SHARED_OWNER));
+            store.createSchedule(owned(newSchedule("own-other-agent", "b"), "editor-1"));
 
-            assertEquals(Set.of("mine", "system-by-alice"), names(store.readAllSchedules(100, 0, false,
-                    new IScheduleStore.ListingScope("alice", false))));
-            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user"),
-                    names(store.readAllSchedules(100, 0, false, new IScheduleStore.ListingScope("alice", true))));
-            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user", "bobs-cadence"),
-                    names(store.readAllSchedules(100, 0, false, new IScheduleStore.ListingScope("alice", true, true))));
-            assertEquals(6, store.readAllSchedules(100, 0, false, IScheduleStore.ListingScope.UNRESTRICTED).size());
-            assertEquals(Set.of("mine", "system-by-alice"), names(store.readSchedulesByAgentId("a1", 100, 0, true,
-                    new IScheduleStore.ListingScope("alice", false))));
-        }
+            var editor = ScheduleOwnerScope.visibleTo("editor-1");
+            var firstPage = store.readAllSchedules(4, 0, true, editor);
+            var secondPage = store.readAllSchedules(4, 4, true, editor);
+            assertEquals(4, firstPage.size(), "a full first page of the caller's visible rows");
+            assertEquals(3, secondPage.size());
+            var seen = new HashSet<String>();
+            firstPage.forEach(s -> seen.add(s.getName()));
+            secondPage.forEach(s -> seen.add(s.getName()));
+            assertEquals(Set.of("own0", "own1", "own2", "unowned", "blank", "system", "own-other-agent"), seen);
 
-        private Set<String> names(List<ScheduleConfiguration> schedules) {
-            return schedules.stream().map(ScheduleConfiguration::getName).collect(Collectors.toSet());
+            var byAgent = store.readSchedulesByAgentId("a", 100, 0, true, editor);
+            assertEquals(6, byAgent.size());
+            assertTrue(byAgent.stream().noneMatch(s -> "victim-42".equals(s.getUserId())));
+
+            assertEquals(3, store.readAllSchedules(100, 0, true, ScheduleOwnerScope.visibleTo(null)).size(),
+                    "a caller with no id sees only shared schedules");
+            assertEquals(12, store.readAllSchedules(100, 0, false, ScheduleOwnerScope.ALL).size());
+            assertEquals(12, store.readAllSchedules(100, 0, false).size(), "the unscoped overload filters nothing");
         }
+    }
+
+    private static ScheduleConfiguration owned(ScheduleConfiguration cfg, String userId) {
+        cfg.setUserId(userId);
+        return cfg;
     }
 
     // ─── Claiming & State ───────────────────────────────────────

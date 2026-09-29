@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.modules.nlp.impl;
 
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.nlp.IInputParser;
 import jakarta.inject.Provider;
@@ -48,7 +48,8 @@ class RestSemanticParserDeepCoverageTest {
         Map<String, Provider<ILifecycleTask>> lifecycleTasks = new HashMap<>();
         lifecycleTasks.put("ai.labs.parser", parserProvider);
 
-        parser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks, mock(ResourceAccessGuard.class));
+        parser = new RestSemanticParser(runtime, resourceClientLibrary, lifecycleTasks,
+                mock(ResourceAccessGuard.class));
     }
 
     private Callable<Void> captureCallable() {

@@ -50,8 +50,10 @@ logical properties.
 
 ## Tests
 
-- Unit: Vitest + RTL in `src/pages/__tests__/`, `renderPage(type)` helper wraps
-  `MemoryRouter` + `QueryClient` + `ThemeProvider`. Assert on `data-testid`.
+- Unit: Vitest + RTL in `__tests__/` directories beside the code (pages in
+  `src/pages/__tests__/`). Render through `renderPage(path, element, routePattern?, client?)` from
+  `src/test/test-utils.tsx` — it wraps `MemoryRouter` + `QueryClient` + `ThemeProvider`.
+  Assert on `data-testid`.
 - Mocks: MSW handlers in `src/test/mocks/handlers.ts`. Specific GET handlers must be
   registered **before** the generic `createResourceHandlers` block. Mock data should match
   the backend Java model.
@@ -60,13 +62,17 @@ logical properties.
 
 ## Gates before you call it done
 
+What CI's `UI Manager Checks` runs — there is no pre-commit hook, so run them yourself:
+
 ```bash
-npm run test    # Vitest
-npm run build   # includes tsc -b
+npm run lint         # --max-warnings 0, src/ and e2e/
+npm run i18n:check
+npm run typecheck    # tsc -b
+npm run test         # Vitest — also the only i18n plural/debt check
+npm run build
 ```
 
-Pre-commit runs `eslint --max-warnings 0` on staged files, then `npm run typecheck`.
 Use `npm run typecheck` (`tsc -b`), never `tsc --noEmit` — `tsconfig.json` is a solution
-file (`"files": []` plus two project references), so `--noEmit` resolves zero inputs and
-exits 0 without checking anything. Never commit to `main`; branch first. Update
-`HANDOFF.md` when a phase completes.
+file (`"files": []` plus project references), so `--noEmit` resolves zero inputs and
+exits 0 without checking anything. Never commit to `main`; branch first. Record the change
+in a root `docs/changelog.d/` fragment, not in `HANDOFF.md`.

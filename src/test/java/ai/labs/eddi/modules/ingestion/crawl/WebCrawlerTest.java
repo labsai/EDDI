@@ -15,6 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.zip.GZIPOutputStream;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -173,14 +177,70 @@ class WebCrawlerTest {
         @Test
         @DisplayName("a canonical link decides the document identity")
         void honoursCanonicalLink() {
+            // Honoured as de-duplication: the page it names is fetched and stored under
+            // its own URL, and this one is not stored a second time.
             FakeSite site = new FakeSite()
                     .page(SITE + "/a?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/a\">"
-                            + "</head><body>A</body></html>");
+                            + "</head><body>A</body></html>")
+                    .page(SITE + "/a", "<html><body>A</body></html>");
             RecordingSink sink = new RecordingSink();
 
             new WebCrawler(site).crawl(request(SITE + "/a?page=2"), sink);
 
             assertEquals(List.of(SITE + "/a"), sink.documentIds());
+        }
+
+        @Test
+        @DisplayName("a canonical link cannot store one page's content under another page's id")
+        void canonicalCannotTakeOverAnotherPage() {
+            // The canonical used to BE the identity: any page on the host could name
+            // /pricing as its canonical and have its own text embedded as /pricing.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/forum/post", "<html><head><link rel=\"canonical\" href=\"" + SITE
+                            + "/pricing\"></head><body>Everything is free today</body></html>")
+                    .page(SITE + "/pricing", "<html><body>Plans start at ten euros</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/forum/post"), sink);
+
+            assertEquals(List.of(SITE + "/pricing"), sink.documentIds());
+            assertTrue(sink.page(SITE + "/pricing").html().contains("ten euros"),
+                    "the document stored as /pricing must be /pricing's own content");
+            assertFalse(sink.page(SITE + "/pricing").html().contains("free today"));
+        }
+
+        @Test
+        @DisplayName("a page whose canonical target produces nothing is stored as itself")
+        void canonicalToAMissingPageKeepsThePage() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/a?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/a\">"
+                            + "</head><body>Only here</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/a?page=2"), sink);
+
+            assertEquals(List.of(SITE + "/a?page=2"), sink.documentIds(),
+                    "deferring to a page that is not there must not lose this one");
+        }
+
+        @Test
+        @DisplayName("the links of a page that defers to its canonical are still followed")
+        void deferringPageStillContributesLinks() {
+            // The second page of a listing that names the first as canonical is where
+            // the later entries are linked from. Returning before reading its links
+            // made every one of them unreachable, and then "missing".
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/list?page=2"))
+                    .page(SITE + "/list", "<html><body>first page</body></html>")
+                    .page(SITE + "/list?page=2", "<html><head><link rel=\"canonical\" href=\"" + SITE + "/list\">"
+                            + "</head><body><a href=\"" + SITE + "/item-7\">item 7</a></body></html>")
+                    .page(SITE + "/item-7", "<html><body>Item seven</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/item-7"), sink.documentIds().toString());
+            assertFalse(sink.documentIds().contains(SITE + "/list?page=2"));
         }
 
         @Test
@@ -514,26 +574,55 @@ class WebCrawlerTest {
     @DisplayName("responses")
     class Responses {
 
+        /** A crawl one link deep, so the seed's links are followed and /a is a leaf. */
+        private CrawlRequest oneLinkDeep() {
+            return request(SITE + "/", new Scope(true, false, "/", 1, List.of()), Limits.defaults());
+        }
+
         @Test
         @DisplayName("a 304 reports the document unchanged rather than re-ingesting it")
         void notModifiedIsReportedUnchanged() {
-            FakeSite site = new FakeSite().conditional(SITE + "/a", "<html><body>A</body></html>", "\"v1\"");
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .conditional(SITE + "/a", "<html><body>A</body></html>", "\"v1\"");
             RecordingSink sink = new RecordingSink().knows(SITE + "/a", "\"v1\"", null);
 
-            CrawlSummary summary = new WebCrawler(site).crawl(request(SITE + "/a"), sink);
+            CrawlSummary summary = new WebCrawler(site).crawl(oneLinkDeep(), sink);
 
             assertEquals(List.of(SITE + "/a"), sink.unchanged());
-            assertTrue(sink.pages().isEmpty());
+            assertEquals(1, sink.pages().size(), "only the seed, whose links were wanted, is downloaded");
             assertEquals(1, summary.pagesUnchanged());
+        }
+
+        @Test
+        @DisplayName("a page whose links are followed is never revalidated, so its children are still reached")
+        void pagesAboveTheDepthLimitAreFetchedInFull() {
+            // A 304 has no body and so no links. The children of an unchanged parent
+            // were never reached, a crawl that otherwise covered the site called them
+            // missing, and after two runs they were deleted.
+            FakeSite site = new FakeSite()
+                    .conditional(SITE + "/", linkTo(SITE + "/child"), "\"v1\"")
+                    .page(SITE + "/child", "<html><body>Child</body></html>");
+            RecordingSink sink = new RecordingSink()
+                    // Keyed as the crawler keys the seed: its canonical form.
+                    .knows(CrawlUrls.canonicalize(SITE + "/"), "\"v1\"", null);
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/child"), sink.documentIds().toString());
+            var command = site.requests().stream().filter(r -> r.url().equals(SITE + "/")).findFirst().orElseThrow();
+            assertEquals(null, command.ifNoneMatch(), "validators would earn a 304 and hide the links");
         }
 
         @Test
         @DisplayName("stored validators are sent as conditional headers")
         void sendsConditionalHeaders() {
-            FakeSite site = new FakeSite().page(SITE + "/a", "<html><body>A</body></html>");
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .page(SITE + "/a", "<html><body>A</body></html>");
             RecordingSink sink = new RecordingSink().knows(SITE + "/a", "\"v1\"", "Wed, 21 Oct 2026 07:28:00 GMT");
 
-            new WebCrawler(site).crawl(request(SITE + "/a"), sink);
+            new WebCrawler(site).crawl(oneLinkDeep(), sink);
 
             var command = site.requests().stream().filter(r -> r.url().equals(SITE + "/a")).findFirst().orElseThrow();
             assertEquals("\"v1\"", command.ifNoneMatch());
@@ -782,6 +871,287 @@ class WebCrawlerTest {
 
             assertTrue(sink.documentIds().contains(SITE + "/orphan"),
                     "a page in the sitemap must be found even when nothing links to it");
+        }
+
+        @Test
+        @DisplayName("a sitemap index is followed to the sitemaps it lists")
+        void followsASitemapIndex() {
+            // Most large sites publish an index. Reading every <loc> as a page queued
+            // the child sitemaps as pages, the fetcher refused the XML, and sitemap
+            // discovery found nothing at all.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemapIndex(SITE + "/sitemap.xml", SITE + "/sitemap-pages.xml")
+                    .sitemap(SITE + "/sitemap-pages.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+            assertFalse(sink.documentIds().contains(SITE + "/sitemap-pages.xml"));
+        }
+
+        @Test
+        @DisplayName("a configured sitemap is read even when robots.txt is not")
+        void configuredSitemapWithoutRobots() {
+            // A site that publishes a sitemap without advertising it, crawled with
+            // respectRobots off — which reads no robots.txt and so found no sitemap.
+            FakeSite site = new FakeSite()
+                    .sitemap(SITE + "/custom-sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/", Scope.defaults(), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", false), List.of(SITE + "/custom-sitemap.xml")), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+            assertFalse(site.wasRequested(SITE + "/robots.txt"));
+        }
+
+        @Test
+        @DisplayName("a sitemap listed twice — configured and in robots.txt — is read once")
+        void sitemapReadOnce() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/a")
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/", Scope.defaults(), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true), List.of(SITE + "/sitemap.xml")), new RecordingSink());
+
+            assertEquals(1, site.requestCount(SITE + "/sitemap.xml"));
+        }
+
+        @Test
+        @DisplayName("a relative Sitemap line in robots.txt is resolved against robots.txt")
+        void relativeSitemapLine() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: /maps/sitemap.xml")
+                    .sitemap(SITE + "/maps/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("with no sitemap configured or advertised, /sitemap.xml is tried")
+        void conventionalSitemapLocation() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow:")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("/sitemap.xml is not guessed when the site names its sitemap")
+        void noGuessWhenAdvertised() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/named.xml")
+                    .sitemap(SITE + "/named.xml", SITE + "/a")
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(site.wasRequested(SITE + "/sitemap.xml"));
+        }
+
+        @Test
+        @DisplayName("without robots.txt read at all, the conventional /sitemap.xml is still read")
+        void readsTheConventionalSitemap() {
+            FakeSite site = new FakeSite()
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            // robots.txt is not read at all here, which used to mean no sitemap either.
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("the conventional /sitemap.xml is not read where robots.txt disallows it")
+        void conventionalSitemapHonoursRobots() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow: /sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>");
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(site.wasRequested(SITE + "/sitemap.xml"));
+        }
+
+        @Test
+        @DisplayName("a gzipped sitemap is read, served with any Content-Type")
+        void gzippedSitemap() throws IOException {
+            var compressed = new ByteArrayOutputStream();
+            try (var gz = new GZIPOutputStream(compressed)) {
+                gz.write(("<urlset><url><loc>" + SITE + "/orphan</loc></url></urlset>").getBytes(StandardCharsets.UTF_8));
+            }
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml.gz")
+                    .raw(SITE + "/sitemap.xml.gz", "application/octet-stream", compressed.toByteArray())
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>unlinked but listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+        }
+
+        @Test
+        @DisplayName("pages a sitemap lists outside the crawl's scope are not crawled")
+        void sitemapPagesStayInScope() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/docs/in", SITE + "/blog/out", "https://elsewhere.test/x")
+                    .page(SITE + "/docs/", "<html><body>x</body></html>")
+                    .page(SITE + "/docs/in", "<html><body>in</body></html>")
+                    .page(SITE + "/blog/out", "<html><body>out</body></html>")
+                    .page("https://elsewhere.test/x", "<html><body>far</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/docs/", new Scope(true, false, "/docs/", 3, List.of()),
+                    Limits.defaults(), new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true)), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/docs/in"), sink.documentIds().toString());
+            assertFalse(site.wasRequested(SITE + "/blog/out"));
+            assertFalse(site.wasRequested("https://elsewhere.test/x"));
+        }
+
+        @Test
+        @DisplayName("a sitemap index is followed only to sitemaps on its own host")
+        void sitemapIndexChildrenStayOnItsHost() {
+            // The index is the site's to write; it must not be able to point the
+            // crawler at arbitrary public hosts.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemapIndex(SITE + "/sitemap.xml", SITE + "/sitemap-pages.xml", "https://elsewhere.test/sitemap.xml")
+                    .sitemap(SITE + "/sitemap-pages.xml", SITE + "/orphan")
+                    .sitemap("https://elsewhere.test/sitemap.xml", SITE + "/other")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>listed</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/orphan"), sink.documentIds().toString());
+            assertFalse(site.wasRequested("https://elsewhere.test/sitemap.xml"));
+        }
+
+        @Test
+        @DisplayName("a sitemap that could not be read means the source was not covered")
+        void unreadableSitemapIsNotCoverage() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .status(SITE + "/sitemap.xml", 503)
+                    .page(SITE + "/", "<html><body>x</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertEquals(StopReason.COMPLETED, summary.stopReason());
+            assertFalse(summary.coveredWholeSource(), "an outage says nothing about which pages the sitemap lists");
+        }
+
+        @Test
+        @DisplayName("a sitemap cut at the fetch cap means the source was not covered")
+        void truncatedSitemapIsNotCoverage() {
+            // Over the 1 MB cap: the fetch keeps the first megabyte and says so.
+            String padding = "<!--" + " ".repeat(1_100_000) + "-->";
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .raw(SITE + "/sitemap.xml", "application/xml",
+                            ("<urlset><url><loc>" + SITE + "/a</loc></url>" + padding + "<url><loc>" + SITE + "/b</loc></url></urlset>")
+                                    .getBytes(StandardCharsets.UTF_8))
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/a"), "what was read is still crawled");
+            assertFalse(summary.coveredWholeSource(), "the rest of the sitemap was never read");
+        }
+
+        @Test
+        @DisplayName("a plain-text sitemap cut at the fetch cap means the source was not covered")
+        void truncatedTextSitemapIsNotCoverage() {
+            // A text sitemap has no closing tag to miss: only the fetch's own
+            // truncation flag says the rest was never read.
+            String filler = "# filler\n".repeat(120_000);
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.txt")
+                    .raw(SITE + "/sitemap.txt", "text/plain",
+                            (SITE + "/a\n" + filler + SITE + "/b\n").getBytes(StandardCharsets.UTF_8))
+                    .page(SITE + "/", "<html><body>x</body></html>")
+                    .page(SITE + "/a", "<html><body>a</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertFalse(summary.coveredWholeSource());
+        }
+
+        @Test
+        @DisplayName("a site with no sitemap — the fallback answers 404 — is still covered")
+        void noSitemapIsStillCoverage() {
+            // The guard against the opposite mistake: were a missing sitemap read as
+            // incomplete discovery, deletions would stop for every site without one.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow:")
+                    .page(SITE + "/", "<html><body>x</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertTrue(site.wasRequested(SITE + "/sitemap.xml"));
+            assertTrue(summary.coveredWholeSource());
+        }
+
+        @Test
+        @DisplayName("an index of indexes cannot read more than the sitemap budget")
+        void sitemapIndexBudget() {
+            // Each index lists two more: unbounded, the requests made before the first
+            // page double at every level.
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/s.xml")
+                    .page(SITE + "/", "<html><body>x</body></html>");
+            List<String> level = List.of(SITE + "/s.xml");
+            for (int depth = 0; depth < 6; depth++) {
+                List<String> next = new ArrayList<>();
+                for (String index : level) {
+                    String left = index.replace(".xml", "-l.xml");
+                    String right = index.replace(".xml", "-r.xml");
+                    site.sitemapIndex(index, left, right);
+                    next.add(left);
+                    next.add(right);
+                }
+                level = next;
+            }
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            long sitemapRequests = site.requestedUrls().stream().filter(url -> url.endsWith(".xml")).count();
+            assertEquals(20, sitemapRequests, "capped at MAX_SITEMAPS");
+            // The sitemaps left unread may list pages the crawl never queued. Reported as
+            // covered, deletion reconciliation would remove exactly those.
+            assertFalse(summary.coveredWholeSource(), "a crawl that left sitemaps unread has not covered the source");
         }
 
         @Test

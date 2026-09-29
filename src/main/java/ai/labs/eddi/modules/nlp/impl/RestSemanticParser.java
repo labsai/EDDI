@@ -97,9 +97,9 @@ public class RestSemanticParser implements IRestSemanticParser {
     RestSemanticParser(IRuntime runtime, IResourceClientLibrary resourceClientLibrary,
             Map<String, Provider<ILifecycleTask>> lifecycleTasks, ResourceAccessGuard resourceAccessGuard, Ticker ticker) {
         this.runtime = runtime;
-        this.resourceAccessGuard = resourceAccessGuard;
         this.resourceClientLibrary = resourceClientLibrary;
         this.parserProvider = lifecycleTasks.get("ai.labs.parser");
+        this.resourceAccessGuard = resourceAccessGuard;
 
         this.parserCache = Caffeine.newBuilder()
                 .maximumSize(MAX_CACHED_PARSERS)
@@ -110,13 +110,13 @@ public class RestSemanticParser implements IRestSemanticParser {
 
     @Override
     public void parse(String configId, Integer version, String sentence, AsyncResponse asyncResponse) {
-        // Parsing reads the configuration and every dictionary it references (the
-        // result echoes their expressions), so it is a read of that configuration:
-        // VIEW, as a GET on the parser store would demand. Checked here, on the
-        // request thread, because the identity is request-scoped and the work below
-        // runs on a pool thread. A refusal propagates as a 403.
-        resourceAccessGuard.requireAccess(configId, AccessLevel.VIEW, "parser configuration");
         asyncResponse.setTimeout(30, TimeUnit.SECONDS);
+
+        // Enforce VIEW on the specific parser configuration on the REQUEST thread —
+        // ResourceAccessGuard reads the request-scoped SecurityIdentity, which is not
+        // available on the runtime pool thread the parse itself runs on. A refusal
+        // (ForbiddenException) propagates synchronously and maps to 403.
+        resourceAccessGuard.requireAccess(configId, AccessLevel.VIEW, "parser configuration");
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {

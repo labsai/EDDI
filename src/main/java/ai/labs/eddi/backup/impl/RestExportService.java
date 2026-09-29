@@ -32,7 +32,7 @@ import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
-import ai.labs.eddi.engine.schedule.IScheduleStore.ListingScope;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -1124,7 +1124,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      */
     private boolean mayExportSchedule(ScheduleConfiguration schedule) {
         String userId = schedule.getUserId();
-        if (ListingScope.isUnownedUserId(userId) || resourceAccessGuard.isAdmin()) {
+        if (ScheduleOwnerScope.isShared(userId) || resourceAccessGuard.isAdmin()) {
             return true;
         }
         return userId.equals(resourceAccessGuard.currentPrincipal());

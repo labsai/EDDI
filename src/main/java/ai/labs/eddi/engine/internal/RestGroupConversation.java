@@ -342,17 +342,22 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
         try {
-            List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, index, limit);
-            // Filter to owned conversations unless admin
+            // Owned conversations only, unless admin — and restricted IN THE QUERY, so
+            // index/limit page through the caller's own conversations. Filtering the
+            // fetched page afterwards gave a non-admin short or empty pages while their
+            // conversations sat further back (the Workforce history's missing rows).
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
-                conversations = conversations.stream()
-                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
+                if (callerId == null) {
+                    return List.of();
+                }
+                return groupConversationService.listGroupConversations(groupId, callerId, index, limit).stream()
+                        .filter(gc -> callerId.equals(gc.getUserId()))
                         .toList();
             }
-            return conversations;
+            return groupConversationService.listGroupConversations(groupId, index, limit);
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -753,7 +758,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (IGroupConversationService.GroupDiscussionException e) {
             LOGGER.infof("Close of %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("Close not possible: the conversation must be COMPLETED, FAILED or CANCELLED "
+                    .entity("Close not possible: the conversation must be COMPLETED, FAILED, REJECTED or CANCELLED "
                             + "(it may still be running or already closed), and no other operation may be in progress.")
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
