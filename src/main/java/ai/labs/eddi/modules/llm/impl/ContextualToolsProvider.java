@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -80,8 +81,21 @@ class ContextualToolsProvider implements ToolSourceProvider {
             Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
                     .<String, Boolean>build().asMap());
 
+    /**
+     * Verifies an earlier step's {@code groupId} before it is trusted — see
+     * {@link #resolveGroupIds(IConversationMemory, LiveDiscussionRegistry)}. May be
+     * null, in which case only the current step's value counts.
+     */
+    private final LiveDiscussionRegistry liveDiscussionRegistry;
+
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
+        this(userMemoryStore, attachmentStore, attachmentTextExtractor, null);
+    }
+
+    ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
+            AttachmentTextExtractor attachmentTextExtractor, LiveDiscussionRegistry liveDiscussionRegistry) {
+        this.liveDiscussionRegistry = liveDiscussionRegistry;
         this.userMemoryStore = userMemoryStore;
         this.attachmentStore = attachmentStore;
         this.attachmentTextExtractor = attachmentTextExtractor;
@@ -203,7 +217,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (!memory.isMemoryToolsEnabled() || config == null || userMemoryStore == null)
             return;
 
-        List<String> groupIds = resolveGroupIds(memory);
+        List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
                 memory::isCancelled);
@@ -233,10 +247,11 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * on PR #626; the defect predates this branch — R2a moved it verbatim out of
      * {@code AgentOrchestrator}.
      * <p>
-     * Reads {@code context:groupId} the way {@code DynamicAgentToolsProvider}
-     * resolves its own delegation-depth context, falling back to the current step
-     * and then to any earlier step, since a resumed turn re-enters without the
-     * original context map.
+     * Reads {@code context:groupId} from the current step, and from an earlier step
+     * only when {@code registry} confirms this conversation is a member of the
+     * running discussion that step names, in that group — see
+     * {@link ConversationGroups#resolveGroupIds(IConversationMemory, ConversationGroups.MembershipCheck)}.
+     * Without a registry only the current step counts.
      * <p>
      * The context value is the only source. A {@code groupId} conversation
      * <em>property</em> used to be honoured as a last resort, but properties are
@@ -247,8 +262,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * group orchestrator asserts, and {@code ClientContextGuard} keeps clients from
      * asserting it through the context key instead.
      */
-    static List<String> resolveGroupIds(IConversationMemory memory) {
-        return ConversationGroups.resolveGroupIds(memory);
+    static List<String> resolveGroupIds(IConversationMemory memory, LiveDiscussionRegistry registry) {
+        return ConversationGroups.resolveGroupIds(memory, registry != null ? registry::isLiveMember : null);
     }
 
     /**

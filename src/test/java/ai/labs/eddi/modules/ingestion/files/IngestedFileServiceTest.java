@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.ExcelTextExtractor;
+import ai.labs.eddi.modules.ingestion.extract.OfficeFixtures;
 import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
@@ -29,6 +30,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,7 +41,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -82,10 +86,10 @@ class IngestedFileServiceTest {
         doAnswer(invocation -> {
             String sourceKey = IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1));
             stateStore.finishRun(new IIngestionStateStore.IngestionRun(invocation.getArgument(2), sourceKey,
-                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
-                    0, 0, 0, 0, invocation.getArgument(3), 0, 0.0, null));
+                    IIngestionStateStore.IngestionRun.Status.MAINTENANCE, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
             return null;
-        }).when(pipeline).releaseClaim(anyString(), any(), anyString(), anyInt());
+        }).when(pipeline).releaseClaim(anyString(), any(), anyString());
         service = new IngestedFileService(fileStore, extractors(), pipeline, stateStore, meterRegistry);
     }
 
@@ -186,6 +190,121 @@ class IngestedFileServiceTest {
             assertEquals(2, outcome.accepted().size());
             assertTrue(outcome.rejected().getFirst().reason().contains("maximum of 2 files"),
                     outcome.rejected().getFirst().reason());
+        }
+
+        @Test
+        @DisplayName("refuses a file over the limit on its declared size, without reading it")
+        void refusesOnTheDeclaredSizeBeforeReading() {
+            // The whole part used to be read into memory first, so a 60 MB file cost
+            // 60 MB of heap in order to be told it was too big.
+            var read = new AtomicBoolean();
+            var oversized = new IngestedFileService.IncomingFile("huge.pdf", 5_000_000L, () -> {
+                read.set(true);
+                return new byte[5_000_000];
+            });
+
+            var outcome = service.upload(KB_ID, source(500, 1_000_000L, 100_000_000L), List.of(oversized));
+
+            assertFalse(read.get(), "a file refused on its declared size must never be read");
+            assertTrue(outcome.rejected().getFirst().reason().contains("limit for one file"),
+                    outcome.rejected().getFirst().reason());
+        }
+
+        @Test
+        @DisplayName("refuses a scanned PDF at upload, and says why")
+        void refusesAScannedPdf() {
+            var outcome = service.upload(KB_ID, source(500, 1_000_000L, 100_000_000L),
+                    List.of(IngestedFileService.IncomingFile.of("scan.pdf", OfficeFixtures.pdf(""))));
+
+            assertTrue(outcome.accepted().isEmpty());
+            assertTrue(outcome.rejected().getFirst().reason().contains("no text layer"),
+                    outcome.rejected().getFirst().reason());
+            assertTrue(fileStore.list(IngestionPipeline.stateKey(KB_ID, source(500, 1_000_000L, 100_000_000L)))
+                    .isEmpty(), "nothing is stored that no run could ever index");
+        }
+
+        @Test
+        @DisplayName("uploads arriving together cannot take a source past its file limit")
+        void concurrentUploadsRespectTheFileLimit() throws Exception {
+            // The limits were read once, when each request arrived: two uploads
+            // together both saw the same headroom and both filled it.
+            var source = source(5, 1000L, 1_000_000L);
+            int uploads = 8;
+            var start = new CountDownLatch(1);
+            var pool = Executors.newFixedThreadPool(uploads);
+            try {
+                List<Future<IngestedFileService.UploadOutcome>> results = new ArrayList<>();
+                for (int i = 0; i < uploads; i++) {
+                    String name = "doc-" + i + ".txt";
+                    results.add(pool.submit(() -> {
+                        start.await();
+                        return service.upload(KB_ID, source, List.of(file(name, 10)));
+                    }));
+                }
+                start.countDown();
+                int accepted = 0;
+                for (var result : results) {
+                    accepted += result.get(30, TimeUnit.SECONDS).accepted().size();
+                }
+
+                assertEquals(5, accepted);
+                assertEquals(5, fileStore.usage(IngestionPipeline.stateKey(KB_ID, source)).fileCount());
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("a new file that finds the source full once stored is taken back out")
+        void aNewFileThatOvershootsIsRemoved() {
+            // Another instance can store between this one's check and its store. The
+            // re-check afterwards takes a new file back out; nothing was replaced, so
+            // nothing is lost by it.
+            var source = source(1, 1000L, 1_000_000L);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+            var racingStore = new InMemoryIngestedFileStore() {
+                @Override
+                public IIngestedFileStore.StoredFile store(String key, String fileName, String mimeType,
+                                                           byte[] content) {
+                    // The other instance's file lands in the window.
+                    super.store(key, "other-node.txt", "text/plain", "x".getBytes(StandardCharsets.UTF_8));
+                    return super.store(key, fileName, mimeType, content);
+                }
+            };
+            var racing = new IngestedFileService(racingStore, extractors(), pipeline, stateStore, meterRegistry);
+
+            var outcome = racing.upload(KB_ID, source, List.of(file("mine.txt", 10)));
+
+            assertTrue(outcome.accepted().isEmpty());
+            assertEquals(1, racingStore.usage(sourceKey).fileCount());
+            assertTrue(racingStore.find(sourceKey, IngestedFileIds.forFileName("mine.txt")).isEmpty());
+        }
+
+        @Test
+        @DisplayName("the overshoot check never deletes a file another instance has since written")
+        void theOvershootCheckKeepsAnotherInstancesFile() {
+            // The other instance uploaded the same name in the same window, saw a
+            // replacement, skipped its own check and told its caller "stored".
+            // Deleting by name here took its file.
+            var source = source(1, 1000L, 1_000_000L);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+            byte[] theirs = "their version".getBytes(StandardCharsets.UTF_8);
+            var racingStore = new InMemoryIngestedFileStore() {
+                @Override
+                public IIngestedFileStore.StoredFile store(String key, String fileName, String mimeType,
+                                                           byte[] content) {
+                    IIngestedFileStore.StoredFile mine = super.store(key, fileName, mimeType, content);
+                    super.store(key, fileName, mimeType, theirs);
+                    super.store(key, "other-node.txt", "text/plain", "x".getBytes(StandardCharsets.UTF_8));
+                    return mine;
+                }
+            };
+            var racing = new IngestedFileService(racingStore, extractors(), pipeline, stateStore, meterRegistry);
+
+            racing.upload(KB_ID, source, List.of(file("mine.txt", 10)));
+
+            var kept = racingStore.find(sourceKey, IngestedFileIds.forFileName("mine.txt"));
+            assertTrue(kept.isPresent(), "the other instance's file must survive");
         }
 
         @Test
@@ -295,7 +414,8 @@ class IngestedFileServiceTest {
             var source = source(500, 100_000L, 1_000_000L);
             var stored = service.upload(KB_ID, source,
                     List.of(file("notes.txt", 10))).accepted().getFirst();
-            when(pipeline.forgetDocument(anyString(), any(), any(), anyString())).thenReturn(true);
+            when(pipeline.forgetDocument(anyString(), any(), any(), anyString()))
+                    .thenReturn(IngestionPipeline.ForgetOutcome.REMOVED);
 
             // The file must still be there when the vectors go. The other order
             // leaves content in the knowledge base that the operator can no longer
@@ -304,7 +424,7 @@ class IngestedFileServiceTest {
             when(pipeline.forgetDocument(anyString(), any(), any(), anyString())).thenAnswer(invocation -> {
                 fileStillPresentWhenVectorsWent.set(
                         fileStore.find(IngestionPipeline.stateKey(KB_ID, source), stored.fileId()).isPresent());
-                return true;
+                return IngestionPipeline.ForgetOutcome.REMOVED;
             });
 
             var outcome = service.delete(KB_ID, new RagConfiguration(), source, stored.fileId());
@@ -321,13 +441,35 @@ class IngestedFileServiceTest {
             var source = source(500, 100_000L, 1_000_000L);
             var stored = service.upload(KB_ID, source,
                     List.of(file("notes.txt", 10))).accepted().getFirst();
-            when(pipeline.forgetDocument(anyString(), any(), any(), anyString())).thenReturn(false);
+            when(pipeline.forgetDocument(anyString(), any(), any(), anyString()))
+                    .thenReturn(IngestionPipeline.ForgetOutcome.UNSUPPORTED);
 
             var outcome = service.delete(KB_ID, new RagConfiguration(), source, stored.fileId());
 
             // The operator asked for the content to be gone. Reporting a plain
             // success while it stays retrievable is the worst of the three answers.
             assertEquals(IngestedFileService.DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN, outcome);
+        }
+
+        @Test
+        @DisplayName("keeps the file when the vector store failed to remove its chunks")
+        void keepsTheFileWhenRemovalFailed() {
+            // Deleting it anyway stranded the chunks for good: the document was
+            // tombstoned, reconciliation passes tombstoned documents over, and no file
+            // was left to delete again once the store recovered.
+            var source = source(500, 100_000L, 1_000_000L);
+            var stored = service.upload(KB_ID, source,
+                    List.of(file("notes.txt", 10))).accepted().getFirst();
+            when(pipeline.forgetDocument(anyString(), any(), any(), anyString()))
+                    .thenReturn(IngestionPipeline.ForgetOutcome.FAILED);
+
+            var outcome = service.delete(KB_ID, new RagConfiguration(), source, stored.fileId());
+
+            assertEquals(IngestedFileService.DeleteOutcome.REMOVAL_FAILED, outcome);
+            assertTrue(fileStore.find(IngestionPipeline.stateKey(KB_ID, source), stored.fileId()).isPresent(),
+                    "the file must stay so the delete can be tried again");
+            assertTrue(stateStore.activeRun(IngestionPipeline.stateKey(KB_ID, source)).isEmpty(),
+                    "the claim is released on this path too");
         }
 
         @Test

@@ -203,7 +203,8 @@ public class GroupHitlCoordinator {
         } else {
             gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
         }
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         // MAJOR-2: Schedule group timeout if configured
         scheduleGroupHitlTimeout(gc);
@@ -259,7 +260,8 @@ public class GroupHitlCoordinator {
         gc.setPausedAt(null);
         gc.setHitlLastPauseFingerprint(null);
         gc.setLastModified(Instant.now());
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
         counterGroupFailure.increment();
         deleteGroupHitlTimeoutSchedule(gc.getId());
         cleanupAfterTerminalState(gc);
@@ -1018,7 +1020,8 @@ public class GroupHitlCoordinator {
         // record — it is not a HitlTimeoutPolicy and must not pretend to be one.
         gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
         gc.setHitlTimeoutPolicy(null);
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         scheduleHumanTurnTimeout(gc);
         counterGroupHitlPause.increment();
@@ -1077,7 +1080,8 @@ public class GroupHitlCoordinator {
         gc.setHitlPauseReason("Facilitator escalation — waiting for input from " + escalation.principalId());
         gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
         gc.setHitlTimeoutPolicy(null);
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         scheduleHumanTurnTimeout(gc);
         counterGroupHitlPause.increment();
