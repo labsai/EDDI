@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
@@ -92,6 +93,18 @@ class RestSecretStoreTest {
     void storeSecret_returns400WhenBodyNull() {
         Response resp = rest.storeSecret("default", "myKey", null);
         assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void storeSecret_returns400ForTheReservedAutoVaultShape() throws Exception {
+        // GDPR erasure deletes a user's auto-vaulted slots by name — a manual key in
+        // that shape would be erased with them.
+        String reserved = AutoVaultedSecrets.newSlotName("agent", "user-1", "apiKey");
+
+        Response resp = rest.storeSecret("default", reserved, new IRestSecretStore.SecretRequest("val", null, null));
+
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).store(any(), any(), any(), any());
     }
 
     @Test
