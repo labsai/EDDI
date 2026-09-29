@@ -21,13 +21,13 @@
        cosign verify \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
          --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
-         {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+         {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
 {{- if not .Values.eddi.image.digest }}
 
      Then pin the digest, so the kubelet can never pull different bits under
      the same tag:
 
-       crane digest {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+       crane digest {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
        helm upgrade {{ .Release.Name }} ./helm/eddi \
          --set eddi.image.digest="sha256:..." \
          --namespace {{ .Release.Namespace }}
