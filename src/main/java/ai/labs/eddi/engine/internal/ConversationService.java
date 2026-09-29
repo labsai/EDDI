@@ -46,7 +46,6 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -1184,10 +1183,6 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
-        // The conversationId overloads are the external entry points (REST, MCP,
-        // Slack, /v1); the engine's own orchestrators use the agent-id overload and
-        // are the only legitimate writers of these keys. See ReservedContextKeys.
-        ReservedContextKeys.stripFromExternal(inputData, "say");
         var snapshot = requireSnapshot(conversationId);
         refuseIfSoftDeleted(conversationId, snapshot);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
@@ -1212,7 +1207,6 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
-        ReservedContextKeys.stripFromExternal(inputData, "streaming say");
         var snapshot = requireSnapshot(conversationId);
         refuseIfSoftDeleted(conversationId, snapshot);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,

@@ -391,7 +391,7 @@ public interface IConversationMemory extends Serializable {
          * <em>starts with</em> {@code prefix}, or {@code null}. Prefix semantics —
          * {@code "context:groupId"} also matches {@code context:groupIdSuffix}. For a
          * key whose writer matters (an engine-reserved context key, see
-         * {@code ReservedContextKeys}) use {@link #getExactDataPerStep(String)}.
+         * {@code ClientContextGuard}) use {@link #getExactDataPerStep(String)}.
          */
         <T> List<IData<T>> getAllLatestData(String prefix);
 
@@ -436,7 +436,7 @@ public interface IConversationMemory extends Serializable {
          * Prefix semantics: {@code getLatestData("context:groupId")} also returns a
          * {@code context:groupIdSuffix} entry, and returns it first if it was stored
          * later. Never use it to read a key whose writer matters — an engine-reserved
-         * context key ({@code ReservedContextKeys}) in particular, since the client
+         * context key ({@code ClientContextGuard}) in particular, since the client
          * chooses its own context key names. Use {@link #getData(String)}, which is
          * exact, for those.
          */

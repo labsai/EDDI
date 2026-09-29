@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.model.ReservedContextKeys;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -69,7 +68,7 @@ public class ConverseWithAgentTool {
      * uses for nested groups, so {@code AgentOrchestrator} can read the depth back
      * out of the callee's memory and refuse to go deeper.
      */
-    public static final String CONTEXT_DELEGATION_DEPTH = ReservedContextKeys.DELEGATION_DEPTH;
+    public static final String CONTEXT_DELEGATION_DEPTH = "delegationDepth";
 
     private final IConversationService conversationService;
     private final String userId;

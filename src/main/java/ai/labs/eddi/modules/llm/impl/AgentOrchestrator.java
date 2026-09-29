@@ -32,7 +32,6 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -1184,7 +1183,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
             if (currentStep == null) {
                 return null;
             }
-            var data = currentStep.getData("context:" + ReservedContextKeys.GROUP_CONVERSATION_ID);
+            var data = currentStep.getData("context:groupConversationId");
             if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
                 return String.valueOf(ctx.getValue());
             }

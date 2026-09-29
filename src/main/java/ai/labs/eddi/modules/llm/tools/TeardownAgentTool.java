@@ -42,7 +42,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * The list alone used to decide, and it could be seeded from client-supplied
  * context, which turned {@code teardown_agent(id, delete=true)} into "delete
  * any agent permanently". The context channel is now closed at the entry points
- * ({@code ReservedContextKeys}); the marker makes sure a future leak of that
+ * ({@code ClientContextGuard}); the marker makes sure a future leak of that
  * kind still cannot reach an agent a person built.
  *
  * @since 6.0.0

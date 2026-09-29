@@ -19,7 +19,6 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.ReservedContextKeys;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
@@ -454,7 +453,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * {@code context:dynamicAgentConfigX} — not a reserved key by name — and hand a
      * standalone agent a group policy of the client's choosing.
      */
-    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:" + ReservedContextKeys.DYNAMIC_AGENT_CONFIG;
+    static final String CONTEXT_DYNAMIC_AGENT_CONFIG = "context:dynamicAgentConfig";
 
     /**
      * Whether {@code toolName} is enabled for this turn.
@@ -687,7 +686,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * turn. Written by {@code MemberTurnExecutor}, read by
      * {@link #seedCreatedAgentIds}.
      */
-    static final String CONTEXT_DYNAMIC_CREATED_AGENT_IDS = "context:" + ReservedContextKeys.DYNAMIC_CREATED_AGENT_IDS;
+    static final String CONTEXT_DYNAMIC_CREATED_AGENT_IDS = "context:dynamicCreatedAgentIds";
 
     /**
      * Finding F17: the agent IDs already created in this conversation, so
@@ -797,7 +796,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * guard is inert on exactly the turns that matter.
      */
     static int resolveDelegationDepth(IConversationMemory memory) {
-        String contextKey = "context:" + ReservedContextKeys.DELEGATION_DEPTH;
+        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
 
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
