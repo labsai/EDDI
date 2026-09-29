@@ -502,7 +502,8 @@ click is accepted only from the card recorded for the conversation's (or
 group's) current pause. An older card of the same conversation cannot approve a
 newer pause, and a button without a card id — a card posted before this
 binding — is refused. The button value is `<integration>|<subject>|<cardId>`, so an
-integration name may not contain `|` (refused on save). See
+integration name may not contain `|` (refused on save; an integration stored
+earlier with one gets approval cards without buttons until it is renamed). See
 [HITL → Slack Integration](hitl.md#slack-integration).
 
 ### Retry Logic

@@ -899,8 +899,14 @@ public class SlackEventHandler {
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
-        if (integrationName == null || integrationName.isBlank()) {
-            includeButtons = false; // unbindable — a decision on it would be refused
+        if (!SlackHitlSupport.isBindableIntegrationName(integrationName)) {
+            // Unbindable — a decision on it would be refused. A name containing '|'
+            // (stored before the save-time rule) would split the button value.
+            if (integrationName != null && !integrationName.isBlank()) {
+                LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot carry "
+                        + "— posting the approval card without buttons; rename the integration", sanitize(integrationName));
+            }
+            includeButtons = false;
         } else {
             try {
                 if (!approvalRecords.tryRecord(integrationName, conversationId, pauseEpoch, cardId, approvalChannel)) {
