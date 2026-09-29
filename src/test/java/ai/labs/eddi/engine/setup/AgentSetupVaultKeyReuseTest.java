@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,6 +84,11 @@ class AgentSetupVaultKeyReuseTest {
         createdResources = new LinkedHashMap<>();
         when(secretProvider.isAvailable()).thenReturn(true);
         when(secretProvider.listKeys(anyString())).thenReturn(List.of());
+        // The mock does not run ISecretProvider's default matchesChecksum, and the
+        // fixtures store legacy bare-SHA-256 checksums, so delegate to the real keyless
+        // (legacy) comparison — which is exactly what the provider default does.
+        when(secretProvider.matchesChecksum(anyString(), any(), anyString())).thenAnswer(
+                inv -> VaultChecksum.matches(null, inv.getArgument(0), inv.getArgument(1), inv.getArgument(2)));
     }
 
     private String vaultApiKey(String apiKey, String vaultKeyName) throws Exception {
@@ -420,6 +426,20 @@ class AgentSetupVaultKeyReuseTest {
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
             assertTrue(e.getMessage().contains("does not match"), e.getMessage());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a failure comparing against an existing entry is a setup error, not a mismatch")
+        void checksumComparisonFailureIsASetupError() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.matchesChecksum(anyString(), any(), anyString())).thenThrow(new IllegalStateException("meta read failed"));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("Could not verify"), e.getMessage());
+            assertFalse(e.getMessage().contains("does not match"), e.getMessage());
+            assertTrue(e.getCause() instanceof IllegalStateException);
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 

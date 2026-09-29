@@ -523,6 +523,23 @@ public class AgentConfiguration {
         private int maxValueLength = 1000;
         private int maxWritesPerTurn = 10;
         private List<String> allowedCategories = List.of("preference", "fact", "context");
+        /**
+         * Which memory visibilities the LLM {@code rememberFact} tool may write.
+         * Defaults to {@code self} only: an agent must be explicitly configured before
+         * the model can persist {@code group}- or {@code global}-visible memories, so a
+         * prompt-injected model cannot broadcast a fact to every other agent by
+         * default. The configured {@code defaultVisibility} is always permitted, so
+         * setting it is never self-blocking.
+         */
+        private List<String> allowedVisibilities = List.of("self");
+        /**
+         * Whether the {@code rememberFact} tool may overwrite the value of a
+         * {@code global} memory whose key is already owned by a <em>different</em>
+         * agent. Defaults to {@code false}: the store preserves the original owner on a
+         * cross-agent global write but still lets the value be overwritten, so this
+         * refuses that overwrite unless an operator opts in.
+         */
+        private boolean allowGlobalKeyOverwrite = false;
 
         public int getMaxKeyLength() {
             return maxKeyLength;
@@ -554,6 +571,22 @@ public class AgentConfiguration {
 
         public void setAllowedCategories(List<String> allowedCategories) {
             this.allowedCategories = allowedCategories;
+        }
+
+        public List<String> getAllowedVisibilities() {
+            return allowedVisibilities;
+        }
+
+        public void setAllowedVisibilities(List<String> allowedVisibilities) {
+            this.allowedVisibilities = allowedVisibilities;
+        }
+
+        public boolean isAllowGlobalKeyOverwrite() {
+            return allowGlobalKeyOverwrite;
+        }
+
+        public void setAllowGlobalKeyOverwrite(boolean allowGlobalKeyOverwrite) {
+            this.allowGlobalKeyOverwrite = allowGlobalKeyOverwrite;
         }
     }
 

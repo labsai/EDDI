@@ -373,8 +373,10 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("the ownership gate still runs before a soft delete")
         void softDelete_checksOwnershipFirst() {
+            // Delete is irreversible, so it uses the STRICT owner guard (finding 10):
+            // a legacy no-owner conversation is refused to a non-admin, not admitted.
             doThrow(new ForbiddenException("not yours"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-other");
+                    .when(conversationAccessGuard).requireConversationOwnerStrict(eq("conv-other"), any());
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.deleteConversationLog("conv-other", false));
@@ -540,8 +542,9 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("deleteConversationLog denies a foreign conversation and deletes nothing")
         void deleteIsGuarded() {
+            // Delete uses the strict owner guard (finding 10).
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationOwnerStrict(eq("conv-of-user-a"), any());
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.deleteConversationLog("conv-of-user-a", true));
@@ -563,7 +566,11 @@ class RestConversationStoreTest {
             restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
             restConversationStore.deleteConversationLog("conv-1", false);
 
-            verify(conversationAccessGuard, times(3)).requireConversationOwner("conv-1");
+            // Reads use the plain owner guard; the irreversible delete uses the strict
+            // variant (finding 10). Both are ForbiddenException-throwing owner checks —
+            // every per-conversation call is still gated.
+            verify(conversationAccessGuard, times(2)).requireConversationOwner("conv-1");
+            verify(conversationAccessGuard, times(1)).requireConversationOwnerStrict(eq("conv-1"), any());
         }
     }
 

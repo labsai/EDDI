@@ -261,6 +261,21 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     /**
+     * The metadata as it may leave over REST — with the {@code checksum} nulled
+     * out. The stored checksum is a keyed value of the plaintext used for internal
+     * dedup and value-match; exposing it hands an offline attacker a target to test
+     * guesses against, so it never crosses the API boundary. A null field is
+     * omitted from the response body, so callers simply see no {@code checksum}.
+     */
+    private static SecretMetadata withoutChecksum(SecretMetadata metadata) {
+        if (metadata == null || metadata.checksum() == null) {
+            return metadata;
+        }
+        return new SecretMetadata(metadata.tenantId(), metadata.keyName(), metadata.createdAt(), metadata.lastAccessedAt(),
+                metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents());
+    }
+
+    /**
      * The response body for a grant update. Carries the previous list as well as
      * the new one — an operator changing a security control should be able to see
      * what it was, and a UI can diff the two without having re-read the secret
@@ -351,7 +366,7 @@ public class RestSecretStore implements IRestSecretStore {
         }
         try {
             SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, keyName));
-            return Response.ok(metadata).build();
+            return Response.ok(withoutChecksum(metadata)).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -372,7 +387,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId)).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();

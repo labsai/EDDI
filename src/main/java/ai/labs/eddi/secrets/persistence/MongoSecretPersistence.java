@@ -382,6 +382,23 @@ public class MongoSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public String setMetaValueIfAbsent(String key, String value) {
+        try {
+            // $setOnInsert writes only when the upsert inserts, so an existing value is
+            // never touched. The unique idx_meta_key index arbitrates two concurrent
+            // inserts: the loser gets a duplicate-key error and reads the winner's value.
+            metaCollection.updateOne(eq("key", key), Updates.setOnInsert("value", value), new UpdateOptions().upsert(true));
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw new PersistenceException("Failed to write meta value: " + key, e);
+            }
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+        return getMetaValue(key);
+    }
+
     // ─── Document conversion ───
 
     private EncryptedSecret documentToSecret(Document doc) {

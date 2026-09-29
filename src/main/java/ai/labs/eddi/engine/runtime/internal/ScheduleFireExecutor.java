@@ -583,8 +583,25 @@ public class ScheduleFireExecutor {
         if (conversationId != null && !conversationId.isBlank()) {
             // Validate conversation still exists and is usable
             try {
-                conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
-                return conversationId;
+                var snapshot = conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
+                // Defence in depth against a persistentConversationId that points at
+                // another user's conversation (e.g. one seeded before create nulled the
+                // field). The fire runs with server identity and no request context, so
+                // the ownership guard on the interactive read path never engages here —
+                // check it explicitly. Only a provable mismatch (both owners known and
+                // different) is refused; an unowned conversation or schedule is left
+                // alone, matching the codebase's legacy-data ownership semantics.
+                String convOwner = snapshot != null ? snapshot.getUserId() : null;
+                String schedOwner = schedule.getUserId();
+                boolean ownerMismatch = convOwner != null && !convOwner.isBlank()
+                        && schedOwner != null && !schedOwner.isBlank()
+                        && !convOwner.equals(schedOwner);
+                if (ownerMismatch) {
+                    LOGGER.warnf("[SCHEDULE] Persistent conversation %s is owned by another user than schedule %s — "
+                            + "ignoring it and creating a fresh conversation", conversationId, schedule.getId());
+                } else {
+                    return conversationId;
+                }
             } catch (Exception e) {
                 LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
             }

@@ -203,7 +203,25 @@ public interface IScheduleStore {
      *            timeouts are excluded by the query, so limit/offset apply to the
      *            visible set
      */
-    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts) throws IResourceStore.ResourceStoreException;
+    default List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readAllSchedules(limit, offset, excludeHitlTimeouts, ScheduleOwnerScope.ALL);
+    }
+
+    /**
+     * {@link #readAllSchedules(int, int, boolean)} restricted to the schedules
+     * {@code ownerScope} admits. The owner filter is part of the QUERY for the same
+     * reason as {@code excludeHitlTimeouts}: filtering a fetched page counts
+     * {@code limit}/{@code offset} over other users' rows, so a non-admin's page
+     * comes back short or empty while their own schedules sit on later pages, and a
+     * short page tells a client following the documented paging rule to stop.
+     *
+     * @param ownerScope
+     *            which owners are visible; {@link ScheduleOwnerScope#ALL} for no
+     *            owner filter
+     */
+    List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ScheduleOwnerScope ownerScope)
+            throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
 
@@ -211,7 +229,17 @@ public interface IScheduleStore {
      * Paged, deterministically ordered variant — see
      * {@link #readAllSchedules(int, int, boolean)}.
      */
-    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    default List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+            throws IResourceStore.ResourceStoreException {
+        return readSchedulesByAgentId(agentId, limit, offset, excludeHitlTimeouts, ScheduleOwnerScope.ALL);
+    }
+
+    /**
+     * Owner-scoped variant, see
+     * {@link #readAllSchedules(int, int, boolean, ScheduleOwnerScope)}.
+     */
+    List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                       ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException;
 
     // --- Polling & Claiming ---

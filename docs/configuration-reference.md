@@ -169,6 +169,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 |---|---|---|
 | `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
+| `eddi.vault.allow-weak-master-key` | `false` | Opt-out for the startup master-key strength gate, mirroring `eddi.security.allow-unauthenticated`. A weak or publicly-known master key (too short, too low-entropy, or a known demo/placeholder) normally **fails startup in production**; setting this `true` downgrades that to a WARN so a deployment already on a weak key can boot, rotate to a strong key via `POST /secretstore/secrets/admin/rotate-kek`, then remove the flag. Dev/test always warn regardless |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
 | `eddi.setup.vault-key-reuse` | `checksum` | `checksum` reuses an existing vault entry when the value matches; `never` always writes a new one. A typo fails startup |
@@ -333,6 +334,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 
 ### OpenAI-compatible API
 
@@ -348,6 +350,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed |
 | `eddi.openai-compat.environment` | `production` | Deployment environment agents are resolved from |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Also list `…-stateless` model ids |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |

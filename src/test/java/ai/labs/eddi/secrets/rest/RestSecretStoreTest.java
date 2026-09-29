@@ -478,6 +478,32 @@ class RestSecretStoreTest {
     }
 
     @Test
+    void getMetadata_redactsChecksumFromResponse() throws Exception {
+        Instant now = Instant.now();
+        when(secretProvider.getMetadata(any()))
+                .thenReturn(new SecretMetadata("default", "apiKey", now, now, null, "h1:deadbeef", "my key", List.of("*")));
+
+        Response resp = rest.getSecretMetadata("default", "apiKey");
+        assertEquals(200, resp.getStatus());
+        // The checksum must never cross the API boundary — it is a keyed value an
+        // attacker could otherwise test guesses against.
+        assertNull(((SecretMetadata) resp.getEntity()).checksum());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listSecrets_redactsChecksumFromEveryRow() throws Exception {
+        when(secretProvider.listKeys("default"))
+                .thenReturn(List.of(new SecretMetadata("default", "key1", Instant.now(), null, null, "h1:aaa", "d1", List.of("*")),
+                        new SecretMetadata("default", "key2", Instant.now(), null, null, "abc123", "d2", List.of("agent1"))));
+
+        Response resp = rest.listSecrets("default");
+        assertEquals(200, resp.getStatus());
+        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
+        assertTrue(list.stream().allMatch(m -> m.checksum() == null), "no listed row may carry a checksum");
+    }
+
+    @Test
     void getMetadata_returns404WhenNotFound() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
         Response resp = rest.getSecretMetadata("default", "missing");
