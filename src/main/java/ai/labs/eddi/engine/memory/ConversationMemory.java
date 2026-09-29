@@ -11,14 +11,23 @@ import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
 import java.time.Instant;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -29,6 +38,17 @@ import java.util.Stack;
  * @author ginccc
  */
 public class ConversationMemory implements IConversationMemory {
+    /**
+     * Step data key holding the conversation-property changes a turn made: for each
+     * changed key its value {@code before} and {@code after} the turn (a serialized
+     * {@link Property}, or {@code null} when absent). {@link #undoLastStep()}
+     * reverts it and {@link #redoLastStep()} re-applies it. Stored uncommitted and
+     * non-public, so the LLM never sees it.
+     */
+    public static final String KEY_PROPERTY_CHANGES = "properties:changes";
+    private static final ObjectMapper PROPERTY_MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+    };
     private String conversationId;
     private final String agentId;
     private final Integer agentVersion;
@@ -62,6 +82,10 @@ public class ConversationMemory implements IConversationMemory {
      * Transient — never serialized to MongoDB. Set once during Conversation.init().
      */
     private transient AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    /**
+     * Transient like the config beside it; {@code null} = derive from the config.
+     */
+    private transient Boolean memoryToolsEnabled;
 
     public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
         this(agentId, agentVersion, userId);
@@ -100,7 +124,20 @@ public class ConversationMemory implements IConversationMemory {
         return result;
     }
 
+    /**
+     * Starts a new TURN. A new turn branches the history: whatever was undone is no
+     * longer "next". Keeping it let a redo after undo → new message graft a step
+     * from the abandoned timeline — and, with property changes recorded per step,
+     * restore property values that timeline had set.
+     * <p>
+     * The clear lives here and NOT in {@link #startNextStep(ConversationOutput)}:
+     * that overload also rebuilds the step stack when a stored conversation is
+     * loaded ({@code ConversationMemoryUtilities.convertConversationMemorySnapshot}
+     * restores the redo cache first), so clearing there wiped the redo history on
+     * every load and every redo through the API was refused.
+     */
     public IConversationStep startNextStep() {
+        redoCache.clear();
         return startNextStep(null);
     }
 
@@ -126,10 +163,12 @@ public class ConversationMemory implements IConversationMemory {
             throw new IllegalStateException();
         }
 
+        IConversationStep undone = currentStep;
         redoCache.push(currentStep);
         currentStep = (IWritableConversationStep) previousSteps.pop();
         conversationOutputs.pop();
         forgetPersistedStepCount();
+        applyPropertyChanges(undone, true);
     }
 
     @Override
@@ -151,6 +190,7 @@ public class ConversationMemory implements IConversationMemory {
         previousSteps.push(currentStep);
         currentStep = (IWritableConversationStep) redoCache.pop();
         conversationOutputs.push(currentStep.getConversationOutput());
+        applyPropertyChanges(currentStep, false);
         forgetPersistedStepCount();
     }
 
@@ -164,6 +204,120 @@ public class ConversationMemory implements IConversationMemory {
      */
     private void forgetPersistedStepCount() {
         this.persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
+    }
+
+    /**
+     * The conversation properties in serialized form — the "before" side of
+     * {@link #recordPropertyChanges}. Serialized rather than copied so a property
+     * mutated in place during the turn still shows as a change. {@code step}-scoped
+     * properties are left out: they are dropped at the end of every turn anyway.
+     */
+    public Map<String, Map<String, Object>> serializedProperties() {
+        Map<String, Map<String, Object>> serialized = new LinkedHashMap<>();
+        conversationProperties.forEach((key, property) -> {
+            if (property != null && property.getScope() != Property.Scope.step) {
+                serialized.put(key, PROPERTY_MAPPER.convertValue(property, MAP_TYPE));
+            }
+        });
+        return serialized;
+    }
+
+    /**
+     * Records on the current step which properties this turn changed, relative to
+     * {@code before} (from {@link #serializedProperties()} at the start of the
+     * turn). Undo used to pop the step and nothing else, so a slot filled by the
+     * undone turn stayed filled — in the conversation and in long-term memory.
+     */
+    public void recordPropertyChanges(Map<String, Map<String, Object>> before) {
+        if (before == null) {
+            return;
+        }
+        Map<String, Map<String, Object>> after = serializedProperties();
+        Set<String> keys = new HashSet<>(before.keySet());
+        keys.addAll(after.keySet());
+        Map<String, Object> changes = new LinkedHashMap<>();
+        for (String key : keys) {
+            Map<String, Object> was = before.get(key);
+            Map<String, Object> now = after.get(key);
+            if (!Objects.equals(was, now)) {
+                Map<String, Object> change = new LinkedHashMap<>();
+                change.put("before", was);
+                change.put("after", now);
+                changes.put(key, change);
+            }
+        }
+        if (changes.isEmpty()) {
+            return;
+        }
+        var data = new Data<Object>(KEY_PROPERTY_CHANGES, changes);
+        data.setPublic(false);
+        data.setCommitted(false);
+        currentStep.storeData(data);
+    }
+
+    /**
+     * Every property value this conversation can still bring back: the current
+     * ones, plus both sides of every recorded change in the step history and the
+     * redo cache — undo and redo restore those. Whatever such a value points to (an
+     * auto-vaulted slot) belongs to the conversation until it is deleted.
+     */
+    public static List<Property> everyPropertyVersion(IConversationMemory memory) {
+        List<Property> versions = new ArrayList<>(memory.getConversationProperties().values());
+        List<IConversationStep> steps = new ArrayList<>();
+        var all = memory.getAllSteps();
+        for (int i = 0; all != null && i < all.size(); i++) {
+            steps.add(all.get(i));
+        }
+        if (memory.getRedoCache() != null) {
+            steps.addAll(memory.getRedoCache());
+        }
+        for (IConversationStep step : steps) {
+            propertyChanges(step).values().forEach(beforeAfter -> {
+                for (Property property : beforeAfter) {
+                    if (property != null) {
+                        versions.add(property);
+                    }
+                }
+            });
+        }
+        return versions;
+    }
+
+    /**
+     * The property changes recorded on {@code step}: key → {@code {before, after}}
+     * as {@link Property} objects ({@code null} = absent). Empty when the step
+     * recorded none.
+     */
+    public static Map<String, Property[]> propertyChanges(IConversationStep step) {
+        Map<String, Property[]> changes = new LinkedHashMap<>();
+        if (step == null) {
+            return changes;
+        }
+        IData<Object> data = step.getLatestData(KEY_PROPERTY_CHANGES);
+        if (data == null || !(data.getResult() instanceof Map<?, ?> recorded)) {
+            return changes;
+        }
+        recorded.forEach((key, change) -> {
+            if (change instanceof Map<?, ?> beforeAfter) {
+                changes.put(String.valueOf(key), new Property[]{toProperty(beforeAfter.get("before")), toProperty(beforeAfter.get("after"))});
+            }
+        });
+        return changes;
+    }
+
+    private static Property toProperty(Object serialized) {
+        return serialized == null ? null : PROPERTY_MAPPER.convertValue(serialized, Property.class);
+    }
+
+    private void applyPropertyChanges(IConversationStep step, boolean revert) {
+        propertyChanges(step).forEach((key, beforeAfter) -> {
+            Property target = revert ? beforeAfter[0] : beforeAfter[1];
+            if (target == null) {
+                conversationProperties.remove(key);
+            } else {
+                conversationProperties.put(key, target);
+            }
+        });
     }
 
     @Override
@@ -267,6 +421,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig config) {
         this.userMemoryConfig = config;
+    }
+
+    @Override
+    public boolean isMemoryToolsEnabled() {
+        return memoryToolsEnabled != null ? memoryToolsEnabled : userMemoryConfig != null;
+    }
+
+    @Override
+    public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
+        this.memoryToolsEnabled = memoryToolsEnabled;
     }
 
     /**

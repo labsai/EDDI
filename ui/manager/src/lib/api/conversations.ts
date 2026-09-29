@@ -120,6 +120,27 @@ export interface SimpleConversationMemorySnapshot {
   hitlApprovalTimeout?: string;
 }
 
+/**
+ * Placeholder the backend persists in `input:initial` (and the echoed `input`)
+ * for a secret-flagged turn — see Conversation.scrubSecretUserInput. The raw
+ * text is scrubbed server-side, so a rebuilt transcript never carries it.
+ */
+export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
+/** Neutral mask shown in place of the placeholder token (no i18n needed). */
+export const SECRET_INPUT_MASK = "••••••••";
+
+/**
+ * Render a user input for display: map the backend secret placeholder to a mask
+ * so a secret turn shows a masked bubble rather than the raw `<secret input>`
+ * token, and pass anything else through unchanged. Use this at every site that
+ * displays `input:initial`.
+ */
+export function displayUserInput(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value === SECRET_INPUT_PLACEHOLDER ? SECRET_INPUT_MASK : value;
+}
+
 /** Extract user input from a conversation step's key/value pairs */
 export function extractInput(step: SimpleConversationStep): string | undefined {
   const entry = step.conversationStep?.find(
@@ -396,11 +417,19 @@ export interface DetailedConversation {
 }
 
 /** Fetch a fully-detailed conversation snapshot including all step data.
- *  Used by the Memory Inspector debug tab. */
+ *  Used by the Memory Inspector debug tab.
+ *
+ *  `returnCurrentStepOnly=false` is explicit because the backend DEFAULTS it to
+ *  `true` on `GET /agents/{conversationId}` — without it the inspector's step
+ *  tabs only ever showed the latest step. */
 export function getDetailedConversation(
   conversationId: string,
 ): Promise<DetailedConversation> {
+  const params = new URLSearchParams({
+    returnDetailed: "true",
+    returnCurrentStepOnly: "false",
+  });
   return api.get<DetailedConversation>(
-    `/agents/${conversationId}?returnDetailed=true`,
+    `/agents/${conversationId}?${params.toString()}`,
   );
 }

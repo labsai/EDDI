@@ -150,6 +150,11 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > holding exactly `limit` entries may be truncated — ask for the next page to find
 > out.
 >
+> A non-admin's listing holds only the schedules that run as the caller plus shared
+> ones (no `userId`, or the `system:scheduler` placeholder), and HITL approval
+> timeouts are left out. Both restrictions are part of the query, so `limit`/`offset`
+> count only the rows the caller can see and a short page really is the last one.
+>
 > **`limit=0` is now `400`, on all three listing endpoints.** It used to be passed
 > through to the store, where the two backends read it opposite ways: the MongoDB
 > driver treats `limit(0)` as *no limit* and dumped every row, while PostgreSQL's

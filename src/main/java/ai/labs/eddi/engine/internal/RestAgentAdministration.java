@@ -362,7 +362,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                 if (activeConversationCount > 0) {
                     if (endAllActiveConversations) {
                         var activeConversations = restConversationStore.getActiveConversations(agentId, version);
-                        restConversationStore.endActiveConversations(activeConversations);
+                        // Ending continues past a failed conversation and reports it in
+                        // a 500; do not undeploy on top of conversations still open.
+                        var endResponse = restConversationStore.endActiveConversations(activeConversations);
+                        if (endResponse != null && endResponse.getStatus() >= 300) {
+                            throw new IllegalStateException(String.format(
+                                    "Could not end every active conversation of agent %s (version %s) — not undeploying",
+                                    sanitize(agentId), version));
+                        }
                     } else {
                         var message = getConflictExplanations(agentId, version, activeConversationCount);
                         return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();

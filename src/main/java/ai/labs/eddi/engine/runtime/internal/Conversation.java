@@ -29,14 +29,19 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.ArrayList;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.storeContextLanguageInLongTermMemory;
 import static ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_MATCHES;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT_INITIAL;
+import static ai.labs.eddi.engine.memory.MemoryKeys.INTENTS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.PROPERTIES_EXTRACTED;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -75,6 +80,9 @@ public class Conversation implements IConversation {
      */
     private final Map<String, Property> longTermBaseline = new HashMap<>();
 
+    /** Serialized properties at the start of this turn — the undo baseline. */
+    private Map<String, Map<String, Object>> propertiesAtTurnStart;
+
     /**
      * Keys of the context entries this turn's client marked {@code "secret": true}.
      * Their stored copy is replaced wholesale when the turn ends.
@@ -94,6 +102,21 @@ public class Conversation implements IConversation {
      * it, and a value that short is not a credential.
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
+
+    /**
+     * Client-flagged secret inputs at least this long are removed verbatim from the
+     * rest of the turn's output; shorter ones only where they stand as a whole
+     * token, so a PIN copied into a reply is removed without shredding every "12"
+     * inside other words and numbers.
+     */
+    static final int MIN_SCRUBBED_SECRET_INPUT_LENGTH = 4;
+
+    /**
+     * The raw client-flagged secret input of the running turn, held in this
+     * transient object only (never in memory) until the turn-end scrub has removed
+     * every copy.
+     */
+    private final List<String> secretInputPlaintexts = new ArrayList<>();
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -127,6 +150,9 @@ public class Conversation implements IConversation {
         if (memoryConfig != null) {
             conversationMemory.setUserMemoryConfig(memoryConfig);
         }
+        // Separate from the config: the config now arrives for every agent that
+        // declares one, but only enableMemoryTools may attach the LLM memory tool.
+        conversationMemory.setMemoryToolsEnabled(propertiesHandler.isMemoryToolsEnabled());
     }
 
     /**
@@ -222,7 +248,7 @@ public class Conversation implements IConversation {
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
-            executeConversationStep(lifecycleData, null);
+            executeConversationStep(lifecycleData, null, isSecretInputFlagged(context));
         } finally {
             checkActionsForConversationEnd();
         }
@@ -248,6 +274,40 @@ public class Conversation implements IConversation {
      * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
      * defaults.
      */
+    /**
+     * One entry per key. A key can be visible more than once — the shared
+     * {@code global} row and this agent's own {@code self} or {@code group} row are
+     * different documents, and they coexist, for instance when an agent whose
+     * {@code defaultVisibility} is {@code self} writes a key that an older version
+     * stored globally. Each lands in the same property slot, so without a choice
+     * the last one listed won — for a recall ordered by update time, the OLDER
+     * value. The most specific scope wins ({@code self}, then {@code group}, then
+     * {@code global}), the newest breaking a tie; the shared row itself is left
+     * untouched, since other agents may still read it.
+     */
+    static List<UserMemoryEntry> mostSpecificPerKey(List<UserMemoryEntry> entries) {
+        Map<String, UserMemoryEntry> byKey = new LinkedHashMap<>();
+        for (UserMemoryEntry entry : entries) {
+            byKey.merge(entry.key(), entry, (kept, candidate) -> precedes(candidate, kept) ? candidate : kept);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    private static boolean precedes(UserMemoryEntry a, UserMemoryEntry b) {
+        int byScope = Integer.compare(scopeRank(a.visibility()), scopeRank(b.visibility()));
+        if (byScope != 0) {
+            return byScope < 0;
+        }
+        return a.updatedAt() != null && (b.updatedAt() == null || a.updatedAt().isAfter(b.updatedAt()));
+    }
+
+    private static int scopeRank(Visibility visibility) {
+        if (visibility == Visibility.self) {
+            return 0;
+        }
+        return visibility == Visibility.group ? 1 : 2;
+    }
+
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
@@ -274,7 +334,7 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+            List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
 
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);
@@ -375,10 +435,12 @@ public class Conversation implements IConversation {
 
             if (startNewStep) {
                 startNextStep();
+                // The turn's starting point for undo — see recordPropertyChanges.
+                propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
 
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
-            executeConversationStep(lifecycleData, restartTaskTypes);
+            executeConversationStep(lifecycleData, restartTaskTypes, isSecretInputFlagged(contexts));
 
         } catch (LifecycleException.LifecycleInterruptedException e) {
             setConversationState(ConversationState.EXECUTION_INTERRUPTED);
@@ -410,6 +472,13 @@ public class Conversation implements IConversation {
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
         removeOldInvalidProperties();
+        if (propertiesAtTurnStart != null && conversationMemory instanceof ConversationMemory cm) {
+            // After the step-scope cleanup, so only what outlives the turn is recorded.
+            // A turn completed through a HITL resume runs in a new Conversation without
+            // this snapshot and records nothing — undo then leaves its properties as
+            // they are, which is the behaviour every turn had before.
+            cm.recordPropertyChanges(propertiesAtTurnStart);
+        }
         storePropertiesPermanently();
     }
 
@@ -527,12 +596,170 @@ public class Conversation implements IConversation {
             initialData.setPublic(true);
             lifecycleData.add(initialData);
 
+            if (isSecretInput) {
+                // Kept for the turn-end scrub: a scope='secret' property may replace
+                // input:initial mid-pipeline, after which the raw form is not in memory.
+                secretInputPlaintexts.add(message);
+            }
             String displayValue = isSecretInput ? SECRET_INPUT_PLACEHOLDER : message;
             currentStep.addConversationOutputString(INPUT.key(), displayValue);
         }
     }
 
-    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
+    /**
+     * Rewrites the persisted raw user input to the placeholder when the client
+     * flagged the turn's input as secret (🔒 secret mode / a password inputField).
+     * <p>
+     * The plaintext deliberately flowed through the pipeline as transient lifecycle
+     * data — {@code input:initial} (and, after normalizers,
+     * {@code input:normalized}) — so parser, behavior and property tasks ran
+     * normally and a {@code scope: "secret"} property could still vault it. This
+     * runs in the turn's {@code finally}, before the step snapshot is persisted or
+     * returned to the client, so the raw value never survives the turn. Storing the
+     * placeholder replaces the datum by key (the step's data store is keyed), and
+     * it doubles as the audit ledger's signal that the input was a secret
+     * ({@link ai.labs.eddi.engine.audit.TurnAuditBuffer}). Idempotent: a
+     * {@code scope: "secret"} property that already scrubbed leaves nothing to do.
+     * <p>
+     * It is not enough to scrub {@code input:initial}/{@code input:normalized}: the
+     * parser runs on the raw plaintext and, with {@code includeUnknown}/{@code
+     * includeUnused} on (the defaults), emits {@code unknown(<token>)} expressions
+     * that embed the (normalized, lower-cased) secret into
+     * {@code expressions:parsed} and {@code expressions:matches} step data and the
+     * {@code expressions} conversation output — none of which a free-text secret
+     * ever matches out of. So the derived parsed forms are dropped too, mirroring
+     * {@code PropertySetterTask.dropParsedForms} (which only runs when a
+     * {@code scope: "secret"} property vaulted the value; the client-flag path has
+     * no such property and must do this itself).
+     */
+    private void scrubSecretUserInput() {
+        IWritableConversationStep currentStep = conversationMemory.getCurrentStep();
+        if (currentStep == null) {
+            return;
+        }
+        boolean hadInput = false;
+        List<String> plaintexts = new ArrayList<>(secretInputPlaintexts);
+        secretInputPlaintexts.clear();
+        for (String inputKey : List.of(INPUT_INITIAL.key(), MemoryKeys.INPUT_NORMALIZED.key())) {
+            IData<String> inputData = currentStep.getLatestData(inputKey);
+            if (inputData != null && inputData.getResult() != null) {
+                hadInput = true;
+                if (!SECRET_INPUT_PLACEHOLDER.equals(inputData.getResult())) {
+                    plaintexts.add(inputData.getResult());
+                    var replacement = new Data<>(inputKey, SECRET_INPUT_PLACEHOLDER);
+                    currentStep.storeData(replacement);
+                }
+            }
+        }
+        // The echoed input the client re-reads on reload. Only touched when this turn
+        // actually carried input (never on the empty CONVERSATION_START turn).
+        if (hadInput) {
+            scrubSecretInputCopies(currentStep, plaintexts);
+            currentStep.resetConversationOutput(INPUT.key());
+            currentStep.addConversationOutputString(INPUT.key(), SECRET_INPUT_PLACEHOLDER);
+            dropParsedSecretForms(currentStep);
+        }
+    }
+
+    /**
+     * Removes verbatim copies of the raw secret input from everything else the turn
+     * produced: an output template such as {@code {memory.current.input}}, a
+     * non-secret property instruction, or any other task may have rendered it into
+     * step data, the conversation output or a conversation property while the
+     * plaintext was still live. Inputs shorter than
+     * {@link #MIN_SCRUBBED_SECRET_INPUT_LENGTH} are removed only where they stand
+     * as a whole token — replacing every "12" inside other numbers would destroy
+     * the reply, but a PIN copied into it must not survive either.
+     * <p>
+     * {@code plaintexts} includes the raw input captured when the turn started, so
+     * the copies are found even when a {@code scope: "secret"} property already
+     * replaced {@code input:initial} mid-pipeline.
+     */
+    private void scrubSecretInputCopies(IWritableConversationStep currentStep, List<String> plaintexts) {
+        List<String> verbatim = plaintexts.stream()
+                .filter(value -> value.length() >= MIN_SCRUBBED_SECRET_INPUT_LENGTH)
+                .distinct()
+                .toList();
+        List<String> tokens = plaintexts.stream()
+                .filter(value -> !value.isBlank() && value.length() < MIN_SCRUBBED_SECRET_INPUT_LENGTH)
+                .distinct()
+                .toList();
+        if (verbatim.isEmpty() && tokens.isEmpty()) {
+            return;
+        }
+        UnaryOperator<Object> scrub = value -> scrubSecretInputFrom(value, verbatim, tokens);
+        IConversationProperties properties = conversationMemory.getConversationProperties();
+        if (properties != null) {
+            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, scrub));
+        }
+        for (IData<?> datum : currentStep.getAllElements()) {
+            String key = datum.getKey();
+            if (INPUT_INITIAL.key().equals(key) || MemoryKeys.INPUT_NORMALIZED.key().equals(key)) {
+                continue;
+            }
+            @SuppressWarnings("unchecked")
+            var writable = (IData<Object>) datum;
+            Object cleaned = scrub.apply(datum.getResult());
+            if (cleaned != null) {
+                writable.setResult(cleaned);
+            }
+            if (scrub.apply(writable.getPossibleResults()) instanceof List<?> cleanedPossible) {
+                writable.setPossibleResults(castList(cleanedPossible));
+            }
+        }
+        var conversationOutput = currentStep.getConversationOutput();
+        if (conversationOutput != null) {
+            for (var entry : conversationOutput.entrySet()) {
+                Object cleaned = scrub.apply(entry.getValue());
+                if (cleaned != null) {
+                    entry.setValue(cleaned);
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code value} with the long secret inputs removed verbatim and the short ones
+     * removed as whole tokens, or {@code null} when it carries none.
+     */
+    private static Object scrubSecretInputFrom(Object value, List<String> verbatim, List<String> tokens) {
+        Object cleaned = verbatim.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, verbatim, SECRET_INPUT_PLACEHOLDER);
+        Object current = cleaned != null ? cleaned : value;
+        Object tokenCleaned = tokens.isEmpty() ? null : SecretValueScrubber.scrubDeepTokens(current, tokens, SECRET_INPUT_PLACEHOLDER);
+        return tokenCleaned != null ? tokenCleaned : cleaned;
+    }
+
+    /**
+     * Drops everything the parser derived from the raw secret input — the parsed
+     * expressions, the per-token match details, the intents and any extracted
+     * properties — and removes their conversation-output echoes. These embed the
+     * raw token verbatim ({@code unknown(<token>)}) and a verbatim scrub cannot
+     * patch them, so they are replaced wholesale. Mirrors
+     * {@code PropertySetterTask.dropParsedForms}. The behavior rules that consume
+     * these have already run by the time this executes (turn {@code finally}).
+     */
+    private static void dropParsedSecretForms(IWritableConversationStep currentStep) {
+        if (currentStep.getLatestData(EXPRESSIONS_PARSED.key()) != null) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_PARSED.key(), ""));
+        }
+        for (String derivedListKey : List.of(EXPRESSIONS_MATCHES.key(), INTENTS.key(), PROPERTIES_EXTRACTED.key())) {
+            if (currentStep.getLatestData(derivedListKey) != null) {
+                currentStep.storeData(new Data<>(derivedListKey, List.of()));
+            }
+        }
+        // InputParserTask echoes the parsed expressions under the bare "expressions"
+        // conversation-output key (KEY_EXPRESSIONS), not "expressions:parsed".
+        currentStep.removeConversationOutput(KEY_EXPRESSIONS_OUTPUT);
+        currentStep.removeConversationOutput(INTENTS.key());
+    }
+
+    /**
+     * Conversation-output key InputParserTask writes the parsed expressions under.
+     */
+    private static final String KEY_EXPRESSIONS_OUTPUT = "expressions";
+
+    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes,
+                                         boolean secretInput)
             throws LifecycleException {
         boolean paused = false;
         // Audit entries are held until the whole turn has run: only then is it known
@@ -556,6 +783,15 @@ public class Conversation implements IConversation {
             // First, so nothing below — the audit flush, the longTerm write, the
             // stored snapshot, the rendered output — sees a secret context value.
             scrubSecretContextValues();
+            // Then the client-flagged secret INPUT: the plaintext flowed through the
+            // pipeline's transient lifecycle data (so parser / property tasks ran and a
+            // scope='secret' property could vault it), but the persisted + client-visible
+            // copy must never keep it. Must run BEFORE the audit flush, whose
+            // inputWasScrubbed() keys off the placeholder on input:initial to redact the
+            // recorded input from every buffered entry.
+            if (secretInput) {
+                scrubSecretUserInput();
+            }
             if (auditBuffer != null) {
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues());
             }
@@ -711,17 +947,7 @@ public class Conversation implements IConversation {
         String agentId = conversationMemory.getAgentId();
         String conversationId = conversationMemory.getConversationId();
 
-        // Determine the agent's configured default visibility (from UserMemoryConfig).
-        // Falls back to global if no config (matches legacy unscoped behavior).
         AgentConfiguration.UserMemoryConfig config = conversationMemory.getUserMemoryConfig();
-        Visibility configDefault = Visibility.global;
-        if (config != null) {
-            try {
-                configDefault = Visibility.valueOf(config.getDefaultVisibility());
-            } catch (IllegalArgumentException e) {
-                configDefault = Visibility.global;
-            }
-        }
 
         // Writes owed by an earlier turn that never reached this method. They are
         // indistinguishable from "unchanged" by value, so they are driven by the
@@ -729,10 +955,26 @@ public class Conversation implements IConversation {
         // and whatever is left is written back — a store failure halfway through the
         // loop therefore retries only the keys that were not written.
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        // The groups this conversation belongs to — a group-visible property must
+        // carry them, or no reader (the writer included) can ever match it.
+        List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory);
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
                 if (property == null || property.getScope() != Scope.longTerm) {
+                    continue;
+                }
+                if (IUserMemoryStore.isReservedKey(propertyEntry.getKey())) {
+                    // GDPR bookkeeping (the Art. 18 flag is loaded like any global entry)
+                    // is never written back from a turn: the store refuses it, and a
+                    // property setter naming such a key would otherwise fail every turn
+                    // of the agent instead of just this one write.
+                    if (!property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                        LOGGER.warnf("Not persisting longTerm property '%s' of conversation %s: keys starting with '%s' are reserved "
+                                + "for GDPR bookkeeping", sanitize(propertyEntry.getKey()), sanitize(conversationId),
+                                IUserMemoryStore.RESERVED_KEY_PREFIX);
+                    }
+                    pending.remove(propertyEntry.getKey());
                     continue;
                 }
                 boolean writeOwed = pending.contains(propertyEntry.getKey());
@@ -742,8 +984,12 @@ public class Conversation implements IConversation {
                     continue;
                 }
                 // Apply visibility at persistence boundary only
-                Visibility vis = property.getVisibility() != null ? property.getVisibility() : configDefault;
-                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis);
+                Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
+                if (vis == Visibility.self && property.getVisibility() == Visibility.group) {
+                    LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
+                            + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                }
+                UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
             }
@@ -927,13 +1173,17 @@ public class Conversation implements IConversation {
     }
 
     private static void scrubProperty(Property property, List<String> needles) {
-        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+        scrubProperty(property, value -> scrubSecretsFrom(value, needles));
+    }
+
+    private static void scrubProperty(Property property, UnaryOperator<Object> scrub) {
+        if (scrub.apply(property.getValueString()) instanceof String cleaned) {
             property.setValueString(cleaned);
         }
-        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+        if (scrub.apply(property.getValueObject()) instanceof Map<?, ?> cleaned) {
             property.setValueObject(castMap(cleaned));
         }
-        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+        if (scrub.apply(property.getValueList()) instanceof List<?> cleaned) {
             property.setValueList(castList(cleaned));
         }
     }

@@ -14,8 +14,12 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.modules.llm.impl.PromptSnippetService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
+import io.quarkus.qute.NamespaceResolver;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
+import org.eclipse.microprofile.config.ConfigProvider;
 import jakarta.annotation.security.RolesAllowed;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -689,5 +693,33 @@ class RestTemplatePreviewTest {
         assertNotNull(roles, "/administration/preview must not be role-less — it renders "
                 + "caller-supplied templates against real conversation memory");
         assertEquals(List.of("eddi-admin", "eddi-editor"), List.of(roles.value()));
+    }
+
+    // ==================== Editor-supplied template text ====================
+
+    /**
+     * The preview renders text an editor typed, so the engine behind it must not
+     * expose configuration or the environment. Uses the real restricted engine,
+     * built from a source that DOES carry a {@code config:} namespace.
+     */
+    @Nested
+    @DisplayName("editor-supplied templates cannot read configuration")
+    class RestrictedEngine {
+
+        @Test
+        void configNamespaceDoesNotResolve() throws Exception {
+            String envKey = System.getenv("PATH") != null ? "PATH" : "Path";
+            Engine source = Engine.builder().addDefaults().strictRendering(false)
+                    .addNamespaceResolver(NamespaceResolver.builder("config")
+                            .resolve(ctx -> ConfigProvider.getConfig().getOptionalValue(ctx.getName(), String.class).orElse("")).build())
+                    .build();
+            var preview = new RestTemplatePreview(new TemplatingEngine(source), conversationMemoryStore, memoryItemConverter,
+                    promptSnippetService, conversationAccessGuard, resourceAccessGuard, globalVariableResolver);
+
+            TemplatePreviewResponse response = preview.previewTemplate(new TemplatePreviewRequest("[{config:" + envKey + "}]", null));
+
+            assertNull(response.error(), response.error());
+            assertEquals("[]", response.resolved());
+        }
     }
 }

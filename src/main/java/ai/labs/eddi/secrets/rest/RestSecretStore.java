@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
@@ -99,6 +100,14 @@ public class RestSecretStore implements IRestSecretStore {
             validateId(keyName, "keyName");
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
+        if (AutoVaultedSecrets.isReservedName(keyName)) {
+            // GDPR erasure deletes a user's auto-vaulted slots by name, so a manual key
+            // in that shape would be erased with them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "keyName '" + keyName + "' has the reserved shape of an auto-vaulted conversation secret "
+                            + "(<agentId>.u<16 hex>.<12 hex>.<name>). Choose another name."))
+                    .build();
         }
         if (body == null || body.value() == null || body.value().isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Secret value must not be empty")).build();
@@ -252,6 +261,21 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     /**
+     * The metadata as it may leave over REST — with the {@code checksum} nulled
+     * out. The stored checksum is a keyed value of the plaintext used for internal
+     * dedup and value-match; exposing it hands an offline attacker a target to test
+     * guesses against, so it never crosses the API boundary. A null field is
+     * omitted from the response body, so callers simply see no {@code checksum}.
+     */
+    private static SecretMetadata withoutChecksum(SecretMetadata metadata) {
+        if (metadata == null || metadata.checksum() == null) {
+            return metadata;
+        }
+        return new SecretMetadata(metadata.tenantId(), metadata.keyName(), metadata.createdAt(), metadata.lastAccessedAt(),
+                metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents());
+    }
+
+    /**
      * The response body for a grant update. Carries the previous list as well as
      * the new one — an operator changing a security control should be able to see
      * what it was, and a UI can diff the two without having re-read the secret
@@ -342,7 +366,7 @@ public class RestSecretStore implements IRestSecretStore {
         }
         try {
             SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, keyName));
-            return Response.ok(metadata).build();
+            return Response.ok(withoutChecksum(metadata)).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -363,7 +387,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId)).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();

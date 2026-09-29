@@ -20,7 +20,7 @@
 
        cosign verify \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
          {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
 {{- if not .Values.eddi.image.digest }}
 
@@ -67,9 +67,28 @@
 
     Or grant all three realm roles to an account of your own — eddi-viewer
     included, because EDDI has no role hierarchy and an administrator without
-    it is refused every read tool over MCP. The unprivileged fixtures
-    (viewer/viewer, user/user) still log straight in.
+    it is refused every read tool over MCP.
 
+  ⚠️  Disable the seeded demo logins before production.
+
+    The shipped realm seeds two accounts with known passwords — viewer/viewer
+    (eddi-viewer) and user/user (eddi-user) — so anyone who can reach Keycloak can
+    log in as them. They exist for local demos and the test suite. On any real
+    deployment, disable or re-password them:
+
+      Keycloak admin console → Users → viewer / user → Details (toggle Enabled off)
+      or → Credentials → Reset password
+
+{{- end }}
+
+{{- if and .Values.ingress.enabled (empty .Values.ingress.tls) }}
+
+  ⚠️  Ingress is enabled but ingress.tls is empty.
+
+     EDDI is being published over plain HTTP. Every request — including bearer
+     tokens and, without OIDC, unauthenticated API calls — crosses the network in
+     cleartext. Configure ingress.tls (a cert-manager Certificate or an existing
+     TLS Secret) before exposing this to anything but a trusted LAN.
 {{- end }}
 
   📊 Components:

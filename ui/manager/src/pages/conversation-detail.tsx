@@ -37,7 +37,7 @@ import type {
   ConversationOutput,
   SimpleConversationStep,
 } from "@/lib/api/conversations";
-import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
+import { extractInput, extractOutput, extractActions, displayUserInput } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -146,7 +146,7 @@ export function ConversationDetailPage() {
       "",
     ];
     conversation.conversationSteps?.forEach((step, i) => {
-      const input = extractInput(step);
+      const input = displayUserInput(extractInput(step));
       const output = extractOutput(conversation.conversationOutputs?.[i]);
       if (input) lines.push(`**User**: ${input}`, "");
       if (output) lines.push(`**Agent**: ${output}`, "");
@@ -509,7 +509,7 @@ function ChatBubbleStep({
   const [showRaw, setShowRaw] = useState(false);
 
   // Parse input/output/actions from the conversationStep key/value pairs
-  const input = extractInput(step);
+  const input = displayUserInput(extractInput(step));
   const output = extractOutput(conversationOutput);
   const actions = extractActions(step);
 
