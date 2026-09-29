@@ -107,8 +107,10 @@ Findings from the 2026-09-25 code review, each with a regression test.
   Audit verification can report `UNKNOWN_KEY`.
 - New properties `eddi.audit.hmac-key` / `eddi.audit.hmac-previous-keys` (empty by default).
 - Startup: an unreadable vault salt now fails the start (it used to derive a possibly wrong KEK).
-- **After any master-key change, DEK creation is refused** until a KEK rotation runs, or, if the old key is lost,
-  until an admin calls `adopt-master-key`. Previously a node silently wrapped new DEKs under whatever key it had.
+- **When the vault holds DEKs, a master-key change blocks DEK creation** until a KEK rotation runs, or, if the
+  old key is lost, until an admin calls `adopt-master-key`. A vault that holds no DEKs at all adopts the
+  configured key at startup, so neither is needed there. Previously a node silently wrapped new DEKs under
+  whatever key it had.
 - New REST operation `POST /secretstore/secrets/admin/adopt-master-key`; the Manager's OpenAPI snapshot is updated.
 
 **Files:** [`VaultSaltManager.java`](../../src/main/java/ai/labs/eddi/secrets/crypto/VaultSaltManager.java),
