@@ -800,6 +800,55 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void readAllSchedules_sharedOnlyIfCreatedByCaller_bindsTheCallerForBothClauses() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 10, true, ScheduleOwnerScope.visibleTo("alice").sharedOnlyIfCreatedByCaller());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String q = sql.getValue();
+        assertTrue(q.contains(" AND (((user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?) AND created_by = ?) OR user_id = ?)"), q);
+        assertFalse(q.contains("alice"), "the principal must be bound, not spliced: " + q);
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(2, "alice");
+        order.verify(preparedStatement).setString(3, "alice");
+        order.verify(preparedStatement).setInt(4, 50);
+        order.verify(preparedStatement).setInt(5, 10);
+    }
+
+    @Test
+    void readSchedulesByAgentId_withTeamCadences_matchesTheCadenceMarker() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readSchedulesByAgentId("agent-1", 50, 0, false, ScheduleOwnerScope.visibleTo("alice").withTeamCadences());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String q = sql.getValue();
+        assertTrue(q.contains("OR user_id = ? OR metadata->>'teamCadenceType' = 'team_cadence')"), q);
+        assertFalse(q.contains("created_by"), q);
+        var order = inOrder(preparedStatement);
+        order.verify(preparedStatement).setString(1, "agent-1");
+        order.verify(preparedStatement).setString(2, ScheduleOwnerScope.SHARED_OWNER);
+        order.verify(preparedStatement).setString(3, "alice");
+        order.verify(preparedStatement).setInt(4, 50);
+    }
+
+    @Test
+    void readAllSchedules_scopeAdmittingNothing_isFalseNotAnEmptyClause() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo(null).sharedOnlyIfCreatedByCaller());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("FROM eddi_schedules WHERE FALSE ORDER BY"), sql.getValue());
+        verify(preparedStatement).setInt(1, 50);
+    }
+
+    @Test
     void readAllSchedules_unrestrictedScope_addsNoOwnerClause() throws Exception {
         when(resultSet.next()).thenReturn(false);
 

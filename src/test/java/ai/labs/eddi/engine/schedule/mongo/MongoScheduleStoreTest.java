@@ -779,6 +779,49 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("readAllSchedules — shared rows restricted to their creator, in the filter")
+    void readAllSchedulesSharedOnlyIfCreatedByCallerFiltersOnCreatedBy() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo("alice").sharedOnlyIfCreatedByCaller());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"userId\": \"alice\""), rendered);
+        assertTrue(rendered.contains("\"createdBy\": \"alice\""), rendered);
+        assertFalse(rendered.contains("teamCadenceType"), rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — team cadences on request, shared rows unrestricted")
+    void readAllSchedulesWithTeamCadencesAdmitsCadencesByMetadata() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo("alice").withTeamCadences());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"metadata.teamCadenceType\": \"team_cadence\""), rendered);
+        assertFalse(rendered.contains("createdBy"), rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — a scope that admits nothing matches no document")
+    void readAllSchedulesScopeAdmittingNothingMatchesNothing() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo(null).sharedOnlyIfCreatedByCaller());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"_id\": null"), rendered);
+        assertFalse(rendered.contains("$or"), "an empty $or is rejected by the server: " + rendered);
+    }
+
+    @Test
     @DisplayName("readAllSchedules — an unrestricted scope adds no owner filter")
     void readAllSchedulesUnrestrictedScopeHasNoOwnerFilter() throws Exception {
         setupSchedulePageIteration();

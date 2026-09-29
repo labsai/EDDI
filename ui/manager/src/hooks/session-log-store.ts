@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry, getRecentLogs } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
+import { mergeNewestFirst } from "@/lib/log-entries";
 
 /**
  * Session-level log store — a buffer of unfiltered log entries, shared by every
@@ -26,6 +27,8 @@ import type { BearerEventSource } from "@/lib/bearer-event-source";
  */
 
 const MAX_SESSION_ENTRIES = 1000;
+/** How many ring-buffer lines to fetch on each (re)open to close the gap. */
+const RESEED_LIMIT = 200;
 
 interface SessionLogState {
   entries: LogEntry[];
@@ -51,15 +54,11 @@ function openStream() {
     const handleEvent = (event: MessageEvent) => {
       try {
         const entry = JSON.parse(event.data) as LogEntry;
-        useSessionLogStore.setState((s) => {
-          const next = [entry, ...s.entries];
-          return {
-            entries:
-              next.length > MAX_SESSION_ENTRIES
-                ? next.slice(0, MAX_SESSION_ENTRIES)
-                : next,
-          };
-        });
+        // De-duplicated merge, not a blind prepend: every (re)connect replays up
+        // to 50 ring-buffer lines the buffer usually already holds.
+        useSessionLogStore.setState((s) => ({
+          entries: mergeNewestFirst(s.entries, [entry], MAX_SESSION_ENTRIES),
+        }));
       } catch {
         // ignore parse errors
       }
@@ -86,37 +85,19 @@ function openStream() {
     eventSource.onopen = async () => {
       useSessionLogStore.setState({ connected: true });
 
-      if (useSessionLogStore.getState().entries.length === 0) {
-        try {
-          const recentLogs = await getRecentLogs({ limit: 200 });
-          useSessionLogStore.setState((s) => {
-            const merged = [...s.entries, ...recentLogs];
-            const seen = new Set<string>();
-            const unique: LogEntry[] = [];
-
-            for (const entry of merged) {
-              const key = `${entry.timestamp}-${entry.message}`;
-              if (!seen.has(key)) {
-                seen.add(key);
-                unique.push(entry);
-              }
-            }
-
-            unique.sort((a, b) => b.timestamp - a.timestamp);
-
-            return {
-              entries:
-                unique.length > MAX_SESSION_ENTRIES
-                  ? unique.slice(0, MAX_SESSION_ENTRIES)
-                  : unique,
-              seeded: true,
-            };
-          });
-        } catch {
-          useSessionLogStore.setState({ seeded: true });
-        }
-      } else {
-        // Entries already exist from SSE — mark seeded so UI doesn't show loading
+      // Reseed on EVERY open, not just the first. The stream only carries what
+      // happens while it is open: after the last viewer leaves (the socket
+      // closes) or after a dropped connection, whatever was logged in between
+      // never arrives. Seeding only an empty buffer left that as a silent gap
+      // in the middle of an otherwise continuous-looking tail. The merge
+      // de-duplicates, so re-fetching lines already shown costs nothing.
+      try {
+        const recentLogs = await getRecentLogs({ limit: RESEED_LIMIT });
+        useSessionLogStore.setState((s) => ({
+          entries: mergeNewestFirst(s.entries, recentLogs, MAX_SESSION_ENTRIES),
+          seeded: true,
+        }));
+      } catch {
         useSessionLogStore.setState({ seeded: true });
       }
     };
