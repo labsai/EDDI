@@ -370,6 +370,14 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             // so retiring v5 after deploying v6, the normal way to roll a version out,
             // silently switched every heartbeat of the agent off. Now only when this
             // call leaves no version of the agent deployed here.
+            //
+            // Uncertainty falls back to the old behaviour, deliberately. deployedVersions
+            // swallows a failed lookup, so a failure can only SHRINK the set: an empty or
+            // partial set makes this true and the schedules are disabled, exactly as every
+            // undeploy did before. The alternative — keep them enabled when a lookup fails
+            // — leaves heartbeats firing at an agent that may have no deployed version at
+            // all, failing until they dead-letter. Keeping them enabled needs positive
+            // evidence: another deployed version actually seen.
             final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
                     .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
             do {
