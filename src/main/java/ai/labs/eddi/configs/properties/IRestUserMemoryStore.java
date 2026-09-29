@@ -74,8 +74,9 @@ public interface IRestUserMemoryStore {
 
     @DELETE
     @Path("/{userId}")
-    @Operation(summary = "Delete all memories for a user (GDPR)", description = "Permanently removes all memory entries for a user. "
-            + "Intended for GDPR right-to-erasure requests.")
+    @Operation(summary = "Delete all memories for a user", description = "Permanently removes the user's memory entries, except the "
+            + "GDPR bookkeeping entries (keys starting with '_gdpr_', such as an Art. 18 processing restriction), which are kept. "
+            + "This is memory housekeeping, not an Art. 17 erasure: use DELETE /admin/gdpr/{userId} for that.")
     Response deleteAllForUser(@PathParam("userId") String userId);
 
     @GET

@@ -27,7 +27,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -41,6 +40,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -374,7 +374,7 @@ class AttachmentForwarderTest {
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
-            verify(httpClient).sendValidated(any(), any());
+            verify(httpClient).sendValidatedBounded(any(), anyLong());
         }
 
         @Test
@@ -614,10 +614,8 @@ class AttachmentForwarderTest {
     @Test
     void downloadNon200_addsNote() throws Exception {
         mockAttachments(urlImage());
-        @SuppressWarnings("unchecked")
-        HttpResponse<byte[]> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(500);
-        doReturn(resp).when(httpClient).sendValidated(any(), any());
+        doReturn(new SafeHttpClient.BoundedResponse(500, new byte[0], false))
+                .when(httpClient).sendValidatedBounded(any(), anyLong());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash"); // needs download
@@ -629,7 +627,7 @@ class AttachmentForwarderTest {
     @Test
     void downloadException_addsNote() throws Exception {
         mockAttachments(urlImage());
-        doThrow(new IOException("boom")).when(httpClient).sendValidated(any(), any());
+        doThrow(new IOException("boom")).when(httpClient).sendValidatedBounded(any(), anyLong());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash");
@@ -742,10 +740,8 @@ class AttachmentForwarderTest {
 
     @SuppressWarnings("unchecked")
     private void mockDownload(byte[] bytes) throws Exception {
-        HttpResponse<byte[]> resp = mock(HttpResponse.class);
-        when(resp.statusCode()).thenReturn(200);
-        when(resp.body()).thenReturn(bytes);
-        doReturn(resp).when(httpClient).sendValidated(any(), any());
+        doReturn(new SafeHttpClient.BoundedResponse(200, bytes, false))
+                .when(httpClient).sendValidatedBounded(any(), anyLong());
     }
 
     private static Attachment urlImage() {

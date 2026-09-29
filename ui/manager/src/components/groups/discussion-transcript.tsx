@@ -3,6 +3,7 @@ import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ChevronDown, 
 import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { HumanTurnBanner } from "./human-turn-banner";
@@ -675,7 +676,7 @@ export function DiscussionTranscript({
                 {isAgentFailurePlaceholder(effectiveSynthesis) ? (
                   <AgentFailedNotice />
                 ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                     {parsedSynthesis}
                   </ReactMarkdown>
                 )}

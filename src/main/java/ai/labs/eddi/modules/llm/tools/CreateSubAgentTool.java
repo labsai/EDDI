@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -243,7 +244,12 @@ public class CreateSubAgentTool {
             String prefixedName = parentAgentId + "/" + name.trim();
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
-                    systemPrompt,
+                    // The prompt is written by the parent MODEL, which a chat user can steer,
+                    // and it is stored as the sub-agent's system prompt — a template LlmTask
+                    // renders on every turn. Unescaped, "{vars.apiKey}" or a "{#for}" loop in
+                    // it would be evaluated with the server's template data. An unparsed
+                    // block makes it literal text; the rendered prompt is byte-identical.
+                    TemplateEscaping.unparsedBlock(systemPrompt),
                     resolvedProvider,
                     resolvedModel,
                     inheritedApiKey, // the parent's vault reference, or null if it has none

@@ -112,7 +112,7 @@ spec:
           #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
           #     labsai/eddi:<tag>
           #   crane digest labsai/eddi:<tag>
-          image: "{{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}{{- with .Values.eddi.image.digest }}@{{ . }}{{- end }}"
+          image: "{{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}{{- with .Values.eddi.image.digest }}@{{ . }}{{- end }}"
           imagePullPolicy: {{ .Values.eddi.image.pullPolicy }}
           # Container-level hardening — without this the pod is rejected outright
           # by a namespace running the "restricted" Pod Security Standard.

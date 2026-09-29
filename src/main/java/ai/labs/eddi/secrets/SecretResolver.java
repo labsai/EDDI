@@ -209,6 +209,21 @@ public class SecretResolver {
 
             // Parse using SecretReference — handles both short and full form
             SecretReference ref = SecretReference.parse(fullMatch);
+
+            // Refuse EDDI-internal namespaces (e.g. agents' Ed25519 signing keys).
+            // These are granted to the agent itself, so the deploy-time grant check
+            // would pass a config that referenced one — but the only legitimate reader
+            // goes through ISecretProvider directly, never through this resolver. Left
+            // in place unresolved (never sent as a credential) and logged, so an LLM
+            // parameter carrying one fails closed via requireResolved().
+            if (SecretReference.isReservedKeyName(ref.keyName())) {
+                LOGGER.warnf("Refusing to resolve reserved vault reference %s via a configuration/template — this namespace is "
+                        + "readable only by the internal service that owns it", fullMatch);
+                resolveErrorCounter.increment();
+                matcher.appendReplacement(result, Matcher.quoteReplacement(fullMatch));
+                continue;
+            }
+
             String cacheKey = ref.tenantId() + "/" + ref.keyName();
 
             // Check cache first — only successful resolutions are cached

@@ -56,10 +56,24 @@ public class RestRagIngestion implements IRestRagIngestion {
         this.ingestedFileService = ingestedFileService;
     }
 
+    /**
+     * The name {@code documentName} defaults to — see {@link IRestRagIngestion}.
+     */
+    static final String UNNAMED_DOCUMENT = "unnamed";
+
     @Override
-    public Response ingestDocument(String ragConfigId, Integer version, String kbId, String documentName, String documentContent) {
+    public Response ingestDocument(String ragConfigId, Integer version, String kbId, String documentName, Boolean replace,
+                                   String documentContent) {
         if (documentContent == null || documentContent.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Document content is required")).build();
+        }
+        boolean replacing = Boolean.TRUE.equals(replace);
+        if (replacing && (documentName == null || documentName.isBlank() || UNNAMED_DOCUMENT.equals(documentName))) {
+            // Replacement is keyed on the name. Without one, every document ingested
+            // without a name shares "unnamed", and replacing would delete all of them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "replace=true needs an explicit documentName: it replaces what was ingested under that name"))
+                    .build();
         }
 
         // EDIT, not the VIEW that reading the config needs. Ingestion writes documents
@@ -83,7 +97,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         // Use provided kbId, or fall back to the RAG config name, or the config ID
         String effectiveKbId = kbId != null && !kbId.isBlank() ? kbId : ragConfig.getName() != null ? ragConfig.getName() : ragConfigId;
 
-        String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig);
+        String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig, replacing);
 
         LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(effectiveKbId), sanitize(documentName),
                 documentContent.length());
@@ -104,6 +118,10 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .entity(Map.of("ingestionId", ingestionId, "status", status, "error",
                             "No ingestion with this id is known (statuses are kept for one hour)"))
                     .build();
+        }
+        String warning = ragIngestionService.getWarning(ingestionId);
+        if (warning != null) {
+            return Response.ok(Map.of("ingestionId", ingestionId, "status", status, "warning", warning)).build();
         }
         return Response.ok(Map.of("ingestionId", ingestionId, "status", status)).build();
     }

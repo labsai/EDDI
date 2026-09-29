@@ -14,8 +14,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -74,13 +76,36 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
-    @DisplayName("not enabled — no config, whatever else is set")
-    void disabledStaysDisabled() throws Exception {
-        when(agentStoreService.getAgentConfiguration("agent-1", 1))
-                .thenReturn(configuration(false, new AgentConfiguration.UserMemoryConfig()));
+    @DisplayName("tools not enabled but a config declared — the config applies, the tool stays off")
+    void configAppliesWithoutTheTools() throws Exception {
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDefaultVisibility("self");
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, memoryConfig));
 
         var agent = library.getAgent("agent-1", 1);
 
-        assertNull(agent.getUserMemoryConfig(), "enableMemoryTools is the opt-in and it says no");
+        // defaultVisibility and the recall settings govern the longTerm property path
+        // of EVERY agent — dropping them made "self" silently persist as global
+        assertEquals(memoryConfig, agent.getUserMemoryConfig());
+        assertFalse(agent.isMemoryToolsEnabled(), "enableMemoryTools is the opt-in for the tool, and it says no");
+    }
+
+    @Test
+    @DisplayName("enabled — the tool switch is on")
+    void enabledSetsTheToolSwitch() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(true, null));
+
+        assertTrue(library.getAgent("agent-1", 1).isMemoryToolsEnabled());
+    }
+
+    @Test
+    @DisplayName("neither declared — no config, no tool")
+    void neitherDeclared() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));
+
+        var agent = library.getAgent("agent-1", 1);
+
+        assertNull(agent.getUserMemoryConfig());
+        assertFalse(agent.isMemoryToolsEnabled());
     }
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { Toaster, toast } from "sonner";
+import { Toaster } from "sonner";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ResourceDetailPage } from "@/pages/resource-detail";
@@ -94,10 +94,16 @@ function stubCascade(onDeploy?: (url: string) => void) {
         },
       }),
     ),
-    http.get("*/agentstore/agents/:id", () =>
+    // The agent a save produced references the workflow version that save
+    // produced (v2) — the cascade checks the reference before it writes.
+    http.get("*/agentstore/agents/:id", ({ request }) =>
       HttpResponse.json({
         name: "test-agent",
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1"],
+        workflows: [
+          `eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=${
+            new URL(request.url).searchParams.get("version") === "1" ? 1 : 2
+          }`,
+        ],
       }),
     ),
     http.put("*/agentstore/agents/:id", () =>
@@ -129,9 +135,10 @@ afterEach(() => {
   console.error = originalConsoleError;
   vi.restoreAllMocks();
   // sonner's toast store is module-global and survives unmount, so with the long
-  // duration above a toast from one test is still on screen for the next --
-  // "Found multiple elements with the role button and name Deploy". Clear it.
-  toast.dismiss();
+  // duration above a toast from one test would still be on screen for the next --
+  // "Found multiple elements with the role button and name Deploy". The shared
+  // afterEach in src/test/setup.ts (drainToasts) dismisses them and waits for
+  // sonner's removal timer, so no toast -- and no timer -- outlives the test.
 });
 
 describe("ResourceDetailPage — a plain Save says it is not live", () => {

@@ -20,7 +20,8 @@ import java.util.regex.Pattern;
  */
 public final class SecretRedactionFilter {
 
-    private static final String REDACTED = "<REDACTED>";
+    /** The placeholder every redaction writes in place of secret material. */
+    public static final String REDACTED = "<REDACTED>";
 
     /** Shared, thread-safe, and used only to answer "is this a JSON document". */
     private static final JsonFactory JSON = new JsonFactory();
@@ -576,6 +577,40 @@ public final class SecretRedactionFilter {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
         return result;
+    }
+
+    /**
+     * The credential field names the name-bound rules above recognise, as a
+     * standalone test for a structured key. Those rules only fire when the name and
+     * the value sit next to each other in one string; a caller that walks a Map
+     * sees them apart, so it asks here whether the key names a credential and masks
+     * the value with {@link #maskCredentialValue}.
+     */
+    private static final Pattern CREDENTIAL_FIELD_NAME = Pattern.compile("(?i)api[_-]?key|token|secret|password|authorization");
+
+    /** The same floor the name-bound rules apply to a value. */
+    private static final int MIN_CREDENTIAL_VALUE_LENGTH = 8;
+
+    /**
+     * Whether a structured key (a Map key, a JSON field name) names a credential,
+     * by the same name set the name-bound text rules use.
+     */
+    public static boolean isCredentialFieldName(String name) {
+        return name != null && CREDENTIAL_FIELD_NAME.matcher(name).find();
+    }
+
+    /**
+     * Masks a value that sits under a credential-named key, with the same
+     * exemptions the name-bound text rules apply: a value under the 8-character
+     * floor, a secret reference, and an already-redacted value are returned
+     * unchanged. Unlike {@link #redact}, no credential <em>shape</em> is required —
+     * the key already says what the value is.
+     */
+    public static String maskCredentialValue(String value) {
+        if (value == null || value.strip().length() < MIN_CREDENTIAL_VALUE_LENGTH || isExempt(value.strip())) {
+            return value;
+        }
+        return REDACTED;
     }
 
     private record RedactionRule(Pattern pattern, String replacement) {

@@ -210,7 +210,7 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt()));
         }
     }
 

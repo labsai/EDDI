@@ -1,6 +1,7 @@
 import { memo, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "@/lib/api/chat";
@@ -157,7 +158,7 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className="flex flex-col gap-3" data-testid="chat-verdict">
                   <DecisionRecordCard decision={verdictToDecision(verdict)} className="not-prose" />
                   {verdict.reasoning && (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                       {formatMarkdownText(verdict.reasoning)}
                     </ReactMarkdown>
                   )}
@@ -169,7 +170,7 @@ export const ChatMessage = memo(function ChatMessage({
               ) : message.content ? (
                 /* Deliberately NO rehypeRaw: bot/LLM output is untrusted, so
                    raw HTML stays escaped rather than being injected live. */
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                   {structured?.kind === "markdown"
                     ? structured.text
                     : formatMarkdownText(message.content)}

@@ -220,4 +220,35 @@ public interface ISecretPersistence {
     default void setMetaValue(String key, String value) {
         // Default = no-op
     }
+
+    /**
+     * Store {@code value} under {@code key} only if no value is stored there yet,
+     * and return the value that is stored afterwards — the caller's own on a first
+     * write, the existing one otherwise. Unlike
+     * {@link #setMetaValue(String, String)} this never overwrites, so concurrent
+     * creators of a one-time value (the vault's checksum key) converge on a single
+     * winner instead of the last writer silently replacing a value others have
+     * already used.
+     * <p>
+     * The default is a non-atomic read-then-write, adequate only for a store
+     * without concurrent writers; the database-backed implementations override it
+     * with an atomic insert-if-absent.
+     *
+     * @param key
+     *            the metadata key
+     * @param value
+     *            the value to store if none exists
+     * @return the value stored under {@code key} after the call, or null if the
+     *         store keeps no metadata
+     * @throws PersistenceException
+     *             if the read or write fails
+     */
+    default String setMetaValueIfAbsent(String key, String value) {
+        String existing = getMetaValue(key);
+        if (existing != null) {
+            return existing;
+        }
+        setMetaValue(key, value);
+        return getMetaValue(key);
+    }
 }

@@ -37,6 +37,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -97,7 +98,7 @@ import java.util.concurrent.atomic.DoubleAdder;
  * @author ginccc
  */
 @ApplicationScoped
-public class GroupConversationService implements IGroupConversationService {
+public class GroupConversationService implements IGroupConversationService, UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
     private static final Environment DEFAULT_ENV = Environment.production;
@@ -2498,6 +2499,51 @@ public class GroupConversationService implements IGroupConversationService {
      * up each log line that later names the discussion.
      */
     private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls = new ConcurrentHashMap<>();
+
+    @Override
+    public String erasureStepName() {
+        return "runningGroupDiscussions";
+    }
+
+    /**
+     * GDPR erasure: cancels, immediately, every discussion running on this node for
+     * {@code userId}. Deleting a running discussion's document did not stop it —
+     * its next phase wrote the document back — so the cascade signals first. A
+     * discussion on another node is not reachable from here; it is stopped by its
+     * next conditional write ({@link RunningDiscussionWrites}) finding the document
+     * gone rather than recreating it.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        int signalled = 0;
+        IllegalStateException failure = null;
+        for (String groupConversationId : List.copyOf(discussionControls.keySet())) {
+            try {
+                GroupConversation gc = conversationStore.read(groupConversationId);
+                if (userId.equals(gc.getUserId()) && hitlCoordinator.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_IMMEDIATE)) {
+                    signalled++;
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // finished and removed between the snapshot of ids and this read
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                // Keep signalling the rest: one unreadable discussion must not leave the
+                // others running. The failure is reported once, after the sweep, so the
+                // cascade names the step as incomplete.
+                if (failure == null) {
+                    failure = new IllegalStateException("Could not read running group discussion " + groupConversationId, e);
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+        return signalled;
+    }
 
     @Override
     public boolean cancelDiscussion(String conversationId, ControlSignal mode)

@@ -149,6 +149,20 @@ describe("DashboardPage", () => {
     expect(screen.getByText("42")).toBeInTheDocument();
   });
 
+  it("marks a count that hit its page as a lower bound (\"100+\")", () => {
+    mockUseDashboardStats.mockReturnValue({
+      data: {
+        agentCount: 5, workflowCount: 3, conversationCount: 100, resourceCount: 0,
+        agentCountCapped: false, workflowCountCapped: false, conversationCountCapped: true,
+      },
+      isLoading: false,
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(screen.getByTestId("stat-value-conversations")).toHaveTextContent("100+");
+    expect(screen.getByLabelText(/: 100\+$/)).toBeInTheDocument();
+    expect(screen.getByTestId("stat-value-agents")).toHaveTextContent(/^5$/);
+  });
+
   it("renders exactly 3 visible stat cards when resource count is 0", () => {
     renderWithProviders(<DashboardPage />);
     const agentLink = screen.getByLabelText(/: 5$/);
