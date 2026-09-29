@@ -156,8 +156,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     /**
-     * Replaces every index on {@code keyPattern} whose uniqueness differs from the
-     * one asked for, and builds the requested one if nothing equivalent is left.
+     * Replaces every index on {@code keyPattern} that does not have the
+     * specification asked for (see {@link #hasSpecification}), and builds the
+     * requested one if nothing equivalent is left.
      *
      * @param conflict
      *            the error {@code createIndex} raised, or {@code null} when it
@@ -173,22 +174,17 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
         String generatedName = generatedIndexName(keyPattern);
         Document nameHolder = indexes.get(generatedName);
-        if (conflict != null && nameHolder != null && !sameKeyPattern(nameHolder, keyPattern)) {
-            LOGGER.errorf("Cannot create index %s on '%s': the name '%s' is already held by an index on a different key (%s). "
-                    + "Nothing was dropped; queries on this field scan until that index is renamed or removed by hand.",
-                    keyPattern.toJson(), collectionName, generatedName, nameHolder.get("key"));
-            return;
-        }
+        boolean nameHeldByForeignIndex = nameHolder != null && !sameKeyPattern(nameHolder, keyPattern);
 
         List<Document> onKey = indexes.values().stream().filter(index -> sameKeyPattern(index, keyPattern)).toList();
-        List<Document> mismatched = onKey.stream().filter(index -> index.getBoolean("unique", false) != unique).toList();
+        List<Document> mismatched = onKey.stream().filter(index -> !hasSpecification(index, unique)).toList();
         if (conflict == null && mismatched.isEmpty()) {
             return;
         }
 
         for (Document index : mismatched) {
-            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with unique=%s; replacing it with the current "
-                    + "specification (unique=%s).", index.getString("name"), collectionName, !unique, unique);
+            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with another specification (%s); replacing it with "
+                    + "the current one (unique=%s).", index.getString("name"), collectionName, index.toJson(), unique);
             mongoCollection.dropIndex(index.getString("name"));
         }
 
@@ -200,12 +196,41 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             }
             return;
         }
-        try {
-            mongoCollection.createIndex(keyPattern, new IndexOptions().unique(unique));
-        } catch (RuntimeException e) {
-            LOGGER.errorf("Dropped the conflicting index(es) on '%s' but could not rebuild %s: %s. Queries on this field "
-                    + "scan until the index is created by hand.", collectionName, keyPattern.toJson(), e.getMessage());
+
+        IndexOptions options = new IndexOptions().unique(unique);
+        if (nameHeldByForeignIndex) {
+            // Someone else's index holds the name. It is never dropped, and it does not
+            // stop the stale index on OUR key from being replaced above; ours is built
+            // under another name instead.
+            String alternateName = generatedName + ALTERNATE_INDEX_NAME_SUFFIX;
+            LOGGER.errorf("The index name '%s' on '%s' is held by an index on a different key (%s); it was left alone, and "
+                    + "%s is built as '%s' instead. Rename or remove that index by hand.", generatedName, collectionName,
+                    nameHolder.get("key"), keyPattern.toJson(), alternateName);
+            options.name(alternateName);
         }
+        try {
+            mongoCollection.createIndex(keyPattern, options);
+        } catch (RuntimeException e) {
+            LOGGER.errorf("Could not build %s on '%s': %s. Queries on this field scan until the index is created by hand.",
+                    keyPattern.toJson(), collectionName, e.getMessage());
+        }
+    }
+
+    /**
+     * Appended to the generated name when an index on another key already holds it.
+     */
+    static final String ALTERNATE_INDEX_NAME_SUFFIX = "_eddi";
+
+    /**
+     * Whether an index on the right key also has the specification asked for: the
+     * same uniqueness, and none of the options that make an index serve only some
+     * queries. A partial, sparse or collated index is not an equivalent — the
+     * queries this store issues carry neither the filter nor the collation, so the
+     * server cannot use it for them.
+     */
+    static boolean hasSpecification(Document index, boolean unique) {
+        return index.getBoolean("unique", false) == unique && !index.containsKey("partialFilterExpression")
+                && !index.getBoolean("sparse", false) && !index.containsKey("collation");
     }
 
     /**
