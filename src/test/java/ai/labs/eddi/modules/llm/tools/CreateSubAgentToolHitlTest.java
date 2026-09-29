@@ -98,7 +98,7 @@ class CreateSubAgentToolHitlTest {
         tool.createSubAgent("helper", prompt, null, null, null, false);
 
         ArgumentCaptor<SetupAgentRequest> request = ArgumentCaptor.forClass(SetupAgentRequest.class);
-        verify(agentSetupService).setupAgent(request.capture());
+        verify(agentSetupService).setupAgent(request.capture(), any());
         String rendered = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())
                 .processTemplate(request.getValue().systemPrompt(), Map.of("vars", Map.of("apiKey", "s3cret")));
         assertEquals(prompt, rendered, "the stored prompt must render to exactly what the model wrote");
