@@ -1,3 +1,29 @@
+## ✨ feat(deployment): undeploy and deploy understand compatible versions (2026-09-29)
+
+**Repo:** EDDI (`feat/agent-version-following`) — Phase 3 of
+[`planning/agent-version-following-plan.md`](../../planning/agent-version-following-plan.md)
+
+### What changed
+
+- **Undeploy** (`RestAgentAdministration.undeployAgent`): open conversations on a version no
+  longer block it with 409, and are not ended by `endAllActiveConversations`, when another
+  deployed version in the same environment has the same compatibility generation — they move
+  there on their next turn. "Deployed" is the deployment records plus this node's registry (which
+  also holds `autoDeploy=false` deployments). A version undeployed by the same call never counts:
+  `undeployThisAndAllPreviousAgentVersions` runs its undeploys asynchronously, and counting them
+  would strand the conversations. Everything else — no generation, a breaking successor, a record
+  that cannot be read — behaves exactly as before.
+- **Conversations ended by an undeploy record `agent-version-retired`**, via a new optional
+  `endReason` on `POST /conversationstore/conversations/end`. Only known reasons are accepted
+  (400 otherwise): the reason is shown to users, so it must never be caller-supplied text.
+- **Schedules survive retiring an old version.** Undeploy disabled every schedule of the agent on
+  any undeploy, so "deploy v6, undeploy v5" — the normal rollout — silently switched off every
+  heartbeat. They are now disabled only when the call leaves no version of the agent deployed in
+  that environment.
+- **`GET /administration/{env}/deploymentimpact/{agentId}?version=N`**: for every other deployed
+  version, its open conversations and whether they `FOLLOW` version N (same generation, older) or
+  `STAY` (another generation, none, or newer). Requires EDIT on the agent, like undeploy.
+
 ## ✨ feat(conversations): conversations follow compatible versions of their agent (2026-09-29)
 
 **Repo:** EDDI (`feat/agent-version-following`) — Phase 2 of
