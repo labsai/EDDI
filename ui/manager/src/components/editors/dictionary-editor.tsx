@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   Plus,
   Trash2,
-  BookOpen,
+  BookA,
 } from "lucide-react";
 
 // ─── Types matching RegularDictionaryConfiguration backend model ─────────────
@@ -173,7 +173,7 @@ export function DictionaryEditor({ data, onChange, readOnly }: DictionaryEditorP
       {/* Language */}
       <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-foreground">
-          <BookOpen className="me-1.5 inline h-4 w-4 text-primary" />
+          <BookA className="me-1.5 inline h-4 w-4 text-primary" />
           {t("dictionaryEditor.language", "Language")}
         </label>
         <input type="text" value={data.lang ?? ""} onChange={(e) => onChange({ ...data, lang: e.target.value })}

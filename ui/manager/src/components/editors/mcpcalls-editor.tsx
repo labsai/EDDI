@@ -6,7 +6,6 @@ import {
   Plus,
   Trash2,
   X,
-  Plug,
   ShieldCheck,
   Zap,
   Search,
@@ -23,6 +22,7 @@ import {
   FileOutput,
   MessageCircle,
   Code2,
+  ServerCog,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
@@ -869,7 +869,7 @@ export function McpCallsEditor({
       {/* Server Connection */}
       <EditorSection
         label={t("mcpcallsEditor.serverConnection", "Server Connection")}
-        icon={Plug}
+        icon={ServerCog}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">

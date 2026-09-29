@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.engine.a2a.A2AModels.*;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -206,11 +207,14 @@ public class A2ATaskHandler {
 
         try {
             conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
-                String response = "";
-                if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
-                    var outputs = snapshot.getConversationOutputs();
-                    var lastOutput = outputs.get(outputs.size() - 1);
-                    response = lastOutput != null ? lastOutput.toString() : "";
+                // Return only the human-readable text output. ConversationOutput.toString()
+                // serialized the whole output map — pipeline metadata, actions and any
+                // internal keys included — onto the wire to a remote peer. The shared
+                // extractor pulls out just the text (and returns null for a
+                // metadata-only turn, which we normalise to an empty response).
+                String response = ConversationOutputExtractor.extractResponse(snapshot);
+                if (response == null) {
+                    response = "";
                 }
                 // Recorded when the turn completes rather than after the wait below, so a
                 // turn that outlives the peer's timeout still reads back as completed.

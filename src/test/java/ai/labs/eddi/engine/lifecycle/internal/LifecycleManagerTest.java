@@ -367,6 +367,192 @@ class LifecycleManagerTest {
             // Verify failure action was still injected (always happens)
             verify(currentStep, atLeastOnce()).set(eq(ACTIONS), anyList());
         }
+
+        private IConversationMemory memoryWithPolicy(ConversationStep currentStep, String onFailure, boolean continueOnFailure) {
+            var memory = mock(IConversationMemory.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure(onFailure);
+            swd.setContinueOnFailure(continueOnFailure);
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new HashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+            return memory;
+        }
+
+        private ILifecycleTask task(String id, String type) {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId(id));
+            when(task.getType()).thenReturn(type);
+            return task;
+        }
+
+        /**
+         * Live-reproduced: with the LLM task failing, every such turn returned an empty
+         * reply in state ERROR, and a fallback rule could only fire on the NEXT turn.
+         * With continueOnFailure the remaining tasks run, so the output task can render
+         * a fallback keyed on task_failed_<taskId> in the same turn.
+         */
+        @Test
+        @DisplayName("continueOnFailure — the failure is recorded and the remaining tasks still run")
+        void continueOnFailureRunsTheRemainingTasks() throws Exception {
+            var failing = task("ai.labs.llm", "langchain");
+            doThrow(new LifecycleException("model down")).when(failing).execute(any(), any());
+            var output = task("ai.labs.output", "output");
+            lifecycleManager.addLifecycleTask(failing);
+            lifecycleManager.addLifecycleTask(output);
+            var currentStep = mock(ConversationStep.class);
+            var memory = memoryWithPolicy(currentStep, "digest", true);
+
+            assertDoesNotThrow(() -> lifecycleManager.executeLifecycle(memory, null));
+
+            verify(output).execute(eq(memory), any());
+            verify(currentStep).addConversationOutputList(eq("taskErrors"), anyList());
+            verify(currentStep, atLeastOnce()).set(eq(ACTIONS), argThat(actions -> actions.contains("task_failed_ai.labs.llm")));
+        }
+
+        @Test
+        @DisplayName("continueOnFailure off (the default) — the pipeline still stops at the failure")
+        void defaultStillStops() throws Exception {
+            var failing = task("ai.labs.llm", "langchain");
+            doThrow(new LifecycleException("model down")).when(failing).execute(any(), any());
+            var output = task("ai.labs.output", "output");
+            lifecycleManager.addLifecycleTask(failing);
+            lifecycleManager.addLifecycleTask(output);
+            var memory = memoryWithPolicy(mock(ConversationStep.class), "digest", false);
+
+            assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
+            verify(output, never()).execute(any(), any());
+        }
+
+        /**
+         * keep_all rolls nothing back, which is why it is not "effectively enabled" —
+         * but the documented task_failed_<taskId> action must still be emitted: it is
+         * the only hook a fallback rule has.
+         */
+        @Test
+        @DisplayName("keep_all — no rollback, no digest, but the task_failed action is emitted")
+        void keepAllStillEmitsTheFailureAction() throws Exception {
+            var failing = task("ai.labs.llm", "langchain");
+            doThrow(new LifecycleException("model down")).when(failing).execute(any(), any());
+            lifecycleManager.addLifecycleTask(failing);
+            var currentStep = mock(ConversationStep.class);
+            var memory = memoryWithPolicy(currentStep, "keep_all", false);
+
+            assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
+
+            verify(currentStep, atLeastOnce()).set(eq(ACTIONS), argThat(actions -> actions.contains("task_failed_ai.labs.llm")));
+            verify(currentStep, never()).addConversationOutputList(eq("taskErrors"), anyList());
+            verify(currentStep, never()).snapshotDataIdentities();
+        }
+
+        @Test
+        @DisplayName("the digest keeps a provider's message, drops its exception class names and raw JSON")
+        void digestIsConcise() {
+            var e = new LifecycleException("Chat model execution failed: dev.langchain4j.exception.ModelNotFoundException: "
+                    + "{\"error\":\"model 'does-not-exist:1b' not found\"}");
+            var anthropic = new LifecycleException("dev.langchain4j.exception.InvalidRequestException: {\"type\":\"error\",\"error\":"
+                    + "{\"type\":\"invalid_request_error\",\"message\":\"temperature is deprecated for this model.\"},\"request_id\":\"req_1\"}");
+
+            assertEquals("Chat model execution failed: model 'does-not-exist:1b' not found", LifecycleManager.summarizeException(e));
+            assertEquals("temperature is deprecated for this model.", LifecycleManager.summarizeException(anthropic));
+        }
+    }
+
+    @Nested
+    @DisplayName("A failed task is reported to the caller")
+    class CallerFailureReport {
+
+        private ConversationStep failingTurn(Exception failure, AgentConfiguration.MemoryPolicy memoryPolicy) throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("ai.labs.llm"));
+            when(task.getType()).thenReturn("langchain");
+            doThrow(failure).when(task).execute(any(), any());
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new HashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ConversationOutput());
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
+            return currentStep;
+        }
+
+        /**
+         * The default. The turn used to come back as ERROR with an empty output: no
+         * reply and no reason, on the plain and the streaming path alike.
+         */
+        @Test
+        @DisplayName("without strict write, the output carries the failure and its actual reason")
+        @SuppressWarnings("unchecked")
+        void reportedWithoutStrictWrite() throws Exception {
+            var providerRejection = new RuntimeException("{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\","
+                    + "\"message\":\"`temperature` is deprecated for this model.\"},\"request_id\":\"req_1\"}");
+            var failure = new LifecycleException("Streaming chat failed", new RuntimeException("wrapped", providerRejection));
+
+            ConversationStep step = failingTurn(failure, null);
+
+            var reported = ArgumentCaptor.forClass(List.class);
+            verify(step).addConversationOutputList(eq("taskErrors"), reported.capture());
+            var entry = (Map<String, Object>) reported.getValue().getFirst();
+            assertEquals("errorDigest", entry.get("type"));
+            assertEquals("langchain", entry.get("taskType"));
+            assertEquals("Task 'eddi://ai.labs.llm' failed: Streaming chat failed: `temperature` is deprecated for this model.",
+                    entry.get("text"));
+        }
+
+        @Test
+        @DisplayName("without strict write, nothing the model reads is touched — only the output is")
+        void reportDoesNotReachTheModel() throws Exception {
+            ConversationStep step = failingTurn(new LifecycleException("boom"), null);
+
+            verify(step, never()).storeData(any(Data.class));
+            verify(step, never()).set(eq(ACTIONS), anyList());
+        }
+
+        @Test
+        @DisplayName("strict write with exclude_all still reports nothing")
+        void excludeAllStaysSilent() throws Exception {
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("exclude_all");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+
+            ConversationStep step = failingTurn(new LifecycleException("boom"), memoryPolicy);
+
+            verify(step, never()).addConversationOutputList(eq("taskErrors"), anyList());
+        }
+
+        @Test
+        @DisplayName("the report is redacted — it leaves the server")
+        @SuppressWarnings("unchecked")
+        void reportIsRedacted() throws Exception {
+            ConversationStep step = failingTurn(
+                    new LifecycleException("rejected key sk-abcdefghijklmnopqrstuvwxyz123456 at https://internal.example/v1"), null);
+
+            var reported = ArgumentCaptor.forClass(List.class);
+            verify(step).addConversationOutputList(eq("taskErrors"), reported.capture());
+            String text = (String) ((Map<String, Object>) reported.getValue().getFirst()).get("text");
+            assertFalse(text.contains("sk-abcdefghijklmnopqrstuvwxyz123456"), text);
+            assertFalse(text.contains("internal.example"), text);
+        }
     }
 
     @Nested
@@ -2022,5 +2208,14 @@ class LifecycleManagerTest {
 
             verify(task).execute(any(), any());
         }
+    }
+
+    @Test
+    @DisplayName("a JSON error body contributes its message, not a string error category beside it")
+    void jsonErrorBody_prefersMessageOverErrorString() {
+        assertEquals("HTTP 400: Unsupported model",
+                LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"error\":\"invalid_request_error\",\"message\":\"Unsupported model\"}"));
+        assertEquals("HTTP 400: quota exceeded", LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"error\":\"quota exceeded\"}"));
+        assertEquals("HTTP 400: (details omitted)", LifecycleManager.replaceJsonErrorBody("HTTP 400: {\"code\":17}"));
     }
 }

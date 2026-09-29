@@ -7,7 +7,10 @@ import { api } from "@/lib/api-client";
 export interface PlatformStatus {
   /** Current connection state */
   status: "checking" | "online" | "offline";
-  /** EDDI instance identifier (from /administration/logs/instance-id) */
+  /**
+   * EDDI instance identifier (from /administration/logs/instance-id).
+   * Null for callers without `eddi-admin` — the endpoint refuses them.
+   */
   instanceId: string | null;
   /** Last measured round-trip latency in ms */
   latencyMs: number | null;
@@ -16,7 +19,7 @@ export interface PlatformStatus {
 }
 
 interface HealthResult {
-  instanceId: string;
+  instanceId: string | null;
   latencyMs: number;
 }
 
@@ -29,6 +32,14 @@ async function checkPlatformHealth(): Promise<HealthResult> {
     { signal: AbortSignal.timeout(5000), headers: api.getAuthHeader() },
   );
   const latencyMs = Math.round(performance.now() - start);
+
+  // The instance-id endpoint is eddi-admin only. A 401/403 is still an
+  // answer from EDDI, so the platform is reachable — this caller just may
+  // not see which node answered. Reporting that as "Offline" told every
+  // eddi-editor/eddi-viewer the backend was down while they were using it.
+  if (res.status === 401 || res.status === 403) {
+    return { instanceId: null, latencyMs };
+  }
 
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
@@ -46,6 +57,12 @@ const QUERY_KEY = ["platform", "health"] as const;
  * Global platform health hook.
  * Polls /administration/logs/instance-id every 15s.
  * Returns connection status, instance ID, and latency.
+ *
+ * The probe is an admin endpoint rather than /q/health on purpose: /q/* is
+ * not proxied by the Vite dev server and is commonly blocked at the ingress,
+ * and the admin endpoint is what yields the instance ID admins see. Any
+ * answer from it — including 401/403 for non-admins — means "online"; only
+ * a network failure, timeout or other non-2xx status means "offline".
  *
  * All derived state is computed from the TanStack Query result
  * — no extra useState — so each poll causes exactly one render.

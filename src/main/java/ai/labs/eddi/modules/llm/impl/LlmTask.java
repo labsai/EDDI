@@ -224,9 +224,11 @@ public class LlmTask implements ILifecycleTask {
 
             var templateDataObjects = memoryItemConverter.convert(memory);
 
-            // Inject prompt snippets into template data — makes all snippets
-            // auto-available as {{snippets.<name>}} in system prompts
-            Map<String, Object> snippets = promptSnippetService.getAll();
+            // Inject prompt snippets into template data — makes the snippets this
+            // agent may use available as {{snippets.<name>}} in system prompts. Scoped
+            // to the agent's workspace: getAll() would hand every workspace's snippets
+            // to every agent, and let a same-named snippet elsewhere replace this one's.
+            Map<String, Object> snippets = promptSnippetService.getForAgent(memory.getAgentId());
             if (!snippets.isEmpty()) {
                 templateDataObjects.put("snippets", snippets);
             }
@@ -372,7 +374,7 @@ public class LlmTask implements ILifecycleTask {
         if (channelData != null && channelData.getResult() != null) {
             channelTag = channelData.getResult();
         }
-        systemMessage = counterweightService.apply(systemMessage, task.getCounterweight(), channelTag);
+        systemMessage = counterweightService.apply(systemMessage, task.getCounterweight(), channelTag, memory.getAgentId());
 
         // When structured JSON output is expected, reinforce the format instruction.
         // If a responseSchema is provided, include it explicitly so the LLM knows the

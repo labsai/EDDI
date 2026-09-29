@@ -5,11 +5,11 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
-  HandMetal,
   ChevronDown,
   Wrench,
   ShieldAlert,
   Pencil,
+  Hand,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -391,7 +391,7 @@ export function ApprovalBanner({
           {isToolCall ? (
             <Wrench className="h-5 w-5 text-amber-500" aria-hidden="true" />
           ) : (
-            <HandMetal className="h-5 w-5 text-amber-500" aria-hidden="true" />
+            <Hand className="h-5 w-5 text-amber-500" aria-hidden="true" />
           )}
         </div>
         <div className="min-w-0 flex-1">

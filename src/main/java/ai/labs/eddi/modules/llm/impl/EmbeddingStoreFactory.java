@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -33,6 +34,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -62,7 +64,6 @@ public class EmbeddingStoreFactory {
 
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
-    private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
     /** Ceiling on cached embedding stores across every knowledge base. */
     static final int MAX_STORES = 50;
@@ -216,6 +217,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
+        guardMetadataHost(host);
         int port = parseIntParam(params, "port", 5432);
         String database = params.getOrDefault("database", "eddi");
         String user = params.getOrDefault("user", "eddi");
@@ -295,6 +297,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
+        UrlValidationUtils.rejectCloudMetadataTarget(serverUrl);
         String indexName = params.getOrDefault("indexName", "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_"));
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
@@ -307,7 +310,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", endpointForLog(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -334,6 +337,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
+        guardMetadataHost(host);
         int port = parseIntParam(params, "port", 6334);
         String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
@@ -370,14 +374,15 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
+        UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
         String tenantName = params.getOrDefault("tenantName", "default_tenant");
         String databaseName = params.getOrDefault("databaseName", "default_database");
         String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
-                collectionName, version.toString());
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", endpointForLog(baseUrl),
+                sanitize(tenantName), sanitize(databaseName), sanitize(collectionName), version.toString());
 
         return ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)
@@ -445,8 +450,55 @@ public class EmbeddingStoreFactory {
         }
     }
 
+    /**
+     * A store URL as it may be logged: scheme, host and port. A URL in
+     * {@code storeParameters} can carry credentials — {@code user:password@}, a
+     * token in the query, or one in the path — and
+     * {@link ai.labs.eddi.utils.LogSanitizer#sanitize} only neutralises control
+     * characters, so it left both in the log line.
+     */
+    static String endpointForLog(String url) {
+        if (url == null) {
+            return "null";
+        }
+        try {
+            URI parsed = URI.create(url.trim());
+            if (parsed.getHost() == null) {
+                return "<unparseable URL>";
+            }
+            String port = parsed.getPort() >= 0 ? ":" + parsed.getPort() : "";
+            return sanitize(parsed.getScheme() + "://" + parsed.getHost() + port);
+        } catch (IllegalArgumentException e) {
+            return "<unparseable URL>";
+        }
+    }
+
     static String sanitizeCollection(String kbId) {
-        return TRAILING_UNDERSCORES.matcher("eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_")).replaceAll("");
+        String name = "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
+        // A scan from the end, not the "_+$" regex it replaces: an unanchored-start
+        // "_+$" retries at every underscore, quadratic on a name that is a long run of
+        // them (CodeQL java/polynomial-redos), and the name is operator input.
+        int end = name.length();
+        while (end > 0 && name.charAt(end - 1) == '_') {
+            end--;
+        }
+        return name.substring(0, end);
+    }
+
+    /**
+     * Refuses a vector-store host that is, or resolves to, the cloud
+     * instance-metadata service. The value is a bare host (no scheme), so it is
+     * wrapped in a URL for the check; other private/internal hosts stay allowed —
+     * this is a metadata guard, not an SSRF lockout of legitimate internal stores.
+     */
+    private static void guardMetadataHost(String host) {
+        if (host == null || host.isBlank()) {
+            return;
+        }
+        String bare = host.trim();
+        // Bracket a bare IPv6 literal so URI parsing accepts it.
+        String authority = bare.indexOf(':') >= 0 && !bare.startsWith("[") ? "[" + bare + "]" : bare;
+        UrlValidationUtils.rejectCloudMetadataTarget("http://" + authority);
     }
 
     /**

@@ -57,6 +57,9 @@ class VaultSecretProviderBranchTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         meterRegistry = new SimpleMeterRegistry();
+        // The checksum key must be durably stored before a keyed checksum is written;
+        // a bare mock keeps no metadata, so accept the insert and hand the value back.
+        lenient().when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(1));
     }
 
     private VaultSecretProvider createAvailableProvider() {

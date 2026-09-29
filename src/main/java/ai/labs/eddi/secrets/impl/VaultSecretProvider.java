@@ -8,7 +8,10 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SealedDataRotationParticipant;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
+import ai.labs.eddi.secrets.crypto.VaultMasterKeyStrength;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
+import io.quarkus.runtime.LaunchMode;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
@@ -90,6 +93,26 @@ public class VaultSecretProvider implements ISecretProvider {
     private byte[] kek; // Key Encryption Key derived from master key
     private boolean available = false;
 
+    /**
+     * Deployment-wide HMAC key for keyed secret checksums. Random, generated once
+     * and persisted <em>KEK-wrapped</em> (and re-wrapped on KEK rotation) so it
+     * survives rotation (see {@link #checksumKey()}); loaded lazily.
+     * Package-private for tests.
+     */
+    volatile byte[] checksumKey;
+
+    /**
+     * Production opt-out for the master-key strength gate, mirroring
+     * {@code eddi.security.allow-unauthenticated}. When {@code true}, a weak master
+     * key downgrades the production boot failure to a WARN so a brownfield
+     * deployment can boot, rotate to a strong key, and then remove the flag —
+     * rather than being wedged (a weak-but-functional key cannot be changed without
+     * a booted vault to run {@code rotate-kek}). Field-injected so the test seam
+     * constructor need not carry it. Package-private for tests.
+     */
+    @ConfigProperty(name = "eddi.vault.allow-weak-master-key", defaultValue = "false")
+    boolean allowWeakMasterKey;
+
     // ─── Metrics ───
     private Counter resolveCounter;
     private Counter storeCounter;
@@ -157,11 +180,39 @@ public class VaultSecretProvider implements ISecretProvider {
             return;
         }
 
+        // Refuse to protect real secrets with a weak or publicly-known master key.
+        // Fails startup in production, warns (and continues) in development/test —
+        // the same production-only enforcement AuthStartupGuard applies to OIDC. The
+        // eddi.vault.allow-weak-master-key opt-out downgrades the production failure to
+        // a WARN so a brownfield deployment on a weak key can boot, rotate to a strong
+        // key, and remove the flag — instead of being wedged (the key cannot be changed
+        // without a booted vault).
+        VaultMasterKeyStrength.weakness(masterKeyConfig.get()).ifPresent(reason -> {
+            boolean prod = getLaunchMode() == LaunchMode.NORMAL;
+            if (prod && !allowWeakMasterKey) {
+                throw new IllegalStateException("[VAULT] Refusing to start: " + reason + ". "
+                        + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase (at least " + VaultMasterKeyStrength.MIN_LENGTH
+                        + " characters); the installer can generate one. If you must boot on the current key to migrate off it, set "
+                        + "eddi.vault.allow-weak-master-key=true, then rotate the key (POST /secretstore/secrets/admin/rotate-kek) and "
+                        + "remove the flag.");
+            }
+            if (prod) {
+                LOGGER.warnf("[VAULT] %s. Booting anyway because eddi.vault.allow-weak-master-key=true — rotate to a strong key via "
+                        + "POST /secretstore/secrets/admin/rotate-kek and remove the flag.", reason);
+            } else {
+                LOGGER.warnf("[VAULT] %s. This is tolerated in %s mode but would FAIL startup in production. "
+                        + "Set EDDI_VAULT_MASTER_KEY to a strong, unique passphrase.", reason, getLaunchMode().name().toLowerCase());
+            }
+        });
+
         // Initialize per-deployment salt (generates on first boot, loads on subsequent)
         saltManager.initialize();
 
         this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get(), saltManager.getSalt());
         this.available = true;
+        // The keyed-checksum key is loaded lazily (see checksumKey()), not derived from
+        // the KEK here: it must survive KEK rotation, so it is a random deployment key
+        // persisted sealed rather than a function of the rotating master key.
 
         if (saltManager.isUsingLegacySalt()) {
             LOGGER.warn("[VAULT] Using legacy fixed salt for KEK derivation. "
@@ -189,7 +240,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // newest generation: a row the last rotation's sweep has not reached yet is
             // still sealed with an older one, and that one still exists.
             byte[] dek = dekFor(reference.tenantId(), secret.getDekId());
-            String plaintext = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+            String plaintext = decryptSecretWithFallback(secret, dek);
 
             // Update last accessed timestamp (best-effort, fire-and-forget)
             updateLastAccessed(secret);
@@ -234,9 +285,16 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             ActiveDek dek = activeDek(reference.tenantId());
 
-            // Encrypt the plaintext with the tenant's DEK
-            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key());
-            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            // Encrypt the plaintext with the tenant's DEK, binding the row identity
+            // (tenant|key|dekId) as GCM AAD so the ciphertext cannot be swapped onto a
+            // different key by someone with DB write access.
+            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key(),
+                    secretAad(reference.tenantId(), reference.keyName(), dek.dekId()));
+            // Keyed, tenant-bound checksum — never a plain SHA-256 an attacker with DB
+            // read access could brute-force offline or use to link equal values across
+            // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
+            // and migrate to this form the next time they are written.
+            String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
 
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
@@ -355,6 +413,17 @@ public class VaultSecretProvider implements ISecretProvider {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while listing secrets for tenant " + sanitize(tenantId), e);
         }
+    }
+
+    @Override
+    public boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
+        // Holds the keyed-checksum key, so it can verify both the current keyed form
+        // and legacy bare SHA-256 rows written before the upgrade.
+        // The key is fetched only for a keyed checksum: a legacy row verifies without
+        // it,
+        // so it needs no metadata read.
+        boolean keyed = storedChecksum != null && storedChecksum.startsWith(VaultChecksum.KEYED_PREFIX);
+        return VaultChecksum.matches(keyed ? checksumKey() : null, tenantId, storedChecksum, plaintext);
     }
 
     @Override
@@ -492,8 +561,9 @@ public class VaultSecretProvider implements ISecretProvider {
             if (activeDekId.equals(rowDekId)) {
                 return true;
             }
-            String plaintext = EnvelopeCrypto.decrypt(current.getEncryptedValue(), current.getIv(), dekFor(tenantId, rowDekId));
-            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek);
+            String plaintext = decryptSecretWithFallback(current, dekFor(tenantId, rowDekId));
+            EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek,
+                    secretAad(tenantId, current.getKeyName(), activeDekId));
             current.setEncryptedValue(enc.ciphertext());
             current.setIv(enc.iv());
             current.setDekId(activeDekId);
@@ -586,6 +656,7 @@ public class VaultSecretProvider implements ISecretProvider {
         if (!available) {
             throw new SecretProviderException("Secrets Vault is not available. Cannot rotate KEK.");
         }
+        requireAcceptableNewMasterKey(newMasterKey);
         rotateCounter.increment();
 
         try {
@@ -613,13 +684,42 @@ public class VaultSecretProvider implements ISecretProvider {
                 prepared.add(new SimpleEntry<>(encDek, reEnc));
             }
 
-            // Phase 2: Commit — write all re-encrypted DEKs
-            for (var entry : prepared) {
-                EncryptedDek encDek = entry.getKey();
-                EnvelopeCrypto.EncryptionResult reEnc = entry.getValue();
-                encDek.setEncryptedDek(reEnc.ciphertext());
-                encDek.setIv(reEnc.iv());
-                persistence.upsertDek(encDek);
+            // Phase 1b: Verify the checksum key the same way, and prepare its new wrapping
+            // now, BEFORE any write. It is re-wrapped with the new KEK exactly like a DEK,
+            // so it decrypts to the SAME random value after rotation and every stored h1:
+            // checksum keeps verifying. A malformed or unwrappable checksum key therefore
+            // aborts the rotation here, with nothing written, instead of after every DEK
+            // has already moved to the new KEK. Absent (never created yet) → nothing to do.
+            String storedChecksumKey = persistence.getMetaValue(CHECKSUM_KEY_META);
+            String rewrappedChecksumKey = storedChecksumKey == null
+                    ? null
+                    : wrapChecksumKey(unwrapChecksumKeyWith(storedChecksumKey, oldKek), newKek);
+
+            // Phase 2: Commit — write all re-encrypted DEKs, then the checksum key. Each
+            // DEK's previous wrapping is remembered before it is written, so a failed
+            // write rolls the already-written DEKs back to the old KEK: the vault is then
+            // still fully readable under the master key it is configured with, and the
+            // rotation can simply be retried.
+            List<SimpleEntry<EncryptedDek, String[]>> attempted = new ArrayList<>();
+            try {
+                for (var entry : prepared) {
+                    EncryptedDek encDek = entry.getKey();
+                    EnvelopeCrypto.EncryptionResult reEnc = entry.getValue();
+                    attempted.add(new SimpleEntry<>(encDek, new String[]{encDek.getEncryptedDek(), encDek.getIv()}));
+                    encDek.setEncryptedDek(reEnc.ciphertext());
+                    encDek.setIv(reEnc.iv());
+                    persistence.upsertDek(encDek);
+                }
+                if (rewrappedChecksumKey != null) {
+                    persistence.setMetaValue(CHECKSUM_KEY_META, rewrappedChecksumKey);
+                }
+            } catch (RuntimeException e) {
+                // Any failure, not only a PersistenceException: an unchecked error from a
+                // store call (a driver/pool exception the implementation does not wrap)
+                // after DEKs were written must still roll them back, or the stored DEKs
+                // would sit on the new KEK while this node keeps using the old one.
+                rollBackDeks(attempted);
+                throw e;
             }
 
             // Phase 3: Persist new salt AFTER DEKs are re-encrypted.
@@ -629,15 +729,69 @@ public class VaultSecretProvider implements ISecretProvider {
                 saltManager.migrateSalt(newSalt);
             }
 
-            // Update our in-memory KEK to the new one
+            // Update our in-memory KEK and drop the cached checksum key so the next use
+            // re-reads it (now wrapped with the new KEK). It unwraps to the same value.
             this.kek = newKek;
+            this.checksumKey = null;
 
             LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
                     migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
             return allDeks.size();
-        } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
+        } catch (RuntimeException e) {
+            // Covers PersistenceException and CryptoException as well as any unchecked
+            // store error, so a failed rotation always surfaces as the documented
+            // SecretProviderException rather than a raw unchecked exception.
             errorCounter.increment();
             throw new SecretProviderException("KEK rotation failed", e);
+        }
+    }
+
+    /**
+     * Refuse a KEK rotation to a master key the startup gate would refuse on the
+     * next production boot — otherwise the rotation reports success and the restart
+     * the operator is told to do next fails. Stricter than the startup gate on
+     * purpose: {@code eddi.vault.allow-weak-master-key} exists to let a deployment
+     * BOOT on a weak key so it can rotate off it, never to rotate onto one. Outside
+     * production the key is accepted with a warning, as at startup.
+     */
+    private void requireAcceptableNewMasterKey(String newMasterKey) throws SecretProviderException {
+        Optional<String> weakness = VaultMasterKeyStrength.weakness(newMasterKey);
+        if (weakness.isEmpty()) {
+            return;
+        }
+        if (getLaunchMode() == LaunchMode.NORMAL) {
+            throw new SecretProviderException("Refusing to rotate to a weak master key: " + weakness.get()
+                    + ". Nothing was changed. Choose a strong, unique passphrase (at least " + VaultMasterKeyStrength.MIN_LENGTH
+                    + " characters).");
+        }
+        LOGGER.warnf("[VAULT] Rotating to a weak master key: %s. Tolerated in %s mode; a production boot would refuse it.",
+                weakness.get(), getLaunchMode().name().toLowerCase());
+    }
+
+    /**
+     * Best-effort restore of DEKs to the wrapping they had before a failed KEK
+     * rotation commit. Each is attempted independently so one failed restore does
+     * not strand the rest; any that cannot be restored are named in the log, since
+     * those alone now need the NEW master key.
+     */
+    private void rollBackDeks(List<SimpleEntry<EncryptedDek, String[]>> attempted) {
+        int failed = 0;
+        for (var entry : attempted) {
+            EncryptedDek encDek = entry.getKey();
+            encDek.setEncryptedDek(entry.getValue()[0]);
+            encDek.setIv(entry.getValue()[1]);
+            try {
+                persistence.upsertDek(encDek);
+            } catch (RuntimeException rollbackFailure) {
+                failed++;
+                LOGGER.errorf("[VAULT] KEK rotation rollback could not restore the DEK of tenant %s (generation %d); it is now "
+                        + "wrapped with the NEW master key. Retry the rotation with the same keys once the store is reachable.",
+                        sanitize(encDek.getTenantId()), encDek.getGeneration());
+            }
+        }
+        if (failed == 0) {
+            LOGGER.warnf("[VAULT] KEK rotation failed during commit; rolled %d DEK(s) back to the old master key. Nothing changed.",
+                    attempted.size());
         }
     }
 
@@ -819,6 +973,147 @@ public class VaultSecretProvider implements ISecretProvider {
         persistence.upsertDek(dek);
         LOGGER.infof("Generated new DEK for tenant: %s", sanitize(tenantId));
         return newDek;
+    }
+
+    /**
+     * The current launch mode. Package-private so a test can exercise the
+     * production-vs-development branch of the master-key strength gate without
+     * booting a container ({@link LaunchMode#current()} is static and not
+     * mockable).
+     */
+    LaunchMode getLaunchMode() {
+        return LaunchMode.current();
+    }
+
+    /** Meta key under which the sealed deployment checksum key is persisted. */
+    private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
+    /**
+     * The deployment-wide keyed-checksum HMAC key, loaded (or created) on first
+     * use.
+     * <p>
+     * It is a <b>random</b> key, generated once and persisted <b>wrapped by the
+     * KEK</b> (like a DEK), never derived from the KEK. Wrapping — rather than
+     * deriving — is what lets it survive KEK rotation: {@link #rotateKek} re-wraps
+     * it with the new KEK just as it re-wraps the DEKs, so it unwraps to the same
+     * value before and after rotation and every {@code h1:} checksum keeps
+     * verifying. A KEK-<em>derived</em> key would change on rotation and turn a
+     * legitimate same-value re-setup into a spurious "value does not match"
+     * failure.
+     * <p>
+     * It is kept secret from a database-read attacker (the whole point of a keyed
+     * checksum) precisely because it is stored KEK-wrapped, not in the clear like
+     * the salt. Unlike a DEK-sealed key, wrapping touches no tenant DEK, so first
+     * use does not create a default-tenant DEK as a side effect.
+     */
+    private byte[] checksumKey() {
+        byte[] k = checksumKey;
+        if (k != null) {
+            return k;
+        }
+        synchronized (this) {
+            if (checksumKey == null) {
+                checksumKey = loadOrCreateChecksumKey();
+            }
+            return checksumKey;
+        }
+    }
+
+    /**
+     * Load the KEK-wrapped checksum key from the meta store, or create, wrap and
+     * persist a fresh random one.
+     * <p>
+     * A new key is created ONLY when the store confirms none exists. Every
+     * {@code h1:} checksum in the vault was written with the stored key, so
+     * replacing it would make all of them unverifiable — permanently, because the
+     * old key would be gone. A failed read (a transient database error) or a failed
+     * unwrap of an existing key (a KEK mismatch) therefore propagates instead of
+     * falling through to creation; nothing is cached, so the next use retries. The
+     * create itself is an insert-if-absent, so racing creators on several nodes
+     * converge on the one key that won the insert rather than the last writer
+     * replacing a key another node has already used. There is no fallback key: a
+     * checksum written under any other key would be unverifiable later, which is
+     * the damage this method exists to prevent.
+     */
+    private byte[] loadOrCreateChecksumKey() {
+        String stored = persistence.getMetaValue(CHECKSUM_KEY_META);
+        if (stored != null) {
+            return unwrapChecksumKey(stored);
+        }
+        byte[] raw = new byte[32];
+        new SecureRandom().nextBytes(raw);
+        String winner = persistence.setMetaValueIfAbsent(CHECKSUM_KEY_META, wrapChecksumKey(raw, kek));
+        if (winner == null) {
+            // A store that keeps no metadata cannot hold the key durably. A key that
+            // lived only for this process would make every h1: checksum it wrote
+            // unverifiable after the next restart, so refuse rather than write one.
+            throw new PersistenceException("The secret store keeps no vault metadata, so the keyed-checksum key cannot be "
+                    + "persisted; refusing to write a checksum no restart could verify");
+        }
+        return unwrapChecksumKey(winner);
+    }
+
+    /**
+     * {@code iv|ciphertext} (both base64) of the checksum key wrapped by
+     * {@code wrapKek}.
+     */
+    private static String wrapChecksumKey(byte[] rawKey, byte[] wrapKek) {
+        EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encryptDek(rawKey, wrapKek);
+        return enc.iv() + "|" + enc.ciphertext();
+    }
+
+    private byte[] unwrapChecksumKey(String serialized) {
+        return unwrapChecksumKeyWith(serialized, kek);
+    }
+
+    /**
+     * As {@link #unwrapChecksumKey} but with an explicit KEK — used during KEK
+     * rotation.
+     */
+    private static byte[] unwrapChecksumKeyWith(String serialized, byte[] kekToUse) {
+        String[] parts = serialized.split("\\|", 2);
+        if (parts.length != 2) {
+            throw new EnvelopeCrypto.CryptoException("Malformed persisted checksum key");
+        }
+        return EnvelopeCrypto.decryptDek(parts[1], parts[0], kekToUse);
+    }
+
+    /**
+     * The GCM AAD that binds a secret's ciphertext to the row it belongs to:
+     * {@code tenantId|keyName|dekId}. All three are stored on the row and so are
+     * reconstructable at decrypt time, and none of them can change without a
+     * re-seal (a grant edit touches neither), so binding them cannot break a later
+     * legitimate read. The grant list is deliberately NOT bound —
+     * {@code updateGrant} rewrites it without re-encrypting, so binding it would
+     * make every post-grant-edit read fail.
+     */
+    private static byte[] secretAad(String tenantId, String keyName, String dekId) {
+        return (tenantId + "|" + keyName + "|" + dekId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Decrypt a stored secret, verifying the row-identity AAD, and falling back to
+     * a no-AAD decrypt for rows written before AAD binding existed.
+     * <p>
+     * GCM authenticates or fails, so a legacy (no-AAD) row cannot be read with the
+     * AAD and vice versa; trying the AAD first and the legacy form only on failure
+     * lets both coexist without a schema flag. A tampered row — ciphertext swapped
+     * from another key — fails both and surfaces as a decryption failure, which is
+     * the intended outcome.
+     */
+    private String decryptSecretWithFallback(EncryptedSecret secret, byte[] dek) {
+        byte[] aad = secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId());
+        try {
+            return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad);
+        } catch (EnvelopeCrypto.CryptoException withAadFailed) {
+            // Legacy row written before AAD binding — retry without AAD. If this also
+            // fails, the original (AAD) failure is the more informative one to surface.
+            try {
+                return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+            } catch (EnvelopeCrypto.CryptoException legacyFailed) {
+                throw withAadFailed;
+            }
+        }
     }
 
     private void ensureAvailable() throws SecretProviderException {
