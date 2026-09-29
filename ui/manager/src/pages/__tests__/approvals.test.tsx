@@ -11,6 +11,21 @@ function mockInbox(regular: PendingApprovalSummary[]) {
   server.use(
     http.get("*/agents/pending-approvals", () => HttpResponse.json(regular)),
     http.get("*/groups/pending-approvals", () => HttpResponse.json([])),
+    // Each rule row's approval-status agrees with the row: a queue decision is
+    // bound to the pause it was shown for, and re-reads it before resuming.
+    ...regular
+      .filter((item) => item.pauseType !== "TOOL_CALL")
+      .map((item) =>
+        http.get(`*/agents/${item.conversationId}/approval-status`, () =>
+          HttpResponse.json({
+            conversationId: item.conversationId,
+            state: "AWAITING_HUMAN",
+            pausedAt: item.pausedAt,
+            pauseReason: item.pauseReason ?? "",
+            pauseDetails: { type: "RULE", reason: item.pauseReason ?? null, actions: [] },
+          }),
+        ),
+      ),
   );
 }
 

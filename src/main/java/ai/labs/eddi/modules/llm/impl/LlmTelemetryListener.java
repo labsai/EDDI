@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.listener.ChatModelErrorContext;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
@@ -13,6 +14,8 @@ import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
@@ -22,6 +25,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -96,8 +101,37 @@ public class LlmTelemetryListener implements ChatModelListener {
     // Attribute keys the langchain4j listener contract carries between callbacks.
     private static final String ATTR_SPAN = "eddi.telemetry.span";
     private static final String ATTR_START_NANOS = "eddi.telemetry.startNanos";
+    private static final String ATTR_MODEL_TYPE = "eddi.telemetry.modelType";
 
     private static final String UNKNOWN = "unknown";
+
+    /**
+     * The meter tag every model beyond {@link #MAX_MODEL_TAGS} distinct names
+     * shares (L1).
+     */
+    static final String OTHER_MODEL = "other";
+
+    /**
+     * Ceiling on distinct {@code model} tag values across the LLM meters.
+     * <p>
+     * A model name is configuration, but configuration can be templated —
+     * {@code "modelName": "{properties.model}"} — and a property can be user input.
+     * Every distinct value is a new time series on three meters, and on the
+     * duration timer a new set of histogram buckets, so an unbounded tag is a
+     * memory leak in the registry and a cardinality bill in Prometheus. Real
+     * deployments use a handful of models; the first {@value} seen keep their own
+     * series, everything after that is tagged {@value #OTHER_MODEL}. Spans are
+     * unaffected — a span attribute creates no series — and keep the real name.
+     */
+    static final int MAX_MODEL_TAGS = 100;
+
+    /** Longest model name kept verbatim, in tags and span attributes alike. */
+    static final int MAX_MODEL_NAME_LENGTH = 128;
+
+    /** Longest provider error text copied onto a span (L4). */
+    static final int MAX_ERROR_TEXT_LENGTH = 256;
+
+    private final Set<String> modelTags = ConcurrentHashMap.newKeySet();
 
     private final MeterRegistry meterRegistry;
 
@@ -114,6 +148,40 @@ public class LlmTelemetryListener implements ChatModelListener {
         this.meterRegistry = meterRegistry;
     }
 
+    /**
+     * The listener one model instance registers: this listener, told which EDDI
+     * provider type the model was built for.
+     * <p>
+     * L2: langchain4j's {@link ModelProvider} has no value for Jlama, HuggingFace
+     * or Oracle GenAI, so those models report {@code OTHER} and every one of them
+     * landed on the same {@code provider="OTHER"} series. The decorator knows the
+     * type it built ({@code "jlama"}, {@code "huggingface"}, …); passing it along
+     * lets the tag name the provider whenever langchain4j cannot. A listener that
+     * is not EDDI's is returned unchanged.
+     */
+    static ChatModelListener forModelType(ChatModelListener listener, String modelType) {
+        if (!(listener instanceof LlmTelemetryListener telemetry) || modelType == null || modelType.isBlank()) {
+            return listener;
+        }
+        return new ChatModelListener() {
+            @Override
+            public void onRequest(ChatModelRequestContext context) {
+                context.attributes().put(ATTR_MODEL_TYPE, modelType);
+                telemetry.onRequest(context);
+            }
+
+            @Override
+            public void onResponse(ChatModelResponseContext context) {
+                telemetry.onResponse(context);
+            }
+
+            @Override
+            public void onError(ChatModelErrorContext context) {
+                telemetry.onError(context);
+            }
+        };
+    }
+
     private Tracer tracer() {
         if (tracer == null) {
             tracer = GlobalOpenTelemetry.getTracer("eddi.llm");
@@ -127,7 +195,7 @@ public class LlmTelemetryListener implements ChatModelListener {
             Map<Object, Object> attributes = context.attributes();
             attributes.put(ATTR_START_NANOS, System.nanoTime());
 
-            String provider = providerOf(context.modelProvider());
+            String provider = providerOf(context.modelProvider(), attributes);
             String model = modelOf(context.chatRequest() != null && context.chatRequest().parameters() != null
                     ? context.chatRequest().parameters().modelName()
                     : null);
@@ -147,7 +215,7 @@ public class LlmTelemetryListener implements ChatModelListener {
     @Override
     public void onResponse(ChatModelResponseContext context) {
         guard(() -> {
-            String provider = providerOf(context.modelProvider());
+            String provider = providerOf(context.modelProvider(), context.attributes());
             String requestModel = modelOf(context.chatRequest() != null && context.chatRequest().parameters() != null
                     ? context.chatRequest().parameters().modelName()
                     : null);
@@ -177,7 +245,7 @@ public class LlmTelemetryListener implements ChatModelListener {
     @Override
     public void onError(ChatModelErrorContext context) {
         guard(() -> {
-            String provider = providerOf(context.modelProvider());
+            String provider = providerOf(context.modelProvider(), context.attributes());
             String model = modelOf(context.chatRequest() != null && context.chatRequest().parameters() != null
                     ? context.chatRequest().parameters().modelName()
                     : null);
@@ -186,9 +254,19 @@ public class LlmTelemetryListener implements ChatModelListener {
 
             Span span = span(context.attributes());
             if (span != null) {
-                span.setStatus(StatusCode.ERROR, error != null ? String.valueOf(error.getMessage()) : UNKNOWN);
+                // L4: never the raw provider text. A provider error can echo the
+                // request — prompt fragments, a key in a URL, the user's data — and a
+                // span is exported to whatever tracing backend is configured, with
+                // none of the redaction the logs get. recordException(error) copied
+                // the message AND the stack trace (every cause's message included), so
+                // the exception event is written by hand: type plus redacted, capped
+                // text. The full error stays in the application log.
+                String errorText = error != null ? safeErrorText(error.getMessage()) : UNKNOWN;
+                span.setStatus(StatusCode.ERROR, errorText);
                 if (error != null) {
-                    span.recordException(error);
+                    span.addEvent("exception", Attributes.of(
+                            AttributeKey.stringKey("exception.type"), error.getClass().getName(),
+                            AttributeKey.stringKey("exception.message"), errorText));
                     span.setAttribute("error.type", error.getClass().getName());
                 }
                 span.end();
@@ -197,7 +275,7 @@ public class LlmTelemetryListener implements ChatModelListener {
             recordDuration(context.attributes(), provider, model, "error");
             meterRegistry.counter("eddi.llm.request.errors",
                     "provider", provider,
-                    "model", model,
+                    "model", modelTag(model),
                     "error", error != null ? error.getClass().getSimpleName() : UNKNOWN).increment();
         });
     }
@@ -214,7 +292,7 @@ public class LlmTelemetryListener implements ChatModelListener {
         }
         Timer.builder("eddi.llm.request.duration")
                 .tag("provider", provider)
-                .tag("model", model)
+                .tag("model", modelTag(model))
                 .tag("outcome", outcome)
                 .description("LLM provider call duration")
                 // Without this the timer publishes only _count, _sum and _max: a
@@ -227,8 +305,8 @@ public class LlmTelemetryListener implements ChatModelListener {
                 // The cost is one series per bucket per provider/model/outcome. That
                 // is the same bargain eddi.pipeline.task.duration already makes, and
                 // the tag set here is bounded the same way: providers are a fixed
-                // list, outcome is success or error, and model names come from
-                // configuration rather than from user input. If a deployment ever
+                // list, outcome is success or error, and model names are capped at
+                // MAX_MODEL_TAGS distinct values (see modelTag). If a deployment ever
                 // does find the cardinality too high, the dashboard-side fallback is
                 // to plot _sum / _count as a mean instead and drop this line.
                 .publishPercentileHistogram()
@@ -240,12 +318,13 @@ public class LlmTelemetryListener implements ChatModelListener {
         if (usage == null) {
             return;
         }
+        String tag = modelTag(model);
         if (usage.inputTokenCount() != null) {
-            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", model, "type", "input")
+            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", tag, "type", "input")
                     .increment(usage.inputTokenCount());
         }
         if (usage.outputTokenCount() != null) {
-            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", model, "type", "output")
+            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", tag, "type", "output")
                     .increment(usage.outputTokenCount());
         }
     }
@@ -264,8 +343,45 @@ public class LlmTelemetryListener implements ChatModelListener {
         return provider == null ? UNKNOWN : provider.name();
     }
 
+    /**
+     * The provider tag: langchain4j's own name where it has one, otherwise the EDDI
+     * model type the decorator recorded (see {@link #forModelType}).
+     */
+    static String providerOf(ModelProvider provider, Map<Object, Object> attributes) {
+        if ((provider == null || provider == ModelProvider.OTHER) && attributes != null
+                && attributes.get(ATTR_MODEL_TYPE) instanceof String modelType) {
+            return modelType;
+        }
+        return providerOf(provider);
+    }
+
     static String modelOf(String modelName) {
-        return modelName == null || modelName.isBlank() ? UNKNOWN : modelName;
+        if (modelName == null || modelName.isBlank()) {
+            return UNKNOWN;
+        }
+        return modelName.length() > MAX_MODEL_NAME_LENGTH ? modelName.substring(0, MAX_MODEL_NAME_LENGTH) : modelName;
+    }
+
+    /** The model as a meter tag, bounded to {@link #MAX_MODEL_TAGS} values. */
+    String modelTag(String model) {
+        if (modelTags.contains(model)) {
+            return model;
+        }
+        // size() then add() races, so the set can overshoot by a few under
+        // contention — the bound is what matters, not its exact value.
+        if (modelTags.size() < MAX_MODEL_TAGS && modelTags.add(model)) {
+            return model;
+        }
+        return modelTags.contains(model) ? model : OTHER_MODEL;
+    }
+
+    /** Provider error text fit for a span: secret-redacted and capped. */
+    static String safeErrorText(String message) {
+        if (message == null) {
+            return UNKNOWN;
+        }
+        String redacted = SecretRedactionFilter.redact(message);
+        return redacted.length() > MAX_ERROR_TEXT_LENGTH ? redacted.substring(0, MAX_ERROR_TEXT_LENGTH) + "…" : redacted;
     }
 
     /**

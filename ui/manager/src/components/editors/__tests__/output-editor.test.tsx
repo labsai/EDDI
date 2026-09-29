@@ -428,3 +428,46 @@ describe("OutputEditor", () => {
     expect(item.value).toBe("wave");
   });
 });
+
+describe("OutputEditor with an unexpected config shape", () => {
+  it("renders an output set with no outputs instead of crashing the page", async () => {
+    // `config.outputs.map` threw during render and the root error boundary
+    // replaced the whole page, taking every unsaved edit with it.
+    const data = {
+      outputSet: [{ action: "greet", timesOccurred: 0 }],
+    } as unknown as OutputConfig;
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<OutputEditor data={data} onChange={onChange} />);
+    expect(screen.getByDisplayValue("greet")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Add Output Group"));
+    expect((onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!.outputs).toEqual([
+      { valueAlternatives: [{ type: "text", text: "" }] },
+    ]);
+  });
+
+  it("renders an output group with no valueAlternatives", () => {
+    const data = {
+      outputSet: [{ action: "greet", timesOccurred: 0, outputs: [{}], quickReplies: [] }],
+    } as unknown as OutputConfig;
+    renderWithProviders(<OutputEditor data={data} onChange={vi.fn()} />);
+    expect(screen.getByText("Add Alternative")).toBeInTheDocument();
+  });
+
+  it("does not append to 0 when the times-occurred field is cleared and retyped", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <OutputEditor
+        data={{ outputSet: [{ action: "a", timesOccurred: 0, outputs: [], quickReplies: [] }] }}
+        onChange={onChange}
+      />,
+    );
+    const input = screen.getByDisplayValue("0");
+    await user.clear(input);
+    await user.type(input, "2");
+    expect(input).toHaveValue(2);
+    expect((onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!.timesOccurred).toBe(2);
+  });
+});

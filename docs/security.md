@@ -403,11 +403,15 @@ DNS resolution is performed and the resolved address is checked before any conne
 | `100.64.0.0/10`  | CGNAT (RFC 6598)              |
 | `224.0.0.0/4`    | IPv4 multicast                |
 | `0.0.0.0/8`      | Unspecified / "this network"  |
+| `255.255.255.255` | Limited broadcast (the rest of `240.0.0.0/4` stays reachable) |
+| `192.0.0.0/24`   | IETF protocol assignments (RFC 6890) |
+| `198.18.0.0/15`  | Benchmarking (RFC 2544)       |
 | `fc00::/7`       | IPv6 unique-local (RFC 4193 — covers `fc00::/8` and `fd00::/8`) |
 | `fe80::/10`      | IPv6 link-local               |
 | `::1`            | IPv6 loopback                 |
+| `64:ff9b:1::/48` | NAT64 local-use prefix (RFC 8215) — blocked whole, since where the IPv4 address sits inside it depends on the prefix length the network chose |
 
-IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) are unwrapped and re-checked against every IPv4 rule above.
+IPv6 addresses that carry an IPv4 address are unwrapped and the IPv4 address is re-checked against every IPv4 rule above: IPv4-mapped (`::ffff:x.x.x.x`), IPv4-compatible (`::x.x.x.x`), NAT64 well-known prefix (`64:ff9b::x.x.x.x`, RFC 6052), 6to4 (`2002:xxxx:xxxx::/48`, RFC 3056) and Teredo (`2001::/32`, server and client address). On a NAT64 network `64:ff9b::7f00:1` *is* 127.0.0.1 once the gateway translates it, so checking the IPv6 address alone let it through. The same unwrapping applies to the always-on cloud-metadata refusal.
 
 ### Cloud Metadata Endpoint Blocking
 
@@ -533,6 +537,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
   - `g` for `global` scope
   - When `user` scope is in effect but no user id is available, the entry falls back to the narrower `c:` partition. If neither a user id nor a conversation id is available, **no tag can be derived and the cache is bypassed entirely** — nothing is read and nothing is stored. A placeholder is deliberately never substituted, because that would put every unattributable request back into one shared partition
 - **Configuration:** `enableToolCaching` (default `true`), `toolCacheScopes` (per-tool overrides, keyed on the dispatch name or the built-in slug — dispatch name wins, same vocabulary as `toolRateLimits` and `toolPricing`), `defaultToolCacheScope` (task-level default, effectively `user`)
+- **Side-effecting sources are opt-in:** HTTP-call, MCP and A2A tools are cached only when named in `toolCacheScopes` — a cache hit skips the call, and for a write that means the write never happens. Keys also carry the tool's source and the agent id, so same-named tools of different agents never share an entry
 - **Unparseable tokens fail safe:** a `toolCacheScopes` value that does not parse resolves to `user` and is logged at WARN — never to `defaultToolCacheScope`, so a typo in an override that was written to *narrow* one tool cannot promote it onto a `global` partition
 - **Behaviour:** A cached result is only ever served back inside its own partition. With the default `user` scope, one authenticated user's tool result is never returned to another. Set a tool to `global` only when its result depends purely on its arguments and never on who is asking — that is an explicit, per-tool opt-in to cross-user reuse
 - **Expiry:** Each entry expires on its own per-tool TTL, measured from the write (`weather` 300s, `websearch` 1800s, `news` 600s, `calculator` 7 days, 300s for tools with no table entry — see `GET /llm/tools/cache/ttl/{toolName}`). The TTL is matched against the dispatch name first and the slug second, so `searchNews` gets the `news` entry rather than its tool's `websearch` entry. Size-based eviction (`tool-results` holds 10 000 entries) is the secondary bound. A stale or poisoned result cannot outlive its TTL

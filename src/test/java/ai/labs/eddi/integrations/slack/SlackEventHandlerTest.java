@@ -18,6 +18,7 @@ import ai.labs.eddi.integrations.channels.ObserveGate;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import org.junit.jupiter.api.Nested;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -278,6 +279,28 @@ class SlackEventHandlerTest {
 
         verify(slackApi, times(2)).postBlocksMessage(anyString(), eq("C_APPROVAL"),
                 any(), any(), anyString());
+    }
+
+    /**
+     * An integration stored before names were refused on '|' still loads. Its name
+     * is the first field of the button value, so its buttons would be split at the
+     * wrong place and every click refused: the card is posted without buttons.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void notifyApprovers_nameContainingSeparator_postsCardWithoutButtons() {
+        var slackApi = mock(SlackWebApiClient.class);
+        var handler = newHandler(slackApi);
+        var resolved = resolvedWithApprovalChannel();
+        resolved.integration().setName("acme|victim");
+
+        handler.notifyApprovers(resolved, "conv-1", "agent-1", bookmarkPausedAt(Instant.ofEpochMilli(1_000L)));
+
+        ArgumentCaptor<List> blocks = ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
+        List<Map<String, Object>> posted = blocks.getValue();
+        assertFalse(posted.stream().anyMatch(block -> "actions".equals(block.get("type"))),
+                "no buttons on a card whose integration name contains '|'");
     }
 
     /**

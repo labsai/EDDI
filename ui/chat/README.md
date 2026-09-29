@@ -61,7 +61,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 ### Standalone Development
 
 ```bash
-# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.2), EDDI backend on localhost:7070
+# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.3), EDDI backend on localhost:7070
 npm install
 npm run dev        # Vite dev server on http://localhost:5174
 ```

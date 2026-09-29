@@ -107,6 +107,18 @@ public final class SlackHitlSupport {
      * id the card id part is left off. The interactivity handler refuses both, so
      * such a value is only ever useful on a card that has no buttons.
      */
+    /**
+     * Whether an approval card of the integration named {@code integrationName} can
+     * carry buttons: the name is the first field of the button value, so it must be
+     * present and must not contain the {@code |} separator. The integration store
+     * refuses such a name on save, but a configuration stored before that rule is
+     * loaded as it is — its buttons would be split at the wrong place and every
+     * click refused, so its cards are posted without buttons instead.
+     */
+    public static boolean isBindableIntegrationName(String integrationName) {
+        return integrationName != null && !integrationName.isBlank() && !integrationName.contains(VALUE_SEPARATOR);
+    }
+
     public static String buildActionValue(String integrationName, String subject, String cardId) {
         if (integrationName == null || integrationName.isBlank()) {
             return subject;

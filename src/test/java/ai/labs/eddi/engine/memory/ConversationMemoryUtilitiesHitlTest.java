@@ -416,6 +416,19 @@ class ConversationMemoryUtilitiesHitlTest {
         }
 
         @Test
+        @DisplayName("A2: drops the batch fingerprint — an unsalted digest over the raw arguments")
+        void dropsBatchFingerprint() {
+            // Served next to the redacted arguments it is an offline guessing oracle:
+            // guess the redacted value, hash toolName|args, compare.
+            var paused = pausedSnapshot();
+            paused.getHitlPendingToolCalls().setFingerprint("0123456789abcdef");
+
+            var snapshot = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(paused);
+
+            assertNull(snapshot.getHitlPendingToolCalls().getFingerprint());
+        }
+
+        @Test
         @DisplayName("the partial fingerprint strip is not a projection of its own")
         void fingerprintStripIsPrivate() throws Exception {
             // It used to be public, and McpHitlTools served detail=full through it and

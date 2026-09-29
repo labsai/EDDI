@@ -1,5 +1,9 @@
 # EDDI Manager Project Handoff
 
+> **Historical log — no longer appended to.** Since the move into the EDDI monorepo, Manager work is
+> recorded as a changelog fragment under the root `docs/changelog.d/` like every other change (see
+> `AGENTS.md` in this directory). Search this file for the area you are working on; do not read it end to end.
+
 ## Current Status (v6.4.0, plus the post-6.3.0 EDDI alignment in #197-#203)
 
 ### How a linked account is actually consumed (traced end to end, after getting it wrong once)

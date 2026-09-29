@@ -644,9 +644,10 @@ describe("MCP Calls Editor", () => {
     const addArgBtn = within(firstCall!).getByText("Add Argument");
     await user.click(addArgBtn);
 
-    // A new argument row with key "arg3" should appear (index 3 since we have 3 existing)
+    // A new argument row takes the first free "arg<n>" name; none of the
+    // existing keys (query, maxResults, minScore) uses one, so it is "arg1"
     await waitFor(() => {
-      expect(within(firstCall!).getByDisplayValue("arg3")).toBeInTheDocument();
+      expect(within(firstCall!).getByDisplayValue("arg1")).toBeInTheDocument();
     });
   });
 
