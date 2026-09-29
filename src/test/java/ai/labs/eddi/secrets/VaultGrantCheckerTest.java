@@ -629,6 +629,16 @@ class VaultGrantCheckerTest {
         }
 
         @Test
+        @DisplayName("follows a connection into its document, so a team secret cannot hide behind one")
+        void followsConnections() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenReturn(oauthConnection("${vault:t.finance.9e8d7c6b/key}"));
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "an agent that names only the connection must still count as using finance's secret");
+        }
+
+        @Test
         @DisplayName("an unreadable agent names nothing")
         void unreadable() throws Exception {
             when(agentStore.read(AGENT_ID, 1)).thenThrow(new RuntimeException("gone"));

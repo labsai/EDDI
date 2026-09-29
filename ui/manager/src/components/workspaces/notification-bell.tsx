@@ -82,16 +82,23 @@ function NotificationBellInner() {
       const subject = userSubject(n.actor);
       if (!subject) throw new Error("No requester");
       await shareResource(n.resourceId, subject, n.level as AccessLevel);
-      await markNotificationsRead([n.id]);
+      // The grant is what matters and it has happened: failing to mark the request
+      // read must not report the whole grant as failed. The refetch below shows it
+      // as still unread, which is true.
+      await markNotificationsRead([n.id]).catch(() => undefined);
     },
     onSuccess: (_, n) => {
       toast.success(
         t("workspaces.notifications.granted", "Access granted to {{name}}", { name: n.actorLabel || n.actor })
       );
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+    // Refetch either way: a share can succeed before a later step fails, and the
+    // badge must not keep counting a request that was granted.
+    onSettled: (_, __, n) => {
       refresh();
       void queryClient.invalidateQueries({ queryKey: ["shares", n.resourceId] });
     },
-    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   return (

@@ -113,8 +113,11 @@ public class RestWorkspaces implements IRestWorkspaces {
         }
         StoredWorkspaceSettings previous;
         try {
-            settings.refresh();
-            previous = settings.storedSettings().orElse(new StoredWorkspaceSettings(null, null, null, null));
+            // Straight from the store, not through the settings cache: the cache keeps
+            // the last values when a read fails, which is right for serving them and
+            // wrong here — a pinned field keeps whatever is stored, so writing from a
+            // stale or empty snapshot would silently erase it.
+            previous = settingsStore.read(WorkspaceSettings.TENANT).orElse(new StoredWorkspaceSettings(null, null, null, null));
         } catch (RuntimeException e) {
             throw new InternalServerErrorException("The workspace settings could not be read; nothing was changed.");
         }

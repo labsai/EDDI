@@ -1050,6 +1050,10 @@ public class GdprComplianceService {
                 }
             } catch (Exception e) {
                 LOGGER.errorf(e, "[GDPR] Failed to export %s [%s]", participant.name(), pseudonym);
+                // Named in the bundle rather than left out of it: an absent section reads
+                // as "nothing held", which a DPO answering an access request cannot tell
+                // apart from a store that failed.
+                additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
             }
         }
 

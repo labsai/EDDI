@@ -538,10 +538,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         Bson byAgent = Filters.eq(KEY_AGENT_ID, agentId);
         long total = conversationCollectionDocument.countDocuments(byAgent);
         long active = conversationCollectionDocument.countDocuments(Filters.and(byAgent, Filters.ne(KEY_CONVERSATION_STATE, ENDED.toString())));
-        long users = 0;
-        for (String ignored : conversationCollectionDocument.distinct("userId", byAgent, String.class)) {
-            users++;
-        }
+        long users = conversationCollectionDocument.distinct("userId", byAgent, String.class).into(new ArrayList<>()).size();
         return new ConversationUsage(total, active, users);
     }
 

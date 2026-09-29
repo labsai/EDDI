@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -133,6 +134,21 @@ class ConversationReviewTest {
             policy.mayReview(AGENT_V2);
 
             verify(agentStore, times(1)).read(AGENT, 2);
+        }
+
+        @Test
+        @DisplayName("a setting that cannot be read denies review, shows the notice, and is not remembered")
+        void unreadableSettingIsNotReviewDisabled() throws Exception {
+            // A blink used to be cached as "review off" for half an hour: no notice in
+            // that window, and afterwards the maintainers could read those chats anyway.
+            when(agentStore.read(AGENT, 2)).thenThrow(new RuntimeException("store down"));
+
+            assertFalse(policy.mayReview(AGENT_V2), "unknown must deny");
+            assertEquals(Optional.of(ConversationReviewPolicy.DEFAULT_NOTICE), policy.noticeFor(AGENT, 2),
+                    "unknown must tell the person their chat may be read");
+
+            doReturn(reviewing(null)).when(agentStore).read(AGENT, 2);
+            assertTrue(policy.mayReview(AGENT_V2), "the failure was not cached");
         }
     }
 

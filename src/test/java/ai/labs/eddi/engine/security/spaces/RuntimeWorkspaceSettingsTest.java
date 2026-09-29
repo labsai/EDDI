@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore.StoredWorkspaceSettings;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.InternalServerErrorException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -214,6 +215,21 @@ class RuntimeWorkspaceSettingsTest {
             WorkspaceSettingsView view = rest(s).updateSettings(new WorkspaceSettingsView.Update("team:finance", "shared"));
             assertEquals(WorkspaceSettingsView.Source.PINNED, view.defaultSpace().source());
             assertEquals(null, store.value.get().defaultSpace(), "restating a pinned value must not seed the store with a copy of it");
+        }
+
+        @Test
+        @DisplayName("an unreadable store aborts the update, so a pinned field's stored value cannot be erased")
+        void unreadableStoreChangesNothing() {
+            // The settings cache keeps its last values when a read fails; an update built
+            // from that snapshot wrote null over what was stored for a pinned field.
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings("shared", null);
+            store.failing = true;
+
+            assertThrows(InternalServerErrorException.class, () -> rest(s).updateSettings(new WorkspaceSettingsView.Update("finance", null)));
+
+            store.failing = false;
+            assertEquals("admin-only", store.value.get().legacyVisibility(), "nothing was written");
         }
 
         @Test

@@ -71,6 +71,22 @@ public class ConversationReviewPolicy {
      * The review setting of one agent version, when review is enabled on it.
      */
     public Optional<AgentConfiguration.ConversationReview> reviewOf(String agentId, Integer version) {
+        Optional<AgentConfiguration.ConversationReview> known = lookup(agentId, version);
+        // Unknown denies: nobody reads a conversation on the strength of a setting that
+        // could not be read.
+        return known == null ? Optional.empty() : known;
+    }
+
+    /**
+     * The review setting, or {@code null} when it could not be read.
+     * <p>
+     * A failure is not cached — Caffeine stores nothing for a {@code null} — so a
+     * store that blinked does not turn review off for half an hour. It used to: the
+     * notice vanished for every conversation started in that window, and once the
+     * entry expired the maintainers could read those conversations anyway, without
+     * the person ever having been told.
+     */
+    private Optional<AgentConfiguration.ConversationReview> lookup(String agentId, Integer version) {
         if (agentId == null || version == null) {
             return Optional.empty();
         }
@@ -80,15 +96,25 @@ public class ConversationReviewPolicy {
                 AgentConfiguration.ConversationReview review = configuration == null ? null : configuration.getConversationReview();
                 return review != null && review.isEnabled() ? Optional.of(review) : Optional.empty();
             } catch (Exception e) {
-                LOGGER.debugf("Could not read agent %s v%s for its review setting: %s", sanitize(agentId), version, e.getMessage());
-                return Optional.empty();
+                LOGGER.warnf("Could not read agent %s v%s for its review setting: %s", sanitize(agentId), version, sanitize(e.getMessage()));
+                return null;
             }
         });
     }
 
-    /** The notice to show for this agent version, or empty when review is off. */
+    /**
+     * The notice to show for this agent version, or empty when review is off.
+     * <p>
+     * When the setting cannot be read, the default notice: telling somebody their
+     * conversation may be read when it will not be costs nothing, and the opposite
+     * is the one mistake this notice exists to prevent.
+     */
     public Optional<String> noticeFor(String agentId, Integer version) {
-        return reviewOf(agentId, version).map(review -> review.getNotice() == null || review.getNotice().isBlank()
+        Optional<AgentConfiguration.ConversationReview> known = lookup(agentId, version);
+        if (known == null) {
+            return Optional.of(DEFAULT_NOTICE);
+        }
+        return known.map(review -> review.getNotice() == null || review.getNotice().isBlank()
                 ? DEFAULT_NOTICE
                 : review.getNotice().trim());
     }

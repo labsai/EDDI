@@ -157,6 +157,12 @@ public record UserDataExport(
      * Javadoc: a data subject whose data lives only in these categories would
      * otherwise be handed an empty bundle described as complete.
      */
+    /**
+     * The section a participant contributes when its export failed — present, so
+     * the bundle says what it is missing, and counted by {@link #complete()}.
+     */
+    public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
+
     public static final List<String> OMITTED_CATEGORIES = List.of("groupConversations", "sharedArtifacts", "schedules", "journalEntries");
 
     /**
@@ -193,7 +199,8 @@ public record UserDataExport(
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean complete() {
-        return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty();
+        return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty()
+                && !additionalData.containsValue(EXPORT_FAILED);
     }
 
     /**

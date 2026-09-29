@@ -1985,5 +1985,19 @@ class GdprComplianceServiceTest {
             assertEquals(Map.of("email", "alice@example.com"), export.additionalData().get("userDirectory"));
             assertFalse(export.additionalData().containsKey("nothingHeld"), "a participant holding nothing adds no empty section");
         }
+
+        @Test
+        @DisplayName("a participant whose export fails is named in the bundle, not silently left out")
+        void failedExportIsNamed() throws Exception {
+            var broken = participant("workspaceNotifications", 0, null);
+            when(broken.export(anyString())).thenThrow(new IllegalStateException("down"));
+            register(broken);
+
+            UserDataExport export = service.exportUserData("alice");
+
+            assertEquals(UserDataExport.EXPORT_FAILED, export.additionalData().get("workspaceNotifications"),
+                    "an absent section reads as nothing held");
+            assertFalse(export.complete());
+        }
     }
 }

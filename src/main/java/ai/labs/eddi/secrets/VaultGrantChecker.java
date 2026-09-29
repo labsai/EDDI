@@ -261,7 +261,8 @@ public class VaultGrantChecker {
         if (agentConfiguration == null) {
             return tenants;
         }
-        collectTenants(agentConfiguration, tenants);
+        Set<String> visitedConnections = new LinkedHashSet<>();
+        collectTenants(agentConfiguration, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
         if (agentConfiguration.getWorkflows() != null) {
             for (URI workflowUri : agentConfiguration.getWorkflows()) {
                 WorkflowConfiguration workflow = readWorkflow(workflowUri);
@@ -275,7 +276,7 @@ public class VaultGrantChecker {
                     }
                     Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString());
                     if (extensionConfig != null) {
-                        collectTenants(extensionConfig, tenants);
+                        collectTenants(extensionConfig, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
                     }
                 }
             }
@@ -283,18 +284,47 @@ public class VaultGrantChecker {
         return tenants;
     }
 
-    private void collectTenants(Object config, Set<String> sink) {
+    /**
+     * Adds every tenant {@code config} names, following {@code ${connection:…}}
+     * into the connection document — the same hop the grant check makes. A
+     * connection that holds {@code ${vault:t.finance…/key}} is otherwise a way to
+     * use another team's secret from an agent that names only the connection.
+     *
+     * @param tenantId
+     *            the tenant a short-form {@code ${vars:key}} resolves in — the
+     *            connection's own for a connection document
+     * @param visitedConnections
+     *            each connection is scanned once, which also ends a cycle
+     */
+    private void collectTenants(Object config, Set<String> sink, String tenantId, Set<String> visitedConnections) {
         String serialized;
         try {
             serialized = MAPPER.writeValueAsString(config);
         } catch (Exception e) {
             return;
         }
-        String scanned = withVariablesExpanded(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT),
-                ConnectionReference.DEFAULT_TENANT);
+        String scanned = withVariablesExpanded(withVariablesExpanded(serialized, tenantId), tenantId);
         Matcher matcher = TENANT_REFERENCE.matcher(scanned);
         while (matcher.find()) {
             sink.add(matcher.group(1));
+        }
+        Matcher connections = CONNECTION_PATTERN.matcher(scanned);
+        while (connections.find()) {
+            String connectionTenant = connections.group(1) != null ? connections.group(1) : ConnectionReference.DEFAULT_TENANT;
+            String name = connections.group(2);
+            if (!visitedConnections.add(connectionTenant + "/" + name)) {
+                continue;
+            }
+            try {
+                ConnectionConfiguration connection = connectionStore.readByName(connectionTenant, name);
+                if (connection != null) {
+                    collectTenants(connection, sink, ConnectionConfiguration.effectiveTenant(connection), visitedConnections);
+                }
+            } catch (Exception e) {
+                // The grant check refuses an unreadable connection on the same deployment;
+                // here there is nothing more to learn from it.
+                LOGGER.debugf("Could not read connection '%s' for the space-reference check: %s", sanitize(name), sanitize(e.getMessage()));
+            }
         }
     }
 

@@ -135,6 +135,19 @@ An independent review of the branch found these problems; each is fixed here and
   - `X-EDDI-Space` is sent only on POSTs that create resources, so a chat turn can no
     longer be refused because of it.
 
+From CodeRabbit's review of the PR:
+
+- The deploy-time space check now follows `${connection:…}` into the connection
+  document, the way the grant check already did.
+- A review setting that cannot be read is no longer cached as "review off". Reading
+  a conversation is denied, and the chat shows the notice.
+- A settings update reads the store directly, so a failed read aborts the update and
+  can no longer erase a pinned field's stored value.
+- A GDPR participant whose export fails is named in the bundle and makes it
+  incomplete.
+- In the notification bell, a failure to mark a request read after a successful
+  grant no longer reports the grant as failed.
+
 Deliberately not changed, and documented instead:
 
 - A sub-agent that inherits a team's key cannot be deployed for a non-member. The
