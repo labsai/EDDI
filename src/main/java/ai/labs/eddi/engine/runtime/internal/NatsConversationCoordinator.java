@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -116,6 +117,26 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     private final int maxRetries;
     private final int maxActiveConversations;
 
+    /**
+     * Bounds of the conversation stream. Nothing consumes it — a published message
+     * is an ordering marker, and the turn itself runs in-process — so on a
+     * {@code WorkQueue} stream every marker used to stay for the full 24-hour max
+     * age with no count or size limit, growing with traffic until the server's
+     * storage limits started refusing publishes (M-E4). The oldest markers are now
+     * discarded first; losing one costs nothing, since it is read by nobody.
+     * <p>
+     * Field-injected with defaults (rather than constructor parameters) so the many
+     * tests that build this class directly keep compiling and get the same bounds.
+     */
+    @ConfigProperty(name = "eddi.nats.stream-max-age", defaultValue = "1h")
+    Duration streamMaxAge = Duration.ofHours(1);
+
+    @ConfigProperty(name = "eddi.nats.stream-max-messages", defaultValue = "100000")
+    long streamMaxMessages = 100_000L;
+
+    @ConfigProperty(name = "eddi.nats.stream-max-bytes", defaultValue = "268435456")
+    long streamMaxBytes = 256L * 1024 * 1024;
+
     private Connection natsConnection;
     private JetStream jetStream;
 
@@ -189,8 +210,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             JetStreamManagement jsm = natsConnection.jetStreamManagement();
 
             // Create or update the main conversation stream
-            StreamConfiguration streamConfig = StreamConfiguration.builder().name(streamName).subjects(SUBJECT_PREFIX + "*")
-                    .retentionPolicy(RetentionPolicy.WorkQueue).maxAge(Duration.ofHours(24)).storageType(StorageType.File).replicas(1).build();
+            StreamConfiguration streamConfig = conversationStreamConfiguration();
 
             createOrUpdateStream(jsm, streamName, streamConfig);
 
@@ -207,6 +227,21 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             log.errorf(e, "Failed to connect to NATS at %s", natsUrl);
             throw new RuntimeException("NATS connection failed", e);
         }
+    }
+
+    /**
+     * The conversation stream: work-queue retention, bounded by age, message count
+     * and bytes, discarding the oldest marker when a bound is reached — see
+     * {@link #streamMaxAge}.
+     */
+    StreamConfiguration conversationStreamConfiguration() {
+        return StreamConfiguration.builder().name(streamName).subjects(SUBJECT_PREFIX + "*")
+                .retentionPolicy(RetentionPolicy.WorkQueue)
+                .maxAge(streamMaxAge)
+                .maxMessages(streamMaxMessages)
+                .maxBytes(streamMaxBytes)
+                .discardPolicy(DiscardPolicy.Old)
+                .storageType(StorageType.File).replicas(1).build();
     }
 
     private void createOrUpdateStream(JetStreamManagement jsm, String name, StreamConfiguration config) throws IOException, JetStreamApiException {
@@ -332,7 +367,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 m.getPublishCount().increment();
                 m.getPublishDuration().record(Duration.ofNanos(durationNanos));
             });
-        } catch (IOException | JetStreamApiException e) {
+        } catch (IOException | JetStreamApiException | RuntimeException e) {
+            // RuntimeException too: a closed or draining connection throws
+            // IllegalStateException, and the marker is an ordering hint nobody reads —
+            // failing the submission over it (and, from submitNext, dead-lettering a
+            // turn that could have run) is the wrong trade. Execute locally, as for an
+            // I/O failure.
             log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitize(conversationId));
         }
 
@@ -391,38 +431,71 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
-        } catch (IOException | JetStreamApiException e) {
+        } catch (IOException | JetStreamApiException | RuntimeException e) {
+            // RuntimeException too (M-E4): this runs inside submitNext's drain loop, and
+            // an IllegalStateException escaping from here left the queue non-empty with
+            // nothing scheduled to drain it — the conversation wedged for good.
             log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitize(conversationId));
         }
     }
 
     private void submitNext(String conversationId, BlockingQueue<RetryableCallable> queue) {
-        synchronized (queue) {
-            if (queue.isEmpty()) {
-                return;
-            }
-            queue.remove(); // drop the task that just finished
-
-            while (!queue.isEmpty()) {
-                try {
-                    publishAndExecute(conversationId, queue, queue.element());
+        // Collected under the queue monitor, notified after releasing it — mirrors
+        // InMemoryConversationCoordinator: the hook completes an HTTP response handler
+        // and must not run while a per-conversation lock is held.
+        List<DiscardedTask> discarded = List.of();
+        try {
+            synchronized (queue) {
+                if (queue.isEmpty()) {
                     return;
-                } catch (RuntimeException | java.lang.Error e) {
-                    // C10 (submitNext side): there is no caller to propagate to here —
-                    // this runs from a completion callback. Dropping out would leave
-                    // the queue non-empty with nothing scheduled to drain it, wedging
-                    // the conversation forever. Dead-letter the task we could not
-                    // schedule and try the next one.
-                    log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
-                            + "so the conversation queue keeps draining", sanitize(conversationId));
-                    routeToDeadLetter(conversationId, e);
-                    queue.remove();
+                }
+                queue.remove(); // drop the task that just finished
+
+                while (!queue.isEmpty()) {
+                    RetryableCallable next = queue.element();
+                    try {
+                        publishAndExecute(conversationId, queue, next);
+                        return;
+                    } catch (RuntimeException | java.lang.Error e) {
+                        // C10 (submitNext side): there is no caller to propagate to here —
+                        // this runs from a completion callback. Dropping out would leave
+                        // the queue non-empty with nothing scheduled to drain it, wedging
+                        // the conversation forever. Dead-letter the task we could not
+                        // schedule and try the next one.
+                        log.errorf(e, "Failed to schedule the next queued task (conversationId=%s) — dead-lettering it "
+                                + "so the conversation queue keeps draining", sanitize(conversationId));
+                        routeToDeadLetter(conversationId, e);
+                        queue.remove();
+                        // M-E4: the task is gone without having run, so its own finally
+                        // (releasing the in-flight gauge, answering the caller) never
+                        // executes. Without this the REST caller waited for its 408 and an
+                        // SSE stream hung — the in-memory coordinator already did this.
+                        if (next.callable() instanceof IDiscardableTask discardable) {
+                            if (discarded.isEmpty()) {
+                                discarded = new ArrayList<>(1);
+                            }
+                            discarded.add(new DiscardedTask(discardable, e));
+                        }
+                    }
+                }
+
+                // Eager cleanup: remove empty queue to prevent memory leaks.
+                conversationQueues.remove(conversationId, queue);
+            }
+        } finally {
+            for (DiscardedTask task : discarded) {
+                try {
+                    task.task().onDiscarded(task.cause());
+                } catch (RuntimeException | java.lang.Error hookFailure) {
+                    // Best effort — a failing hook must never break the drain.
+                    log.errorf(hookFailure, "Discard hook failed for conversationId=%s", sanitize(conversationId));
                 }
             }
-
-            // Eager cleanup: remove empty queue to prevent memory leaks.
-            conversationQueues.remove(conversationId, queue);
         }
+    }
+
+    /** A queued task that was dropped before it ever ran, plus the reason. */
+    private record DiscardedTask(IDiscardableTask task, Throwable cause) {
     }
 
     /**
@@ -432,10 +505,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      *
      * A subject token may not contain {@code .} (it is the token delimiter), nor
      * any of space, tab, CR or LF: {@code Validator.validateSubjectTerm} in the
-     * NATS client rejects all four with an {@link IllegalArgumentException}. That
-     * exception is <em>unchecked</em>, so it does not degrade to local execution
-     * through the {@code IOException | JetStreamApiException} handler around the
-     * publish -- it escapes it.
+     * NATS client rejects all four with an {@link IllegalArgumentException}. The
+     * publish handler now degrades any runtime failure to local execution, so such
+     * an id no longer fails the turn — but it would never get an ordering marker
+     * either, so the token rule still matters.
      *
      * <h4>Why widening this was safe</h4>
      *

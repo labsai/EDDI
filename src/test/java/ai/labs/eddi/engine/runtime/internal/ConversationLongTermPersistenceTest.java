@@ -471,4 +471,42 @@ class ConversationLongTermPersistenceTest {
         assertEquals("new", Conversation.mostSpecificPerKey(List.of(older, newer)).getFirst().id());
         assertEquals("new", Conversation.mostSpecificPerKey(List.of(newer, older)).getFirst().id());
     }
+
+    @Test
+    @DisplayName("a step-scoped property is dropped even when the turn ERRORs")
+    void stepScopedPropertyIsDroppedWhenTheTurnFails() throws Exception {
+        IExecutableWorkflow failing = workflowThat(() -> {
+            memory.getConversationProperties().put("temp", new Property("temp", "value", Scope.step));
+            throw new LifecycleException("task blew up");
+        });
+
+        Conversation errored = turnWith(failing);
+        assertThrows(LifecycleException.class, () -> errored.say("hi", new LinkedHashMap<>()));
+
+        // The ERROR snapshot is still persisted — before, it carried the step property
+        // into the next turn's {properties.temp} and rule matching.
+        assertEquals(ConversationState.ERROR, memory.getConversationState());
+        assertFalse(memory.getConversationProperties().containsKey("temp"),
+                "step scope means cleared at the end of the turn — a failed turn ends too");
+        assertNull(mirroredProperties().get("temp"));
+    }
+
+    @Test
+    @DisplayName("a step-scoped property survives a HITL pause, and is dropped when the resumed step ends")
+    void stepScopedPropertySurvivesAPauseUntilTheResumedStepEnds() throws Exception {
+        IExecutableWorkflow pausing = workflowThat(() -> {
+            memory.getConversationProperties().put("temp", new Property("temp", "value", Scope.step));
+            throw new ConversationPauseException("wf1", 2, "needs approval");
+        });
+
+        turnWith(pausing).say("hi", new LinkedHashMap<>());
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        assertTrue(memory.getConversationProperties().containsKey("temp"),
+                "the paused step is not over: the resumed pipeline may still read it");
+
+        turnWith(pausing).resume(approved());
+
+        assertFalse(memory.getConversationProperties().containsKey("temp"));
+    }
 }
