@@ -617,6 +617,45 @@ class VaultKeySafetyTest {
             assertNull(persistence.meta.get("vault-kek-salt-pending"));
             assertEquals("one", provider(NEW_MASTER).resolve(ref("t1", "key")));
         }
+
+        /**
+         * Salt promoted, marker left behind, and the nodes restarted instead of
+         * re-running the rotation. The marker must no longer make a DEK failure read as
+         * an unfinished rotation: that message drops the reset and adopt-master-key
+         * guidance, which is what a genuinely lost key needs.
+         */
+        @Test
+        @DisplayName("a pending marker left after the salt was promoted does not hide the lost-key guidance")
+        void stalePendingMarkerDoesNotHideLostKeyGuidance() throws Exception {
+            seedLegacyTenant("t1", "one");
+            var provider = provider(MASTER);
+            persistence.failNextMetaDelete = new PersistenceException("delete failed");
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+            // The restart's own clean-up fails too, so the marker survives it.
+            persistence.failNextMetaDelete = new PersistenceException("delete failed again");
+            var restarted = provider("some-other-master-key-777");
+            assertTrue(persistence.meta.containsKey("vault-kek-salt-pending"));
+
+            var failure = assertThrows(SecretProviderException.class, () -> restarted.resolve(ref("t1", "key")));
+
+            assertTrue(failure.getMessage().contains("adopt-master-key"), failure.getMessage());
+            assertFalse(failure.getMessage().contains("did not finish"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("a restart on a promoted salt removes the pending marker a failed delete left behind")
+        void restartRemovesAStalePendingMarker() throws Exception {
+            seedLegacyTenant("t1", "one");
+            var provider = provider(MASTER);
+            persistence.failNextMetaDelete = new PersistenceException("delete failed");
+            assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
+            assertTrue(persistence.meta.containsKey("vault-kek-salt-pending"));
+
+            var restarted = provider(NEW_MASTER);
+
+            assertNull(persistence.meta.get("vault-kek-salt-pending"));
+            assertEquals("one", restarted.resolve(ref("t1", "key")));
+        }
     }
 
     // ─── m2: a replica that stalls across the announcement ───

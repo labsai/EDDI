@@ -1450,7 +1450,11 @@ public class VaultSecretProvider implements ISecretProvider {
         boolean pendingMigration = false;
         boolean checkIsOurs = false;
         try {
-            pendingMigration = saltManager.getPendingSalt() != null;
+            // Meaningful only while this deployment is still on the legacy salt. Once a
+            // random salt is persisted the migration it belonged to has been promoted, and
+            // a marker left behind (its delete failed) says nothing about unreached DEKs —
+            // honouring it would drop the reset and adopt-master-key guidance for good.
+            pendingMigration = saltManager.isUsingLegacySalt() && saltManager.getPendingSalt() != null;
             String check = persistence.getMetaValue(KEK_CHECK_META_KEY);
             checkIsOurs = check != null && kekCheckOpens(check, kek);
         } catch (PersistenceException | IllegalStateException e) {

@@ -106,6 +106,7 @@ public class VaultSaltManager {
             if (existingSalt != null) {
                 adopt(existingSalt);
                 LOGGER.info("[VAULT] Per-deployment salt loaded (" + activeSalt.length + " bytes).");
+                clearStalePendingSalt();
                 return;
             }
 
@@ -121,6 +122,7 @@ public class VaultSaltManager {
             if (existingSalt != null) {
                 adopt(existingSalt);
                 LOGGER.info("[VAULT] Per-deployment salt loaded (" + activeSalt.length + " bytes).");
+                clearStalePendingSalt();
                 return;
             }
 
@@ -159,6 +161,29 @@ public class VaultSaltManager {
             // wrapped under a key the rest of the cluster could not open.
             throw new IllegalStateException("[VAULT] Could not read or create the per-deployment KEK salt: " + e.getMessage()
                     + ". The vault cannot start without it — check the database connection and restart.", e);
+        }
+    }
+
+    /**
+     * Removes a pending-salt marker left behind once a random salt is persisted.
+     * <p>
+     * The marker belongs to a legacy-salt migration only, and {@link #migrateSalt}
+     * writes the salt before it deletes the marker, so a persisted salt means that
+     * migration was promoted; a marker still present is one whose delete failed. No
+     * rotation in flight can still need it: a legacy migration runs only while no
+     * salt is persisted ({@link #migrateSalt} refuses a different one), and a
+     * replica still on the legacy salt that finds the marker gone is refused at
+     * verification rather than re-wrapping anything. Best-effort — a failure here
+     * is logged and never fails the start.
+     */
+    private void clearStalePendingSalt() {
+        try {
+            if (persistence.getMetaValue(PENDING_SALT_META_KEY) != null) {
+                LOGGER.warn("[VAULT] A pending-salt marker was left behind by a completed salt migration; removing it.");
+                persistence.deleteMetaValue(PENDING_SALT_META_KEY);
+            }
+        } catch (PersistenceException e) {
+            LOGGER.warn("[VAULT] Could not remove a stale pending-salt marker: " + e.getMessage());
         }
     }
 
