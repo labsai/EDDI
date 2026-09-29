@@ -121,3 +121,48 @@ describe("JsonEditor", () => {
     expect(screen.getByTestId("json-editor")).toBeInTheDocument();
   });
 });
+
+describe("JsonEditor schema scope", () => {
+  type Opts = { schemas: { fileMatch: string[]; schema: unknown }[] };
+
+  it("scopes its schema to its own model instead of every JSON model on the page", async () => {
+    // fileMatch: ["*"] validated unrelated editors (another resource's JSON
+    // tab, the diff editor) against this schema.
+    const { monaco, setDiagnosticsOptions } = monacoWithJsonLanguage();
+    monacoDouble = monaco;
+    const { default: Editor } = await import("@monaco-editor/react");
+    renderWithProviders(<JsonEditor value="{}" jsonSchema={{ title: "llm" }} />);
+
+    const opts = setDiagnosticsOptions.mock.lastCall![0] as Opts;
+    expect(opts.schemas).toHaveLength(1);
+    expect(opts.schemas[0]!.fileMatch).not.toContain("*");
+    // The same path is the one handed to Monaco as the model path.
+    const path = (vi.mocked(Editor).mock.lastCall![0] as { path?: string }).path;
+    expect(path).toBeTruthy();
+    expect(opts.schemas[0]!.fileMatch).toEqual([path]);
+  });
+
+  it("keeps two editors' schemas apart and drops one when its editor unmounts", () => {
+    const { monaco, setDiagnosticsOptions } = monacoWithJsonLanguage();
+    monacoDouble = monaco;
+    const first = renderWithProviders(<JsonEditor value="{}" jsonSchema={{ title: "a" }} />);
+    renderWithProviders(<JsonEditor value="{}" jsonSchema={{ title: "b" }} testId="second" />);
+
+    // The second mount used to replace the first editor's schema outright.
+    let opts = setDiagnosticsOptions.mock.lastCall![0] as Opts;
+    expect(opts.schemas.map((s) => s.schema)).toEqual([{ title: "a" }, { title: "b" }]);
+    expect(new Set(opts.schemas.map((s) => s.fileMatch[0])).size).toBe(2);
+
+    first.unmount();
+    opts = setDiagnosticsOptions.mock.lastCall![0] as Opts;
+    expect(opts.schemas.map((s) => s.schema)).toEqual([{ title: "b" }]);
+  });
+
+  it("contributes no schema at all when it has none", () => {
+    const { monaco, setDiagnosticsOptions } = monacoWithJsonLanguage();
+    monacoDouble = monaco;
+    renderWithProviders(<JsonEditor value="{}" />);
+    const calls = setDiagnosticsOptions.mock.calls as [Opts][];
+    for (const [opts] of calls) expect(opts.schemas).toEqual([]);
+  });
+});
