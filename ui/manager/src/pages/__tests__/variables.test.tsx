@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { VariablesPage } from "@/pages/variables";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
 // Save original clipboard so we can restore it
 const originalClipboard = navigator.clipboard;
@@ -123,6 +125,47 @@ describe("VariablesPage", () => {
     await user.type(screen.getByTestId("var-key-input"), "my-var");
     await user.type(screen.getByTestId("var-value-input"), "my-value");
     expect(confirmBtn).not.toBeDisabled();
+  });
+
+  it("refuses to add a variable whose key already exists, without writing", async () => {
+    const puts: string[] = [];
+    server.use(
+      http.put("*/variablestore/variables/:tenantId/:key", ({ params }) => {
+        puts.push(params.key as string);
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderVariables();
+    const user = userEvent.setup();
+    await screen.findByText("default-model");
+    await user.click(screen.getByTestId("create-variable-button"));
+    await user.type(screen.getByTestId("var-key-input"), "default-model");
+    await user.type(screen.getByTestId("var-value-input"), "something-else");
+    await user.click(screen.getByTestId("confirm-save-button"));
+
+    expect(await screen.findByTestId("var-exists-error")).toHaveTextContent(
+      /default-model.*already exists/,
+    );
+    expect(puts).toEqual([]);
+  });
+
+  it("still saves an edit of an existing variable", async () => {
+    const puts: string[] = [];
+    server.use(
+      http.put("*/variablestore/variables/:tenantId/:key", ({ params }) => {
+        puts.push(params.key as string);
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderVariables();
+    const user = userEvent.setup();
+    await screen.findByText("default-model");
+    await user.click(screen.getByTestId("edit-default-model"));
+    await user.clear(screen.getByTestId("var-value-input"));
+    await user.type(screen.getByTestId("var-value-input"), "gpt-5");
+    await user.click(screen.getByTestId("confirm-save-button"));
+
+    await waitFor(() => expect(puts).toEqual(["default-model"]));
   });
 
   it("opens edit dialog with pre-filled values when edit is clicked", async () => {

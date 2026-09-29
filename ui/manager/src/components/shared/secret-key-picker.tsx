@@ -13,6 +13,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useSecrets, useStoreSecret, useVaultHealth } from "@/hooks/use-secrets";
+import { SecretsError, SECRET_EXISTS } from "@/lib/api/secrets";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
@@ -147,6 +148,8 @@ function CreateSecretModal({
   const [newValue, setNewValue] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
+  /* The name a create was refused for because it is already in the vault. */
+  const [existingKey, setExistingKey] = useState<string | null>(null);
   const storeMut = useStoreSecret();
 
   // Reset form state whenever the modal closes (security: clear secret value from memory)
@@ -155,6 +158,7 @@ function CreateSecretModal({
     setNewValue("");
     setNewDescription("");
     setValueVisible(false);
+    setExistingKey(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -164,28 +168,40 @@ function CreateSecretModal({
 
   const handleCreate = () => {
     if (!newKeyName.trim() || !newValue.trim()) return;
+    const savedKey = newKeyName.trim();
+    setExistingKey(null);
     storeMut.mutate(
       {
         tenantId,
-        keyName: newKeyName.trim(),
-        value: newValue.trim(),
+        keyName: savedKey,
+        // Sent as typed: trimming changed the credential being stored.
+        value: newValue,
         description: newDescription.trim() || undefined,
+        // This dialog makes a NEW secret for the field it was opened from. The
+        // store endpoint is an upsert, and this dialog sends no grant, so typing
+        // an existing name here used to replace that secret's value — and, on a
+        // backend before the vault-key-safety fix, open it to every agent.
+        createOnly: true,
       },
       {
         onSuccess: () => {
           toast.success(
             t("secrets.storeSuccess", {
-              key: newKeyName.trim(),
-              defaultValue: `Secret "${newKeyName.trim()}" stored`,
+              key: savedKey,
+              defaultValue: `Secret "${savedKey}" stored`,
             })
           );
-          const savedKey = newKeyName.trim();
           resetForm();
           onSuccess(savedKey);
           onClose();
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : String(err)),
+        onError: (err) => {
+          if (err instanceof SecretsError && err.code === SECRET_EXISTS) {
+            setExistingKey(savedKey);
+            return;
+          }
+          toast.error(err instanceof Error ? err.message : String(err));
+        },
       }
     );
   };
@@ -224,12 +240,29 @@ function CreateSecretModal({
             <input
               type="text"
               value={newKeyName}
-              onChange={(e) => setNewKeyName(e.target.value)}
+              onChange={(e) => {
+                setNewKeyName(e.target.value);
+                setExistingKey(null);
+              }}
               placeholder={t("secrets.keyNamePlaceholder", "e.g. openaiKey")}
               className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
               autoFocus
               autoComplete="off"
+              aria-invalid={existingKey !== null}
+              data-testid="create-secret-modal-key"
             />
+            {existingKey !== null && (
+              <p
+                role="alert"
+                className="mt-1.5 text-xs text-destructive"
+                data-testid="create-secret-modal-exists"
+              >
+                {t("secrets.keyExistsPicker", {
+                  key: existingKey,
+                  defaultValue: `A secret named "${existingKey}" already exists. Pick it from the vault list, or choose another name.`,
+                })}
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
@@ -243,6 +276,7 @@ function CreateSecretModal({
                 placeholder={t("secrets.valuePlaceholder", "Enter secret value…")}
                 className="h-9 w-full rounded-lg border border-input bg-background pe-10 ps-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 autoComplete="off"
+                data-testid="create-secret-modal-value"
               />
               <button
                 type="button"
@@ -277,6 +311,7 @@ function CreateSecretModal({
           <button
             onClick={handleCreate}
             disabled={!newKeyName.trim() || !newValue.trim() || storeMut.isPending}
+            data-testid="create-secret-modal-submit"
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {storeMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -558,6 +593,13 @@ export function SecretKeyPicker({
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  /**
+   * The raw text last typed or pasted into this field. The value on screen
+   * counts as "edited here" only while it still equals that — so a value the
+   * parent swaps in (another channel loaded into the same page) is treated as
+   * loaded again, not as something the operator just typed.
+   */
+  const [typedValue, setTypedValue] = useState<string | null>(null);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -615,6 +657,15 @@ export function SecretKeyPicker({
   const currentVaultKey = hasVaultRef ? referenceLabel(value) : "";
   /** A non-empty value that is not (yet) an admissible reference. */
   const literalRejected = referenceOnly && value.trim() !== "" && !isCanonicalRef;
+  /**
+   * A literal this field was LOADED with — a credential stored in plaintext
+   * before the field became reference-only (a channel's bot token, say).
+   * Reference-only mode renders as plain text, which put that live secret on
+   * screen for anyone looking; it stays masked until the operator types over
+   * it. Something typed or pasted here stays visible, as before.
+   */
+  const editedHere = typedValue !== null && typedValue === value;
+  const maskStoredLiteral = literalRejected && !editedHere && !hasReferencePrefix(value);
   /**
    * The warning's own id, appended to `aria-describedby` when it is showing.
    *
@@ -686,6 +737,7 @@ export function SecretKeyPicker({
 
   const handleDirectChange = useCallback(
     (newValue: string) => {
+      setTypedValue(newValue);
       // Auto-detect a pasted reference and normalise it to the canonical form.
       // Emitting the raw paste instead would send a trailing newline along with
       // the reference as the api key — which the backend has to trim on its side
@@ -965,7 +1017,13 @@ export function SecretKeyPicker({
             // Nothing to mask: in reference-only mode the only admissible value
             // is a pointer, and masking it hides the one thing worth reading.
             // The same holds for a connection reference still being typed.
-            type={referenceOnly || connectionInProgress || showPassword ? "text" : "password"}
+            type={
+              maskStoredLiteral
+                ? "password"
+                : referenceOnly || connectionInProgress || showPassword
+                  ? "text"
+                  : "password"
+            }
             value={value}
             onChange={(e) => handleDirectChange(e.target.value)}
             onKeyDown={handleInputKeyDown}
