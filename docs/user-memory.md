@@ -202,9 +202,12 @@ The group is taken only from that injected context value. A client cannot supply
 and a conversation *property* named `groupId` does not select a group scope for the
 `usermemory` tool.
 
-Only the engine can name the group. `groupId` is a [reserved context key](passing-context-information.md#reserved-context-keys) that is dropped from client input, and a conversation *property* called `groupId` is ignored — properties can be set by the client, so trusting one would let a caller read and write another team's group memories.
-
-A `groupId` found only on an earlier step of the conversation (a resumed turn, a later turn without group context) is used only while the discussion named on that step is running, this conversation is one of its members, and it belongs to that group — so a value a client forged before the reserved-key filter existed does not keep working.
+A `groupId` found only on an earlier step of the conversation — a turn the owner sends
+into a member conversation directly carries no group context — is used, by the
+`usermemory` tool and when `longTerm` properties are persisted alike, only while the
+discussion named on that step is running on this instance, this conversation is one of its
+members, and it belongs to that group. Otherwise the turn is self-scoped, so a value a
+client forged before reserved keys were filtered does not keep working.
 
 ## REST API
 

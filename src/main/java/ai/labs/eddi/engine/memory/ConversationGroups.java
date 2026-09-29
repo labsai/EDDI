@@ -18,8 +18,9 @@ import java.util.List;
  * <p>
  * {@code groupId} arrives as a <b>context</b> value —
  * {@code MemberTurnExecutor} and {@code GroupLifecycleOps} both inject it that
- * way. It is read from the current step first, then from any earlier step,
- * since a resumed turn re-enters without the original context map.
+ * way. It is read from the current step first, then from an earlier step whose
+ * discussion confirms the membership — see
+ * {@link #resolveGroupIds(IConversationMemory, MembershipCheck)}.
  * <p>
  * The context value is the only source. A {@code groupId} conversation
  * <em>property</em> used to be honoured as a last resort, but properties are
@@ -33,17 +34,55 @@ import java.util.List;
 public final class ConversationGroups {
 
     private static final String CONTEXT_KEY = "context:groupId";
+    private static final String DISCUSSION_KEY = "context:groupConversationId";
 
     private ConversationGroups() {
     }
 
     /**
+     * Confirms an earlier step's group claim against the discussion that step
+     * names. Implemented by {@code LiveDiscussionRegistry#isLiveMember}: the
+     * discussion is running on this node, has this conversation as a member, and
+     * belongs to that group.
+     */
+    @FunctionalInterface
+    public interface MembershipCheck {
+        boolean isLiveMember(String groupConversationId, String conversationId, String groupId);
+    }
+
+    /**
+     * {@link #resolveGroupIds(IConversationMemory, MembershipCheck)} without a
+     * membership check: only the current step's {@code groupId} counts.
+     */
+    public static List<String> resolveGroupIds(IConversationMemory memory) {
+        return resolveGroupIds(memory, null);
+    }
+
+    /**
+     * The conversation's group: the current step's {@code context:groupId}, else
+     * the most recent earlier step's — but an earlier value only when
+     * {@code membershipCheck} confirms it.
+     * <p>
+     * The current step's value was written this turn, and since
+     * {@code ClientContextGuard} removes the key from client input it can only have
+     * come from the group orchestrator. An earlier step's may predate that guard: a
+     * conversation in which a client forged {@code groupId} before the fix still
+     * carries it, and trusting it would keep that client in another team's group
+     * memory — reading it through the tool and writing into it at the
+     * {@code longTerm} boundary — for as long as the conversation lives. So a
+     * fallback value counts only when the same step's {@code groupConversationId}
+     * names a discussion that is running, that this conversation is a member of,
+     * and that belongs to that group. Engine-driven member turns (the discussion
+     * loop, follow-ups) always carry the context on the current step; the fallback
+     * serves a turn the owner sends into a member conversation while its discussion
+     * runs. {@code null} check, or anything unverified: no group (self scope).
+     * <p>
      * Exact-key reads throughout ({@code getData} / {@code getExactDataPerStep}):
      * the prefix-matching {@code getLatestData} / {@code getAllLatestData} would
      * also return a client-sent {@code context:groupIdSuffix} as this
      * conversation's group.
      */
-    public static List<String> resolveGroupIds(IConversationMemory memory) {
+    public static List<String> resolveGroupIds(IConversationMemory memory, MembershipCheck membershipCheck) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
             String fromCurrent = contextValueAsString(currentStep.getData(CONTEXT_KEY));
@@ -53,18 +92,24 @@ public final class ConversationGroups {
         }
 
         var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getExactDataPerStep(CONTEXT_KEY);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    String value = contextValueAsString(entry);
-                    if (value != null) {
-                        return List.of(value);
-                    }
-                }
-            }
+        if (membershipCheck == null || allSteps == null) {
+            return List.of();
         }
-
+        List<IData<Object>> priorGroupIds = allSteps.getExactDataPerStep(CONTEXT_KEY);
+        List<IData<Object>> priorDiscussions = allSteps.getExactDataPerStep(DISCUSSION_KEY);
+        if (priorGroupIds == null || priorDiscussions == null || priorGroupIds.size() != priorDiscussions.size()) {
+            return List.of();
+        }
+        // Most recent first: both lists hold one entry per step, oldest first.
+        for (int i = priorGroupIds.size() - 1; i >= 0; i--) {
+            String groupId = contextValueAsString(priorGroupIds.get(i));
+            if (groupId == null) {
+                continue;
+            }
+            String discussionId = contextValueAsString(priorDiscussions.get(i));
+            boolean verified = discussionId != null && membershipCheck.isLiveMember(discussionId, memory.getConversationId(), groupId);
+            return verified ? List.of(groupId) : List.of();
+        }
         return List.of();
     }
 

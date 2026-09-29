@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -67,17 +69,25 @@ class ReservedContextKeyExactLookupTest {
     }
 
     @Test
-    @DisplayName("an earlier step's groupIdSuffix does not shadow that step's groupId")
+    @DisplayName("an earlier step's groupIdSuffix is not paired with a real discussion")
     void groupIdSuffix_onAnEarlierStep_isIgnored() {
         var memory = memory();
-        // Earlier step: the pair the orchestrator wrote, then a forged suffix key
-        // stored after it — a prefix lookup would return the forgery.
+        // Earlier step: the verified pair the orchestrator wrote, then a forged
+        // suffix key stored after it — a prefix lookup would return the forgery and
+        // the membership check would compare it against gc-1's group.
         putContext(memory, "groupId", "my-group");
         putContext(memory, "groupConversationId", "gc-1");
         putContext(memory, "groupIdSuffix", "another-teams-group");
         memory.startNextStep();
 
-        assertEquals(List.of("my-group"), ConversationGroups.resolveGroupIds(memory));
+        var registry = new LiveDiscussionRegistry();
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("my-group");
+        gc.getMemberConversationIds().put("agent-1", "conv-1");
+        registry.register(gc);
+
+        assertEquals(List.of("my-group"), ConversationGroups.resolveGroupIds(memory, registry::isLiveMember));
     }
 
     @Test

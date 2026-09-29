@@ -58,7 +58,7 @@ class ContextualToolsProviderGroupIdTest {
     void groupIdFromCurrentStepContext_isResolved() {
         var memory = memoryWithCurrentStepContext(new Context(Context.ContextType.string, "group-42"));
 
-        assertEquals(List.of("group-42"), ContextualToolsProvider.resolveGroupIds(memory),
+        assertEquals(List.of("group-42"), ContextualToolsProvider.resolveGroupIds(memory, null),
                 "the context value MemberTurnExecutor injects must reach UserMemoryTool's group scope");
     }
 
@@ -68,7 +68,7 @@ class ContextualToolsProviderGroupIdTest {
         // than a Context wrapper.
         var memory = memoryWithCurrentStepContext("group-7");
 
-        assertEquals(List.of("group-7"), ContextualToolsProvider.resolveGroupIds(memory));
+        assertEquals(List.of("group-7"), ContextualToolsProvider.resolveGroupIds(memory, null));
     }
 
     private static final String DISCUSSION_KEY = "context:groupConversationId";
@@ -104,6 +104,45 @@ class ContextualToolsProviderGroupIdTest {
     }
 
     @Test
+    void groupIdFromAnEarlierStep_isResolvedForAVerifiedMember() {
+        // A turn the owner sends into a member conversation directly carries no group
+        // context, so the value only exists on an earlier step — trusted because the
+        // running discussion confirms this conversation is its member, in that group.
+        var memory = memoryWithEarlierStep("group-earlier", "gc-1");
+
+        assertEquals(List.of("group-earlier"),
+                ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "group-earlier", "conv-1")));
+    }
+
+    @Test
+    void forgedPreGuardGroupId_onAnEarlierStep_isIgnored() {
+        // A client that forged context:groupId before ClientContextGuard existed left
+        // it on an earlier step, with no discussion behind it.
+        var memory = memoryWithEarlierStep("another-teams-group", null);
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, new LiveDiscussionRegistry()).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_notMatchingTheDiscussionsGroup_isIgnored() {
+        var memory = memoryWithEarlierStep("another-teams-group", "gc-1");
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "conv-1")).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_forANonMemberConversation_isIgnored() {
+        var memory = memoryWithEarlierStep("my-group", "gc-1");
+
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, registryWithLiveMember("gc-1", "my-group", "someone-else")).isEmpty());
+    }
+
+    @Test
+    void earlierGroupId_withoutARegistry_isIgnored() {
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memoryWithEarlierStep("my-group", "gc-1"), null).isEmpty());
+    }
+
+    @Test
     void groupIdProperty_doesNotGrantGroupScope() {
         // Properties are client- and input-settable, so they are not evidence of
         // group membership. Only the context value the orchestrator injects counts.
@@ -114,7 +153,7 @@ class ContextualToolsProviderGroupIdTest {
         when(props.get("groupId")).thenReturn(new Property("groupId", "another-teams-group", Property.Scope.conversation));
         when(memory.getConversationProperties()).thenReturn(props);
 
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, null).isEmpty(),
                 "a groupId conversation property must not select a group memory scope");
     }
 
@@ -125,7 +164,7 @@ class ContextualToolsProviderGroupIdTest {
         when(memory.getAllSteps()).thenReturn(null);
         when(memory.getConversationProperties()).thenReturn(null);
 
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, null).isEmpty(),
                 "an ordinary non-group conversation must stay self-scoped");
     }
 
@@ -135,7 +174,7 @@ class ContextualToolsProviderGroupIdTest {
         when(memory.getAllSteps()).thenReturn(null);
         when(memory.getConversationProperties()).thenReturn(null);
 
-        assertTrue(ContextualToolsProvider.resolveGroupIds(memory).isEmpty(),
+        assertTrue(ContextualToolsProvider.resolveGroupIds(memory, null).isEmpty(),
                 "a blank id must not become a real group scope");
     }
 }
