@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.schedule.rest;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -27,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -205,22 +207,22 @@ class RestScheduleStoreTest {
 
     @Test
     void readAll_delegatesToStore() throws Exception {
-        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
 
         List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(0, result.size());
-        verify(scheduleStore).readAllSchedules(eq(500), eq(0), anyBoolean());
+        verify(scheduleStore).readAllSchedules(eq(500), eq(0), anyBoolean(), any());
     }
 
     @Test
     void readAll_filtersByAgentId() throws Exception {
-        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
 
         rest.readAllSchedules("agent-1", 500, 0);
 
-        verify(scheduleStore).readSchedulesByAgentId(eq("agent-1"), eq(500), eq(0), anyBoolean());
-        verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
+        verify(scheduleStore).readSchedulesByAgentId(eq("agent-1"), eq(500), eq(0), anyBoolean(), any());
+        verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean(), any());
     }
 
     // --- Enable / Disable ---
@@ -401,35 +403,35 @@ class RestScheduleStoreTest {
     @Test
     void readAllSchedules_asksTheStoreToExcludeHitlForEditor() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(false);
-        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(makeCronSchedule("r1")));
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of(makeCronSchedule("r1")));
 
         List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(1, result.size());
         assertEquals("r1", result.get(0).getId());
-        verify(scheduleStore).readAllSchedules(500, 0, true);
+        verify(scheduleStore).readAllSchedules(eq(500), eq(0), eq(true), any());
     }
 
     @Test
     void readAllSchedules_byAgentId_asksTheStoreToExcludeHitlForEditor() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(false);
-        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
 
         rest.readAllSchedules("agent-1", 500, 0);
 
-        verify(scheduleStore).readSchedulesByAgentId("agent-1", 500, 0, true);
+        verify(scheduleStore).readSchedulesByAgentId(eq("agent-1"), eq(500), eq(0), eq(true), any());
     }
 
     @Test
     void readAllSchedules_showsHitlForAdmin() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(true);
-        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(makeCronSchedule("r1"), hitlSchedule("h1")));
 
         List<ScheduleConfiguration> result = rest.readAllSchedules(null, 500, 0);
 
         assertEquals(2, result.size());
-        verify(scheduleStore).readAllSchedules(500, 0, false);
+        verify(scheduleStore).readAllSchedules(eq(500), eq(0), eq(false), any());
     }
 
     // --- Cross-user schedules: a schedule runs AS its userId ---
@@ -1435,11 +1437,11 @@ class RestScheduleStoreTest {
 
     @Test
     void readAllSchedules_hugeLimit_isCappedAndNegativeOffsetClamped() throws Exception {
-        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
 
         rest.readAllSchedules(null, 999_999, -10);
 
-        verify(scheduleStore).readAllSchedules(eq(1000), eq(0), anyBoolean());
+        verify(scheduleStore).readAllSchedules(eq(1000), eq(0), anyBoolean(), any());
     }
 
     // --- Heartbeat descriptions ---
@@ -1523,5 +1525,188 @@ class RestScheduleStoreTest {
      */
     private static ResourceAccessGuard permissiveResourceGuard() {
         return mock(ResourceAccessGuard.class);
+    }
+
+    // --- Finding 3: create must not seed a caller-supplied
+    // persistentConversationId ---
+
+    @Test
+    void createSchedule_clearsCallerSuppliedPersistentConversationId() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.createSchedule(any())).thenReturn("c1");
+
+        var body = makeCronSchedule("c1");
+        body.setUserId("editor-1");
+        body.setPersistentConversationId("victim-conversation-42");
+
+        Response response = rest.createSchedule(body);
+        assertEquals(201, response.getStatus());
+
+        ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).createSchedule(captor.capture());
+        assertNull(captor.getValue().getPersistentConversationId(),
+                "create must not persist a caller-supplied persistentConversationId");
+    }
+
+    // --- Finding 4: ownership on schedule reads and state-changers ---
+
+    @Test
+    void deleteSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s1");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s1")).thenReturn(stored);
+
+        Response response = rest.deleteSchedule("s1");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).deleteSchedule(anyString());
+    }
+
+    @Test
+    void deleteSchedule_ownSchedule_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s2");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s2")).thenReturn(stored);
+
+        Response response = rest.deleteSchedule("s2");
+
+        assertEquals(204, response.getStatus());
+        verify(scheduleStore).deleteSchedule("s2");
+    }
+
+    @Test
+    void deleteSchedule_downstreamStatusIsPreserved_notFlattenedTo500() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s2");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s2")).thenReturn(stored);
+        doThrow(new NotFoundException("gone")).when(scheduleStore).deleteSchedule("s2");
+
+        assertThrows(NotFoundException.class, () -> rest.deleteSchedule("s2"));
+    }
+
+    @Test
+    void disableSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s3");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s3")).thenReturn(stored);
+
+        Response response = rest.disableSchedule("s3");
+
+        assertEquals(403, response.getStatus());
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+    }
+
+    @Test
+    void readSchedule_ofAnotherUsersSchedule_forbiddenForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s4");
+        stored.setUserId("victim-42");
+        when(scheduleStore.readSchedule("s4")).thenReturn(stored);
+
+        assertThrows(ForbiddenException.class, () -> rest.readSchedule("s4"));
+    }
+
+    @Test
+    void readSchedule_ownSchedule_allowedForEditor() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("s5");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("s5")).thenReturn(stored);
+
+        assertEquals("s5", rest.readSchedule("s5").getId());
+    }
+
+    @Test
+    void readAllSchedules_filtersOtherUsersSchedulesForEditor() throws Exception {
+        asEditor("editor-1");
+        var own = makeCronSchedule("own");
+        own.setUserId("editor-1");
+        var other = makeCronSchedule("other");
+        other.setUserId("victim-42");
+        var system = makeCronSchedule("system"); // userId null -> system/shared
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), eq(true), any())).thenReturn(List.of(own, other, system));
+
+        List<ScheduleConfiguration> visible = rest.readAllSchedules(null, 500, 0);
+
+        assertEquals(2, visible.size());
+        assertTrue(visible.stream().noneMatch(s -> "victim-42".equals(s.getUserId())),
+                "an editor must not see another user's schedule in the listing");
+    }
+
+    @Test
+    void readAllSchedules_adminSeesAll() throws Exception {
+        asAdmin("root");
+        var own = makeCronSchedule("own");
+        own.setUserId("editor-1");
+        var other = makeCronSchedule("other");
+        other.setUserId("victim-42");
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), eq(false), any())).thenReturn(List.of(own, other));
+
+        assertEquals(2, rest.readAllSchedules(null, 500, 0).size());
+        verify(scheduleStore).readAllSchedules(eq(500), eq(0), eq(false), eq(ScheduleOwnerScope.ALL));
+    }
+
+    /**
+     * The owner filter is part of the store query, so limit/offset count only the
+     * rows the caller may see. When it was applied to the fetched page, an editor
+     * whose newest rows belonged to other users got a short or empty page, which
+     * the documented paging contract (only a response holding exactly 'limit'
+     * entries may be truncated) tells a client to treat as the end.
+     */
+    @Test
+    void readAllSchedules_editorPageIsFilledWithOwnSchedules_whenNewerRowsBelongToOthers() throws Exception {
+        asEditor("editor-1");
+        var rows = new ArrayList<ScheduleConfiguration>(); // newest first, as the store orders them
+        for (int i = 0; i < 5; i++) {
+            var other = makeCronSchedule("other" + i);
+            other.setUserId("victim-42");
+            rows.add(other);
+        }
+        for (int i = 0; i < 3; i++) {
+            var own = makeCronSchedule("own" + i);
+            own.setUserId("editor-1");
+            rows.add(own);
+        }
+        rows.add(makeCronSchedule("shared")); // no owner
+        // A fake store honouring limit/offset and the pushed-down owner scope.
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenAnswer(inv -> {
+            int limit = inv.getArgument(0);
+            int offset = inv.getArgument(1);
+            ScheduleOwnerScope scope = inv.getArgument(3);
+            return rows.stream().filter(s -> scope.admits(s.getUserId())).skip(offset).limit(limit).toList();
+        });
+
+        List<ScheduleConfiguration> firstPage = rest.readAllSchedules(null, 3, 0);
+        List<ScheduleConfiguration> secondPage = rest.readAllSchedules(null, 3, 3);
+
+        assertEquals(List.of("own0", "own1", "own2"), firstPage.stream().map(ScheduleConfiguration::getId).toList(),
+                "a full first page of the editor's own schedules, not a short page of what survived a post-filter");
+        assertEquals(List.of("shared"), secondPage.stream().map(ScheduleConfiguration::getId).toList());
+        verify(scheduleStore, times(2)).readAllSchedules(anyInt(), anyInt(), eq(true), eq(ScheduleOwnerScope.visibleTo("editor-1")));
+    }
+
+    @Test
+    void readAllSchedules_byAgentId_pushesTheEditorsOwnerScopeIntoTheQuery() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
+
+        rest.readAllSchedules("agent-1", 500, 0);
+
+        verify(scheduleStore).readSchedulesByAgentId("agent-1", 500, 0, true, ScheduleOwnerScope.visibleTo("editor-1"));
+    }
+
+    @Test
+    void readAllSchedules_anonymousNonAdmin_scopedToSharedSchedulesOnly() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(identity.isAnonymous()).thenReturn(true);
+        when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean(), any())).thenReturn(List.of());
+
+        rest.readAllSchedules(null, 500, 0);
+
+        verify(scheduleStore).readAllSchedules(500, 0, true, ScheduleOwnerScope.visibleTo(null));
     }
 }

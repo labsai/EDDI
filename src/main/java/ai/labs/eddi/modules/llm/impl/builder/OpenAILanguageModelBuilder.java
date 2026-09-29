@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -43,6 +44,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     public ChatModel build(Map<String, String> parameters) {
         var builder = OpenAiChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
@@ -70,6 +74,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
         var builder = OpenAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {

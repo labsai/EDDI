@@ -35,6 +35,7 @@ import {
   extractOutputParts,
   extractInputField,
   extractQuickReplies,
+  displayUserInput,
 } from "@/lib/api/conversations";
 import {
   getAgentDescriptors,
@@ -980,7 +981,7 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
   const outputs = snapshot.conversationOutputs ?? [];
   for (let i = 0; i < (snapshot.conversationSteps ?? []).length; i++) {
     const step = snapshot.conversationSteps[i];
-    const input = step ? extractInput(step) : undefined;
+    const input = step ? displayUserInput(extractInput(step)) : undefined;
     const parts = extractOutputParts(outputs[i]);
     if (input) {
       messages.push({

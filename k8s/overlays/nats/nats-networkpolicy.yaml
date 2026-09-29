@@ -1,0 +1,42 @@
+# NetworkPolicy — isolate NATS so only the EDDI pod may use the client protocol.
+#
+# Defense in depth beside the production overlay's EGRESS rules: this restricts
+# INGRESS to NATS. The client port (4222) is EDDI-only; the monitoring port
+# (8222) is left open to same-namespace callers because NATS uses an httpGet
+# readiness probe on it (the kubelet probe and Prometheus scrape arrive from the
+# namespace/node, not from the EDDI pod), so a strict 4222-only rule would keep
+# the pod from ever becoming Ready.
+#
+# Inert on a cluster whose CNI does not enforce NetworkPolicy — never harmful.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats-network-policy
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+      app.kubernetes.io/component: messaging
+  policyTypes:
+    - Ingress
+  ingress:
+    # Client protocol: the EDDI server pod only.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eddi
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 4222
+    # Monitoring/health (8222): any pod in this policy's own namespace, so the
+    # readiness probe and Prometheus keep working.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8222

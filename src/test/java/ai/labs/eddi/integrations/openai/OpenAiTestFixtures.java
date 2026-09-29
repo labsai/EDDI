@@ -49,11 +49,13 @@ final class OpenAiTestFixtures {
         int maxConcurrentRequests = 64;
         int modelCacheSeconds = 30;
         boolean exposeStatelessVariants = true;
+        boolean adoptLegacyHeaderMappings = false;
 
         OpenAiCompatConfig build() {
             return new OpenAiCompatConfig(enabled, Optional.ofNullable(apiKey), httpPolicy,
                     trustUserHeaders, allowAnonymous, defaultUser, environment, requestTimeoutSeconds,
-                    maxConcurrentRequests, modelCacheSeconds, exposeStatelessVariants);
+                    maxConcurrentRequests, modelCacheSeconds, exposeStatelessVariants,
+                    adoptLegacyHeaderMappings);
         }
     }
 }

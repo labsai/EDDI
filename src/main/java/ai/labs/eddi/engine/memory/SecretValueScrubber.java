@@ -18,6 +18,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Removes a known plaintext from the plain values conversation memory is made
@@ -53,7 +55,7 @@ public final class SecretValueScrubber {
      * any other type are not inspected and yield {@code null}.
      */
     public static Object scrubValue(Object value, String plaintext, String placeholder) {
-        return plaintext == null || plaintext.isEmpty() ? null : scrubSorted(value, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : scrubSorted(value, List.of(plaintext), placeholder, false, false);
     }
 
     /**
@@ -64,7 +66,7 @@ public final class SecretValueScrubber {
      */
     public static Object scrubAll(Object value, Collection<String> plaintexts, String placeholder) {
         List<String> sorted = longestFirst(plaintexts);
-        return sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, false);
+        return sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, false, false);
     }
 
     /**
@@ -72,7 +74,7 @@ public final class SecretValueScrubber {
      * removed from its value, or {@code null} when it does not carry it.
      */
     public static Context scrubContext(Context context, String plaintext, String placeholder) {
-        return plaintext == null || plaintext.isEmpty() ? null : (Context) scrubSorted(context, List.of(plaintext), placeholder, false);
+        return plaintext == null || plaintext.isEmpty() ? null : (Context) scrubSorted(context, List.of(plaintext), placeholder, false, false);
     }
 
     /**
@@ -88,7 +90,21 @@ public final class SecretValueScrubber {
      */
     public static Object scrubDeep(Object value, Collection<String> plaintexts, String placeholder) {
         List<String> sorted = longestFirst(plaintexts);
-        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true);
+        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true, false);
+    }
+
+    /**
+     * Like {@link #scrubDeep}, but a plaintext is replaced only where it stands as
+     * a whole token - not directly preceded or followed by a letter or digit. For
+     * values too short to replace verbatim: a three-digit PIN copied into a reply
+     * is removed, while the same digits inside a longer number are left alone.
+     *
+     * @return the scrubbed copy, or {@code null} when {@code value} carries none of
+     *         the plaintexts as a whole token
+     */
+    public static Object scrubDeepTokens(Object value, Collection<String> plaintexts, String placeholder) {
+        List<String> sorted = longestFirst(plaintexts);
+        return value == null || sorted.isEmpty() ? null : scrubSorted(value, sorted, placeholder, true, true);
     }
 
     /**
@@ -128,16 +144,16 @@ public final class SecretValueScrubber {
      *            whether objects outside strings, numbers, lists, maps and contexts
      *            are scrubbed through their JSON form
      */
-    private static Object scrubSorted(Object value, List<String> plaintexts, String placeholder, boolean deep) {
+    private static Object scrubSorted(Object value, List<String> plaintexts, String placeholder, boolean deep, boolean wholeToken) {
         if (value instanceof String text) {
-            String cleaned = replaceAll(text, plaintexts, placeholder);
+            String cleaned = replaceAll(text, plaintexts, placeholder, wholeToken);
             return cleaned.equals(text) ? null : cleaned;
         }
         if (value instanceof Number number) {
             return plaintexts.contains(String.valueOf(number)) ? placeholder : null;
         }
         if (value instanceof Context context) {
-            Object cleaned = scrubSorted(context.getValue(), plaintexts, placeholder, deep);
+            Object cleaned = scrubSorted(context.getValue(), plaintexts, placeholder, deep, wholeToken);
             if (cleaned == null) {
                 return null;
             }
@@ -149,7 +165,7 @@ public final class SecretValueScrubber {
             List<Object> copy = new ArrayList<>(list);
             boolean changed = false;
             for (int i = 0; i < copy.size(); i++) {
-                Object cleaned = scrubSorted(copy.get(i), plaintexts, placeholder, deep);
+                Object cleaned = scrubSorted(copy.get(i), plaintexts, placeholder, deep, wholeToken);
                 if (cleaned != null) {
                     copy.set(i, cleaned);
                     changed = true;
@@ -162,8 +178,8 @@ public final class SecretValueScrubber {
             boolean changed = false;
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                String cleanedKey = replaceAll(key, plaintexts, placeholder);
-                Object cleaned = scrubSorted(entry.getValue(), plaintexts, placeholder, deep);
+                String cleanedKey = replaceAll(key, plaintexts, placeholder, wholeToken);
+                Object cleaned = scrubSorted(entry.getValue(), plaintexts, placeholder, deep, wholeToken);
                 copy.put(cleanedKey, cleaned != null ? cleaned : entry.getValue());
                 changed |= cleaned != null || !cleanedKey.equals(key);
             }
@@ -184,16 +200,26 @@ public final class SecretValueScrubber {
             }
             return null;
         }
-        return tree == null ? null : scrubSorted(tree, plaintexts, placeholder, true);
+        return tree == null ? null : scrubSorted(tree, plaintexts, placeholder, true, wholeToken);
     }
 
-    private static String replaceAll(String text, List<String> plaintexts, String placeholder) {
+    private static String replaceAll(String text, List<String> plaintexts, String placeholder, boolean wholeToken) {
         String cleaned = text;
         for (String plaintext : plaintexts) {
-            cleaned = cleaned.replace(plaintext, placeholder);
+            if (wholeToken) {
+                cleaned = Pattern.compile(TOKEN_START + Pattern.quote(plaintext) + TOKEN_END)
+                        .matcher(cleaned).replaceAll(Matcher.quoteReplacement(placeholder));
+            } else {
+                cleaned = cleaned.replace(plaintext, placeholder);
+            }
         }
         return cleaned;
     }
+
+    /** No letter or digit directly before the match. */
+    private static final String TOKEN_START = "(?<![\\p{L}\\p{N}])";
+    /** No letter or digit directly after the match. */
+    private static final String TOKEN_END = "(?![\\p{L}\\p{N}])";
 
     /**
      * Adds every string, number and boolean found in {@code value} (walking lists

@@ -595,4 +595,28 @@ class SecretRedactionFilterTest {
             assertEquals("{\"password\":\"<REDACTED>\",\"n\":1}", result);
         }
     }
+
+    @Nested
+    class StructuredCredentialFields {
+
+        @Test
+        void credentialFieldNamesMatchTheNameBoundRules() {
+            assertTrue(SecretRedactionFilter.isCredentialFieldName("apiKey"));
+            assertTrue(SecretRedactionFilter.isCredentialFieldName("api_key"));
+            assertTrue(SecretRedactionFilter.isCredentialFieldName("clientSecret"));
+            assertTrue(SecretRedactionFilter.isCredentialFieldName("Authorization"));
+            assertTrue(SecretRedactionFilter.isCredentialFieldName("refresh_token"));
+            assertFalse(SecretRedactionFilter.isCredentialFieldName("name"));
+            assertFalse(SecretRedactionFilter.isCredentialFieldName(null));
+        }
+
+        @Test
+        void maskCredentialValueMasksShapelessValuesButKeepsExemptions() {
+            assertEquals("<REDACTED>", SecretRedactionFilter.maskCredentialValue("mytenantsecret12345"));
+            assertEquals("short", SecretRedactionFilter.maskCredentialValue("short"));
+            assertEquals("${vault:tenant-key}", SecretRedactionFilter.maskCredentialValue("${vault:tenant-key}"));
+            assertEquals("<REDACTED>", SecretRedactionFilter.maskCredentialValue("<REDACTED>"));
+            assertNull(SecretRedactionFilter.maskCredentialValue(null));
+        }
+    }
 }

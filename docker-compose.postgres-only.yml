@@ -38,9 +38,12 @@ services:
       EDDI_VAULT_MASTER_KEY: "${EDDI_VAULT_MASTER_KEY:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Bound to 127.0.0.1 by default, same reasoning as docker-compose.yml: EDDI
+    # ships unauthenticated, so it must not be off-box reachable out of the box.
+    # Set EDDI_BIND=0.0.0.0 in .env to expose it — after enabling auth.
     ports:
-      - "${EDDI_PORT:-7070}:7070"
-      - "${EDDI_HTTPS_PORT:-7443}:7443"
+      - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+      - "${EDDI_BIND:-127.0.0.1}:${EDDI_HTTPS_PORT:-7443}:7443"
     depends_on:
       postgres:
         condition: service_healthy

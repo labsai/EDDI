@@ -112,4 +112,37 @@ class RestAgentTriggerStoreTest {
 
         verify(cache, never()).remove("broken");
     }
+
+    // --- Finding 4: a trigger carries no owner, so edit/delete is gated on USE of
+    // the agents it currently routes to (a foreign editor must not re-point or
+    // remove another team's trigger). ---
+
+    private static AgentTriggerConfiguration triggerRouting(String intent, String agentId) {
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(agentId);
+        var configuration = new AgentTriggerConfiguration();
+        configuration.setIntent(intent);
+        configuration.getAgentDeployments().add(deployment);
+        return configuration;
+    }
+
+    @Test
+    void deleteAgentTrigger_storedTriggerRoutesToAgentCallerMayNotUse_refused() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("greeting")).thenReturn(triggerRouting("greeting", "abcdef1234567890abcdef"));
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireAgentUseAccess("abcdef1234567890abcdef");
+
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.deleteAgentTrigger("greeting"));
+        verify(agentTriggerStore, never()).deleteAgentTrigger("greeting");
+        verify(cache, never()).remove("greeting");
+    }
+
+    @Test
+    void updateAgentTrigger_storedTriggerRoutesToAgentCallerMayNotUse_refused() throws Exception {
+        when(agentTriggerStore.readAgentTrigger("greeting")).thenReturn(triggerRouting("greeting", "abcdef1234567890abcdef"));
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireAgentUseAccess("abcdef1234567890abcdef");
+
+        var newConfig = triggerRouting("greeting", "0000111122223333aaaabbbb");
+        assertThrows(ForbiddenException.class, () -> restAgentTriggerStore.updateAgentTrigger("greeting", newConfig));
+        verify(agentTriggerStore, never()).updateAgentTrigger(anyString(), any());
+    }
 }

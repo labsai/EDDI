@@ -138,6 +138,74 @@ function applyColorOverrides(params: URLSearchParams): void {
   }
 }
 
+/**
+ * Sanitize the `?apiServer=` param so it can never redirect API traffic
+ * off-origin. This is an ALLOW-list, not a deny-list: the value must be a clean
+ * same-origin absolute path (a single leading `/`, as the dev proxy and sub-path
+ * deployments use). A deny-list was bypassable — `?apiServer=%09https://attacker`
+ * decodes to a leading TAB, which no scheme/`//`/`\` test matches, but the WHATWG
+ * URL parser strips before resolving, turning `${base}${path}` into the attacker
+ * origin and leaking the bearer token. So anything carrying a control character
+ * or whitespace (the smuggling vector), a backslash, or not starting with a
+ * single `/` is rejected.
+ */
+export function sanitizeApiServer(raw: string | null): string | null {
+  if (!raw) return null;
+  const rejected =
+    /[\u0000- \u007f\\]/.test(raw) || // control chars, whitespace, DEL, backslash
+    !raw.startsWith("/") || // must be an absolute path...
+    raw.startsWith("//"); // ...but not a protocol-relative //host
+  if (rejected) {
+    console.warn(
+      "[eddi-chat] ignoring apiServer query param: only a clean same-origin path (single leading '/') is allowed",
+    );
+    return null;
+  }
+  return raw;
+}
+
+/**
+ * Origins allowed to hand the widget a bearer token via postMessage, read from
+ * `?tokenOrigin=` (comma-separated, exact `scheme://host[:port]` each). This is
+ * an explicit operator opt-in: with no value, no postMessage token is accepted.
+ * A malformed entry is dropped rather than widening the allow-list.
+ */
+export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
+  const raw = params.get("tokenOrigin");
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => {
+      if (!o) return false;
+      try {
+        return new URL(o).origin === o;
+      } catch {
+        return false;
+      }
+    });
+}
+
+/**
+ * Given a full URL, return the `token` query value (if any) and the same URL
+ * with `token` removed. Pure so it can be unit-tested; the effect below applies
+ * the cleaned URL with history.replaceState.
+ */
+export function stripTokenFromUrl(href: string): {
+  token: string | null;
+  cleanedUrl: string | null;
+} {
+  try {
+    const url = new URL(href);
+    const token = url.searchParams.get("token");
+    if (!token) return { token: null, cleanedUrl: null };
+    url.searchParams.delete("token");
+    return { token, cleanedUrl: url.pathname + url.search + url.hash };
+  } catch {
+    return { token: null, cleanedUrl: null };
+  }
+}
+
 /** Read feature toggles from query parameters */
 function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   const cfg: Partial<ChatConfig> = {};
@@ -204,13 +272,11 @@ export function ChatWidget() {
    */
   const generationRef = useRef(0);
   /**
-   * Raw texts sent this session with secret mode on. The backend stores
-   * `input:initial` unmasked, so a transcript rebuild would print them in
-   * clear; this is the only thing that can mask them client-side.
-   *
-   * Session-scoped by nature: after a reload the widget no longer knows which
-   * past turns were secret, so a rebuild of an older conversation can still
-   * surface them. Masking them properly needs a backend change.
+   * Raw texts sent this session with secret mode on. The backend now scrubs
+   * `input:initial` to the `<secret input>` placeholder for a secret-flagged
+   * turn (Conversation.scrubSecretUserInput), so masking survives a reload on
+   * its own. This session set remains a fallback for turns sent to an older
+   * backend that still persists the raw text; stepsToMessages consults both.
    */
   const secretTextsRef = useRef<Set<string>>(new Set());
   /**
@@ -234,13 +300,59 @@ export function ChatWidget() {
 
   /* ─── Set base URL + auth on mount ──────────── */
   useEffect(() => {
-    setBaseUrl(apiServer ?? state.config.apiBaseUrl ?? "");
+    setBaseUrl(sanitizeApiServer(apiServer) ?? state.config.apiBaseUrl ?? "");
   }, [apiServer, state.config.apiBaseUrl]);
 
   useEffect(() => {
-    // Query param is a convenience for embedding; config is the real channel.
-    setAuthToken(searchParams.get("token") ?? state.config.authToken ?? null);
+    // A bearer token passed as `?token=` is a convenience for embedding, but it
+    // lingers in the address bar, browser history, the Referer header of any
+    // outbound request and server access logs. Consume it once, then strip it
+    // from the URL with replaceState so it does not persist anywhere visible.
+    //
+    // NOTE (residual risk): accepting a token straight from the URL is still a
+    // login-CSRF vector — a crafted link can silently authenticate the widget as
+    // someone else's session. Fully closing this needs a PKCE/OIDC login flow
+    // (out of scope here). Prefer the postMessage handshake below, or config.
+    const urlToken = searchParams.get("token");
+    if (urlToken) {
+      setAuthToken(urlToken);
+      try {
+        const { cleanedUrl } = stripTokenFromUrl(window.location.href);
+        if (cleanedUrl !== null) {
+          window.history.replaceState(window.history.state, "", cleanedUrl);
+        }
+      } catch {
+        // replaceState/URL unavailable (very old embed) — token still set, but
+        // we could not scrub the address bar. Nothing else to do here.
+      }
+    } else {
+      setAuthToken(state.config.authToken ?? null);
+    }
   }, [searchParams, state.config.authToken]);
+
+  /* ─── Accept a token via postMessage from an allow-listed parent ──
+     Safer than the URL: the token never touches the address bar, history or
+     Referer. Only origins named in ?tokenOrigin= are honoured, and only when
+     the message comes from our own parent frame. */
+  useEffect(() => {
+    const allowed = parseAllowedTokenOrigins(searchParams);
+    if (allowed.length === 0) return;
+    const onMessage = (event: MessageEvent) => {
+      if (!allowed.includes(event.origin)) return;
+      if (event.source !== window.parent) return;
+      const data = event.data as unknown;
+      if (
+        data &&
+        typeof data === "object" &&
+        (data as { type?: unknown }).type === "eddi-chat-token" &&
+        typeof (data as { token?: unknown }).token === "string"
+      ) {
+        setAuthToken((data as { token: string }).token);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [searchParams]);
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),

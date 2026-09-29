@@ -164,11 +164,17 @@ RUN mkdir -p /opt/eddi/data && \
       chown -R 185:0 /opt/eddi && \
       chmod -R 775 /opt/eddi
 
-COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
-COPY --chown=185 target/quarkus-app/*.jar /deployments/
-COPY --chown=185 target/quarkus-app/app/ /deployments/app/
-COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
-COPY --chown=185 licenses/ /licenses/
+# Application files are owned by root and group 0, NOT by the runtime user (185).
+# UID 185 belongs to group 0 on the UBI base, so it can READ everything here, but
+# it cannot overwrite its own jars, libraries or config at runtime — code that is
+# compromised at runtime cannot rewrite the code that runs next boot. The
+# writable runtime scratch dirs (/deployments/tmp, /opt/eddi) are chowned to 185:0
+# above precisely because they are the only paths the process must write to.
+COPY --chown=root:0 target/quarkus-app/lib/ /deployments/lib/
+COPY --chown=root:0 target/quarkus-app/*.jar /deployments/
+COPY --chown=root:0 target/quarkus-app/app/ /deployments/app/
+COPY --chown=root:0 target/quarkus-app/quarkus/ /deployments/quarkus/
+COPY --chown=root:0 licenses/ /licenses/
 
 # Documentation served to MCP clients via McpDocResources (eddi://docs/*).
 #
@@ -184,7 +190,7 @@ COPY --chown=185 licenses/ /licenses/
 # GitBook table of contents (whose links point at subdirectories that are
 # intentionally not in the image). docs/security-review.md is kept - it is a
 # published OpenSSF Gold artefact.
-COPY --from=docs --chown=185 /docs/ /deployments/docs/
+COPY --from=docs --chown=root:0 /docs/ /deployments/docs/
 
 # Run as non-root user (UID 185 = jboss user from UBI base image)
 # This is a security requirement — containers MUST NOT run as root

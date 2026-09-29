@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -345,7 +346,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                 )}
               >
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                     {truncateContent(readable!, t("groups.contentTruncated", "[Content truncated]"))}
                   </ReactMarkdown>
                 </div>

@@ -120,6 +120,27 @@ export interface SimpleConversationMemorySnapshot {
   hitlApprovalTimeout?: string;
 }
 
+/**
+ * Placeholder the backend persists in `input:initial` (and the echoed `input`)
+ * for a secret-flagged turn — see Conversation.scrubSecretUserInput. The raw
+ * text is scrubbed server-side, so a rebuilt transcript never carries it.
+ */
+export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
+/** Neutral mask shown in place of the placeholder token (no i18n needed). */
+export const SECRET_INPUT_MASK = "••••••••";
+
+/**
+ * Render a user input for display: map the backend secret placeholder to a mask
+ * so a secret turn shows a masked bubble rather than the raw `<secret input>`
+ * token, and pass anything else through unchanged. Use this at every site that
+ * displays `input:initial`.
+ */
+export function displayUserInput(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value === SECRET_INPUT_PLACEHOLDER ? SECRET_INPUT_MASK : value;
+}
+
 /** Extract user input from a conversation step's key/value pairs */
 export function extractInput(step: SimpleConversationStep): string | undefined {
   const entry = step.conversationStep?.find(

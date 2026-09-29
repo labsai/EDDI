@@ -483,8 +483,17 @@ public class AgentSetupService {
         // Scheme-level check only. Full SSRF validation would reject loopback and
         // private addresses, which is precisely where a local LLM provider lives —
         // the reason this field exists.
-        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
-            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank()) {
+            if (!UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+                throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+            }
+            // A local LLM base URL may point at loopback/private hosts on purpose, but
+            // never at the cloud instance-metadata service (always-on guard).
+            try {
+                UrlValidationUtils.rejectCloudMetadataTarget(request.llmBaseUrl());
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException(e.getMessage(), e);
+            }
         }
         // Validate the HITL config HERE, before a single resource exists.
         // AgentStore.create validates it too, but only at step 7 — so an unusable
