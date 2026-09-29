@@ -75,7 +75,9 @@ class SecretVaultIntegrationTest {
 
         // Create provider with real crypto, mocked persistence
         var saltManager = new VaultSaltManager(persistence);
-        saltManager.initialize(); // Uses legacy salt since mock returns null for meta
+        // No salt and no DEKs yet: a fresh deployment, whose salt is created with the
+        // same insert-if-absent stubbed above.
+        saltManager.initialize();
         provider = new VaultSecretProvider(Optional.of(MASTER_KEY), persistence, saltManager, meterRegistry);
         provider.initMetrics();
         provider.onStartup(new StartupEvent());
@@ -415,9 +417,14 @@ class SecretVaultIntegrationTest {
             // the DEK (a CryptoException in the verification phase).
             var thrown = assertThrows(ISecretProvider.SecretProviderException.class,
                     () -> provider.rotateKek("wrong-old-key", "replacement-master-key-Xq7vR2mK9pL4"));
-            assertEquals("KEK rotation failed", thrown.getMessage());
+            // The refusal names the DEK and says nothing was changed; the cause is still
+            // the
+            // failed unwrap under the wrong old key.
+            assertTrue(thrown.getMessage().startsWith("KEK rotation failed"), thrown.getMessage());
             assertInstanceOf(EnvelopeCrypto.CryptoException.class, thrown.getCause(), "the wrong old key must fail to unwrap the DEK");
             verify(persistence, never()).upsertDek(any());
+            verify(persistence, never()).updateDekWrapping(any(), any());
+            verify(persistence, never()).setMetaValue(anyString(), anyString());
         }
     }
 

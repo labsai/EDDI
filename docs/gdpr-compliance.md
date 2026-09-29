@@ -79,7 +79,7 @@ principal, not a user: erasing or exporting it is refused with 400.
    refusing to recreate a deleted conversation or group discussion, and step 12
    removes any memory it managed to write in the meantime. From this point the
    node's audit ledger also writes the user's pseudonym instead of their id for an
-   hour, so audit entries that cancelled work still flushes while it unwinds — or
+   hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
    that were already queued — do not land raw after step 14.
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
@@ -95,7 +95,7 @@ principal, not a user: erasing or exporting it is refused with 400.
     callback completing afterwards would otherwise mint a new grant), then the OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
 12. User memories — **re-swept**, for writes that landed while the cascade ran
 13. Database logs — userId **pseudonymized** (SHA-256 hash)
-14. Audit ledger — userId **pseudonymized** (SHA-256 hash)
+14. Audit ledger — userId **pseudonymized** (a keyed HMAC in v5 rows, SHA-256 hash in older ones — see [audit-ledger.md](audit-ledger.md))
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 

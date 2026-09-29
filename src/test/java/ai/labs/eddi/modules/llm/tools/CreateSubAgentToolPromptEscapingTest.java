@@ -51,7 +51,7 @@ class CreateSubAgentToolPromptEscapingTest {
 
         SetupResult setupResult = SetupResult.builder().action("setup_complete").agentId("0123456789abcdef76543210").agentName("helper")
                 .provider("openai").model("gpt-4o").deployed(true).deploymentStatus("READY").build();
-        when(agentSetupService.setupAgent(any())).thenReturn(setupResult);
+        when(agentSetupService.setupAgent(any(), any())).thenReturn(setupResult);
     }
 
     @ParameterizedTest
@@ -65,7 +65,7 @@ class CreateSubAgentToolPromptEscapingTest {
         assertTrue(result.contains("Sub-agent created successfully"), result);
 
         var captor = ArgumentCaptor.forClass(SetupAgentRequest.class);
-        verify(agentSetupService).setupAgent(captor.capture());
+        verify(agentSetupService).setupAgent(captor.capture(), any());
         String stored = captor.getValue().systemPrompt();
 
         var engine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());

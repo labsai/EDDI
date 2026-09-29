@@ -205,7 +205,7 @@ class RestSlackWebhookTest {
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
-                    eq(new SlackEventHandler.EventOrigin("T1", null)));
+                    eq(new SlackEventHandler.EventOrigin("T1", null, "secret-b")));
         }
 
         @Test
@@ -224,7 +224,7 @@ class RestSlackWebhookTest {
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-9"), any(), isNull(),
-                    eq(new SlackEventHandler.EventOrigin(null, null)));
+                    eq(new SlackEventHandler.EventOrigin(null, null, "secret-b")));
         }
 
         @Test
@@ -268,7 +268,7 @@ class RestSlackWebhookTest {
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
-                    eq(new SlackEventHandler.EventOrigin("T1", "int-b")));
+                    eq(new SlackEventHandler.EventOrigin("T1", "int-b", "secret-b")));
         }
 
         @Test
@@ -302,7 +302,7 @@ class RestSlackWebhookTest {
 
             assertEquals(200, response.getStatus());
             verify(eventHandler).handleEventAsync(eq("evt-10"), any(), isNull(),
-                    eq(new SlackEventHandler.EventOrigin(null, "int-b")));
+                    eq(new SlackEventHandler.EventOrigin(null, "int-b", "secret-b")));
         }
 
         @Test

@@ -10,6 +10,7 @@ import {
   useDeployedAgents,
   useStartConversation,
   useResumeOrStartConversation,
+  useLoadConversation,
   useSendMessage,
   useEndConversation,
   useUndoConversation,
@@ -34,6 +35,7 @@ import { useDebugStore, isInternalTask, type PipelineEvent } from "@/hooks/use-d
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import { InputHint } from "@/components/chat/input-hint";
+import { SecretInputField } from "./secret-input-field";
 import {
   Bot,
   ChevronDown,
@@ -88,7 +90,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const activeInputField = useChatStore((s) => s.activeInputField);
   const isSecretMode = useChatStore((s) => s.isSecretMode);
   const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
-  const clearInputField = useChatStore((s) => s.clearInputField);
+  // A conversation load is reading: the transcript and its id still belong to
+  // the conversation being left, so nothing may be sent until it settles.
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
 
   // Activity display
   const showActivity = useDebugStore((s) => s.showActivity);
@@ -103,6 +107,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Opening a chat reopens the last conversation; only "New Conversation"
   // deliberately starts a fresh one.
   const openConversation = useResumeOrStartConversation();
+  const loadConversation = useLoadConversation();
   const sendMessage = useSendMessage();
   const endConversation = useEndConversation();
   const undoConversation = useUndoConversation();
@@ -132,6 +137,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   useEffect(() => {
     const agentIdParam = searchParams.get("agentId");
     if (!agentIdParam) return;
+    // "Continue in Chat" names the exact conversation to continue. It used to
+    // be ignored, so the chat reopened the agent's most recent conversation
+    // instead — a different one whenever the user had continued from history.
+    const conversationIdParam = searchParams.get("conversationId");
 
     // Wait for the deployed-agents list before acting, so the display name can be
     // resolved from it (below) rather than falling back to the id and then losing
@@ -153,10 +162,20 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
       setSelectedAgent(agentIdParam, agentName);
     }
 
+    // A named conversation is only READ (the same GET the history list uses to
+    // open one): nothing is started, resumed or sent, so the rule above holds.
+    // Skipped when it is already the open one.
+    if (conversationIdParam && conversationIdParam !== useChatStore.getState().conversationId) {
+      loadConversation.mutate(
+        { agentId: agentIdParam, conversationId: conversationIdParam },
+        { onError: (err) => toast.error(getErrorMessage(err)) },
+      );
+    }
+
     // Remove query params so a refresh does not re-trigger, and so the
     // (ignored) agentName does not linger in the URL.
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, loadConversation, setSearchParams]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -231,21 +250,26 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     if (isSecretMode) discardAll();
   }, [isSecretMode, discardAll]);
 
+  /** Returns whether a send was issued. */
   const handleSend = useCallback(
-    (message: string, isSecret?: boolean) => {
+    (message: string, isSecret?: boolean): boolean => {
+      // Read live, not from the render: a send racing the load's first render
+      // must not reach the conversation being left (useSendMessage refuses it
+      // too, but only after the attachments below were already drained).
+      if (useChatStore.getState().loadingConversationId) return false;
       // Secret turns never carry attachments — a masked bubble must not leak a
       // filename or thumbnail. Discard anything staged (freeing previews and
       // best-effort deleting the blob) instead of forwarding or displaying it.
       if (isSecret) {
-        if (!message.trim()) return; // nothing to send once attachments are dropped
+        if (!message.trim()) return false; // nothing to send once attachments are dropped
         discardAll();
         sendMessage.mutate({ message, isSecret: true });
-        return;
+        return true;
       }
 
       // Guard BEFORE draining the staging area: a no-op send must not clear
       // the user's staged chips.
-      if (!message.trim() && !hasReadyAttachment) return;
+      if (!message.trim() && !hasReadyAttachment) return false;
 
       // Forward only successfully-uploaded attachments as context this turn.
       const sent: SentAttachment[] = takeForSend().map((a: ReadyAttachment) => ({
@@ -262,12 +286,14 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         isSecret,
         attachments: sent.length ? sent : undefined,
       });
+      return true;
     },
     [sendMessage, takeForSend, discardAll, hasReadyAttachment]
   );
 
   const handleQuickReply = useCallback(
     (reply: string) => {
+      if (useChatStore.getState().loadingConversationId) return;
       sendMessage.mutate({ message: reply });
     },
     [sendMessage]
@@ -527,7 +553,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="text-center">
                 <Bot className="mx-auto h-12 w-12 text-muted-foreground/30" />
                 <p className="mt-3 text-sm text-muted-foreground">
-                  {startConversation.isPending || openConversation.isPending
+                  {startConversation.isPending || openConversation.isPending || loadConversation.isPending
                     ? t("chat.thinking")
                     : conversationId
                       ? // An opened conversation that turned out to hold no
@@ -539,7 +565,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                     a conversation by itself, so offer the explicit start here —
                     otherwise the input stays disabled and "New conversation" is
                     hidden until the user re-picks the same agent. */}
-                {!conversationId && !startConversation.isPending && !openConversation.isPending && (
+                {!conversationId && !startConversation.isPending && !openConversation.isPending && !loadConversation.isPending && (
                   <button
                     type="button"
                     onClick={() => handleSelectAgent(selectedAgentId, selectedAgentName ?? selectedAgentId)}
@@ -624,7 +650,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && !conversationBusy && (
+        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -672,16 +698,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             placeholder={activeInputField.placeholder}
             defaultValue={activeInputField.defaultValue}
             subType={activeInputField.subType}
-            onSend={(val) => {
-              handleSend(val, true);
-              clearInputField();
-            }}
-            disabled={isProcessing || isPaused || conversationBusy}
+            // The send clears the field itself, and hands it back if the
+            // backend refuses the message without consuming it.
+            onSend={(val) => handleSend(val, true)}
+            disabled={isProcessing || isPaused || isLoadingConversation || conversationBusy}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId || isPaused || conversationBusy}
+            disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
@@ -712,95 +737,6 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
 /* ─── Inline sub-components ──────────────────── */
 
-/** Password input field rendered when backend requests InputFieldOutputItem */
-function SecretInputField({
-  label,
-  placeholder,
-  defaultValue = "",
-  subType = "password",
-  onSend,
-  disabled = false,
-}: {
-  label?: string;
-  placeholder?: string;
-  defaultValue?: string;
-  subType?: string;
-  onSend: (value: string) => void;
-  disabled?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [value, setValue] = useState(defaultValue);
-  const [visible, setVisible] = useState(false);
-
-  const handleSubmit = () => {
-    const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
-    setValue("");
-  };
-
-  const inputType = visible ? "text" : (subType || "password");
-
-  return (
-    <div className="border-t border-border bg-background p-4">
-      {label && (
-        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-primary" data-testid="secret-input-label">
-          <Lock className="h-3.5 w-3.5" />
-          {label}
-        </div>
-      )}
-      <div className="flex items-end gap-2">
-        <div className="relative flex-1">
-          <input
-            type={inputType}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            placeholder={placeholder || t("chat.secretPlaceholder", "Enter secret value...")}
-            disabled={disabled}
-            autoFocus
-            autoComplete="off"
-            className={cn(
-              "w-full rounded-xl border border-primary/60 bg-card px-4 py-3 pe-10 text-sm",
-              "placeholder:text-muted-foreground",
-              "focus:outline-none focus:ring-2 focus:ring-primary/30",
-              "disabled:cursor-not-allowed disabled:opacity-50"
-            )}
-            data-testid="secret-input-field"
-          />
-          <button
-            type="button"
-            onClick={() => setVisible(!visible)}
-            className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            title={visible ? t("chat.hide", "Hide") : t("chat.show", "Show")}
-            data-testid="secret-input-eye"
-          >
-            {visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-          </button>
-        </div>
-        <button
-          onClick={handleSubmit}
-          disabled={!value.trim() || disabled}
-          className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
-            value.trim() && !disabled
-              ? "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-              : "bg-muted text-muted-foreground cursor-not-allowed"
-          )}
-          data-testid="secret-input-send"
-        >
-          <Send className="h-5 w-5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** ChatInput enhanced with 🔒/🔓 secret mode toggle */
 function ChatInputWithSecretToggle({
   onSend,
@@ -820,7 +756,8 @@ function ChatInputWithSecretToggle({
   onRedo,
   embedded = false,
 }: {
-  onSend: (message: string, isSecret?: boolean) => void;
+  /** Returns whether the message was sent; the draft is kept when it was not. */
+  onSend: (message: string, isSecret?: boolean) => boolean;
   disabled?: boolean;
   isProcessing?: boolean;
   isSecretMode: boolean;
@@ -847,7 +784,7 @@ function ChatInputWithSecretToggle({
     const trimmed = value.trim();
     // Allow an attachment-only turn (empty text) once a file is uploaded.
     if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
-    onSend(trimmed, isSecretMode);
+    if (!onSend(trimmed, isSecretMode)) return;
     setValue("");
     if (isSecretMode) {
       onToggleSecret();

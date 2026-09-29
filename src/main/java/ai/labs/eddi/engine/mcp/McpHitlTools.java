@@ -193,6 +193,9 @@ public class McpHitlTools {
                     ? (snapshot.getHitlPauseType() != null ? snapshot.getHitlPauseType() : "RULE")
                     : "");
             summary.put("pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
@@ -207,14 +210,28 @@ public class McpHitlTools {
         }
     }
 
+    /** {@code resume_conversation} without a {@code pauseId}. */
+    public String resumeConversation(String conversationId, String verdict, String note) {
+        return resumeConversation(conversationId, verdict, note, null);
+    }
+
+    /**
+     * {@code pauseId} is optional. Passed, the decision applies only to that pause:
+     * a conversation that has since been resumed and paused again answers
+     * {@code PAUSE_CHANGED} instead of approving a request the caller never saw.
+     */
     @Tool(name = "resume_conversation",
           description = "Resume a paused regular conversation with a human decision. verdict=APPROVED or REJECTED "
                   + "(case-insensitive). Resolves both RULE and TOOL_CALL pauses. The decision is attributed to the "
-                  + "authenticated caller.")
+                  + "authenticated caller. Pass pauseId (from get_approval_status) to bind the decision to the pause "
+                  + "you reviewed: if the conversation has since paused again on a different request, the decision "
+                  + "is refused with errorCode PAUSE_CHANGED.")
     public String resumeConversation(
                                      @ToolArg(description = "Conversation ID awaiting approval") String conversationId,
                                      @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
-                                     @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note) {
+                                     @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
+                                     @ToolArg(description = "pauseId from get_approval_status — the pause this decision is for",
+                                              required = false) String pauseId) {
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -236,6 +253,7 @@ public class McpHitlTools {
             decision.setVerdict(parsed);
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
+            decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
             conversationService.resumeConversation(conversationId, decision, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "regular", "verdict", parsed.name()).increment();
             return "{\"status\":\"RESUMED\",\"conversationId\":\"" + escapeJsonString(conversationId)
@@ -244,6 +262,9 @@ public class McpHitlTools {
             return errorJson("Access denied", "FORBIDDEN", null);
         } catch (ResourceNotFoundException e) {
             return errorJson("Conversation not found", "NOT_FOUND", null);
+        } catch (IConversationService.PauseMismatchException e) {
+            return errorJson("The pending approval changed since this decision was made — re-read get_approval_status "
+                    + "and decide again", "PAUSE_CHANGED", null);
         } catch (IllegalStateException e) {
             String state;
             try {
@@ -372,6 +393,9 @@ public class McpHitlTools {
             summary.put("groupConversationId", conversationId);
             summary.put("state", gc.getState() != null ? gc.getState().name() : "");
             summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
@@ -397,18 +421,33 @@ public class McpHitlTools {
         }
     }
 
+    /** {@code approve_group_phase} without a {@code pauseId}. */
+    public String approveGroupPhase(String groupId, String conversationId, String verdict, String note,
+                                    String taskApprovalsJson) {
+        return approveGroupPhase(groupId, conversationId, verdict, note, taskApprovalsJson, null);
+    }
+
+    /**
+     * {@code pauseId} is optional. Passed, the decision applies only to that pause:
+     * a discussion that has since been resumed and paused again answers
+     * {@code PAUSE_CHANGED} instead of approving something the caller never saw.
+     */
     @Tool(name = "approve_group_phase",
           description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
                   + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
                   + "task-id to APPROVED/REJECTED. Returns the resumed group conversation. The decision is attributed "
-                  + "to the authenticated caller.")
+                  + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
+                  + "to the pause you reviewed: if the discussion has since paused again, the decision is refused "
+                  + "with errorCode PAUSE_CHANGED.")
     @SuppressWarnings("unchecked")
     public String approveGroupPhase(
                                     @ToolArg(description = "Group ID") String groupId,
                                     @ToolArg(description = "Group conversation ID") String conversationId,
                                     @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
                                     @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
-                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson) {
+                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson,
+                                    @ToolArg(description = "pauseId from get_group_approval_status — the pause this decision is for",
+                                             required = false) String pauseId) {
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -453,6 +492,7 @@ public class McpHitlTools {
             decision.setVerdict(parsed);
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
+            decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
             GroupApprovalRequest request = new GroupApprovalRequest();
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
@@ -468,6 +508,9 @@ public class McpHitlTools {
         } catch (ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {
             return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            return errorJson("The pending approval changed since this decision was made — re-read "
+                    + "get_group_approval_status and decide again", "PAUSE_CHANGED", null);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                     + "or already approved", "WRONG_STATE", null);

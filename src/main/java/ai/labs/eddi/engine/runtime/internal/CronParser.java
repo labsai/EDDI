@@ -6,9 +6,12 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.zone.ZoneRules;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +66,11 @@ public final class CronParser {
 
     /**
      * Compute the next fire time after the given instant, in the given time zone.
+     * <p>
+     * Across a DST transition a fixed-time expression ({@code 30 2 * * *}) fires
+     * once per day: a skipped local time fires at the transition, a repeated one
+     * only at its first occurrence. Wildcard expressions follow real time. See
+     * {@link #isFixedTime}.
      *
      * @param cronExpression
      *            5-field cron expression
@@ -91,8 +99,15 @@ public final class CronParser {
         // field is always true, so the AND below reduces to the restricted field.
         boolean bothDayFieldsRestricted = !parts[2].trim().startsWith("*") && !parts[4].trim().startsWith("*");
 
-        // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute
-        // boundary)
+        if (isFixedTime(parts)) {
+            return nextFixedTimeFire(after, zoneId, minutes, hours, daysOfMonth, months, daysOfWeek, bothDayFieldsRestricted, cronExpression);
+        }
+
+        // Wildcard job: walk forward minute-by-minute in REAL time from 'after + 1
+        // minute' (aligned to minute boundary). Instant arithmetic is the right
+        // semantics here — "every 15 minutes" keeps firing every 15 real minutes
+        // through a fall-back hour, and a spring-forward gap simply has no local
+        // minutes to match.
         ZonedDateTime candidate = after.atZone(zoneId).withSecond(0).withNano(0).plusMinutes(1);
 
         // Safety: max 2 years of scanning (covers leap years + DST)
@@ -125,6 +140,75 @@ public final class CronParser {
         }
 
         throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+    }
+
+    /**
+     * Whether this is a "fixed-time" job in Vixie cron's sense: neither the minute
+     * nor the hour field starts with {@code *}. Such a job names wall-clock times
+     * ("02:30 every day"), and across a DST transition it must fire exactly once
+     * per matching local time:
+     * <ul>
+     * <li>a local time the clocks skip (spring forward) fires at the moment of the
+     * transition instead of being lost for the day;</li>
+     * <li>a local time the clocks repeat (fall back) fires only at its first
+     * occurrence, not twice.</li>
+     * </ul>
+     * Wildcard jobs ({@code *}/15 * * * *, 5 * * * *) keep real-time semantics.
+     */
+    static boolean isFixedTime(String[] parts) {
+        return !parts[0].trim().startsWith("*") && !parts[1].trim().startsWith("*");
+    }
+
+    /**
+     * Next fire of a fixed-time job (see {@link #isFixedTime}). Walks LOCAL
+     * date-times — so every wall-clock time is visited exactly once, whatever the
+     * offset does — and resolves each match to an instant with the DST rules above.
+     * That mapping is monotonic in local time, so the first match that resolves to
+     * an instant after {@code after} is the next fire.
+     */
+    private static Instant nextFixedTimeFire(Instant after, ZoneId zoneId, Set<Integer> minutes, Set<Integer> hours, Set<Integer> daysOfMonth,
+                                             Set<Integer> months, Set<Integer> daysOfWeek, boolean bothDayFieldsRestricted, String cronExpression) {
+        ZoneRules rules = zoneId.getRules();
+        LocalDateTime candidate = LocalDateTime.ofInstant(after, zoneId).withSecond(0).withNano(0).plusMinutes(1);
+        LocalDateTime limit = candidate.plusYears(2);
+
+        while (candidate.isBefore(limit)) {
+            if (!months.contains(candidate.getMonthValue())) {
+                candidate = candidate.plusMonths(1).withDayOfMonth(1).withHour(0).withMinute(0);
+                continue;
+            }
+            if (!dayMatches(candidate.toLocalDate(), daysOfMonth, daysOfWeek, bothDayFieldsRestricted)) {
+                candidate = candidate.plusDays(1).withHour(0).withMinute(0);
+                continue;
+            }
+            if (!hours.contains(candidate.getHour())) {
+                candidate = candidate.plusHours(1).withMinute(0);
+                continue;
+            }
+            if (minutes.contains(candidate.getMinute())) {
+                Instant fire = resolveWallClock(candidate, rules);
+                if (fire.isAfter(after)) {
+                    return fire;
+                }
+            }
+            candidate = candidate.plusMinutes(1);
+        }
+        throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+    }
+
+    /**
+     * The instant a fixed-time job fires for a local wall-clock time: the time
+     * itself when it exists once, its EARLIER occurrence when the clocks repeat it,
+     * and the transition instant when the clocks skip it.
+     */
+    private static Instant resolveWallClock(LocalDateTime local, ZoneRules rules) {
+        List<ZoneOffset> offsets = rules.getValidOffsets(local);
+        if (offsets.isEmpty()) {
+            return rules.getTransition(local).getInstant();
+        }
+        // In an overlap the list is [offset before, offset after]; the offset before
+        // the transition gives the earlier instant.
+        return local.toInstant(offsets.get(0));
     }
 
     /**

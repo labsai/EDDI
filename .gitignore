@@ -128,10 +128,15 @@ __pycache__/
 *.py[cod]
 
 # ui/manager/.claude holds the Manager's tracked Claude Code skills and launch.json.
-# The `.claude/` rule above would ignore any new file there; re-include the directory
-# and keep only the machine-local settings file out.
+# The `.claude/` rule above would ignore any new file there, so the directory is
+# re-included — and then everything in it re-excluded except those two, the same
+# shape as the root block below. Re-including the whole directory let anything
+# Claude Code writes there (settings.local.json, a worktrees/ checkout of the whole
+# repository) become addable.
 !ui/manager/.claude/
-ui/manager/.claude/settings.local.json
+ui/manager/.claude/*
+!ui/manager/.claude/skills/
+!ui/manager/.claude/launch.json
 
 # Repo-root .claude/skills holds tracked, shared Claude Code skills (the backend's
 # counterpart to ui/manager/.claude/skills). The `.claude/` rule above ignores the
@@ -139,9 +144,14 @@ ui/manager/.claude/settings.local.json
 # re-included file — so the parent has to be un-ignored first, then re-excluded for
 # everything that is genuinely machine-local: settings.local.json, worktrees/ and
 # the local workflow scratch.
-!.claude/
-.claude/*
-!.claude/skills/
+#
+# All three are anchored with a leading `/`. An unanchored `!.claude/` matches a
+# .claude/ directory at ANY depth, while `.claude/*` (slash in the middle) is
+# already root-only — so a nested ui/chat/.claude/ or src/.claude/ was re-included
+# and nothing re-excluded its contents, settings.local.json included.
+!/.claude/
+/.claude/*
+!/.claude/skills/
 
 # === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
 # frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
