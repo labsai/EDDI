@@ -453,6 +453,7 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a newly created NAMED entry is left alone by rollback")
         void namedEntryIsNotRollbackFodder() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             vaultApiKey(KEY, "openai-prod");
 
@@ -510,46 +511,75 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a tenant-qualified name is created in that tenant")
         void tenantQualifiedNameStaysInItsTenant() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             assertEquals("${vault:acme/openai-prod}", vaultApiKey(KEY, "${vault:acme/openai-prod}"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
             assertEquals("acme", ref.getValue().tenantId());
             assertEquals("openai-prod", ref.getValue().keyName());
         }
 
         /**
-         * store is an UPSERT and the absent-then-create sequence is not atomic, so two
-         * setups naming one key with different values can both find it missing and both
-         * write. Reading back turns the common interleaving into a loud failure before
-         * any document exists, instead of an agent provisioned against the other
-         * caller's credential.
+         * Two setups naming one key both find it absent; the atomic insert lets exactly
+         * one create it. The loser must not overwrite it — and must not proceed as if
+         * it had created it either.
          */
         @Test
-        @DisplayName("a value overwritten concurrently is detected, not accepted")
-        void concurrentOverwriteIsDetected() throws Exception {
+        @DisplayName("losing the create race to a DIFFERENT value fails instead of overwriting")
+        void losingTheRaceToADifferentValueFails() throws Exception {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
                     .thenReturn(entry("openai-prod", "the-other-callers-key", Instant.EPOCH, List.of("*")));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
-            assertTrue(e.getMessage().contains("written concurrently"), e.getMessage());
+            assertTrue(e.getMessage().contains("created concurrently"), e.getMessage());
+            // The unconditional upsert is what made the old read-back a best effort.
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("losing the create race to the SAME value reuses the winner's entry")
+        void losingTheRaceToTheSameValueReuses() throws Exception {
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
+
+            assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
+
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            // Not ours: nothing was created, so the resolver cache is left alone.
+            verify(secretResolver, never()).invalidateCache(any(SecretReference.class));
+        }
+
+        @Test
+        @DisplayName("a store failure while creating a named key is reported, not swallowed")
+        void namedCreateFailureIsReported() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("absent"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any()))
+                    .thenThrow(new ISecretProvider.SecretProviderException("disk full"));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("disk full"), e.getMessage());
         }
 
         @Test
         @DisplayName("a missing entry is created under exactly that name")
         void createsUnderTheGivenName() throws Exception {
-            when(secretProvider.getMetadata(any()))
-                    .thenThrow(new ISecretProvider.SecretNotFoundException("nope"))
-                    .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
             assertEquals("openai-prod", ref.getValue().keyName());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
         @Test

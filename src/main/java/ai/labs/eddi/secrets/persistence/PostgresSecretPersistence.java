@@ -159,6 +159,35 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean insertSecretIfAbsent(EncryptedSecret secret) {
+        ensureSchema();
+        String sql = """
+                INSERT INTO secret_vault_secrets
+                    (tenant_id, key_name, encrypted_value, iv, dek_id, checksum,
+                     description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                ON CONFLICT (tenant_id, key_name) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, secret.getTenantId());
+            ps.setString(2, secret.getKeyName());
+            ps.setString(3, secret.getEncryptedValue());
+            ps.setString(4, secret.getIv());
+            ps.setString(5, secret.getDekId());
+            ps.setString(6, secret.getChecksum());
+            ps.setString(7, secret.getDescription());
+            ps.setString(8, MAPPER.writeValueAsString(secret.getAllowedAgents() != null ? secret.getAllowedAgents() : List.of("*")));
+            ps.setTimestamp(9, instantToTimestamp(secret.getCreatedAt()));
+            ps.setTimestamp(10, instantToTimestamp(secret.getLastAccessedAt()));
+            ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
+            // The affected-row count is the answer: 0 means the conflict arm fired.
+            return ps.executeUpdate() > 0;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to insert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
+    @Override
     public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
         ensureSchema();
         String sql = "SELECT * FROM secret_vault_secrets WHERE tenant_id = ? AND key_name = ?";
