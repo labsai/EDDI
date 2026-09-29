@@ -105,6 +105,23 @@ class ConversationAgentVersionTest {
         assertEquals(Map.of("from", 5, "to", 7), changeOnCurrentStep());
     }
 
+    /**
+     * Detailed snapshots list a step's data in insertion order, and clients read it
+     * by position (AgentEngineIT reads conversationStep[0]). Recording the version
+     * first shifted every entry by one; it goes last.
+     */
+    @Test
+    @DisplayName("the version is recorded after the step's own data, keeping its positions")
+    void recordedLast() throws Exception {
+        conversation.init(new HashMap<>());
+        memory.switchAgentVersion(7);
+        conversation.say("hello", new HashMap<>());
+
+        var keys = memory.getCurrentStep().getAllElements().stream().map(data -> data.getKey()).toList();
+        assertEquals(List.of(MemoryKeys.AGENT_VERSION.key(), MemoryKeys.AGENT_VERSION_CHANGE.key()), keys.subList(keys.size() - 2, keys.size()));
+        assertEquals("input:initial", keys.getFirst(), "the step's own data keeps position 0");
+    }
+
     @Test
     @DisplayName("moving to the version it is already on is no move")
     void sameVersionIsNoMove() throws Exception {

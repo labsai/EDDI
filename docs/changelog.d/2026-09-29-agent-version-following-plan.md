@@ -65,6 +65,9 @@ paths around them.
 - **Every step records its version** as step data `agent:version`, and the first step after a
   move records `agent:switch = {from, to}`. The marker is not `agent:version…` because step
   lookups match keys by prefix — the first name tried shadowed the version key in the tests.
+  Both are written at the **end** of the step: detailed snapshots list a step's data in
+  insertion order and clients read it by position, so writing them first shifted every entry
+  (`AgentEngineIT` caught it).
 - A move updates the conversation descriptor's agent URI (best-effort; listings filter on it),
   logs at INFO and increments `eddi_conversation_agent_version_switch_count`. Undo/redo read the
   memory config from any version of the generation when the conversation's own is gone.

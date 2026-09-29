@@ -217,9 +217,10 @@ public final class MemoryKeys {
 
     /**
      * The agent version that ran this step. Written by {@code Conversation} at the
-     * start of every step, so a conversation that followed its agent across
-     * versions can say which version produced each answer — with or without the
-     * audit ledger.
+     * end of every step, so a conversation that followed its agent across versions
+     * can say which version produced each answer — with or without the audit
+     * ledger. At the end, not the start: detailed snapshots list a step's data in
+     * insertion order and clients read it by position.
      *
      * @since 6.5.0
      */

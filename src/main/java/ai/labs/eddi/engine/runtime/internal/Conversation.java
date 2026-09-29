@@ -228,7 +228,6 @@ public class Conversation implements IConversation {
         setConversationState(ConversationState.READY);
 
         addConversationStartAction(conversationMemory.getCurrentStep());
-        recordAgentVersion();
 
         // The config is applied in the constructor, which every turn goes through —
         // init() is only the first of them. Re-applying is harmless but pointless.
@@ -241,6 +240,7 @@ public class Conversation implements IConversation {
             var lifecycleData = prepareLifecycleData("", context, null);
             executeConversationStep(lifecycleData, null);
         } finally {
+            recordAgentVersion();
             checkActionsForConversationEnd();
         }
     }
@@ -429,10 +429,6 @@ public class Conversation implements IConversation {
                 // The turn's starting point for undo — see recordPropertyChanges.
                 propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
-            // A rerun re-executes the current step, possibly on another version than
-            // the one that first ran it — so the version is recorded on every run.
-            recordAgentVersion();
-
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
             executeConversationStep(lifecycleData, restartTaskTypes);
 
@@ -443,6 +439,10 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            // Recorded last, after the pipeline, so a step's existing data keeps its
+            // positions — detailed snapshots are read by index — and on every run: a
+            // rerun re-executes the step, possibly on another version than the first.
+            recordAgentVersion();
             checkActionsForConversationEnd();
 
             if (getConversationState() == ConversationState.IN_PROGRESS) {
