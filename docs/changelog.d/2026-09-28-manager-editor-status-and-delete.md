@@ -37,7 +37,10 @@ only an EDIT grant saw an enabled Delete button, and clicking it returned a 403.
 None of the three pages has a Share entry point.
 
 - New `accessForDetail(descriptors, id, workspacesEnforced)` in `lib/access.ts` reads the level
-  from the version descriptors each page already loads. It only uses the
+  from the version descriptors each page already loads. Since `main` moved version
+  lists to per-id reads (`GET /descriptorstore/descriptors/{id}?version=`,
+  `getDescriptorVersions`), those are what carry the level.
+  `RestDocumentDescriptorStore` stamps it through `redactUnlessOwner`. It only uses the
   descriptor whose URI resolves to this `id`, because `filter=` is a text match
   and can also return a resource whose id merely contains this one.
 - **A missing descriptor is not a missing level.** If no descriptor for this

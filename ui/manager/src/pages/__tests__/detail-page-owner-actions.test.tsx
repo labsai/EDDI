@@ -37,6 +37,27 @@ async function accessSettled(client: QueryClient, agentId: string) {
   });
 }
 
+/**
+ * Answers the per-id descriptor read (`GET /descriptorstore/descriptors/:id`),
+ * which is how every detail page loads its version list — see
+ * `getDescriptorVersions`. The store listing (`…/descriptors?filter=`) is only
+ * the fallback when that read finds nothing.
+ */
+function descriptorRead(resource: (version: number) => string, name: string, callerLevel?: string) {
+  return http.get("*/descriptorstore/descriptors/:id", ({ request }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    return HttpResponse.json(descriptor(resource(version), name, callerLevel));
+  });
+}
+
+/** No descriptor for any version, by id or in the fallback listing. */
+function noDescriptors(listing: string) {
+  return [
+    http.get("*/descriptorstore/descriptors/:id", () => HttpResponse.json({}, { status: 404 })),
+    http.get(listing, () => HttpResponse.json([])),
+  ];
+}
+
 function descriptor(resource: string, name: string, callerLevel?: string) {
   return {
     resource,
@@ -51,11 +72,7 @@ function descriptor(resource: string, name: string, callerLevel?: string) {
 describe("Agent detail — owner-only actions", () => {
   function withLevel(callerLevel?: string) {
     server.use(
-      http.get("*/agentstore/agents/descriptors", () =>
-        HttpResponse.json([
-          descriptor("eddi://ai.labs.agent/agentstore/agents/agent1?version=1", "Support Agent", callerLevel),
-        ]),
-      ),
+      descriptorRead((v) => `eddi://ai.labs.agent/agentstore/agents/agent1?version=${v}`, "Support Agent", callerLevel),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
     renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
@@ -87,7 +104,7 @@ describe("Agent detail — owner-only actions", () => {
       http.get("*/workspaces", () =>
         HttpResponse.json({ enabled: true, principal: "editor", spaces: [], seesEverything: false }),
       ),
-      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      ...noDescriptors("*/agentstore/agents/descriptors"),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
     const { queryClient } = renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
@@ -101,7 +118,7 @@ describe("Agent detail — owner-only actions", () => {
     // off", a 502 here offered Delete to anyone whose lookup came back empty.
     server.use(
       http.get("*/workspaces", () => HttpResponse.json({}, { status: 502 })),
-      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      ...noDescriptors("*/agentstore/agents/descriptors"),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
     const { queryClient } = renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
@@ -114,7 +131,7 @@ describe("Agent detail — owner-only actions", () => {
   it("keeps Delete when an older backend 404s /workspaces and no descriptor came back", async () => {
     server.use(
       http.get("*/workspaces", () => HttpResponse.json({}, { status: 404 })),
-      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      ...noDescriptors("*/agentstore/agents/descriptors"),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
     renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
@@ -126,7 +143,7 @@ describe("Agent detail — owner-only actions", () => {
       http.get("*/workspaces", () =>
         HttpResponse.json({ enabled: false, spaces: [], seesEverything: true }),
       ),
-      http.get("*/agentstore/agents/descriptors", () => HttpResponse.json([])),
+      ...noDescriptors("*/agentstore/agents/descriptors"),
       http.get("*/agentstore/agents/agent1/currentversion", () => HttpResponse.json(1)),
     );
     renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
@@ -137,10 +154,10 @@ describe("Agent detail — owner-only actions", () => {
 describe("Workflow detail — owner-only actions", () => {
   function withLevel(callerLevel: string) {
     server.use(
-      http.get("*/workflowstore/workflows/descriptors", () =>
-        HttpResponse.json([
-          descriptor("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1", "Support Ticket Pipeline", callerLevel),
-        ]),
+      descriptorRead(
+        (v) => `eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=${v}`,
+        "Support Ticket Pipeline",
+        callerLevel,
       ),
       http.get("*/workflowstore/workflows/wf1/currentversion", () => HttpResponse.json(1)),
     );
@@ -163,11 +180,7 @@ describe("Workflow detail — owner-only actions", () => {
 describe("Resource detail — owner-only actions", () => {
   function withLevel(callerLevel: string) {
     server.use(
-      http.get("*/llmstore/llms/descriptors", () =>
-        HttpResponse.json([
-          descriptor("eddi://ai.labs.llm/llmstore/llms/res1?version=1", "My LLM", callerLevel),
-        ]),
-      ),
+      descriptorRead((v) => `eddi://ai.labs.llm/llmstore/llms/res1?version=${v}`, "My LLM", callerLevel),
       http.get("*/llmstore/llms/res1/currentversion", () => HttpResponse.json(1)),
     );
     renderPage("/manage/resources/llm/res1", <ResourceDetailPage />, "/manage/resources/:type/:id");
