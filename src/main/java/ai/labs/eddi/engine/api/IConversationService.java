@@ -85,6 +85,23 @@ public interface IConversationService {
     void endConversation(String conversationId, String endedBy);
 
     /**
+     * {@link #endConversation(String, String)}, and also record why the
+     * conversation ended so clients can tell the user — see
+     * {@link ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot#getEndReason()}.
+     * A {@code null} reason records nothing. The reason is written after the state,
+     * best-effort: failing to record it never un-ends the conversation.
+     */
+    void endConversation(String conversationId, String endedBy, String endReason);
+
+    /**
+     * End reason for a conversation ended because the agent version it ran on was
+     * taken out of service by an undeploy, with no compatible version to continue
+     * on. Clients that start a fresh conversation for the user on an ended one can
+     * say "this assistant was updated" rather than nothing.
+     */
+    String END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
+
+    /**
      * Get the current state of a conversation (from cache or DB).
      *
      * @throws ConversationNotFoundException

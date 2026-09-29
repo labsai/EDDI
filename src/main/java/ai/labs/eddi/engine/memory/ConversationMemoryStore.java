@@ -58,6 +58,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_VALUE = "value";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
+    private static final String KEY_END_REASON = "endReason";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
     /**
      * Optimistic-concurrency revision — see
@@ -500,6 +501,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         var updateConversationStateField = new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
 
         conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
+    }
+
+    @Override
+    public void setConversationEndReason(String conversationId, String endReason) {
+        conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)),
+                new Document("$set", new Document(KEY_END_REASON, endReason)));
     }
 
     @Override

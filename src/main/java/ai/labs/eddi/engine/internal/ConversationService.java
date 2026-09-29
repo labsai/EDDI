@@ -543,6 +543,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Override
     public void endConversation(String conversationId, String endedBy) {
+        endConversation(conversationId, endedBy, null);
+    }
+
+    @Override
+    public void endConversation(String conversationId, String endedBy, String endReason) {
         long startTime = System.nanoTime();
         // Signal any in-flight resume on this pod (mirrors cancelConversation): a
         // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
@@ -559,6 +564,14 @@ public class ConversationService implements IConversationService, UserErasurePar
         // leave a dead schedule row forever) and clear the persisted bookmark.
         ConversationState previousState = conversationMemoryStore.getConversationState(conversationId);
         setConversationState(conversationId, ConversationState.ENDED);
+        if (endReason != null) {
+            try {
+                conversationMemoryStore.setConversationEndReason(conversationId, endReason);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Conversation %s ended, but its end reason '%s' could not be recorded: %s",
+                        sanitize(conversationId), endReason, e.getMessage());
+            }
+        }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
         // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
         // its
@@ -678,6 +691,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                 message = String.format(message, agentId, conversationId);
                 throw new AgentMismatchException(message);
             }
+
+            rejectIfEnded(conversationMemory);
 
             // HITL fast-fail: a paused conversation cannot consume input — reject
             // promptly (REST: 409) instead of dropping the turn into the 60s
@@ -802,6 +817,24 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * An ended conversation is refused before its agent is looked up.
+     * <p>
+     * The check further down ({@code conversation.isEnded()}) comes after the agent
+     * lookup, so an ended conversation whose agent version had since been
+     * undeployed — the normal state after
+     * {@code undeploy?endAllActiveConversations=true} — answered "agent not ready"
+     * instead of "ended". Clients that recover from an ended conversation by
+     * starting a new one (Slack threads, managed conversations, {@code /v1}) never
+     * saw the signal they recover on, and retried a conversation that could never
+     * answer again.
+     */
+    static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {
+        if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+            throw new ConversationEndedException("Conversation has ended!");
+        }
+    }
+
     static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
             turn.release();
@@ -838,6 +871,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                 message = String.format(message, agentId, conversationId);
                 throw new AgentMismatchException(message);
             }
+
+            rejectIfEnded(conversationMemory);
 
             // HITL fast-fail (mirrors say()): reject input into a paused
             // conversation promptly instead of leaving the SSE stream dangling.

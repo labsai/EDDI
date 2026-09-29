@@ -591,6 +591,7 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setAgentId(conversationMemorySnapshot.getAgentId());
         simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
+        simpleSnapshot.setEndReason(conversationMemorySnapshot.getEndReason());
         simpleSnapshot.setHitlPausedAt(conversationMemorySnapshot.getHitlPausedAt());
         // Task 13: carry the HITL pause type + gated tool-call batch (names-only for
         // consumers) so delegated/MCP surfaces and the group member-turn path can

@@ -118,6 +118,15 @@ public class ConversationMemorySnapshot {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    /**
+     * Why the conversation ended, when the ending path knows a reason worth telling
+     * a client — for example
+     * {@link ai.labs.eddi.engine.api.IConversationService#END_REASON_AGENT_VERSION_RETIRED}.
+     * {@code null} for every other end and for every conversation that has not
+     * ended. Written by a narrow field update when the conversation is ended, never
+     * by a turn; absent in documents written before it existed.
+     */
+    private String endReason;
     private String hitlPausedWorkflowId;
     private int hitlPausedAbsoluteTaskIndex = -1;
     private Instant hitlPausedAt;
@@ -537,6 +546,14 @@ public class ConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(String endReason) {
+        this.endReason = endReason;
     }
 
     public String getHitlPausedWorkflowId() {

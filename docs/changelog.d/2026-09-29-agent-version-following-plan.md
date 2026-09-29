@@ -1,3 +1,38 @@
+## 🐛 fix(conversations): an ended conversation no longer strands a Slack thread or a heartbeat (2026-09-29)
+
+**Repo:** EDDI (`feat/agent-version-following`) — Phase 0 of
+[`planning/agent-version-following-plan.md`](../../planning/agent-version-following-plan.md)
+
+### Why
+
+The idle sweep and `undeploy?endAllActiveConversations=true` both end conversations, and two
+callers never recovered from that: a Slack thread kept sending to its ended conversation and was
+refused on every further message, and a `conversationStrategy=persistent` schedule kept firing into
+its ended conversation until the FAILED fires dead-lettered it.
+
+### What changed
+
+- **`ConversationService.say` / `sayStreaming`** refuse an ENDED conversation before looking its
+  agent up (`rejectIfEnded`). The ended check used to come after the lookup, so an ended
+  conversation whose version had been undeployed — the normal state after `endAll` — answered
+  "agent not ready", which no client recovers from.
+- **Slack** (`SlackEventHandler.openThreadConversation` / `sendInThread`): a mapped conversation
+  that has ended or vanished is replaced by a fresh one, and a conversation that ends between
+  opening and sending (including a queued turn dropped as ENDED) is replaced once and the message
+  resent. When the old conversation ended because its agent version was retired, the thread is told
+  first. A state that cannot be read keeps the conversation — a store hiccup never costs a thread.
+- **`IUserConversationStore.deleteUserConversationIfMatches`** (Mongo + Postgres): the mapping is
+  removed only while it still names the ended conversation, so two messages racing on one ended
+  thread converge on one new conversation. Both stores now also report a raced duplicate insert as
+  `ResourceAlreadyExistsException` (Mongo `E11000`, Postgres `23505`) instead of a raw driver
+  error, which is what the existing create-race recovery listens for.
+- **`ScheduleFireExecutor.resolveOrCreatePersistent`** treats an ENDED conversation like an
+  unreadable one and creates a fresh conversation.
+- **End reason**: `IConversationService.endConversation(id, endedBy, endReason)` records why a
+  conversation ended (`endReason` on the stored and client-facing snapshots, a narrow field update
+  on both stores). `END_REASON_AGENT_VERSION_RETIRED` is the first value; the undeploy path sets it
+  in Phase 3.
+
 ## 📝 docs(planning): conversations follow compatible agent versions (2026-09-29)
 
 **Repo:** EDDI (`docs/agent-version-following`)

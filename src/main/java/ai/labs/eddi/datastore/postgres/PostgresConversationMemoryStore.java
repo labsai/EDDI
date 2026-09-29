@@ -482,6 +482,19 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public void setConversationEndReason(String conversationId, String endReason) {
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{endReason}', to_jsonb(?::text)) WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, endReason);
+            ps.setString(2, conversationId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to set conversation end reason", e);
+        }
+    }
+
+    @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
         ensureSchema();
         String sql = "DELETE FROM conversation_memories WHERE id = ?::uuid";

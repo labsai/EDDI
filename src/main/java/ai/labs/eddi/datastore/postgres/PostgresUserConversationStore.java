@@ -30,6 +30,9 @@ public class PostgresUserConversationStore implements IUserConversationStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresUserConversationStore.class);
 
+    /** Postgres SQLSTATE for a unique violation. */
+    static final String UNIQUE_VIOLATION = "23505";
+
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS user_conversations (
                 intent VARCHAR(255) NOT NULL,
@@ -124,6 +127,16 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             ps.setString(2, userConversation.getUserId());
             ps.setString(3, jsonSerialization.serialize(userConversation));
             ps.executeUpdate();
+        } catch (SQLException e) {
+            // The existence check above and this insert are not atomic: a concurrent
+            // create for the same key lands in between and the primary key rejects
+            // ours. Reported as the check would have reported it, so callers can
+            // resolve the race instead of failing the turn.
+            if (UNIQUE_VIOLATION.equals(e.getSQLState())) {
+                throw new IResourceStore.ResourceAlreadyExistsException(
+                        String.format("UserConversation with intent=%s does already exist", userConversation.getIntent()));
+            }
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
@@ -144,6 +157,22 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             LOGGER.error("Failed to delete user conversation intent=" + sanitize(intent), e);
         }
     }
+
+    @Override
+    public boolean deleteUserConversationIfMatches(String intent, String userId, String conversationId)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "DELETE FROM user_conversations WHERE intent = ? AND user_id = ? AND data->>'conversationId' = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, intent);
+            ps.setString(2, userId);
+            ps.setString(3, conversationId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
     // === GDPR ===
 
     @Override

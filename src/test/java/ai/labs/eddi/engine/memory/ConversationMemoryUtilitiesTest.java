@@ -174,6 +174,18 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("the end reason reaches the client-facing snapshot")
+        void endReasonIsCarried() {
+            var snapshot = buildSnapshotWithOutputs("input:initial");
+            snapshot.setConversationState(ConversationState.ENDED);
+            snapshot.setEndReason("agent-version-retired");
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, false);
+
+            assertEquals("agent-version-retired", simple.getEndReason());
+        }
+
+        @Test
         @DisplayName("returnDetailed=false should filter to input/actions/output")
         void nonDetailedFiltersKeys() {
             var snapshot = buildSnapshotWithOutputs("input:initial", "actions", "output", "internal:debug");

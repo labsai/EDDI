@@ -410,6 +410,56 @@ class ScheduleFireExecutorTest {
         verify(conversationService, never()).startConversation(any(), any(), any(), any());
     }
 
+    /**
+     * An ENDED persistent conversation reads fine but can never take a turn. It
+     * used to be reused: say() refused every fire, and the FAILED outcomes walked
+     * the schedule into backoff and the dead letter. The idle sweep and an undeploy
+     * with endAllActiveConversations both end conversations, so a heartbeat died of
+     * either.
+     */
+    @Test
+    void fire_persistentStrategy_endedConversation_isReplacedAndTheFireCompletes() throws Exception {
+        var schedule = makeCronSchedule("sched-ended", "persistent");
+        schedule.setPersistentConversationId("ended-conv");
+        var ended = new SimpleConversationMemorySnapshot();
+        ended.setConversationState(ConversationState.ENDED);
+        when(conversationService.readConversation(any(), any(), eq("ended-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(ended);
+        when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-fresh", null));
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("conv-fresh"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        assertEquals("conv-fresh", result.conversationId());
+        verify(scheduleStore).setPersistentConversationId("sched-ended", "conv-fresh");
+        verify(conversationService, never()).say(any(), any(), eq("ended-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+    }
+
+    @Test
+    void fire_persistentStrategy_liveConversation_isReused() throws Exception {
+        var schedule = makeCronSchedule("sched-live", "persistent");
+        schedule.setPersistentConversationId("live-conv");
+        var live = new SimpleConversationMemorySnapshot();
+        live.setConversationState(ConversationState.READY);
+        when(conversationService.readConversation(any(), any(), eq("live-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(live);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("live-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        assertEquals("live-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).setPersistentConversationId(anyString(), anyString());
+    }
+
     @Test
     void fire_heartbeat_defaultsPersistentStrategy() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-1", null); // null strategy → defaults to persistent

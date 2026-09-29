@@ -599,6 +599,15 @@ public class ScheduleFireExecutor {
                 if (ownerMismatch) {
                     LOGGER.warnf("[SCHEDULE] Persistent conversation %s is owned by another user than schedule %s — "
                             + "ignoring it and creating a fresh conversation", conversationId, schedule.getId());
+                } else if (snapshot != null && snapshot.getConversationState() == ConversationState.ENDED) {
+                    // An ENDED conversation reads fine but can never take another
+                    // turn: reusing it made say() refuse every fire, and the FAILED
+                    // outcomes walked the schedule into backoff and then the dead
+                    // letter. The idle sweep and an undeploy with
+                    // endAllActiveConversations both end conversations, so a
+                    // heartbeat died of either. It gets a fresh conversation instead.
+                    LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — creating a fresh conversation",
+                            conversationId, schedule.getId());
                 } else {
                     return conversationId;
                 }
