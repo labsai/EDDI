@@ -230,7 +230,7 @@ Before deploying a version, ask what it does to the conversations already runnin
 `deployedVersions` lists every other deployed version in the environment, highest first.
 `outcome` is `FOLLOW` when its conversations move to the new version on their next turn (same
 generation, older version) and `STAY` otherwise (another generation, no generation, or a newer
-version). The Manager shows this in its deploy flow.
+version).
 
 ### Undeploying: old versions can be retired freely
 
