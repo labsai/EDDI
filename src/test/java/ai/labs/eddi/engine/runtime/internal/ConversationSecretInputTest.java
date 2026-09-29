@@ -288,7 +288,7 @@ class ConversationSecretInputTest {
          * The turn's finally scrub must remove those copies too.
          */
         @Test
-        @DisplayName("Secret input: copies rendered into output, step data and properties are scrubbed")
+        @DisplayName("Secret input: copies rendered into output and step data are scrubbed; a captured property is kept")
         void secretInput_renderedCopiesScrubbed() throws Exception {
             var lifecycleManager = mock(ILifecycleManager.class);
             var workflow = mock(IExecutableWorkflow.class);
@@ -314,14 +314,27 @@ class ConversationSecretInputTest {
 
             var currentStep = memory.getCurrentStep();
             for (var datum : currentStep.getAllElements()) {
+                // properties:* data (the property mirrors and the properties:changes undo
+                // log) records the conversation properties, which keep a captured input
+                // (see below) — undo must restore the value the designer captured.
+                if (datum.getKey().startsWith("properties:")) {
+                    continue;
+                }
                 assertFalse(String.valueOf(datum.getResult()).contains("pw-Rendered-99"),
                         "secret survived in step data '" + datum.getKey() + "'");
             }
             assertEquals(List.of("You said: <secret input>"), currentStep.getLatestData("output:text:echo").getResult());
-            String output = String.valueOf(currentStep.getConversationOutput());
+            // The "properties" entry mirrors the conversation properties, which keep a
+            // captured input (see below); every other output entry is scrubbed.
+            var outputWithoutProperties = new LinkedHashMap<>(currentStep.getConversationOutput());
+            outputWithoutProperties.remove("properties");
+            String output = String.valueOf(outputWithoutProperties);
             assertFalse(output.contains("pw-Rendered-99"), "secret survived in the conversation output: " + output);
             assertTrue(output.contains("You said: <secret input>"), "the rest of the reply must be kept: " + output);
-            assertEquals("<secret input>", memory.getConversationProperties().get("lastInput").getValueString());
+            // A conversation property that captured the input is the agent designer's
+            // choice and is kept (the wizard pattern hands it to a later turn); give it
+            // scope "secret" to have it vaulted instead. See docs/secrets-vault.md.
+            assertEquals("pw-Rendered-99", memory.getConversationProperties().get("lastInput").getValueString());
         }
 
         @Test

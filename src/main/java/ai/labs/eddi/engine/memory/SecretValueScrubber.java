@@ -40,6 +40,23 @@ public final class SecretValueScrubber {
     private static final Logger LOGGER = Logger.getLogger(SecretValueScrubber.class);
 
     /**
+     * The shortest form of a message the client flagged {@code secretInput} that is
+     * searched for in the rest of the turn — its other step data, its output, a
+     * pending tool-call batch, its audit entries. Every nonempty form is still
+     * replaced wholesale where it IS the input ({@code input:initial},
+     * {@code input:normalized}, the displayed {@code input}).
+     * <p>
+     * Four, not the eight used for secret context values: the client explicitly
+     * marked this text a secret, and a 4-digit PIN or a short password is exactly
+     * what a password field carries. Not lower, because the search replaces every
+     * occurrence in every value and map key of the turn — a one- to three-character
+     * "secret" would shred the turn's reply and rename the fields of its stored API
+     * responses and output items, while being trivially guessable anyway. The audit
+     * ledger uses the same floor, so the stored turn and its ledger entries agree.
+     */
+    public static final int MIN_SEARCHED_SECRET_INPUT_LENGTH = 4;
+
+    /**
      * Configured like the persistence mapper, so an object is scrubbed in exactly
      * the JSON form it would be stored and returned in.
      */
@@ -97,7 +114,9 @@ public final class SecretValueScrubber {
      * Like {@link #scrubDeep}, but a plaintext is replaced only where it stands as
      * a whole token - not directly preceded or followed by a letter or digit. For
      * values too short to replace verbatim: a three-digit PIN copied into a reply
-     * is removed, while the same digits inside a longer number are left alone.
+     * is removed, while the same digits inside a longer number are left alone. Map
+     * keys are never changed in this mode — only values — because a short secret is
+     * often also a field name ({@code id}, {@code to}).
      *
      * @return the scrubbed copy, or {@code null} when {@code value} carries none of
      *         the plaintexts as a whole token
@@ -117,10 +136,29 @@ public final class SecretValueScrubber {
      *             if the scrubbed form cannot be read back as {@code type}
      */
     public static <T> T scrubTyped(T value, Class<T> type, Collection<String> plaintexts, String placeholder) {
-        if (value == null || longestFirst(plaintexts).isEmpty()) {
+        return scrubTyped(value, type, plaintexts, placeholder, false);
+    }
+
+    /**
+     * {@link #scrubDeepTokens} for a value that has to stay of its own type — the
+     * whole-token counterpart of {@link #scrubTyped}. Map keys (the type's field
+     * names in JSON form) are never changed.
+     *
+     * @return the scrubbed copy, or {@code null} when {@code value} carries none of
+     *         the plaintexts as a whole token
+     * @throws IllegalArgumentException
+     *             if the scrubbed form cannot be read back as {@code type}
+     */
+    public static <T> T scrubTypedTokens(T value, Class<T> type, Collection<String> plaintexts, String placeholder) {
+        return scrubTyped(value, type, plaintexts, placeholder, true);
+    }
+
+    private static <T> T scrubTyped(T value, Class<T> type, Collection<String> plaintexts, String placeholder, boolean wholeToken) {
+        List<String> sorted = longestFirst(plaintexts);
+        if (value == null || sorted.isEmpty()) {
             return null;
         }
-        Object cleaned = scrubDeep(TREE_MAPPER.convertValue(value, Object.class), plaintexts, placeholder);
+        Object cleaned = scrubSorted(TREE_MAPPER.convertValue(value, Object.class), sorted, placeholder, true, wholeToken);
         return cleaned == null ? null : TREE_MAPPER.convertValue(cleaned, type);
     }
 
@@ -178,7 +216,10 @@ public final class SecretValueScrubber {
             boolean changed = false;
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                String cleanedKey = replaceAll(key, plaintexts, placeholder, wholeToken);
+                // Token mode never renames a key: a short secret ("id", "to") is also a
+                // common field name, and renaming it would corrupt every stored API
+                // response and output item of the turn.
+                String cleanedKey = wholeToken ? key : replaceAll(key, plaintexts, placeholder, false);
                 Object cleaned = scrubSorted(entry.getValue(), plaintexts, placeholder, deep, wholeToken);
                 copy.put(cleanedKey, cleaned != null ? cleaned : entry.getValue());
                 changed |= cleaned != null || !cleanedKey.equals(key);
