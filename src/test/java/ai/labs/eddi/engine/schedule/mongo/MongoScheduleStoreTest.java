@@ -297,19 +297,6 @@ class MongoScheduleStoreTest {
     }
 
     /**
-     * A configuration update must not touch the fire lifecycle at all.
-     * <p>
-     * {@code fireStatus} and {@code failCount} used to be written from the caller's
-     * object (defaulting to PENDING when absent), which made every PUT a
-     * read-modify-write over live state: the REST layer read PENDING, the poller
-     * claimed the row, and this update then wrote PENDING back over the fresh
-     * CLAIMED. Because {@code tryClaim} accepts any PENDING row, the next poll
-     * started a duplicate fire into the very same persistent conversation. Carrying
-     * the values over in the REST layer narrowed the window to milliseconds and did
-     * nothing for a non-REST caller; the two fields belong to the claim/completion
-     * methods.
-     */
-    /**
      * {@code enabled} is a runtime switch owned by {@code setScheduleEnabled}.
      * Writing it from the caller's object let an editor whose copy predated another
      * operator's disable re-enable the schedule just by saving; left out of the
@@ -333,6 +320,19 @@ class MongoScheduleStoreTest {
         assertFalse(rendered.contains("enabled"), "only /enable and /disable may change enabled: " + rendered);
     }
 
+    /**
+     * A configuration update must not touch the fire lifecycle at all.
+     * <p>
+     * {@code fireStatus} and {@code failCount} used to be written from the caller's
+     * object (defaulting to PENDING when absent), which made every PUT a
+     * read-modify-write over live state: the REST layer read PENDING, the poller
+     * claimed the row, and this update then wrote PENDING back over the fresh
+     * CLAIMED. Because {@code tryClaim} accepts any PENDING row, the next poll
+     * started a duplicate fire into the very same persistent conversation. Carrying
+     * the values over in the REST layer narrowed the window to milliseconds and did
+     * nothing for a non-REST caller; the two fields belong to the claim/completion
+     * methods.
+     */
     @Test
     @DisplayName("updateSchedule — never writes fireStatus or failCount")
     void updateScheduleDoesNotTouchTheFireLifecycle() throws Exception {
