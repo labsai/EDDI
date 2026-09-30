@@ -33,8 +33,8 @@ env:
   # resolved that day while the jar was built with a different one.
   # NODE_SHA256_LINUX_X64 is the linux-x64 .tar.gz line of
   # https://nodejs.org/dist/v<NODE_VERSION>/SHASUMS256.txt — update both together.
-  NODE_VERSION: "22.23.2"
-  NODE_SHA256_LINUX_X64: "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a"
+  NODE_VERSION: "22.23.3"
+  NODE_SHA256_LINUX_X64: "1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
 
 jobs:
   # ─── Job 0: Detect Changes ──────────────────────────────────────

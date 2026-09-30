@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import javax.sql.DataSource;
 import jakarta.enterprise.inject.Instance;
@@ -34,7 +34,7 @@ import jakarta.enterprise.util.TypeLiteral;
 public abstract class PostgresTestBase {
 
     @SuppressWarnings("resource")
-    private static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
+    private static final PostgreSQLContainer PG = new PostgreSQLContainer("postgres:16-alpine")
             .withDatabaseName("eddi_test")
             .withUsername("test")
             .withPassword("test");

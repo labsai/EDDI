@@ -148,13 +148,13 @@ class BuildQualityGatesTest {
     private static final String SKIP_ITS_DISABLED = "-DskipITs=false";
 
     /**
-     * The version {@code swagger-annotations} shipped in before the unused
-     * <em>direct</em> dependency was removed. swagger-parser pulls the same
-     * artifact transitively at 2.2.52, so dropping the declaration without managing
-     * the version would have downgraded the jar that actually lands in the image
-     * and the SBOM.
+     * The version {@code swagger-annotations} is managed at in pom.xml. The unused
+     * <em>direct</em> dependency was removed, but swagger-parser pulls the same
+     * artifact transitively at 2.2.52, so dropping the management as well would
+     * downgrade the jar that actually lands in the image and the SBOM. Move this
+     * with the pom when bumping it.
      */
-    private static final String SWAGGER_ANNOTATIONS_VERSION = "2.2.54";
+    private static final String SWAGGER_ANNOTATIONS_VERSION = "2.2.55";
 
     /**
      * Files git must record as mode {@code 100755}. {@code mvnw} is invoked
