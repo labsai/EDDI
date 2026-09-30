@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.triggermanagement.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import ai.labs.eddi.engine.model.Deployment;
 
 public class UserConversation {
@@ -52,6 +53,8 @@ public class UserConversation {
         return agentId;
     }
 
+    /** Also accepts {@code botId}, what EDDI 5 stored. */
+    @JsonAlias("botId")
     public void setAgentId(String agentId) {
         this.agentId = agentId;
     }

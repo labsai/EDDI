@@ -156,8 +156,39 @@ class V6RenameMigrationTest {
         @DisplayName("should skip when already applied")
         void skipsWhenAlreadyApplied() {
             when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            // An applied migration only checks whether an earlier 6.x left triggers
+            // or mappings in the v5 shape; with nothing there, it writes nothing.
+            @SuppressWarnings("unchecked")
+            MongoCollection<Document> empty = mock(MongoCollection.class);
+            when(empty.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString())).thenReturn(empty);
+
             migration.runIfNeeded();
-            verify(database, never()).getCollection(anyString());
+
+            verify(migrationLogStore, never()).createMigrationLog(any());
+            verify(empty, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(empty, never()).updateMany(any(), anyList());
+            verify(empty, never()).replaceOne(any(), any());
+        }
+
+        /**
+         * A count that fails is not an empty collection: the triggers an earlier 6.x
+         * left under bottriggers would then never be moved.
+         */
+        @Test
+        @DisplayName("an already-applied migration does not take a failed trigger count for none")
+        @SuppressWarnings("unchecked")
+        void failedTriggerCountIsNotEmpty() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            MongoCollection<Document> unreadable = mock(MongoCollection.class);
+            when(unreadable.countDocuments()).thenThrow(new IllegalStateException("not authorized"));
+            MongoCollection<Document> agentTriggers = mock(MongoCollection.class);
+            when(database.getCollection(anyString())).thenAnswer(i -> "bottriggers".equals(i.getArgument(0)) ? unreadable : agentTriggers);
+
+            migration.runIfNeeded();
+
+            verify(unreadable, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(agentTriggers, never()).estimatedDocumentCount();
         }
 
         @Test

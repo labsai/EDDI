@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.triggermanagement.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import ai.labs.eddi.engine.model.AgentDeployment;
 
 import java.util.LinkedList;
@@ -25,6 +26,8 @@ public class AgentTriggerConfiguration {
         return agentDeployments;
     }
 
+    /** Also accepts {@code botDeployments}, what EDDI 5 stored. */
+    @JsonAlias("botDeployments")
     public void setAgentDeployments(List<AgentDeployment> agentDeployments) {
         this.agentDeployments = agentDeployments;
     }

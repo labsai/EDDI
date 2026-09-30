@@ -439,6 +439,7 @@ These run once against an existing database and then stay off.
 | `eddi.migration.v6-qute.enabled` | `false` | Convert Thymeleaf templates to Qute. A document whose template cannot be converted is logged with its collection and id and left unchanged, and the migration is then *not* recorded as complete — so it runs again on the next start, and keeps doing so until that document is fixed or removed |
 | `eddi.migration.backupBeforeWrite` | `true` | Snapshot documents into `.history` collections before rewriting. **Leave this on** |
 | `eddi.migration.skipConversationMemories` | `false` | Skip conversation memories, which are the bulk of the data and rarely need rewriting |
+| `eddi.migration.properties.skip-keys` | `userInfo` | Top-level keys of the EDDI 5 `properties` collection that are **not** copied into long-term memory (`usermemories`) on the first 6.x boot. `userInfo` was the caller's per-request identity in 5.x — a platform bearer token beside names and ids — not a memory. Independently of this list, any key whose value holds a credential by the export scrubber's rules is skipped too. Skipped keys are logged by name and count and stay in `properties_migrated_v6` |
 
 ---
 
