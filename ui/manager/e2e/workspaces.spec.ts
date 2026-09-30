@@ -277,16 +277,40 @@ test.describe("workspaces enforced", () => {
     await expect(row4.getByRole("button", { name: /delete/i })).toHaveCount(0);
   });
 
-  test("hides the switcher for a user with only their own space", async ({ page }) => {
+  test("keeps the switcher for a user with only their own space", async ({ page }) => {
+    // It used to hide here. Somebody with no team still receives shares, and
+    // "Shared with me" is how they find them.
     await seedWorkspaces(page, { enabled: true, spaces: [PERSONAL] });
     await page.goto("/manage/agents");
     await waitForApp(page);
 
-    await expect(page.getByTestId("space-switcher")).toHaveCount(0);
-    // The feature is on, so the Share action is still offered — the switcher is
-    // hidden because it has nothing to offer, not because sharing is off.
-    await openAgentMenu(page, "agent1");
-    await expect(page.getByRole("menuitem", { name: /share/i })).toBeVisible();
+    await page.getByTestId("space-switcher").click();
+    await expect(page.getByTestId("ownership-option-shared")).toBeVisible();
+  });
+
+  test("\"Shared with me\" lists what somebody else owns, and \"Mine\" the rest", async ({ page }) => {
+    await page.getByTestId("space-switcher").click();
+    await page.getByTestId("ownership-option-shared").click();
+
+    // Invoice Analyst is bob's; everything of alice's is gone.
+    await expect(page.getByText("Invoice Analyst", { exact: true })).toBeVisible();
+    for (const name of IN_PERSONAL_SPACE) {
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+    }
+    await expect(page.getByTestId("space-switcher")).toContainText("Shared with me");
+
+    await page.getByTestId("space-switcher").click();
+    await page.getByTestId("ownership-option-mine").click();
+    await expect(page.getByText("Support Agent", { exact: true })).toBeVisible();
+    await expect(page.getByText("Invoice Analyst", { exact: true })).toHaveCount(0);
+  });
+
+  test("says where new items will be created", async ({ page }) => {
+    await page.getByTestId("space-switcher").click();
+    await page.getByTestId(`space-option-${TEAM.id}`).click();
+    await page.getByTestId("space-switcher").click();
+
+    await expect(page.getByTestId("space-create-hint")).toContainText("engineering");
   });
 
   test("badges someone else's published agent and leaves your own alone", async ({
@@ -382,5 +406,84 @@ test.describe("sharing", () => {
   test("closes on Escape", async ({ page }) => {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("share-dialog")).toHaveCount(0);
+  });
+});
+
+test.describe("finding people to share with", () => {
+  test("suggests people by name from the directory", async ({ page }) => {
+    await seedWorkspaces(page, { enabled: true });
+    await page.goto("/manage/agents");
+    await waitForApp(page);
+    await openAgentMenu(page, "agent1");
+    await page.getByRole("menuitem", { name: /share/i }).click();
+
+    await page.getByTestId("share-subject-input").fill("car");
+
+    const suggestion = page.getByTestId("share-suggestion-user:carol");
+    await expect(suggestion).toContainText("Carol Test");
+    await suggestion.click();
+    await expect(page.getByTestId("share-subject-input")).toHaveValue(/carol/);
+  });
+});
+
+test.describe("notifications", () => {
+  const REQUEST = {
+    id: "n1",
+    type: "ACCESS_REQUESTED",
+    resourceId: "agent1",
+    resourceUri: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
+    resourceName: "Support Agent",
+    actor: "bob",
+    actorLabel: "Bob Builder",
+    level: "VIEW",
+    message: "for the audit",
+    createdAt: "2026-09-28T10:00:00Z",
+    readAt: null,
+  };
+
+  test("an access request can be granted from the bell in one click", async ({ page }) => {
+    await seedWorkspaces(page, { enabled: true });
+    // Seeded once, on the first load only: the mock remembers marking it read,
+    // and re-planting it on every navigation would undo that.
+    await page.addInitScript((value) => {
+      if (!sessionStorage.getItem("eddi-e2e-notifications-planted")) {
+        localStorage.setItem("eddi-e2e-notifications", value);
+        sessionStorage.setItem("eddi-e2e-notifications-planted", "1");
+      }
+    }, JSON.stringify([REQUEST]));
+    await page.goto("/manage/agents");
+    await waitForApp(page);
+
+    await expect(page.getByTestId("notification-count")).toHaveText("1");
+    await page.getByTestId("notification-bell").click();
+    await expect(page.getByTestId("notification-n1")).toContainText("Bob Builder");
+    await expect(page.getByTestId("notification-n1")).toContainText("for the audit");
+
+    await page.getByTestId("notification-grant-n1").click();
+
+    await expect(page.getByText("Access granted to Bob Builder")).toBeVisible();
+    await expect(page.getByTestId("notification-count")).toHaveCount(0);
+  });
+
+  test("no bell while workspaces are off", async ({ page }) => {
+    await page.goto("/manage/agents");
+    await waitForApp(page);
+
+    await expect(page.getByTestId("notification-bell")).toHaveCount(0);
+  });
+});
+
+test.describe("the Workspaces page", () => {
+  test("stores a secret for a space and shows how to reference it", async ({ page }) => {
+    await seedWorkspaces(page, { enabled: true });
+    await page.goto("/manage/workspaces");
+    await waitForApp(page);
+
+    await expect(page.getByTestId("space-secrets")).toBeVisible();
+    await page.getByTestId("space-secret-name").fill("openai-key");
+    await page.getByTestId("space-secret-value").fill("sk-test-not-a-real-key");
+    await page.getByTestId("space-secret-save").click();
+
+    await expect(page.getByText(/\$\{vault:u\.alice\.5e6f7a8b\/openai-key\}/).first()).toBeVisible();
   });
 });

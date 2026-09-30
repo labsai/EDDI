@@ -738,6 +738,8 @@ describe("ChatWidget — resume after approval", () => {
         return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
       }
       if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      // Not a conversation read: kept out of the count below.
+      if (href.includes("/profile")) return new Response("{}", { status: 200 });
       if (href.includes("/approval-status")) {
         approvalPolls += 1;
         // First poll: still paused. Second: settled, so the widget refreshes.
@@ -1139,5 +1141,158 @@ describe("ChatWidget — New Conversation during a live stream", () => {
     const fresh = screen.getByTestId("chat-input");
     fireEvent.change(fresh, { target: { value: "second turn" } });
     await waitFor(() => expect(screen.getByTestId("chat-send")).toBeEnabled());
+  });
+});
+
+describe("ChatWidget — conversation review notice", () => {
+  const snapshot = {
+    conversationState: "READY",
+    conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hello!"] }], timestamp: "2026-07-21T10:00:00Z" }],
+  };
+
+  function backendWithProfile(profile: Response) {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) return profile.clone();
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/descriptorstore/") || href.includes("/agentstore/")) {
+        return new Response(JSON.stringify({ name: "Descriptor Name" }), { status: 200 });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+    return calls;
+  }
+
+  it("tells the person, before they type, that the maintainers may read the chat", async () => {
+    backendWithProfile(
+      new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this conversation." }), {
+        status: 200,
+      }),
+    );
+
+    renderWidget();
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent(
+      "The support team may read this conversation.",
+    );
+  });
+
+  it("keeps the input closed until the notice has had its chance to appear", async () => {
+    // A slow profile let somebody type before they were told the conversation
+    // may be read. The input now waits for the lookup to settle.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+  });
+
+  it("shows no notice for an agent that did not opt in", async () => {
+    backendWithProfile(new Response(JSON.stringify({ name: "Support", reviewNotice: null }), { status: 200 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
+  });
+
+  it("shows no notice, and still chats, on an EDDI without the profile endpoint", async () => {
+    // The agent's name comes from the conversation (loadAgentName); the profile
+    // is only asked about review, and a 404 there must not get in the way.
+    const calls = backendWithProfile(new Response(JSON.stringify({ message: "not found" }), { status: 404 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.includes("/profile"))).toBe(true));
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
+  });
+
+  it("sends no quick reply before the notice has had its chance to appear", async () => {
+    // Only the composer waited; a quick reply calls handleSend directly.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    const sends: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (init?.method === "POST") sends.push(href);
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: ["Pick one"], quickReplies: [{ value: "Yes" }] }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Yes" }));
+    expect(sends).toEqual([]);
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(sends.length).toBeGreaterThan(0));
+  });
+
+  it("shows the notice of the agent behind a managed route", async () => {
+    // The managed route names an intent, not an agent; the snapshot names the agent.
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) {
+        return new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 });
+      }
+      if (href.includes("/agentstore/") || href.includes("/descriptorstore/")) return new Response("{}", { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationId: "managed-conv-9",
+          agentId: "agent-9",
+          agentVersion: 1,
+          conversationState: "READY",
+          conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hi from managed"] }], timestamp: "2026-07-21T10:00:00Z" }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    render(
+      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The support team may read this.");
+    expect(calls.some((c) => c.includes("/agents/agent-9/profile"))).toBe(true);
   });
 });

@@ -8,14 +8,17 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.security.spaces.Subjects;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
 import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -299,6 +302,37 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         void invalidUuid() {
             // MongoDB ObjectId format should be treated as not found
             assertEquals(-1, storage.getCurrentVersion("507f1f77bcf86cd799439011"));
+        }
+    }
+
+    @Nested
+    @DisplayName("NotMatching filter")
+    class NotMatchingFilter {
+
+        @Test
+        @DisplayName("excludes matching rows and keeps rows without the field, as MongoDB does")
+        void excludesOnlyMatchingRows() throws Exception {
+            String alice = store(Map.of("accessIndex", "|owner:alice|space:user:alice|"));
+            String bob = store(Map.of("accessIndex", "|owner:bob|user:alice|"));
+            String malice = store(Map.of("accessIndex", "|owner:malice|"));
+            String unowned = store(Map.of("name", "legacy"));
+
+            var filter = new IResourceFilter.QueryFilter("accessIndex",
+                    new IResourceFilter.NotMatching(Subjects.tokenPattern(Subjects.OWNER_TOKEN_PREFIX + "alice")));
+            var found = storage.findResources(new IResourceFilter.QueryFilters[]{new IResourceFilter.QueryFilters(List.of(filter))}, null, 0,
+                    50);
+
+            Set<String> ids = new HashSet<>();
+            found.forEach(id -> ids.add(id.getId()));
+            // Without the COALESCE, NULL !~ x is NULL and the unowned row vanishes —
+            // "Shared with me" would then disagree between the two backends.
+            assertEquals(Set.of(bob, malice, unowned), ids, "only alice's own row is excluded; " + alice + " must not appear");
+        }
+
+        private String store(Map<String, Object> content) throws IOException {
+            var resource = storage.newResource(content);
+            storage.store(resource);
+            return resource.getId();
         }
     }
 

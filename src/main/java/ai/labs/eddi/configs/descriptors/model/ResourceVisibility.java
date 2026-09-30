@@ -30,6 +30,19 @@ public enum ResourceVisibility {
     space("space"),
 
     /**
+     * Everyone who is signed in may <em>use</em> it — hold a conversation with an
+     * agent, run a group — without reading how it is built. Anonymous callers,
+     * including the public chat endpoints and the shared-key {@code /v1} API, are
+     * not admitted.
+     * <p>
+     * This is the answer to "the whole organisation should be able to talk to
+     * this", which is by far the most common reason to widen access, and which
+     * {@link #published} over-answers: published also discloses the configuration —
+     * system prompt, tools — to everyone, and admits anonymous callers.
+     */
+    internal("internal"),
+
+    /**
      * Everyone with access to this deployment. Use for shared templates and agents
      * meant to be discovered rather than handed out.
      */

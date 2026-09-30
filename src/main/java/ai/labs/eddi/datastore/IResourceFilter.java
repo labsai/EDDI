@@ -52,6 +52,26 @@ public interface IResourceFilter<T> {
     }
 
     /**
+     * A filter value that matches when the field does <em>not</em> match
+     * {@code pattern}.
+     * <p>
+     * A plain {@code String} filter is a regular expression on both backends, and
+     * neither regex dialect they share can express a negation — POSIX ERE, which
+     * PostgreSQL uses, has no lookahead. So "everything except X" needs its own
+     * value type, which each backend renders as its native negation.
+     * <p>
+     * A document that does not carry the field at all <em>matches</em>: absent is
+     * "not X". Both backends are written to agree on that, because a descriptor
+     * without an owner is exactly the row a "not mine" listing must include.
+     *
+     * @param pattern
+     *            a regular expression in the dialect both backends accept — see
+     *            {@code Subjects.escapeRegex}
+     */
+    record NotMatching(String pattern) {
+    }
+
+    /**
      * One condition on one field. A {@code String} filter is a regular expression
      * on both backends; any other value is compared for equality. Use
      * {@link #exact(String, String)} to compare a string for equality instead.

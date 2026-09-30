@@ -1,4 +1,6 @@
 import { useEffect, useMemo } from "react";
+import { getWorkspaceInfo } from "@/lib/api/workspaces";
+import { setResourceVisibility } from "@/lib/api/sharing";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   readOperatorConfig,
@@ -324,6 +326,16 @@ export function useActivateOperator() {
         await handBackToPredecessor(verificationError, previous, config, result.agentId);
         throw verificationError;
       }
+
+      // Make the operator reachable by everybody signed in. It is provisioned by
+      // whoever activates it, so under workspace enforcement it lands in THAT
+      // person's space and every other user got 403 opening the drawer — the
+      // docs told administrators to publish it by hand with curl. "internal"
+      // lets every signed-in user chat with it without disclosing its prompt
+      // and tools, and without admitting anonymous callers. Best-effort: the
+      // operator works for its activator either way, and an administrator can
+      // still widen it from the share dialog.
+      await shareOperatorWithEveryoneSignedIn(result.agentId);
 
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
@@ -665,4 +677,18 @@ export function useOperatorUpgradeAssessment(
 /** The config to seed the activation form with. */
 export function seedConfig(existing: OperatorConfig | null | undefined): OperatorConfig {
   return existing ?? defaultOperatorConfig();
+}
+
+/**
+ * Sets a freshly provisioned operator to `internal` visibility when workspaces
+ * are enforced. Never throws: a failure is logged and the activation carries on.
+ */
+async function shareOperatorWithEveryoneSignedIn(agentId: string): Promise<void> {
+  try {
+    const info = await getWorkspaceInfo();
+    if (!info.enabled) return;
+    await setResourceVisibility(agentId, "internal");
+  } catch (e) {
+    console.warn("[operator] Could not make the operator available to everyone signed in:", e);
+  }
 }

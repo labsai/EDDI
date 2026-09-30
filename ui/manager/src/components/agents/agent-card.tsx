@@ -150,6 +150,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
             nothing, so say who owns it. */}
         <OwnershipBadge
           ownerId={agent.ownerId}
+                          ownerName={agent.ownerName}
           spaceId={agent.spaceId}
           visibility={agent.visibility}
         />

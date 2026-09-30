@@ -14,12 +14,17 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Resolves {@code ${vars:...}} references in configuration values at runtime
@@ -126,6 +131,7 @@ public class GlobalVariableResolver {
 
         Matcher matcher = VARS_PATTERN.matcher(value);
         StringBuilder result = new StringBuilder();
+        List<String> substituted = new ArrayList<>();
 
         while (matcher.find()) {
             String explicitTenant = matcher.group(1);
@@ -138,6 +144,7 @@ public class GlobalVariableResolver {
             Map<String, String> variables = loadVariables(effectiveTenant);
             String resolved = variables.get(key);
             if (resolved != null) {
+                substituted.add(resolved);
                 matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
             } else {
                 // Leave the original reference — variable not found
@@ -147,7 +154,71 @@ public class GlobalVariableResolver {
             }
         }
         matcher.appendTail(result);
-        return result.toString();
+        String out = result.toString();
+        refuseAssembledReferences(value, substituted, out);
+        return out;
+    }
+
+    /**
+     * Any {@code ${scheme:...}} reference — vault, eddivault, connection, caller,
+     * vars. What substitution must not be able to manufacture.
+     */
+    private static final Pattern ANY_REFERENCE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}");
+
+    /**
+     * Refuses a reference that exists only because substitution joined text.
+     * <p>
+     * Variables resolve before vault, connection and caller references, and every
+     * check on those — agent grants, space membership, the reference guard in API
+     * calls — runs against a configuration or against a variable's value. None of
+     * them can see a reference that is split across two variables ({@code "${vau"}
+     * and {@code "lt:t.finance…/key}"}) or across a variable and the surrounding
+     * text ({@code "${"} + {@code "${vars:x}"}), and a variable can be edited after
+     * the agent was deployed. So a reference in the result must already be present,
+     * whole, in the value as written or in one substituted variable on its own;
+     * anything else was assembled, and resolving it would hand a secret to whoever
+     * arranged the pieces.
+     *
+     * @throws AssembledReferenceException when the result carries a reference
+     * neither source contains
+     */
+    static void refuseAssembledReferences(String original, List<String> substituted, String result) {
+        Set<String> formed = referencesIn(result);
+        if (formed.isEmpty()) {
+            return;
+        }
+        formed.removeAll(referencesIn(original));
+        for (String value : substituted) {
+            formed.removeAll(referencesIn(value));
+        }
+        if (!formed.isEmpty()) {
+            LOGGER.warnf("Refused %d reference(s) assembled by joining global variables: %s", formed.size(), sanitize(formed.toString()));
+            throw new AssembledReferenceException("A reference was assembled by joining global variables with the text around them ("
+                    + formed.size() + " found). Each ${vault:...}, ${connection:...} or ${caller:...} reference must be written whole — in the "
+                    + "configuration, or as the entire content of one variable.");
+        }
+    }
+
+    private static Set<String> referencesIn(String value) {
+        Set<String> found = new HashSet<>();
+        if (value == null) {
+            return found;
+        }
+        Matcher matcher = ANY_REFERENCE.matcher(value);
+        while (matcher.find()) {
+            found.add(matcher.group());
+        }
+        return found;
+    }
+
+    /**
+     * A reference that only exists because variable substitution joined text. See
+     * {@link #refuseAssembledReferences}.
+     */
+    public static final class AssembledReferenceException extends IllegalArgumentException {
+        public AssembledReferenceException(String message) {
+            super(message);
+        }
     }
 
     /**

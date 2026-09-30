@@ -42,6 +42,13 @@ public final class Subjects {
     public static final String TOKEN_ALL = "all";
 
     /**
+     * Access-index token marking a resource usable by every signed-in caller —
+     * {@code internal} visibility. Admitted to any caller with an identity, never
+     * to an anonymous one.
+     */
+    public static final String TOKEN_AUTHENTICATED = "authenticated";
+
+    /**
      * Access-index token that admits nobody.
      * <p>
      * An index must never be empty — an empty string matches no predicate, but so

@@ -145,7 +145,9 @@ describe("ShareDialog — transfer ownership", () => {
     await user.click(screen.getByTestId("transfer-submit"));
     await user.click(screen.getByTestId("transfer-submit"));
 
-    await waitFor(() => expect(ownerId).toBe("user:bob"));
+    // The principal, not the subject: "user:bob" stored as an owner matches
+    // nobody. The server resolves the name to the account.
+    await waitFor(() => expect(ownerId).toBe("bob"));
   });
 
   it("withdraws the confirmation when the name is changed", async () => {

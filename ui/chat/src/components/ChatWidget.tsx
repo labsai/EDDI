@@ -27,6 +27,7 @@ import {
   undoConversation,
   redoConversation,
   fetchAgentDescriptor,
+  fetchAgentProfile,
   rerunLastStep,
   endManagedConversation,
   setBaseUrl,
@@ -726,6 +727,9 @@ export function ChatWidget() {
           if (fresh) await endManagedConversation(intent, userId);
           const snapshot = await loadManagedConversation(intent, userId);
           if (gen !== generationRef.current) return;
+          // The route names an intent; the snapshot names the agent, whose review
+          // notice must be shown like any other's.
+          setManagedAgentId(snapshot.agentId || null);
           processSnapshot(snapshot);
           loadAgentName(snapshot, gen);
         } else if (environment && agentId) {
@@ -742,6 +746,9 @@ export function ChatWidget() {
         }
       } catch (err) {
         if (gen !== generationRef.current) return;
+        // A managed conversation that did not load names no agent; waiting on its
+        // notice would keep the input closed for good.
+        if (isManagedAgent) setManagedAgentId((current) => current ?? null);
         console.error("Failed to start conversation:", err);
         // A failed start used to reach the console only, leaving the widget
         // on "Starting conversation…" for good.
@@ -772,6 +779,55 @@ export function ChatWidget() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ─── Review notice ─────────────────────────── */
+  // The agent's name comes from loadAgentName, per conversation. This only asks
+  // whether the maintainers may read the conversation, which is shown whatever
+  // the name setting: it is about the person's data, not decoration. An EDDI
+  // older than the profile endpoint answers 404, and there is nothing to announce.
+  // Whether the lookup below has answered. The input stays closed until it has:
+  // otherwise a slow profile let somebody type before they were told the
+  // conversation may be read. A failure (an EDDI without the endpoint) settles
+  // it too, so it only ever waits for the request, never blocks on it.
+  const [profileSettled, setProfileSettled] = useState(false);
+  // Read at click time by handleSend, which quick replies and the secret input
+  // call directly: gating only the composer let a quick reply through before the
+  // notice appeared. Synced after commit, like the refs above.
+  const profileSettledRef = useRef(false);
+  useEffect(() => {
+    profileSettledRef.current = profileSettled;
+  }, [profileSettled]);
+  // The agent behind a managed route, which names an intent rather than an agent.
+  // Undefined until the managed conversation has loaded; null when it named none.
+  const [managedAgentId, setManagedAgentId] = useState<string | null | undefined>(undefined);
+  const profileAgentId = agentId ?? (isManagedAgent ? managedAgentId : null);
+  useEffect(() => {
+    // A new target starts without the previous one's notice, and a slower answer
+    // for the previous target cannot overwrite the new one's.
+    dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
+    if (profileAgentId === undefined && !isDemo) {
+      // A managed conversation still loading: its agent is not known yet.
+      setProfileSettled(false);
+      return;
+    }
+    if (isDemo || !profileAgentId) {
+      setProfileSettled(true);
+      return;
+    }
+    setProfileSettled(false);
+    let cancelled = false;
+    fetchAgentProfile(profileAgentId, environment ?? "production")
+      .then((profile) => {
+        if (!cancelled) dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+      })
+      .catch(() => { /* no profile endpoint: no notice */ })
+      .finally(() => {
+        if (!cancelled) setProfileSettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileAgentId, environment, isDemo, dispatch]);
+
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
     async (text: string, isSecret?: boolean) => {
@@ -779,6 +835,8 @@ export function ChatWidget() {
       // disabled state, so a click during an in-flight turn used to start a
       // second one — two streams writing into the same transcript.
       if (isProcessingRef.current) return;
+      // Nothing is sent before the review notice has had its chance to appear.
+      if (!profileSettledRef.current) return;
 
       // Conversation identity for THIS turn. Every async continuation below
       // must re-check it: New Conversation can land while a request is in
@@ -1413,6 +1471,11 @@ export function ChatWidget() {
   return (
     <div className="chat-root">
       <ChatHeader />
+      {state.reviewNotice && (
+        <div className="chat-review-notice" role="note" data-testid="chat-review-notice">
+          {state.reviewNotice}
+        </div>
+      )}
 
       <div
         className="chat-messages"
@@ -1619,7 +1682,7 @@ export function ChatWidget() {
             ) : (
               <ChatInput
                 onSend={handleSend}
-                disabled={(!state.conversationId && !isManagedAgent) || isPaused}
+                disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}
               />
             )}

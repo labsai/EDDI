@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -67,13 +68,15 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     private static final Logger log = Logger.getLogger(RestAgentAdministration.class);
 
     private final ResourceAccessGuard resourceAccessGuard;
+    private final SpaceReferenceGuard spaceReferenceGuard;
 
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
             IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore,
-            TenantQuotaService tenantQuotaService, ResourceAccessGuard resourceAccessGuard) {
+            TenantQuotaService tenantQuotaService, ResourceAccessGuard resourceAccessGuard, SpaceReferenceGuard spaceReferenceGuard) {
         this.resourceAccessGuard = resourceAccessGuard;
+        this.spaceReferenceGuard = spaceReferenceGuard;
         this.runtime = runtime;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
@@ -84,6 +87,15 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         this.documentDescriptorStore = documentDescriptorStore;
         this.deploymentListener = deploymentListener;
         this.scheduleStore = scheduleStore;
+    }
+
+    /** Without the space-reference check. Test seam. */
+    public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
+            IDocumentDescriptorStore documentDescriptorStore, IDeploymentListener deploymentListener, IScheduleStore scheduleStore,
+            TenantQuotaService tenantQuotaService, ResourceAccessGuard resourceAccessGuard) {
+        this(runtime, agentFactory, agentStore, deploymentStore, conversationMemoryStore, restConversationStore, documentDescriptorStore,
+                deploymentListener, scheduleStore, tenantQuotaService, resourceAccessGuard, null);
     }
 
     @Override
@@ -98,6 +110,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // same level as editing it. Before the quota gate below, because refusing an
         // unauthorised deploy must not first consume the tenant's agent allowance.
         resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+
+        // Checked against the person deploying, on the request thread where their
+        // identity is: deployment is what turns a reference to a space's secret into
+        // a request that carries it. See SpaceReferenceGuard.
+        if (spaceReferenceGuard != null) {
+            spaceReferenceGuard.requireMayDeploy(agentId, version);
+        }
 
         // MUST sit before the try below, for the same reason as the quota gate: the
         // catch(Exception) there rethrows as InternalServerErrorException, which

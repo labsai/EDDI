@@ -279,6 +279,7 @@ export function WorkflowsPage() {
                         <OwnershipBadge
                           className="ms-2 align-middle"
                           ownerId={wf.ownerId}
+                          ownerName={wf.ownerName}
                           spaceId={wf.spaceId}
                           visibility={wf.visibility}
                         />

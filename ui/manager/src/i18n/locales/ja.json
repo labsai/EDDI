@@ -75,7 +75,8 @@
     "workforce": "ワークフォース",
     "monitoring": "会話モニタリング",
     "analytics": "分析",
-    "connections": "接続"
+    "connections": "接続",
+    "workspaces": "ワークスペース"
   },
   "theme": {
     "light": "ライト",
@@ -446,7 +447,18 @@
     "toolPauseReasonPlaceholder": "例: {toolNames} には承認が必要です",
     "toolPendingMessage": "一時停止中にエンドユーザーへ表示するメッセージ（{toolNames} が使用可能）",
     "toolPendingMessagePlaceholder": "例: {toolNames} の承認を人間が行うのを待っています…",
-    "toolInGroupTurns": "グループターン内では、メンバーのゲートされたツール呼び出しは自動的に拒否されます (REJECT)。"
+    "toolInGroupTurns": "グループターン内では、メンバーのゲートされたツール呼び出しは自動的に拒否されます (REJECT)。",
+    "review": {
+      "title": "利用状況と会話のレビュー",
+      "total": "会話数",
+      "active": "現在アクティブ",
+      "users": "利用者数",
+      "description": "会話は、その会話をした本人だけのものです。これをオンにすると、このエージェントを編集できる全員がその会話を読めるようになります — 利用者が何を尋ねているかを把握し、改善するためです。チャットは入力前に利用者へその旨を伝えます。",
+      "enable": "このエージェントのメンテナーに会話の閲覧を許可する",
+      "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
+      "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
+      "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
+    }
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -757,6 +769,7 @@
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
     "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "reviewNoticeLabel": "会話のレビュー",
     "sendRejected": "メッセージは送信されませんでした: {{reason}}",
     "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。",
     "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
@@ -5003,7 +5016,9 @@
       "published": "公開済み",
       "shared": "共有中",
       "sharedTitle": "{{owner}} が所有 · {{space}} 内",
-      "ownedBy": "{{owner}} が所有"
+      "ownedBy": "{{owner}} が所有",
+      "internal": "サインイン済みの全員",
+      "sharedBy": "{{owner}} が共有"
     },
     "level": {
       "use": "会話のみ",
@@ -5021,7 +5036,9 @@
       "space": "ワークスペース",
       "spaceHint": "このリソースのワークスペースの全員。",
       "published": "公開",
-      "publishedHint": "このデプロイにアクセスできる全員。",
+      "publishedHint": "このデプロイにアクセスできる全員が閲覧できます — 匿名のチャット訪問者も含みます。",
+      "internal": "サインイン済みの全員",
+      "internalHint": "サインインした人なら誰でもチャットできます。構成は非公開のままです。匿名ではアクセスできません。",
       "confirmTitle": "公開範囲を{{visibility}}に変更しますか？",
       "cascadeLabel": "参照しているワークフローと設定にも適用する",
       "cascadeWarning": "あなたが所有する参照先リソースすべてにこの公開範囲が設定され、個別の設定は置き換えられます。以前の設定は残りません。",
@@ -5034,7 +5051,7 @@
       "visibility": "公開範囲",
       "peopleAndTeams": "ユーザーとチーム",
       "subjectLabel": "ユーザーまたはチーム",
-      "subjectPlaceholder": "name@example.com または team:engineering",
+      "subjectPlaceholder": "名前、メールアドレス、またはチーム",
       "levelLabel": "アクセスレベル",
       "add": "共有",
       "shared": "共有しました",
@@ -5060,7 +5077,13 @@
       "cascadeRevoked_other": "{{count}} 件のリソースから削除しました",
       "andMore_other": "ほか {{count}} 件",
       "cascadeRevoked_one": "{{count}} 件のリソースから削除しました",
-      "andMore_one": "ほか {{count}} 件"
+      "andMore_one": "ほか {{count}} 件",
+      "unknownGrant": "サインインするユーザーのうち、これに一致する人はいません — 誰にも届きません。削除して共有し直してください。",
+      "copyFailed": "コピーできませんでした — アドレスを選択して手動でコピーしてください。",
+      "chatLink": "チャットリンク",
+      "copied": "コピーしました",
+      "copy": "コピー",
+      "chatLinkHint": "「会話のみ」以上の権限でエージェントを共有されている全員が利用できます。"
     },
     "emptySpace": "このワークスペースにエージェントはありません",
     "emptySpaceDescription": "他のワークスペースに閲覧可能なエージェントがある可能性があります。",
@@ -5078,13 +5101,107 @@
       "warning": "現在の所有者（{{owner}}）が置き換えられ、このリソースの制御を失います。",
       "cascade_other": "{{count}} 件のリソースの所有者を変更しました",
       "cascade_one": "{{count}} 件のリソースの所有者を変更しました"
-    }
+    },
+    "notifications": {
+      "granted": "{{name}} にアクセス権を付与しました",
+      "labelUnread_one": "通知 — 未読 {{count}} 件",
+      "labelUnread_other": "通知 — 未読 {{count}} 件",
+      "label": "通知",
+      "markAll": "すべて既読にする",
+      "empty": "新着はありません。あなたへの共有やアクセスリクエストがここに表示されます。",
+      "unnamed": "名前のないリソース",
+      "requested": "{{who}} が {{what}} への「{{level}}」アクセスをリクエストしています",
+      "shared": "{{who}} が {{what}} をあなたと共有しました — {{level}}",
+      "grant": "付与",
+      "openChat": "チャットを開く",
+      "open": "開く",
+      "dismiss": "閉じる"
+    },
+    "request": {
+      "alreadyHas": "すでにそのアクセス権があります — ページを再読み込みしてください。",
+      "chatOnlyTitle": "このエージェントとチャットできます",
+      "title": "これにアクセスする権限がありません",
+      "chatOnly": "チャット用に共有されているため、構成は非公開のままです。",
+      "subtitle": "非公開か、他のユーザーとのみ共有されている可能性があります。アクセスをリクエストできます。",
+      "sent": "リクエストを送信しました。対象が存在し所有者がいる場合、所有者の通知に表示されます — 付与されると、あなたにも通知されます。",
+      "messagePlaceholder": "必要な理由（任意）",
+      "message": "所有者へのメッセージ",
+      "action": "アクセスをリクエスト"
+    },
+    "move": {
+      "done": "移動しました",
+      "title": "チームに移動",
+      "team": "チーム",
+      "action": "移動",
+      "hint": "チームの全員が検索・編集できるようになります。所有者はあなたのままです — 削除やさらなる共有ができるのはあなただけです。",
+      "cascade_one": "{{count}} 件のリソースを移動しました",
+      "cascade_other": "{{count}} 件のリソースを移動しました"
+    },
+    "preview": {
+      "title_one": "この変更は {{count}} 件のリソースに適用されます",
+      "title_other": "この変更は {{count}} 件のリソースに適用されます",
+      "confirm": "すべてに適用"
+    },
+    "ownership": {
+      "mine": "自分のもの",
+      "shared": "共有されたもの",
+      "any": "表示できるすべて",
+      "label": "表示"
+    },
+    "create": {
+      "default": "デフォルトのワークスペース",
+      "hint": "新しい項目は {{space}} に作成されます。"
+    },
+    "emptyShared": "まだ何も共有されていません",
+    "emptySharedDescription": "同僚があなたやあなたのチームとエージェントを共有すると、ここと通知に表示されます。",
+    "showEverything": "表示できるものをすべて表示"
   },
   "connectionRef": {
     "wrapped": "接続はスキームを含むヘッダー値全体を供給します。${connection:name} を単独で使い、「Bearer 」は接続のヘッダー値側に置いてください。",
     "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
     "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
     "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
+  },
+  "workspacesPage": {
+    "title": "ワークスペース",
+    "subtitle": "あなたのワークスペース、そこに保管されるシークレットと変数、新しい作業の共有方法。",
+    "notEnforced": "このデプロイではワークスペースが適用されていないため、全員がすべてを見られます。オペレーターは eddi.workspaces.enabled=true で有効にします。",
+    "yourSpaces": "あなたのワークスペース",
+    "yourSpacesHint": "各ワークスペースには独自のシークレットと変数があります。表示・変更できるのはメンバーだけで、それらを使うエージェントをデプロイできるのもメンバーだけです。",
+    "referenceCopied": "参照をコピーしました",
+    "copyReference": "エージェントで使う参照をコピー",
+    "secretStored": "シークレットを保存しました",
+    "secrets": "シークレット",
+    "noSecrets": "このワークスペースにはまだシークレットがありません",
+    "deleteNamed": "{{name}} を削除",
+    "secretName": "名前（例: openai-key）",
+    "secretValue": "値 — 暗号化して保存され、二度と表示されません",
+    "add": "追加",
+    "deleteSecretTitle": "このシークレットを削除しますか？",
+    "deleteSecretDescription": "これを使うエージェントは、再度保存されるまで動作しなくなります。この操作は元に戻せません。",
+    "variableStored": "変数を保存しました",
+    "variables": "変数",
+    "noVariables": "このワークスペースにはまだ変数がありません",
+    "variableName": "名前（例: model）",
+    "variableValue": "値",
+    "pinned": "{{property}} により固定",
+    "stored": "ここで設定",
+    "default": "デフォルト",
+    "settings": "設定",
+    "settingsHint": "すぐに反映され、5 秒以内にすべてのレプリカに適用されます。ワークスペースを適用するかどうか、どのトークンクレームがチームを含むかは起動時の設定で、参考として表示されます。",
+    "enforcing": "適用中",
+    "enforcedYes": "はい",
+    "enforcedNo": "いいえ",
+    "groupsClaim": "チームの取得元トークンクレーム",
+    "defaultSpace": "新しい作業の既定の作成先",
+    "defaultSpacePlaceholder": "空欄: 各自のワークスペース — またはチーム名",
+    "defaultSpaceHelp": "チーム名を指定すると、デプロイはチーム優先になります。非公開にしない限り、同僚同士で作業が見えます。個人が選択したワークスペースが常に優先されます。",
+    "legacy": "所有権の記録前に作成されたリソース",
+    "legacyShared": "全員に表示 — アップグレード後も何も消えません",
+    "legacyAdminOnly": "管理者のみに表示 — 所有者が割り当てられた後",
+    "lastChanged": "最終変更者: {{who}}",
+    "neverChanged": "まだここで変更されていません",
+    "saved": "設定を保存しました"
   },
   "cascadeSave": {
     "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",

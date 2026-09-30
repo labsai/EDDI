@@ -37,6 +37,8 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -47,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -1919,4 +1922,82 @@ class GdprComplianceServiceTest {
                         + "has two different shipped defaults depending on how it was built");
     }
 
+    @Nested
+    @DisplayName("registered participants")
+    class Participants {
+
+        private IGdprParticipant participant(String name, long erased, Object exported) throws Exception {
+            var participant = mock(IGdprParticipant.class);
+            when(participant.name()).thenReturn(name);
+            when(participant.erase(anyString())).thenReturn(erased);
+            when(participant.export(anyString())).thenReturn(exported);
+            return participant;
+        }
+
+        @SuppressWarnings("unchecked")
+        private void register(IGdprParticipant... participants) {
+            Instance<IGdprParticipant> instance = mock(Instance.class);
+            doAnswer(invocation -> {
+                Consumer<IGdprParticipant> consumer = invocation.getArgument(0);
+                for (IGdprParticipant p : participants) {
+                    consumer.accept(p);
+                }
+                return null;
+            }).when(instance).forEach(any());
+            service.participantInstances = instance;
+        }
+
+        @Test
+        @DisplayName("erasure reaches every participant and reports what each removed")
+        void erasureReachesParticipants() throws Exception {
+            var directory = participant("userDirectory", 1, null);
+            register(directory);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            verify(directory).erase("alice");
+            assertEquals(1L, result.additionalDeleted().get("userDirectory"));
+            assertTrue(result.complete());
+        }
+
+        @Test
+        @DisplayName("a failing participant makes the erasure incomplete instead of being skipped quietly")
+        void failingParticipantIsReported() throws Exception {
+            var broken = participant("workspaceNotifications", 0, null);
+            when(broken.erase(anyString())).thenThrow(new IllegalStateException("down"));
+            var directory = participant("userDirectory", 1, null);
+            register(broken, directory);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            assertFalse(result.complete());
+            assertTrue(result.failedSteps().contains("workspaceNotifications"));
+            verify(directory).erase("alice");
+        }
+
+        @Test
+        @DisplayName("export carries each participant's section, keyed by its name")
+        void exportCarriesSections() throws Exception {
+            register(participant("userDirectory", 0, Map.of("email", "alice@example.com")), participant("nothingHeld", 0, null));
+
+            UserDataExport export = service.exportUserData("alice");
+
+            assertEquals(Map.of("email", "alice@example.com"), export.additionalData().get("userDirectory"));
+            assertFalse(export.additionalData().containsKey("nothingHeld"), "a participant holding nothing adds no empty section");
+        }
+
+        @Test
+        @DisplayName("a participant whose export fails is named in the bundle, not silently left out")
+        void failedExportIsNamed() throws Exception {
+            var broken = participant("workspaceNotifications", 0, null);
+            when(broken.export(anyString())).thenThrow(new IllegalStateException("down"));
+            register(broken);
+
+            UserDataExport export = service.exportUserData("alice");
+
+            assertEquals(UserDataExport.EXPORT_FAILED, export.additionalData().get("workspaceNotifications"),
+                    "an absent section reads as nothing held");
+            assertFalse(export.complete());
+        }
+    }
 }

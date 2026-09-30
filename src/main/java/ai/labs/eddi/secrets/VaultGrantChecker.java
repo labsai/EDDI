@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.RestUtilities;
@@ -98,6 +99,11 @@ public class VaultGrantChecker {
      */
     private static final Pattern VARS_PATTERN = Pattern.compile("\\$\\{vars:[^}]+\\}");
 
+    /**
+     * An explicit tenant in a vault or variable reference; group 1 is the tenant.
+     */
+    private static final Pattern TENANT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|vars):([^/}]+)/[^}]+\\}");
+
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
@@ -131,6 +137,10 @@ public class VaultGrantChecker {
     public List<String> findUngrantedReferences(String agentId, Integer agentVersion) {
         try {
             return findUngrantedReferences(agentStore.read(agentId, agentVersion), agentId);
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // A verdict, not an unreadable configuration: the catch-all below would
+            // turn it into "no violations" and let the agent deploy.
+            return List.of("a reference assembled from global variables (" + e.getMessage() + ")");
         } catch (Exception e) {
             LOGGER.debugf("Could not read agent '%s' v%s for the vault-grant check: %s", sanitize(agentId), agentVersion,
                     sanitize(e.getMessage()));
@@ -238,7 +248,15 @@ public class VaultGrantChecker {
             return ReferenceCheck.UNKNOWN;
         }
         List<String> unreadable = new ArrayList<>();
-        for (String reference : collectVaultReferences(agentConfiguration, unreadable, unreadable)) {
+        Set<String> found;
+        try {
+            found = collectVaultReferences(agentConfiguration, unreadable, unreadable);
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // The agent assembles a reference from variables, so which secret it
+            // reaches depends on their values: the answer is not known.
+            return ReferenceCheck.UNKNOWN;
+        }
+        for (String reference : found) {
             try {
                 if (secret.equals(SecretReference.parse(reference))) {
                     return ReferenceCheck.REFERENCES;
@@ -248,6 +266,124 @@ public class VaultGrantChecker {
             }
         }
         return unreadable.isEmpty() ? ReferenceCheck.DOES_NOT_REFERENCE : ReferenceCheck.UNKNOWN;
+    }
+
+    /**
+     * Every tenant the agent's configuration names explicitly in a
+     * {@code ${vault:<tenant>/…}} or {@code ${vars:<tenant>/…}} reference —
+     * including those that only appear once variables are expanded, twice over,
+     * since a variable may hold a reference to another variable or to a secret.
+     * <p>
+     * Feeds the workspace check that a deployer belongs to every space whose
+     * secrets or variables an agent uses. Reuses this class's traversal because it
+     * is the one that already reaches the agent document, every workflow step's
+     * extension config, and the variable expansion the runtime performs.
+     *
+     * @return the tenant ids; empty when the configuration cannot be read, which
+     *         the deployment itself then fails on
+     */
+    public Set<String> referencedTenants(String agentId, Integer agentVersion) {
+        AgentConfiguration agentConfiguration;
+        try {
+            agentConfiguration = agentStore.read(agentId, agentVersion);
+        } catch (ResourceNotFoundException e) {
+            // Not there: nothing to deploy, and the deployment's own existence check
+            // answers 404 — refusing here would turn that into a 403.
+            return Set.of();
+        } catch (Exception e) {
+            // A store failure is not "names no tenant": fail closed.
+            LOGGER.debugf("Could not read agent '%s' v%s for the space-reference check: %s", sanitize(agentId), agentVersion,
+                    sanitize(e.getMessage()));
+            throw new UnverifiableReferencesException("agent configuration");
+        }
+        Set<String> tenants = new LinkedHashSet<>();
+        if (agentConfiguration == null) {
+            return tenants;
+        }
+        Set<String> visitedConnections = new LinkedHashSet<>();
+        collectTenants(agentConfiguration, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
+        if (agentConfiguration.getWorkflows() != null) {
+            for (URI workflowUri : agentConfiguration.getWorkflows()) {
+                List<String> unreadable = new ArrayList<>();
+                WorkflowConfiguration workflow = readWorkflow(workflowUri, unreadable);
+                if (!unreadable.isEmpty()) {
+                    // Fail closed: "could not read it" is not "it names no tenant", and a
+                    // workflow cached from an earlier build can still resolve whatever it
+                    // names at runtime.
+                    throw new UnverifiableReferencesException("workflow " + workflowUri);
+                }
+                if (workflow == null || workflow.getWorkflowSteps() == null) {
+                    continue;
+                }
+                for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                    Object configuredUri = step.getConfig() != null ? step.getConfig().get("uri") : null;
+                    if (step.getType() == null || configuredUri == null) {
+                        continue;
+                    }
+                    // readExtensionConfig records a scanned type it could not read; parser,
+                    // rules and output steps are not read at all and record nothing.
+                    Object extensionConfig = readExtensionConfig(step.getType().toString(), configuredUri.toString(), unreadable);
+                    if (!unreadable.isEmpty()) {
+                        throw new UnverifiableReferencesException("extension configuration " + configuredUri);
+                    }
+                    if (extensionConfig != null) {
+                        collectTenants(extensionConfig, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
+                    }
+                }
+            }
+        }
+        return tenants;
+    }
+
+    /**
+     * Adds every tenant {@code config} names, following {@code ${connection:…}}
+     * into the connection document — the same hop the grant check makes. A
+     * connection that holds {@code ${vault:t.finance…/key}} is otherwise a way to
+     * use another team's secret from an agent that names only the connection.
+     *
+     * @param tenantId
+     *            the tenant a short-form {@code ${vars:key}} resolves in — the
+     *            connection's own for a connection document
+     * @param visitedConnections
+     *            each connection is scanned once, which also ends a cycle
+     */
+    private void collectTenants(Object config, Set<String> sink, String tenantId, Set<String> visitedConnections) {
+        String serialized;
+        try {
+            serialized = MAPPER.writeValueAsString(config);
+        } catch (Exception e) {
+            return;
+        }
+        List<String> unresolved = new ArrayList<>();
+        String scanned = withVariablesExpanded(withVariablesExpanded(serialized, tenantId, unresolved), tenantId, unresolved);
+        if (!unresolved.isEmpty()) {
+            // A variable that could not be read may hold a reference to any tenant.
+            throw new UnverifiableReferencesException("variable " + unresolved.get(0));
+        }
+        Matcher matcher = TENANT_REFERENCE.matcher(scanned);
+        while (matcher.find()) {
+            sink.add(matcher.group(1));
+        }
+        Matcher connections = CONNECTION_PATTERN.matcher(scanned);
+        while (connections.find()) {
+            String connectionTenant = connections.group(1) != null ? connections.group(1) : ConnectionReference.DEFAULT_TENANT;
+            String name = connections.group(2);
+            if (!visitedConnections.add(connectionTenant + "/" + name)) {
+                continue;
+            }
+            try {
+                ConnectionConfiguration connection = connectionStore.readByName(connectionTenant, name);
+                if (connection != null) {
+                    collectTenants(connection, sink, ConnectionConfiguration.effectiveTenant(connection), visitedConnections);
+                }
+            } catch (Exception e) {
+                // Fail closed: a connection cached from an earlier read can still resolve
+                // whatever it names at runtime. An absent one (null above) is fine — the
+                // runtime refuses it as NOT_FOUND.
+                LOGGER.debugf("Could not read connection '%s' for the space-reference check: %s", sanitize(name), sanitize(e.getMessage()));
+                throw new UnverifiableReferencesException("connection " + connectionTenant + "/" + name);
+            }
+        }
     }
 
     /**
@@ -333,6 +469,17 @@ public class VaultGrantChecker {
                     sanitize(e.getMessage()));
             unreadableResources.add(String.valueOf(workflowUri));
             return null;
+        }
+    }
+
+    /**
+     * A resource the space-reference check needed to read could not be read, so
+     * which tenants the agent names is unknown. The deployment is refused rather
+     * than let through.
+     */
+    public static final class UnverifiableReferencesException extends IllegalStateException {
+        public UnverifiableReferencesException(String what) {
+            super("Could not read the " + what + " to check which spaces' secrets and variables it uses");
         }
     }
 
@@ -466,6 +613,13 @@ public class VaultGrantChecker {
      * it, so a scan sees both what is written and what the runtime resolves it to.
      * One helper for the vault scan and the connection scan: expanding for only one
      * of them is how a variable came to hide a connection hop.
+     * <p>
+     * The config is also resolved in place, the way the runtime does it. Each
+     * expansion on its own line could not show a reference split across two
+     * variables; resolving in place refuses one
+     * ({@link GlobalVariableResolver.AssembledReferenceException}), so such an
+     * agent fails to deploy instead of failing its first turn. That exception is
+     * let through deliberately — it is a verdict, not an unreadable variable.
      *
      * @param tenantId
      *            the tenant a short-form {@code ${vars:key}} resolves in
@@ -479,6 +633,10 @@ public class VaultGrantChecker {
             return serialized;
         }
         StringBuilder scanned = new StringBuilder(serialized);
+        String inPlace = globalVariableResolver.resolveValue(serialized, tenantId);
+        if (inPlace != null && !inPlace.equals(serialized)) {
+            scanned.append('\n').append(inPlace);
+        }
         Matcher vars = VARS_PATTERN.matcher(serialized);
         while (vars.find()) {
             String expanded;

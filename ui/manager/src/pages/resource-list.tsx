@@ -264,6 +264,7 @@ export function ResourceListPage() {
                         <OwnershipBadge
                           className="ms-2 align-middle"
                           ownerId={item.ownerId}
+                          ownerName={item.ownerName}
                           spaceId={item.spaceId}
                           visibility={item.visibility}
                         />

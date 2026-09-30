@@ -61,8 +61,9 @@ describe("ShareDialog", () => {
     const shared = vi.fn();
     server.use(
       http.get(SHARES, () => HttpResponse.json(shareInfo())),
-      http.post(SHARES, () => {
-        shared();
+      http.post(SHARES, ({ request }) => {
+        // Every change is previewed first (dryRun=true); only the applied POST counts.
+        if (new URL(request.url).searchParams.get("dryRun") !== "true") shared();
         return HttpResponse.json({ updated: [], skipped: [] });
       })
     );
@@ -133,6 +134,7 @@ describe("ShareDialog", () => {
 
     await userEvent.type(screen.getByTestId("share-subject-input"), "bob");
     await userEvent.click(screen.getByTestId("share-submit"));
+    await userEvent.click(await screen.findByTestId("share-preview-confirm"));
 
     await waitFor(() => expect(screen.getByTestId("share-cascade-summary")).toBeInTheDocument());
     expect(screen.getByText("Bob's rule set")).toBeInTheDocument();
@@ -158,6 +160,7 @@ describe("ShareDialog", () => {
 
     await userEvent.type(screen.getByTestId("share-subject-input"), "bob");
     await userEvent.click(screen.getByTestId("share-submit"));
+    await userEvent.click(await screen.findByTestId("share-preview-confirm"));
 
     // "Applied to 2 resource" is what a missing plural form produces, and it is
     // the sort of thing that ships because nobody shares exactly two things
@@ -411,6 +414,7 @@ describe("ShareDialog", () => {
 
     await userEvent.type(screen.getByTestId("share-subject-input"), "bob");
     await userEvent.click(screen.getByTestId("share-submit"));
+    await userEvent.click(await screen.findByTestId("share-preview-confirm"));
 
     await waitFor(() => expect(screen.getByTestId("share-cascade-summary")).toBeInTheDocument());
     expect(screen.getByText("Colleague resource 0")).toBeInTheDocument();
@@ -454,5 +458,127 @@ describe("ShareDialog", () => {
     await waitFor(() => expect(errorToast).toHaveBeenCalled());
     expect(screen.queryByTestId("share-cascade-summary")).not.toBeInTheDocument();
     expect(screen.getByTestId("share-subject-input")).toHaveValue("bob");
+  });
+
+  it("previews a change that reaches beyond this resource, and applies nothing until confirmed", async () => {
+    // Sharing a group reaches every agent in it; a cascade is invisible in the
+    // request, so the dialog says what it will touch before touching it.
+    const applied = vi.fn();
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.post(SHARES, ({ request }) => {
+        if (new URL(request.url).searchParams.get("dryRun") !== "true") applied();
+        return HttpResponse.json({
+          updated: [
+            { id: RESOURCE_ID, name: "Support Group" },
+            { id: "cccccccccccccccccccccccc", name: "Billing Agent" },
+          ],
+          skipped: [],
+          dryRun: true,
+        });
+      })
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+    await waitFor(() => expect(screen.getByTestId("share-subject-input")).toBeInTheDocument());
+    await userEvent.type(screen.getByTestId("share-subject-input"), "carol");
+    await userEvent.click(screen.getByTestId("share-submit"));
+
+    expect(await screen.findByTestId("share-preview")).toBeInTheDocument();
+    expect(screen.getByText("Billing Agent")).toBeInTheDocument();
+    expect(applied).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("share-preview-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("share-preview")).not.toBeInTheDocument());
+    expect(applied).not.toHaveBeenCalled();
+  });
+
+  it("names people by name, and warns about a grant that reaches nobody", async () => {
+    server.use(
+      http.get(SHARES, () =>
+        HttpResponse.json(
+          shareInfo({
+            ownerLabel: "Alice Doe",
+            grants: [
+              { subject: "user:carol", level: "USE", kind: "user", label: "Carol Test", detail: "carol@example.com", known: true },
+              { subject: "user:carol@example.com", level: "VIEW", kind: "user", label: "carol@example.com", known: false },
+            ],
+          })
+        )
+      )
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+
+    expect(await screen.findByText("Carol Test")).toBeInTheDocument();
+    // Once as Carol's detail line, once as the label of the unmatched grant.
+    expect(screen.getAllByText("carol@example.com")).toHaveLength(2);
+    expect(screen.getByTestId("share-owner-line")).toHaveTextContent("Alice Doe");
+    // The pre-directory grant made with an email address matches nobody: say so,
+    // so the owner removes it rather than believing it works.
+    expect(screen.getAllByTestId("share-grant-unknown")).toHaveLength(1);
+  });
+
+  it("offers everyone-signed-in as its own visibility", async () => {
+    let sentVisibility: string | null = null;
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.put(`${SHARES}/visibility`, ({ request }) => {
+        sentVisibility = new URL(request.url).searchParams.get("visibility");
+        return HttpResponse.json({ updated: [{ id: RESOURCE_ID, name: "Test Agent" }], skipped: [] });
+      })
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+    await userEvent.click(await screen.findByTestId("visibility-internal"));
+    await userEvent.click(screen.getByTestId("visibility-apply"));
+
+    await waitFor(() => expect(sentVisibility).toBe("internal"));
+  });
+
+  it("offers the public chat address once the agent is published", async () => {
+    // The standalone Chat UI signs nobody in, so it is the right link only for
+    // an agent anonymous callers may reach.
+    server.use(http.get(SHARES, () => HttpResponse.json(shareInfo({ visibility: "published" }))));
+
+    renderWithProviders(<ShareDialog {...props} chatLink="http://localhost/manage/chat?agentId=abc" />);
+
+    expect(await screen.findByTestId("share-chat-link")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(`http://localhost:3000/chat/production/${RESOURCE_ID}`)).toBeInTheDocument();
+  });
+
+  it("offers a copyable chat link for an agent", async () => {
+    server.use(http.get(SHARES, () => HttpResponse.json(shareInfo())));
+
+    renderWithProviders(<ShareDialog {...props} chatLink="http://localhost/chat/production/abc" />);
+
+    expect(await screen.findByTestId("share-chat-link")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("http://localhost/chat/production/abc")).toBeInTheDocument();
+  });
+
+  it("names an unnamed resource in the preview by its id, not with a blank line", async () => {
+    // Workflows and configuration beneath an agent usually have no name, and the
+    // server sends "" for it. `name ?? id` rendered those as empty bullets.
+    server.use(
+      http.get(SHARES, () => HttpResponse.json(shareInfo())),
+      http.post(SHARES, () =>
+        HttpResponse.json({
+          updated: [
+            { id: RESOURCE_ID, name: "Support Agent" },
+            { id: "bbbbbbbbbbbbbbbbbbbbbbbb", name: "" },
+          ],
+          skipped: [],
+          dryRun: true,
+        })
+      )
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+    await waitFor(() => expect(screen.getByTestId("share-subject-input")).toBeInTheDocument());
+    await userEvent.type(screen.getByTestId("share-subject-input"), "carol");
+    await userEvent.click(screen.getByTestId("share-submit"));
+
+    const preview = await screen.findByTestId("share-preview");
+    expect(preview).toHaveTextContent("bbbbbbbbbbbbbbbbbbbbbbbb");
   });
 });

@@ -568,6 +568,23 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public ConversationUsage getConversationUsage(String agentId) {
+        ensureSchema();
+        String sql = "SELECT COUNT(*), COUNT(*) FILTER (WHERE conversation_state <> ?), COUNT(DISTINCT data ->> 'userId') "
+                + "FROM conversation_memories WHERE AGENT_ID = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ENDED.toString());
+            ps.setString(2, agentId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return new ConversationUsage(rs.getLong(1), rs.getLong(2), rs.getLong(3));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count conversation usage", e);
+        }
+    }
+
+    @Override
     public List<String> getEndedConversationIds() {
         ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";

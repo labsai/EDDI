@@ -1,3 +1,5 @@
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -108,6 +110,7 @@ export function WorkflowDetailPage() {
     data: workflow,
     isLoading,
     isError,
+    error: workflowError,
     refetch,
   } = useWorkflow(id!, resolvedVersion);
   const updateMutation = useUpdateWorkflow();
@@ -353,6 +356,15 @@ export function WorkflowDetailPage() {
     return (
       <div className="flex items-center justify-center py-20" data-testid="workflow-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isForbidden(workflowError)) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <RequestAccessPanel resourceId={id!} />
       </div>
     );
   }

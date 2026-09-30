@@ -75,7 +75,8 @@
     "workforce": "Workforce",
     "monitoring": "Conversation Monitoring",
     "analytics": "Analytics",
-    "connections": "Connections"
+    "connections": "Connections",
+    "workspaces": "Workspaces"
   },
   "theme": {
     "light": "Light",
@@ -473,7 +474,18 @@
     "toolPauseReasonPlaceholder": "e.g. Approval required for {toolNames}",
     "toolPendingMessage": "End-user message while paused ({toolNames} allowed)",
     "toolPendingMessagePlaceholder": "e.g. Waiting for a human to approve {toolNames}…",
-    "toolInGroupTurns": "Inside a group turn, a member's gated tool call is auto-rejected (REJECT)."
+    "toolInGroupTurns": "Inside a group turn, a member's gated tool call is auto-rejected (REJECT).",
+    "review": {
+      "title": "Usage & conversation review",
+      "total": "Conversations",
+      "active": "Active now",
+      "users": "People",
+      "description": "Conversations are private to the person who had them. Turn this on to let everyone who can edit this agent read its conversations — to see what people ask and improve it. The chat tells people before they type.",
+      "enable": "Let this agent's maintainers read its conversations",
+      "notice": "What the chat tells people (leave empty for the standard wording)",
+      "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
+      "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
+    }
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -784,6 +796,7 @@
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
     "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "reviewNoticeLabel": "Conversation review",
     "sendRejected": "Your message was not sent: {{reason}}",
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
     "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
@@ -5003,7 +5016,9 @@
       "published": "Published",
       "shared": "Shared",
       "sharedTitle": "Owned by {{owner}} · in {{space}}",
-      "ownedBy": "Owned by {{owner}}"
+      "ownedBy": "Owned by {{owner}}",
+      "internal": "Everyone signed in",
+      "sharedBy": "Shared by {{owner}}"
     },
     "level": {
       "use": "Can chat",
@@ -5021,7 +5036,9 @@
       "space": "Workspace",
       "spaceHint": "Everyone in this resource's workspace.",
       "published": "Published",
-      "publishedHint": "Everyone with access to this deployment.",
+      "publishedHint": "Everyone with access to this deployment can read it — anonymous chat visitors included.",
+      "internal": "Everyone signed in",
+      "internalHint": "Anyone who signs in can chat with it. Its configuration stays private. Not reachable anonymously.",
       "confirmTitle": "Change visibility to {{visibility}}?",
       "cascadeLabel": "Also apply it to the workflows and configurations this references",
       "cascadeWarning": "Each referenced resource you own gets this visibility, replacing whatever it was set to on its own. Their previous settings are not kept.",
@@ -5034,7 +5051,7 @@
       "visibility": "Visibility",
       "peopleAndTeams": "People and teams",
       "subjectLabel": "Person or team",
-      "subjectPlaceholder": "name@example.com or team:engineering",
+      "subjectPlaceholder": "Name, email or team",
       "levelLabel": "Access level",
       "add": "Share",
       "shared": "Shared",
@@ -5060,7 +5077,13 @@
       "cascadeRevoked_one": "Removed from {{count}} resource",
       "andMore_one": "and {{count}} more",
       "cascadeRevoked_other": "Removed from {{count}} resources",
-      "andMore_other": "and {{count}} more"
+      "andMore_other": "and {{count}} more",
+      "unknownGrant": "No one who signs in matches this — it reaches nobody. Remove it and share again.",
+      "copyFailed": "Could not copy — select the address and copy it yourself.",
+      "chatLink": "Chat link",
+      "copied": "Copied",
+      "copy": "Copy",
+      "chatLinkHint": "Works for anyone the agent is shared with at “Can chat” or above."
     },
     "emptySpace": "No agents in this workspace",
     "emptySpaceDescription": "Other workspaces may have agents you can see.",
@@ -5078,13 +5101,107 @@
       "warning": "This replaces the current owner ({{owner}}). They lose control of this resource.",
       "cascade_one": "Owner changed on {{count}} resource",
       "cascade_other": "Owner changed on {{count}} resources"
-    }
+    },
+    "notifications": {
+      "granted": "Access granted to {{name}}",
+      "labelUnread_one": "Notifications — {{count}} unread",
+      "labelUnread_other": "Notifications — {{count}} unread",
+      "label": "Notifications",
+      "markAll": "Mark all read",
+      "empty": "Nothing new. Shares with you and access requests appear here.",
+      "unnamed": "an unnamed resource",
+      "requested": "{{who}} asks for “{{level}}” access to {{what}}",
+      "shared": "{{who}} shared {{what}} with you — {{level}}",
+      "grant": "Grant",
+      "openChat": "Open chat",
+      "open": "Open",
+      "dismiss": "Dismiss"
+    },
+    "request": {
+      "alreadyHas": "You already have that access — reload the page.",
+      "chatOnlyTitle": "You can chat with this agent",
+      "title": "You don't have access to this",
+      "chatOnly": "It was shared with you for chatting, so its configuration stays private.",
+      "subtitle": "It may be private, or shared with other people only. You can ask for access.",
+      "sent": "Request sent. If this exists and has an owner, they will see it in their notifications — and once they grant it, you will too.",
+      "messagePlaceholder": "Why do you need it? (optional)",
+      "message": "Message to the owner",
+      "action": "Request access"
+    },
+    "move": {
+      "done": "Moved",
+      "title": "Move to a team",
+      "team": "Team",
+      "action": "Move",
+      "hint": "Everyone in the team can then find and edit it. You stay the owner — only you can delete it or share it further.",
+      "cascade_one": "Moved {{count}} resource",
+      "cascade_other": "Moved {{count}} resources"
+    },
+    "preview": {
+      "title_one": "This change reaches {{count}} resource",
+      "title_other": "This change reaches {{count}} resources",
+      "confirm": "Apply to all of them"
+    },
+    "ownership": {
+      "mine": "Mine",
+      "shared": "Shared with me",
+      "any": "Everything I can see",
+      "label": "Show"
+    },
+    "create": {
+      "default": "your default workspace",
+      "hint": "New items are created in {{space}}."
+    },
+    "emptyShared": "Nothing has been shared with you yet",
+    "emptySharedDescription": "When a colleague shares an agent with you or your team, it appears here — and in your notifications.",
+    "showEverything": "Show everything I can see"
   },
   "connectionRef": {
     "wrapped": "A connection supplies the whole header value, scheme included. Use ${connection:name} on its own and put “Bearer ” in the connection's header value instead.",
     "headerMismatch": "This connection sends its credential as “{{expected}}”, so the header must be named that — otherwise the config shows one name and the request carries another.",
     "refusedInRequest": "${connection:…} is refused in a path, query parameter or body — a credential in a URL lands in every proxy log, and one in a body is not read. Reference the connection from a header instead.",
     "refusedInModel": "Language models, embeddings and vector stores do not accept ${connection:…}: a connection resolves to a whole header, and these need a bare credential. Use ${vault:…} here."
+  },
+  "workspacesPage": {
+    "title": "Workspaces",
+    "subtitle": "Your spaces, the secrets and variables they keep, and how new work is shared.",
+    "notEnforced": "Workspaces are not enforced on this deployment, so everybody sees everything. An operator turns them on with eddi.workspaces.enabled=true.",
+    "yourSpaces": "Your spaces",
+    "yourSpacesHint": "Each space keeps its own secrets and variables. Only its members can see or change them, and only a member can deploy an agent that uses them.",
+    "referenceCopied": "Reference copied",
+    "copyReference": "Copy the reference to use in an agent",
+    "secretStored": "Secret stored",
+    "secrets": "Secrets",
+    "noSecrets": "No secrets in this space yet",
+    "deleteNamed": "Delete {{name}}",
+    "secretName": "Name, e.g. openai-key",
+    "secretValue": "Value — stored encrypted, never shown again",
+    "add": "Add",
+    "deleteSecretTitle": "Delete this secret?",
+    "deleteSecretDescription": "Agents that use it stop working until it is stored again. This cannot be undone.",
+    "variableStored": "Variable saved",
+    "variables": "Variables",
+    "noVariables": "No variables in this space yet",
+    "variableName": "Name, e.g. model",
+    "variableValue": "Value",
+    "pinned": "Pinned by {{property}}",
+    "stored": "Set here",
+    "default": "Default",
+    "settings": "Settings",
+    "settingsHint": "Take effect at once, on every replica within five seconds. Whether workspaces are enforced, and which token claim carries teams, are startup settings and shown for reference only.",
+    "enforcing": "Enforced",
+    "enforcedYes": "Yes",
+    "enforcedNo": "No",
+    "groupsClaim": "Teams come from the token claim",
+    "defaultSpace": "Where new work lands by default",
+    "defaultSpacePlaceholder": "Empty: each person's own workspace — or a team name",
+    "defaultSpaceHelp": "A team name makes the deployment team-first: colleagues see each other's work unless it is made private. The workspace a person has selected always wins.",
+    "legacy": "Resources created before ownership was recorded",
+    "legacyShared": "Visible to everyone — nothing disappears after an upgrade",
+    "legacyAdminOnly": "Visible to administrators only — once owners have been assigned",
+    "lastChanged": "Last changed by {{who}}",
+    "neverChanged": "Not changed here yet",
+    "saved": "Settings saved"
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",

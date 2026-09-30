@@ -50,6 +50,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
@@ -203,6 +205,9 @@ public class RestConversationStore implements IRestConversationStore {
         // (descriptors come back most-recent-first, so a typical caller's own
         // conversations fall well within the budget).
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        // Review decisions per agent version, made once per listing rather than once
+        // per row: the answer depends only on the version and on the caller.
+        final Map<URI, Boolean> reviewable = new HashMap<>();
 
         try {
             List<ConversationDescriptor> conversationDescriptors;
@@ -243,7 +248,8 @@ public class RestConversationStore implements IRestConversationStore {
                         String recordedOwner = conversationDescriptor.getUserId();
                         boolean ownerRecorded = !isNullOrEmpty(recordedOwner);
                         if (!seesAllConversations && ownerRecorded
-                                && !conversationAccessGuard.canAccessConversation(recordedOwner)) {
+                                && !conversationAccessGuard.canAccessConversation(recordedOwner)
+                                && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
                             continue;
                         }
 
@@ -354,12 +360,33 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
+    /**
+     * Whether a conversation the caller does not own may still be listed because
+     * they review its agent. Only when the listing asks for one agent: a reviewer
+     * browsing "all conversations" would otherwise have every agent's review
+     * setting checked for every row of the store.
+     */
+    private boolean mayReview(URI agentResource, String agentIdFilter, Map<URI, Boolean> cache) {
+        if (isNullOrEmpty(agentIdFilter) || agentResource == null) {
+            return false;
+        }
+        var resourceId = extractResourceId(agentResource);
+        if (resourceId == null || !agentIdFilter.equals(resourceId.getId())) {
+            return false;
+        }
+        return cache.computeIfAbsent(agentResource, conversationAccessGuard::canReview);
+    }
+
     @Override
     public ConversationMemorySnapshot readRawConversationLog(String conversationId) {
         checkNotNull(conversationId, "conversationId");
         // Owner-or-admin, the same gate RestAgentEngine/RestAttachmentUpload apply.
         // Without it any authenticated caller could read any conversation by id — the
-        // raw surface returns the full memory document, properties included.
+        // raw surface returns the full memory document, properties included. NOT
+        // opened to conversation review: those properties include the person's
+        // long-term memory, facts from other conversations and other agents, which a
+        // maintainer reviewing this agent has no business reading. Reviewers read the
+        // simple log below, which shows them the dialogue only.
         conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
@@ -383,10 +410,19 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(returnDetailed, "returnDetailed");
         checkNotNull(returnCurrentStepOnly, "returnCurrentStepOnly");
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        var access = conversationAccessGuard.requireConversationRead(conversationId);
+        boolean review = access != null && access.review();
 
         try {
-            return convertSimpleConversationMemory(requireSnapshot(conversationId), returnDetailed, returnCurrentStepOnly);
+            // A reviewing maintainer sees what was said, not what EDDI holds about the
+            // person: no detailed view (model traces, raw tool data), and none of the
+            // conversation's properties, which carry the user's long-term memory.
+            var snapshot = convertSimpleConversationMemory(requireSnapshot(conversationId), review ? false : returnDetailed,
+                    returnCurrentStepOnly);
+            if (review) {
+                snapshot.setConversationProperties(null);
+            }
+            return snapshot;
 
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);

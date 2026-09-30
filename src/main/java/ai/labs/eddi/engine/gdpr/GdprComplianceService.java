@@ -112,6 +112,15 @@ public class GdprComplianceService {
      */
     private final ICache<String, Boolean> restrictionCache;
 
+    /**
+     * Stores that joined erasure and export by registering an
+     * {@link IGdprParticipant} bean. Field-injected so the constructor every test
+     * builds this service with stays as it is; null in those tests, which means "no
+     * participants".
+     */
+    @Inject
+    Instance<IGdprParticipant> participantInstances;
+
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
             IConversationMemoryStore conversationMemoryStore,
@@ -727,11 +736,27 @@ public class GdprComplianceService {
             recordFailure(failedSteps, "auditLedger", e, pseudonym);
         }
 
+        // 8. Self-contained stores that registered themselves — the user directory,
+        // workspace notifications. Each owns its own records outright, so it needs no
+        // ordering against the steps above.
+        Map<String, Long> additionalDeleted = new LinkedHashMap<>();
+        for (IGdprParticipant participant : participants()) {
+            try {
+                long removed = participant.erase(userId);
+                additionalDeleted.put(participant.name(), removed);
+                if (removed > 0) {
+                    LOGGER.infof("[GDPR] Deleted %d %s records [%s]", removed, participant.name(), pseudonym);
+                }
+            } catch (Exception e) {
+                recordFailure(failedSteps, participant.name(), e, pseudonym);
+            }
+        }
+
         var result = new GdprDeletionResult(userId, memoriesDeleted,
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now());
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -765,11 +790,21 @@ public class GdprComplianceService {
         auditDetails.put("inFlightWorkStopped", inFlightWorkStopped);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
+        additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    private List<IGdprParticipant> participants() {
+        if (participantInstances == null) {
+            return List.of();
+        }
+        List<IGdprParticipant> found = new ArrayList<>();
+        participantInstances.forEach(found::add);
+        return found;
     }
 
     /**
@@ -1006,9 +1041,25 @@ public class GdprComplianceService {
                 "attachmentsExported", attachmentEntries.size(),
                 "connectionGrantsExported", connectionGrants.size()));
 
+        Map<String, Object> additionalData = new LinkedHashMap<>();
+        for (IGdprParticipant participant : participants()) {
+            try {
+                Object held = participant.export(userId);
+                if (held != null) {
+                    additionalData.put(participant.name(), held);
+                }
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[GDPR] Failed to export %s [%s]", participant.name(), pseudonym);
+                // Named in the bundle rather than left out of it: an absent section reads
+                // as "nothing held", which a DPO answering an access request cannot tell
+                // apart from a store that failed.
+                additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
+            }
+        }
+
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
-                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants);
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

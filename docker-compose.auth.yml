@@ -82,6 +82,15 @@ services:
       # causing iss-mismatch failures when the browser validates them.
       KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Substituted into eddi-realm.json's webOrigins on import
+      # ("http://localhost:${EDDI_PORT:7070}"), so EDDI on a non-default port
+      # can log in from the browser. Without them the SPA's token request is
+      # refused by CORS and the login fails with nothing but a 401. Keycloak
+      # skips the import when the realm already exists in the keycloak-data
+      # volume: after changing a port, recreate that volume or add the origin
+      # in the admin console.
+      EDDI_PORT: "${EDDI_PORT:-7070}"
+      EDDI_HTTPS_PORT: "${EDDI_HTTPS_PORT:-7443}"
     # Loopback by default, like EDDI itself (EDDI_BIND in docker-compose.yml):
     # the admin/admin default above must never be reachable off-host by accident.
     # Nothing off-box needs this port — EDDI reaches Keycloak over the compose

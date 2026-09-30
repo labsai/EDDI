@@ -25,7 +25,13 @@ export interface AgentDescriptor {
    */
   ownerId?: string;
   spaceId?: string;
-  visibility?: "private" | "space" | "published";
+  visibility?: "private" | "space" | "internal" | "published";
+  /**
+   * The owner's name from the user directory, for showing a person to a person.
+   * Absent when the directory does not know them or workspaces are not enforced
+   * — fall back to `ownerId`.
+   */
+  ownerName?: string;
   /**
    * What the signed-in user may do with THIS resource — `USE`, `VIEW`, `EDIT`
    * or `OWN`.
@@ -59,6 +65,12 @@ export interface Agent {
   memoryPolicy?: MemoryPolicy;
   // Wave 6 — Session Management
   sessionManagement?: SessionManagement;
+  /**
+   * Whether the agent's maintainers may read other people's conversations with
+   * it. Off unless set; the chat shows `notice` (or a standard wording) before
+   * anyone types.
+   */
+  conversationReview?: { enabled?: boolean; notice?: string | null };
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**
@@ -191,11 +203,18 @@ export function parseResourceUri(resource: string): {
 }
 
 // API functions
+/**
+ * Which agents a listing returns by owner: everything reachable, only the
+ * caller's own, or only what somebody else owns and has let them reach.
+ */
+export type Ownership = "" | "mine" | "shared";
+
 export function getAgentDescriptors(
   limit = 20,
   index = 0,
   filter = "",
-  space = ""
+  space = "",
+  ownership: Ownership = ""
 ): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -206,9 +225,40 @@ export function getAgentDescriptors(
   // "everything" is not page 2 of "this workspace", so filtering client-side
   // would quietly break pagination.
   if (space) params.set("space", space);
+  // Also in the query, for the same paging reason.
+  if (ownership) params.set("ownership", ownership);
   return api.get<AgentDescriptor[]>(
     `/agentstore/agents/descriptors?${params.toString()}`
   );
+}
+
+/** What a chat window shows about an agent — readable by anybody who may chat with it. */
+export interface AgentProfile {
+  agentId: string;
+  name?: string | null;
+  description?: string | null;
+  /**
+   * What to tell the person chatting when the deployed version lets its
+   * maintainers read conversations. Absent when it does not.
+   */
+  reviewNotice?: string | null;
+}
+
+export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {
+  return api.get<AgentProfile>(
+    `/agents/${encodeURIComponent(agentId)}/profile?environment=${encodeURIComponent(environment)}`
+  );
+}
+
+/** How much an agent is used — counts, never content. Requires view access. */
+export interface AgentUsage {
+  total: number;
+  active: number;
+  distinctUsers: number;
+}
+
+export function getAgentUsage(agentId: string): Promise<AgentUsage> {
+  return api.get<AgentUsage>(`/agents/${encodeURIComponent(agentId)}/usage`);
 }
 
 /**

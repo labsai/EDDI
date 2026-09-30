@@ -1,13 +1,15 @@
 import { useTranslation } from "react-i18next";
-import { Globe, Users } from "lucide-react";
+import { Building2, Globe, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useSpaces } from "@/hooks/use-spaces";
 import { describeSpace } from "@/lib/spaces";
 
 interface OwnershipBadgeProps {
   ownerId?: string;
+  /** The owner's name from the user directory — shown instead of the principal. */
+  ownerName?: string;
   spaceId?: string;
-  visibility?: "private" | "space" | "published";
+  visibility?: "private" | "space" | "internal" | "published";
   className?: string;
 }
 
@@ -23,7 +25,7 @@ interface OwnershipBadgeProps {
  * It is presentation only. Access is decided by the backend, which scopes every
  * listing regardless of what is drawn here.
  */
-export function OwnershipBadge({ ownerId, spaceId, visibility, className }: OwnershipBadgeProps) {
+export function OwnershipBadge({ ownerId, ownerName, spaceId, visibility, className }: OwnershipBadgeProps) {
   const { t } = useTranslation();
   const { enabled, principal } = useSpaces();
 
@@ -52,10 +54,25 @@ export function OwnershipBadge({ ownerId, spaceId, visibility, className }: Owne
   // the token. It is the value stamped as ownerId, and the two are not
   // guaranteed to be the same string.
   const isMine = !!ownerId && !!principal && ownerId === principal;
+
+  if (visibility === "internal" && isMine) {
+    // The owner is the one person who needs reminding that everyone signed in
+    // can talk to this; everyone else sees who shared it, below.
+    return (
+      <Badge variant="secondary" className={className} data-testid="ownership-badge-internal">
+        <Building2 className="me-1 h-3 w-3" aria-hidden="true" />
+        {t("workspaces.badge.internal", "Everyone signed in")}
+      </Badge>
+    );
+  }
+
   if (isMine) return null;
 
   if (!ownerId) return null;
 
+  // A person's name, not their principal: "Shared by Alice Doe" is what a
+  // colleague recognises, "Shared by f81d4fae-7dec" is not.
+  const owner = ownerName || ownerId;
   const space = describeSpace(spaceId);
   return (
     <Badge
@@ -64,12 +81,12 @@ export function OwnershipBadge({ ownerId, spaceId, visibility, className }: Owne
       data-testid="ownership-badge-shared"
       title={
         space
-          ? t("workspaces.badge.sharedTitle", "Owned by {{owner}} · in {{space}}", { owner: ownerId, space })
-          : t("workspaces.badge.ownedBy", "Owned by {{owner}}", { owner: ownerId })
+          ? t("workspaces.badge.sharedTitle", "Owned by {{owner}} · in {{space}}", { owner, space })
+          : t("workspaces.badge.ownedBy", "Owned by {{owner}}", { owner })
       }
     >
       <Users className="me-1 h-3 w-3" aria-hidden="true" />
-      {t("workspaces.badge.shared", "Shared")}
+      <span className="max-w-[9rem] truncate">{t("workspaces.badge.sharedBy", "Shared by {{owner}}", { owner })}</span>
     </Badge>
   );
 }
