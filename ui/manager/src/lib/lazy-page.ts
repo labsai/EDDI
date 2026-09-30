@@ -75,7 +75,7 @@ export function lazyPage<K extends string, M extends Record<K, ComponentType>>(
       return { default: module[name] };
     } catch (error) {
       if (looksLikeStaleChunk(error)) {
-        let alreadyTried = false;
+        let alreadyTried: boolean;
         try {
           alreadyTried = sessionStorage.getItem(RELOAD_GUARD_KEY) === "1";
           if (!alreadyTried) sessionStorage.setItem(RELOAD_GUARD_KEY, "1");

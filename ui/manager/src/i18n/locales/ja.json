@@ -3114,6 +3114,9 @@
     "new": "新規",
     "updated": "更新済み",
     "unchanged": "変更なし",
+    "removed": "削除",
+    "conflicts": "ここで変更済み",
+    "conflictHint": "「競合」と表示されたリソースは、前回の同期以降にこのインスタンスで変更されています。チェックしない限り変更されません。チェックするとローカルの変更が上書きされます。",
     "selected": "選択済み",
     "mergeNow": "選択した項目をインポート",
     "syncNow": "今すぐ同期",
@@ -3159,6 +3162,9 @@
     "previewFirst": "同期前に変更をプレビュー",
     "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
     "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "outcomeCounts": "更新 {{updated}} · 作成 {{created}} · 変更なし {{skipped}}",
+    "redeployHint": "同期された変更は新しいバージョンとして保存されます。実行中のものはそのまま動き続けます。有効にするには新しいバージョンをデプロイしてください。",
+    "overwrite": "ローカルの変更を上書き",
     "previewFailed": "プレビューに失敗しました",
     "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
@@ -3166,7 +3172,8 @@
     "actionCreate": "新規",
     "actionUpdate": "更新",
     "actionSkip": "最新です",
-    "actionConflict": "競合"
+    "actionConflict": "競合",
+    "actionRemove": "削除"
   },
   "userConversations": {
     "title": "ユーザー会話",

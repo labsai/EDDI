@@ -269,7 +269,7 @@ function toPipelineEvent(event: SSEEvent): PipelineEvent | null {
     return null;
   }
   let taskId = "unknown";
-  let taskType = "unknown";
+  let taskType: string;
   let index = 0;
   let durationMs: number | undefined;
   let toolTrace: PipelineEvent["toolTrace"];

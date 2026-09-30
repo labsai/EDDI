@@ -31,6 +31,15 @@ public interface IResourceSource extends AutoCloseable {
     List<SnippetSourceData> readSnippets();
 
     /**
+     * Things about the source the operator should know before approving a sync, but
+     * that are not a failure — e.g. two snippets sharing the name the agent
+     * references, of which only one can travel. Carried into the preview.
+     */
+    default List<String> warnings() {
+        return List.of();
+    }
+
+    /**
      * Cleans up any temporary resources (e.g., unzipped directories). Default no-op
      * — override when cleanup is needed.
      */

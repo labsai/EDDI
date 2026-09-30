@@ -23,7 +23,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 
 | Layer | Technology |
 | --- | --- |
-| **Build** | Vite 6 |
+| **Build** | Vite 8 |
 | **UI** | React 19 + TypeScript 5 (strict) |
 | **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
 | **State (server)** | TanStack Query v5 |

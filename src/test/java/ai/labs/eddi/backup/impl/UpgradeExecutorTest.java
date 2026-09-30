@@ -319,12 +319,12 @@ class UpgradeExecutorTest {
             setupPreviewAndAgent("target-1", 3, diffs);
 
             var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
+            agentConfig.setWorkflows(new ArrayList<>(List.of(workflowUri(WF_FIRST), workflowUri(WF_SECOND))));
             when(agentStore.readAgent("target-1", 3)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(3), any(), any()))
                     .thenReturn(Response.ok().build());
 
-            var result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1"));
+            var result = executor.executeUpgrade(source, "target-1", null, List.of(WF_SECOND, WF_FIRST));
 
             assertTrue(result.agentUpdated());
             assertNotNull(result.agentUri());
@@ -1061,19 +1061,27 @@ class UpgradeExecutorTest {
             when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
+            agentConfig.setWorkflows(new ArrayList<>(List.of(workflowUri(WF_FIRST), workflowUri(WF_SECOND))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any()))
                     .thenThrow(new RuntimeException("DB error"));
 
-            // A workflow order is what makes the agent config genuinely need writing;
-            // without one the executor deliberately does not touch the agent at all.
+            // A workflow order that actually changes the order is what makes the agent
+            // config genuinely need writing; without one — or with one that leaves the
+            // list as it is — the executor deliberately does not touch the agent at all.
             assertThrows(RuntimeException.class,
-                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of(WF_SECOND, WF_FIRST)));
         }
     }
 
     // ==================== Test Helpers ====================
+
+    private static final String WF_FIRST = "a1a1a1a1a1a1a1a1a1a1a1a1";
+    private static final String WF_SECOND = "b2b2b2b2b2b2b2b2b2b2b2b2";
+
+    private static URI workflowUri(String id) {
+        return URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + id + "?version=1");
+    }
 
     private ResourceDiff agentDiff(String sourceId, String targetId, DiffAction action) {
         return new ResourceDiff(sourceId, "agent", "Agent", action, targetId, 1, "targetAgent", null, null, -1);

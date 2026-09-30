@@ -793,6 +793,11 @@ class AgentSigningServiceTest {
             store.put(reference.tenantId() + ":" + reference.keyName(), plaintext);
         }
 
+        @Override
+        public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents) {
+            return store.putIfAbsent(reference.tenantId() + ":" + reference.keyName(), plaintext) == null;
+        }
+
         /**
          * Unsupported on purpose. This double stores only plaintext by key — it has no
          * grant list to update, and agent signing never touches one. Throwing beats

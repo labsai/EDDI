@@ -14,6 +14,12 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -48,6 +54,88 @@ class PostgresSecretPersistenceTest extends PostgresTestBase {
         } catch (SQLException e) {
             // Tables don't exist yet on the very first test — that's fine,
             // ensureSchema() will create them.
+        }
+    }
+
+    // ─── Create-if-absent (#700) ────────────────────────────────
+
+    @Nested
+    @DisplayName("insertSecretIfAbsent")
+    class InsertIfAbsent {
+
+        private static final int WRITERS = 8;
+        private static final int ROUNDS = 25;
+
+        @Test
+        @DisplayName("inserts a missing secret and reports it")
+        void insertsWhenAbsent() {
+            assertTrue(persistence.insertSecretIfAbsent(createSecret("t1", "k1", "v1", "iv", "d1")));
+
+            assertEquals("v1", persistence.findSecret("t1", "k1").orElseThrow().getEncryptedValue());
+        }
+
+        @Test
+        @DisplayName("an existing secret is reported and left exactly as it was")
+        void leavesAnExistingSecretAlone() {
+            persistence.upsertSecret(createSecret("t1", "k1", "original", "iv-original", "d1"));
+
+            assertFalse(persistence.insertSecretIfAbsent(createSecret("t1", "k1", "intruder", "iv-intruder", "d2")));
+
+            var found = persistence.findSecret("t1", "k1").orElseThrow();
+            assertEquals("original", found.getEncryptedValue());
+            assertEquals("iv-original", found.getIv());
+            assertEquals("d1", found.getDekId());
+        }
+
+        @Test
+        @DisplayName("the same key name in another tenant is a different secret")
+        void tenantsAreIndependent() {
+            assertTrue(persistence.insertSecretIfAbsent(createSecret("t1", "k1", "v1", "iv", "d1")));
+            assertTrue(persistence.insertSecretIfAbsent(createSecret("t2", "k1", "v2", "iv", "d1")));
+        }
+
+        @Test
+        @DisplayName("after an insert, upsertSecret still replaces (rotation keeps working)")
+        void upsertStillReplaces() {
+            persistence.insertSecretIfAbsent(createSecret("t1", "k1", "v1", "iv", "d1"));
+
+            persistence.upsertSecret(createSecret("t1", "k1", "v2", "iv", "d1"));
+
+            assertEquals("v2", persistence.findSecret("t1", "k1").orElseThrow().getEncryptedValue());
+        }
+
+        @Test
+        @DisplayName("concurrent inserts of one key: exactly one wins, and its value is the one stored")
+        void concurrentInsertsHaveOneWinner() throws Exception {
+            for (int round = 0; round < ROUNDS; round++) {
+                String key = "contended-" + round;
+                var winners = new ConcurrentLinkedQueue<Integer>();
+                var pool = Executors.newFixedThreadPool(WRITERS);
+                try {
+                    var start = new CountDownLatch(1);
+                    var futures = new ArrayList<Future<?>>();
+                    for (int i = 0; i < WRITERS; i++) {
+                        int writer = i;
+                        futures.add(pool.submit(() -> {
+                            start.await();
+                            if (persistence.insertSecretIfAbsent(createSecret("t1", key, "value-" + writer, "iv", "d1"))) {
+                                winners.add(writer);
+                            }
+                            return null;
+                        }));
+                    }
+                    start.countDown();
+                    for (var f : futures) {
+                        f.get(30, TimeUnit.SECONDS);
+                    }
+                } finally {
+                    pool.shutdownNow();
+                }
+
+                assertEquals(1, winners.size(), "round " + round + ": winners " + winners);
+                assertEquals("value-" + winners.peek(), persistence.findSecret("t1", key).orElseThrow().getEncryptedValue(),
+                        "round " + round + ": the stored value must be the winner's");
+            }
         }
     }
 

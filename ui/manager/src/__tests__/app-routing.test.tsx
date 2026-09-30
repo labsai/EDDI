@@ -40,17 +40,22 @@ describe("App routing (code-split)", () => {
     ["/manage/groups", "sidebar"],
   ])("resolves the lazy chunk for %s inside the Manager shell", async (route, chrome) => {
     renderWithProviders(<App />, { initialRoute: route });
+    // 15s rather than 5s: this is the first test in the run to import each page
+    // chunk, so the wait includes transforming that page's whole import graph.
+    // /manage/agents is the largest — about 1s on an idle machine — and under
+    // the full suite's parallel load it has measured 5.4s, which failed the old
+    // 5s bound although the chunk resolved.
     await waitFor(
       () => {
         expect(screen.getByTestId(chrome)).toBeInTheDocument();
       },
-      { timeout: 5000 },
+      { timeout: 15_000 },
     );
     // The shell rendering is not enough — assert the skeleton actually cleared,
     // which only happens once the page chunk itself has mounted.
     await waitFor(() => {
       expect(document.querySelector("[data-testid='page-loader']")).toBeNull();
-    }, { timeout: 5000 });
+    }, { timeout: 15_000 });
   });
 
   it("keeps the Manager chrome mounted across a lazy navigation", async () => {

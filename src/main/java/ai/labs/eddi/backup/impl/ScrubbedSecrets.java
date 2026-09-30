@@ -25,6 +25,19 @@ import java.util.Objects;
  * matcher compared a placeholder against a real credential, so <em>every</em>
  * agent with a credential compared unequal, could never SKIP, and burned a
  * resource and agent version on every sync that changed nothing.
+ * <p>
+ * <b>Vault references are the target's too.</b> The scrubber leaves
+ * {@code ${vault:openai-key}} legible on purpose — it is a pointer, not a
+ * secret — so it used to travel like any other value and overwrite the target's
+ * own pointer. That is wrong for the same reason a credential is: which vault
+ * entry an environment uses is that environment's business. Staging names
+ * {@code ${vault:openai-key}}, production names
+ * {@code ${vault:prod-openai-key}}, and a promotion that rewrote production's
+ * reference broke every LLM call it made. A value holding a vault reference is
+ * therefore bound to the target exactly like a placeholder: where the target
+ * has its own value at the same place, that value is kept. Where it has none —
+ * a first promotion, a newly added call — the reference travels, because it is
+ * the only hint the operator gets of which entry to create.
  *
  * @since 6.0.0
  */
@@ -32,6 +45,8 @@ final class ScrubbedSecrets {
 
     /** The marker {@link SecretScrubber} writes in place of a secret value. */
     static final String PLACEHOLDER = SecretScrubber.REDACTED;
+
+    private static final List<String> VAULT_REFERENCE_PREFIXES = List.of("${vault:", "${eddivault:");
 
     /**
      * Fields that identify one element of a JSON array across a reorder, in
@@ -49,11 +64,39 @@ final class ScrubbedSecrets {
     }
 
     /**
-     * The source content with every scrubbed leaf replaced by the target's own
-     * value for that leaf. Object fields are bound by key; array elements by a
-     * stable identity where they carry one, and otherwise only by a position the
-     * surrounding content proves — see {@link #counterpartOf}. A leaf with no
-     * provable counterpart keeps its placeholder.
+     * Whether this content carries anything {@link #restore} would take from the
+     * target — a scrubbed placeholder or a vault reference.
+     */
+    static boolean carriesTargetBoundValue(String json) {
+        if (json == null) {
+            return false;
+        }
+        if (json.contains(PLACEHOLDER)) {
+            return true;
+        }
+        for (String prefix : VAULT_REFERENCE_PREFIXES) {
+            if (json.contains(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a single value belongs to the target rather than the source: a
+     * scrubbed placeholder, or a value naming a vault entry.
+     */
+    static boolean isTargetBound(String text) {
+        return text != null && carriesTargetBoundValue(text);
+    }
+
+    /**
+     * The source content with every target-bound leaf — a scrubbed placeholder or a
+     * vault reference — replaced by the target's own value for that leaf. Object
+     * fields are bound by key; array elements by a stable identity where they carry
+     * one, and otherwise only by a position the surrounding content proves — see
+     * {@link #counterpartOf}. A leaf with no provable counterpart keeps the
+     * source's value.
      *
      * @return the merged JSON
      * @throws Exception
@@ -74,7 +117,7 @@ final class ScrubbedSecrets {
      */
     private static Object merge(Object sourceNode, Object targetNode) {
         if (sourceNode instanceof String text) {
-            if (text.contains(PLACEHOLDER) && targetNode instanceof String targetText) {
+            if (isTargetBound(text) && targetNode instanceof String targetText && keepsTarget(text, targetText)) {
                 return targetText;
             }
             return text;
@@ -95,7 +138,7 @@ final class ScrubbedSecrets {
                 Object sourceElement = sourceList.get(i);
                 // An element with nothing scrubbed in it needs no counterpart at all,
                 // so it never risks being paired with the wrong one.
-                Object counterpart = containsPlaceholder(sourceElement)
+                Object counterpart = containsTargetBound(sourceElement)
                         ? counterpartOf(sourceElement, i, sourceList, targetList)
                         : null;
                 merged.add(merge(sourceElement, counterpart));
@@ -177,7 +220,7 @@ final class ScrubbedSecrets {
      */
     private static boolean equalApartFromPlaceholders(Object sourceNode, Object targetNode) {
         if (sourceNode instanceof String text) {
-            return text.contains(PLACEHOLDER) || text.equals(targetNode);
+            return isTargetBound(text) || text.equals(targetNode);
         }
         if (sourceNode instanceof Map<?, ?> sourceMap) {
             if (!(targetNode instanceof Map<?, ?> targetMap) || sourceMap.size() != targetMap.size()) {
@@ -206,14 +249,24 @@ final class ScrubbedSecrets {
         return Objects.equals(sourceNode, targetNode);
     }
 
-    /** Whether anything anywhere below this parsed node was scrubbed. */
-    private static boolean containsPlaceholder(Object node) {
+    /**
+     * Whether the target's value replaces a target-bound source value. A
+     * placeholder always yields: whatever the target holds is better than a marker
+     * that can never work. A vault reference yields only to a target value that is
+     * actually there — a blank one would trade a working pointer for nothing.
+     */
+    private static boolean keepsTarget(String sourceText, String targetText) {
+        return sourceText.contains(PLACEHOLDER) || !targetText.isBlank();
+    }
+
+    /** Whether anything anywhere below this parsed node is target-bound. */
+    private static boolean containsTargetBound(Object node) {
         if (node instanceof String text) {
-            return text.contains(PLACEHOLDER);
+            return isTargetBound(text);
         }
         if (node instanceof Map<?, ?> map) {
             for (Object value : map.values()) {
-                if (containsPlaceholder(value)) {
+                if (containsTargetBound(value)) {
                     return true;
                 }
             }
@@ -221,7 +274,7 @@ final class ScrubbedSecrets {
         }
         if (node instanceof List<?> list) {
             for (Object element : list) {
-                if (containsPlaceholder(element)) {
+                if (containsTargetBound(element)) {
                     return true;
                 }
             }
