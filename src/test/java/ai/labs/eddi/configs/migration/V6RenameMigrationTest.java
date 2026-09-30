@@ -207,7 +207,7 @@ class V6RenameMigrationTest {
 
             // Should record the migration as complete
             ArgumentCaptor<MigrationLog> captor = ArgumentCaptor.forClass(MigrationLog.class);
-            verify(migrationLogStore).createMigrationLog(captor.capture());
+            verify(migrationLogStore, times(2)).createMigrationLog(captor.capture());
             assertEquals("v6-rename-migration-complete", captor.getValue().getName());
         }
     }
@@ -502,7 +502,7 @@ class V6RenameMigrationTest {
 
             assertTrue(migration.detectCollectionRenameConflicts().isEmpty());
             verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -600,7 +600,7 @@ class V6RenameMigrationTest {
                     "an empty leftover v6 namespace must be dropped — otherwise the rename fails with 48, the run "
                             + "aborts, the app re-creates the namespace on the next boot and the migration can never complete");
             // ...and because the rename went through, the run finishes and is recorded.
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -770,7 +770,7 @@ class V6RenameMigrationTest {
             MongoCollection<Document> emptyCol = mock(MongoCollection.class);
             when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
             when(database.getCollection(anyString()))
-                    .thenAnswer(invocation -> "conversationmemories".equals(invocation.getArgument(0)) ? envCol : emptyCol);
+                    .thenAnswer(invocation -> "deployments".equals(invocation.getArgument(0)) ? envCol : emptyCol);
             when(database.getName()).thenReturn("eddi");
 
             migration.runIfNeeded();
@@ -1087,7 +1087,7 @@ class V6RenameMigrationTest {
 
             migration.runIfNeeded();
 
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         /**

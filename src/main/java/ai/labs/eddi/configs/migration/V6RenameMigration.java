@@ -51,6 +51,15 @@ public class V6RenameMigration {
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
 
+    /**
+     * Written when this migration completes, and read by {@link #holdsRetention()}:
+     * the database came from EDDI 5, which never deleted ended conversations.
+     */
+    static final String RETENTION_HOLD_KEY = "v6-rename-retention-hold";
+
+    /** A v5 collection whose documents mean the database has not been migrated. */
+    private static final String V5_MARKER_COLLECTION = "bots";
+
     /** MongoDB {@code NamespaceExists} — renameCollection onto an existing name. */
     private static final int NAMESPACE_EXISTS_ERROR_CODE = 48;
 
@@ -219,6 +228,33 @@ public class V6RenameMigration {
     }
 
     /**
+     * Whether ended conversations must not be deleted yet because this database
+     * comes from EDDI 5 — which kept them for ever — and the operator has not said
+     * that 6.x's retention may apply.
+     *
+     * <p>
+     * True while the migration is pending, once it has completed (a marker in the
+     * migration log, so it holds on every later boot and every replica, not only in
+     * the process that migrated), and while the v5 collections still hold documents
+     * — which covers a 5.x database booted with the migration flag off. It is
+     * lifted by the operator, through
+     * {@code eddi.migration.v6-rename.retention-confirmed}, not by time or by a
+     * restart: a rescheduled pod or a second replica is not a decision anybody
+     * made. A migration log or collection that cannot be read answers true; a sweep
+     * that waits a day loses nothing.
+     * </p>
+     */
+    public boolean holdsRetention() {
+        try {
+            return isPending() || migrationLogStore.readMigrationLog(RETENTION_HOLD_KEY) != null
+                    || database.getCollection(V5_MARKER_COLLECTION).estimatedDocumentCount() > 0;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not tell whether this database came from EDDI 5 (%s) — holding the retention sweep", e.getMessage());
+            return true;
+        }
+    }
+
+    /**
      * Run the v6 rename migration if enabled and not already applied.
      */
     public void runIfNeeded() {
@@ -272,9 +308,7 @@ public class V6RenameMigration {
         total = total.plus(migrateDescriptors("descriptors.history"));
 
         // 4. Rename the v5 step shape inside stored conversations (packages →
-        // workflows).
-        // Server-side, and before the per-document pass below, which then rewrites the
-        // renamed documents as it finds them.
+        // workflows), server-side.
         total = total.plus(migrateConversationStepShape());
 
         // 5. The managed-conversation mappings: triggers by intent, and each user's
@@ -282,10 +316,11 @@ public class V6RenameMigration {
         total = total.plus(migrateAgentTriggers());
         total = total.plus(migrateUserConversations());
 
-        // 6. Rewrite environment fields in deployment/conversation documents
-        for (String collectionName : List.of(COLLECTION_CONVERSATIONS, COLLECTION_DEPLOYMENTS)) {
-            total = total.plus(migrateEnvironments(collectionName));
-        }
+        // 6. Rename the v5 field names and environment values: conversations
+        // server-side, deployments one row at a time (a row can collide with another
+        // on its v6 key, and that needs deciding per row).
+        total = total.plus(migrateConversationFields());
+        total = total.plus(migrateEnvironments(COLLECTION_DEPLOYMENTS));
 
         // Every pass, not only the environment one: a collection that could not be
         // read and a document that could not be written both land here, and either
@@ -299,6 +334,7 @@ public class V6RenameMigration {
 
         LOGGER.infof("V6 rename migration complete: %d documents migrated", total.migrated());
 
+        migrationLogStore.createMigrationLog(new MigrationLog(RETENTION_HOLD_KEY));
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
@@ -745,6 +781,7 @@ public class V6RenameMigration {
                     "$" + array)));
         }
 
+        bumpRevision(set);
         long migrated;
         try {
             migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
@@ -793,6 +830,113 @@ public class V6RenameMigration {
     private static Bson renamableStep() {
         return and(exists(FIELD_STEP_RUNS_V5), or(exists(FIELD_STEP_RUNS_V6, false), eq(FIELD_STEP_RUNS_V6, null),
                 new Document(FIELD_STEP_RUNS_V6, new Document("$size", 0))));
+    }
+
+    /**
+     * A conversation's optimistic-concurrency revision; see
+     * {@code ConversationMemoryStore}.
+     */
+    private static final String FIELD_REVISION = "_rev";
+    /** The revision of the last write that rewrote a conversation's history. */
+    private static final String FIELD_HISTORY_REVISION = "_histRev";
+
+    /**
+     * Adds to a pipeline {@code $set} what {@code ConversationMemoryStore} does on
+     * every full-document write: the revision goes up by one, and the history
+     * revision is set to it, since these passes rewrite stored steps.
+     *
+     * <p>
+     * A migration write that left the revision alone could be undone without a
+     * trace: a writer holding the document from before it would replace the
+     * document on a revision that still matched. Bumped, that writer gets the
+     * conflict the store already raises for any concurrent write and reloads.
+     * {@code _rev} is absent on documents EDDI 5 wrote, which the store reads as 0.
+     * </p>
+     */
+    private static void bumpRevision(Document set) {
+        Document next = new Document("$add", List.of(new Document("$ifNull", List.of("$" + FIELD_REVISION, 0L)), 1L));
+        set.append(FIELD_REVISION, next).append(FIELD_HISTORY_REVISION, next);
+    }
+
+    /**
+     * Renames the v5 field names of stored conversations ({@code botId},
+     * {@code botVersion} → {@code agentId}, {@code agentVersion}) and maps the v5
+     * environments to {@code production}, in one server-side {@code updateMany}.
+     *
+     * <p>
+     * This used to be {@link #migrateEnvironments}: every conversation read into
+     * Java, rewritten and replaced whole. Its cost followed the size of the
+     * collection, not the work — on a throttled database it was about 20 of the 24
+     * minutes the first boot took, for 195 documents — and each whole-document
+     * replace could overwrite a concurrent write. Here the documents never leave
+     * the server, and the revision is bumped as by any other write (see
+     * {@link #bumpRevision}).
+     * </p>
+     *
+     * <p>
+     * The old pass also rewrote legacy {@code eddi://} URIs anywhere inside a
+     * conversation. That is not carried over: no field of a stored conversation is
+     * read as a URI in 6.x (the agent is addressed by {@code agentId}, runs by
+     * workflow id), so such a string is historical step data, and finding one means
+     * reading every document in full — the cost this pass exists to remove. A
+     * document holding both {@code botId} and {@code agentId} is not matched —
+     * which is right cannot be told — and is counted and reported.
+     * </p>
+     */
+    private MigrationResult migrateConversationFields() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<String> v5Environments = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            v5Environments.add(mapping[0]);
+        }
+        List<Bson> v5Shaped = new ArrayList<>();
+        List<String> v5Fields = new ArrayList<>();
+        Document set = new Document();
+        for (String[] mapping : FIELD_NAME_REWRITES) {
+            v5Shaped.add(exists(mapping[0]));
+            v5Fields.add(mapping[0]);
+            set.append(mapping[1], new Document("$ifNull", List.of("$" + mapping[1], "$" + mapping[0])));
+        }
+        v5Shaped.add(new Document(FIELD_ENVIRONMENT, new Document("$in", v5Environments)));
+        set.append(FIELD_ENVIRONMENT, cond(
+                new Document("$in", List.of(new Document("$toLower", new Document("$ifNull", List.of("$" + FIELD_ENVIRONMENT, ""))),
+                        v5Environments)),
+                ENVIRONMENT_REWRITES[0][1], "$" + FIELD_ENVIRONMENT));
+        bumpRevision(set);
+        Bson ambiguous = and(exists(FIELD_NAME_REWRITES[0][0]), exists(FIELD_NAME_REWRITES[0][1]));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
+                    List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the v5 field names could not be migrated — counted as a failure, so the migration is NOT "
+                    + "recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d documents", COLLECTION_CONVERSATIONS, migrated);
+        }
+        try {
+            long left = collection.countDocuments(ambiguous);
+            if (left > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold both '%s' and '%s' and were left unchanged; they load as '%s'. "
+                        + "Remove '%s' by hand once checked.", COLLECTION_CONVERSATIONS, left, FIELD_NAME_REWRITES[0][0],
+                        FIELD_NAME_REWRITES[0][1], FIELD_NAME_REWRITES[0][1], FIELD_NAME_REWRITES[0][0]);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the documents left unmigrated: %s", COLLECTION_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
     }
 
     /**
@@ -1071,18 +1215,13 @@ public class V6RenameMigration {
     }
 
     /**
-     * Migrate environment fields in conversation memory and deployment documents.
+     * Migrate environment fields in deployment documents.
      *
      * <p>
-     * This is the expensive step of the migration, and its cost follows total
-     * conversation bytes rather than the work it does: on a real staging upgrade it
-     * was about 20 of the 24 minutes the startup migrations took, for 195 documents
-     * averaging 410 KB, each read and rewritten one at a time in Java. A pre-check
-     * that skips a clean collection cannot shorten that — proving there is no
-     * legacy URI nested anywhere in a document means reading the document, which is
-     * the whole cost. The fix, when it is made, is to move the rewrite server-side
-     * ({@code updateMany} with {@code $rename} and {@code $set}), so the bytes
-     * never cross the client.
+     * Conversations used to go through here too, and made this the expensive step
+     * of the migration; they are now migrated server-side by
+     * {@link #migrateConversationFields()}. Deployment rows stay here: they are
+     * few, and one can collide with another on its v6 key.
      * </p>
      *
      * <p>

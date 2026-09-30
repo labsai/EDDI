@@ -148,12 +148,14 @@ spec:
               mountPath: /deployments/tmp
             - name: eddi-data
               mountPath: /opt/eddi/data
+          {{- $startupProbe := .Values.eddi.startupProbe | default dict }}
+          # Liveness, not readiness: see eddi.startupProbe in values.yaml.
           startupProbe:
             httpGet:
-              path: /q/health/ready
+              path: {{ $startupProbe.path | default "/q/health/live" }}
               port: http
-            failureThreshold: 30
-            periodSeconds: 2
+            failureThreshold: {{ $startupProbe.failureThreshold | default 30 }}
+            periodSeconds: {{ $startupProbe.periodSeconds | default 2 }}
           livenessProbe:
             httpGet:
               path: /q/health/live
