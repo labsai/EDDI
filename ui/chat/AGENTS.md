@@ -73,7 +73,7 @@ src/
   the name only; arguments reach the client later, redacted, in
   `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
   widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
-  an escalation, or the end of the turn clears it. It is not token-gated — a
+  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
   model can write a sentence and then call a tool.
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
   refused BEFORE it ran — every condition the non-streaming endpoint answers with a

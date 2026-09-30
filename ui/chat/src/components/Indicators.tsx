@@ -45,6 +45,20 @@ export function TypingIndicator() {
  * tool when an escalation follows it. The name is shown as sent — it is the
  * identifier the agent designer gave the tool, not operator detail.
  */
+/**
+ * The words a status indicator shows, for the screen-reader announcement.
+ *
+ * The visual indicator lives inside the transcript, which is `aria-busy` for
+ * the whole turn so a streamed reply is read once rather than token by token.
+ * A live region inside a busy one may not be announced at all — and every
+ * state here exists only mid-turn — so the widget announces this text from a
+ * status region outside the transcript instead.
+ */
+export function indicatorStatusText(escalating: boolean, tool: string | null): string {
+  if (tool) return `Using ${tool}…`;
+  return escalating ? "Taking a closer look…" : "Thinking…";
+}
+
 export function ThinkingIndicator({
   escalating = false,
   tool = null,
@@ -53,13 +67,11 @@ export function ThinkingIndicator({
   tool?: string | null;
 }) {
   const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
+  // Hidden from assistive technology: the transcript is aria-busy while this is
+  // on screen, so ChatWidget announces indicatorStatusText() from a status
+  // region outside it. Announcing here as well would read it twice.
   return (
-    <div
-      className="indicator"
-      role="status"
-      aria-live="polite"
-      data-testid={`${mode}-indicator`}
-    >
+    <div className="indicator" aria-hidden="true" data-testid={`${mode}-indicator`}>
       <div className="indicator__avatar" aria-hidden="true">
         E
       </div>
@@ -70,13 +82,7 @@ export function ThinkingIndicator({
           ) : (
             <Brain className="indicator__brain" size="1em" />
           )}
-          <span>
-            {mode === "tool"
-              ? `Using ${tool}…`
-              : mode === "escalating"
-                ? "Taking a closer look…"
-                : "Thinking…"}
-          </span>
+          <span>{indicatorStatusText(escalating, tool)}</span>
         </div>
       </div>
     </div>

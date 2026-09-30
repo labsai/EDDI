@@ -1010,6 +1010,22 @@ describe("ChatWidget — live tool calls", () => {
     expect(document.body.textContent).not.toMatch(/Using /);
   });
 
+  it("announces the tool from outside the busy transcript", async () => {
+    // The transcript is aria-busy for the whole turn, and a status region
+    // inside a busy one may not be announced — so the tool state, which only
+    // exists mid-turn, would never reach a screen reader.
+    mockOpenStream(['event: tool_call\ndata: {"tool":"calculator"}\n\n']);
+    await sendOnOpenStream();
+
+    const status = await screen.findByTestId("chat-activity-status");
+    await waitFor(() => expect(status).toHaveTextContent("Using calculator…"));
+    expect(status).toHaveAttribute("role", "status");
+    expect(status.closest("[aria-busy='true']")).toBeNull();
+    expect(screen.getByTestId("chat-transcript")).toHaveAttribute("aria-busy", "true");
+    // The visual copy stays put but is not a second announcement.
+    expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("gives way to the escalation hint when the cascade escalates", async () => {
     mockOpenStream([
       'event: tool_call\ndata: {"tool":"calculator"}\n\n',

@@ -30,6 +30,22 @@ reason. The widget now shows the same wording in its existing status indicator.
   handled by this widget yet" is replaced by its payload and how the indicator
   is cleared.
 
+### Announced from outside the busy transcript (review follow-up)
+
+After merging `main`, the transcript became a `role="log"` with
+`aria-busy={isProcessing}`, so a streamed reply is read once rather than token
+by token. The indicator was a `role="status"` region *inside* that log, and a
+live region inside a busy one may not be announced at all. Every indicator
+state exists only mid-turn, so "Using calculator…" (and "Thinking…") could
+never reach a screen reader. The visual indicator stays where it is but is now
+`aria-hidden`. Its text, from the new `indicatorStatusText()`, is announced by an
+always-mounted `.chat-sr-only` status region placed after the transcript, the
+same pattern `ChatInput` uses. CodeRabbit suggested moving the whole indicator
+out of the transcript instead; that would have pinned it above the composer and
+changed the layout for sighted users to fix a problem only assistive
+technology has. `ui/chat/AGENTS.md` now also lists `task_failed` among the
+events that clear the tool status, which the widget already did.
+
 ### Design decisions
 
 - **Resumed output is the completion signal.** No event says a tool has

@@ -13,7 +13,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator } from "./Indicators";
+import { TypingIndicator, ThinkingIndicator, indicatorStatusText } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
@@ -1432,6 +1432,22 @@ export function ChatWidget() {
             <div ref={messagesEndRef} />
           </>
         )}
+      </div>
+
+      {/* The indicator's announcement. It sits OUTSIDE the transcript because
+          the transcript is aria-busy for the whole turn, and a status inside a
+          busy region may never be announced — which would silence "Using
+          calculator…", a state that only exists mid-turn. Always mounted: a
+          live region added together with its text is often not read. */}
+      <div
+        className="chat-sr-only"
+        role="status"
+        aria-live="polite"
+        data-testid="chat-activity-status"
+      >
+        {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
+          ? indicatorStatusText(state.isEscalating, state.activeTool)
+          : ""}
       </div>
 
       <div style={{ position: "relative" }}>
