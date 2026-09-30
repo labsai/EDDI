@@ -122,7 +122,20 @@ export interface ConversationSnapshot {
   conversationProperties?: Record<string, unknown>;
   undoAvailable?: boolean;
   redoAvailable?: boolean;
+  /**
+   * Why the conversation ended, when the backend recorded a reason — today
+   * only {@link END_REASON_AGENT_VERSION_RETIRED}. Absent otherwise.
+   */
+  endReason?: string;
 }
+
+/**
+ * `endReason` of a conversation ended because the agent version it ran on was
+ * undeployed with "end all active conversations" — the assistant was updated
+ * in a way the conversation could not follow (backend
+ * `IConversationService.END_REASON_AGENT_VERSION_RETIRED`).
+ */
+export const END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
 
 /** A single output item from the backend output array. */
 export interface OutputItem {

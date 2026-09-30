@@ -50,6 +50,20 @@ public interface ISecretPersistence {
     void upsertSecret(EncryptedSecret secret);
 
     /**
+     * Insert an encrypted secret only if no row exists for
+     * {@code (tenantId, keyName)}. Atomic: the check and the insert are one
+     * statement against the store's unique {@code (tenantId, keyName)} constraint,
+     * so of any number of concurrent callers exactly one gets {@code true}, and an
+     * existing row is never touched.
+     *
+     * @return {@code true} if this call inserted the row, {@code false} if one
+     *         already existed
+     * @throws PersistenceException
+     *             if the write fails for any reason other than the row existing
+     */
+    boolean insertSecretIfAbsent(EncryptedSecret secret);
+
+    /**
      * Find an encrypted secret by tenant and key name.
      *
      * @throws PersistenceException

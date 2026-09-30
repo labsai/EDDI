@@ -178,6 +178,17 @@ eddi:
       cpu: "2"
       memory: 1Gi
 
+  # Startup probe. It checks LIVENESS, not readiness, on purpose. Readiness is
+  # false for as long as the startup migrations run, and the first boot of a
+  # database migrated from EDDI 5 can take many minutes on a large or throttled
+  # database. A startup probe on readiness killed the pod mid-migration after
+  # 60 s, and every restart began the migration again, so it never finished.
+  # Traffic is still gated by the readiness probe.
+  startupProbe:
+    path: /q/health/live
+    failureThreshold: 30
+    periodSeconds: 2
+
   service:
     type: ClusterIP
     port: 7070

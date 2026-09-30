@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -110,7 +111,7 @@ class RestExportServiceSelectionContractTest {
 
         exportService = new RestExportService(
                 documentDescriptorStore, agentStore, workflowStore,
-                mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
+                mock(IParserStore.class), mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
                 llmStore, mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), snippetStore,
                 jsonSerialization, zipArchive, secretScrubber, scheduleStore,

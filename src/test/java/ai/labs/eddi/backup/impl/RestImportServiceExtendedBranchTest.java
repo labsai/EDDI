@@ -373,7 +373,7 @@ class RestImportServiceExtendedBranchTest {
         void loopbackIpRejected() {
             assertThrows(BadRequestException.class,
                     () -> importService.previewSync(
-                            "http://127.0.0.1:8080", "src", 1, "tgt", null));
+                            "http://127.0.0.1:8080", "src", 1, "tgt", null, null));
         }
 
         @Test
@@ -389,7 +389,7 @@ class RestImportServiceExtendedBranchTest {
                 assertThrows(BadRequestException.class,
                         () -> importService.executeSync(
                                 "http://example.com", "src", 1, "tgt",
-                                null, null, null));
+                                null, null, null, null));
             } finally {
                 LaunchMode.set(originalMode);
             }
@@ -454,7 +454,7 @@ class RestImportServiceExtendedBranchTest {
 
             Response response = importService.importAgent(
                     new ByteArrayInputStream(new byte[0]),
-                    "upgrade", "", "t1", "");
+                    "upgrade", null, "t1", "");
 
             assertEquals(201, response.getStatus());
             // Verify that empty string is converted to null selectedSet and null

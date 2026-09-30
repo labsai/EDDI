@@ -40,6 +40,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -246,7 +248,7 @@ public class AgentSetupService {
         // is the whole point of provisioning a second agent against an existing one.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
             throw new AgentSetupException(
-                    "API key is required for cloud LLM providers (anthropic, openai, gemini) — pass apiKey, or vaultKeyName to reuse a key "
+                    "API key is required for cloud LLM providers (anthropic, openai, gemini, xai, deepseek, ...) — pass apiKey, or vaultKeyName to reuse a key "
                             + "already in the vault");
         }
         // Validate the HITL config HERE, before a single resource exists — same
@@ -1487,41 +1489,54 @@ public class AgentSetupService {
             // triggers rollback, a concurrent setup may already have reused the entry,
             // and rollback would pull the key out from under an agent that is not ours.
             // Leaving it also means the retry finds the key already in place.
-            String reference = storeSecret(ref, key, agentName, null, VAULTED_SECRET_KEY);
-            verifyStoredValue(ref, key);
-            return reference;
+            if (storeSecretIfAbsent(ref, key, agentName)) {
+                return ref.toReferenceString();
+            }
+            // Lost the race for the name: another setup created it between the metadata
+            // read above and the insert. The insert left it untouched, so the outcome
+            // depends only on what it holds.
+            return reuseConcurrentlyCreatedKey(ref, key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
             throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
     }
 
     /**
-     * Read the entry back and fail if it does not hold what was just written.
+     * A create-if-absent insert found the named key already there. Reuse it when it
+     * holds the value this setup meant to store — two setups naming one key with
+     * one value converge — and refuse when it holds a different one.
      * <p>
-     * The absent-then-create sequence above is not atomic: {@code store} is an
-     * UPSERT (every {@link ISecretProvider} caller uses it that way — there is no
-     * create-if-absent in the SPI), so two setups naming the same key with
-     * different values can both find it missing and both write. Without this check
-     * the loser proceeds and provisions an agent pointing at the winner's
-     * credential.
-     * <p>
-     * This narrows the window rather than closing it: a write that lands after this
-     * read is still missed. Closing it properly needs a conditional insert in the
-     * persistence layer (Mongo and Postgres both), which is an SPI change shared
-     * with three other callers and does not belong in this one — tracked in issue
-     * #700. What it does buy is that the common interleaving fails loudly, here,
-     * before a single document is created — instead of silently.
+     * The insert is atomic (see {@link ISecretProvider#storeIfAbsent}), so nothing
+     * was overwritten and no window remains: whichever setup created the entry owns
+     * it, and every other one sees exactly that value here.
      */
-    private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
+    private String reuseConcurrentlyCreatedKey(SecretReference ref, String expectedPlaintext, String agentName,
+                                               Map<String, Object> createdResources)
+            throws AgentSetupException {
+        SecretMetadata winner;
         try {
-            SecretMetadata written = secretProvider.getMetadata(ref);
-            if (written.checksum() != null && !secretProvider.matchesChecksum(ref.tenantId(), written.checksum(), expectedPlaintext)) {
-                throw new AgentSetupException("Vault key '" + ref.keyName() + "' was written concurrently by another setup and now holds "
-                        + "a different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
-            }
-        } catch (ISecretProvider.SecretNotFoundException | ISecretProvider.SecretProviderException e) {
-            LOGGER.debugf("Could not read back vault key '%s' after storing it: %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
+            winner = secretProvider.getMetadata(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            // Created and deleted again inside one setup call. Not something to paper
+            // over by writing: report it and let the caller retry.
+            throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created and removed concurrently. Retry the setup.", e);
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
+        boolean sameValue;
+        try {
+            sameValue = winner.checksum() != null && secretProvider.matchesChecksum(ref.tenantId(), winner.checksum(), expectedPlaintext);
+        } catch (RuntimeException e) {
+            throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': " + e.getClass().getSimpleName(), e);
+        }
+        if (!sameValue) {
+            throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created concurrently by another setup and holds a "
+                    + "different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
+        }
+        LOGGER.infof("Agent '%s' reuses vault key '%s', created concurrently with the same value.", LogSanitizer.sanitize(agentName),
+                LogSanitizer.sanitize(ref.keyName()));
+        warnIfRestricted(winner, agentName, createdResources);
+        return ref.toReferenceString();
     }
 
     /**
@@ -1551,6 +1566,26 @@ public class AgentSetupService {
         }
         LOGGER.infof("Credential vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
         return ref.toReferenceString();
+    }
+
+    /**
+     * The create-if-absent counterpart of {@link #storeSecret}, for a caller-chosen
+     * name that must never replace what is there. Not registered for rollback: the
+     * caller decides that.
+     *
+     * @return {@code true} if this call created the entry
+     */
+    private boolean storeSecretIfAbsent(SecretReference ref, String plaintext, String agentName) throws ISecretProvider.SecretProviderException {
+        // "*" for the same reason as in storeSecret: the agent has no id yet.
+        boolean created = secretProvider.storeIfAbsent(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName,
+                List.of("*"));
+        if (created) {
+            if (secretResolver != null) {
+                secretResolver.invalidateCache(ref);
+            }
+            LOGGER.infof("Credential vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
+        }
+        return created;
     }
 
     /**
@@ -1934,6 +1969,16 @@ public class AgentSetupService {
     }
 
     /**
+     * The model to use for {@code provider} when none was named: a named
+     * OpenAI-compatible provider's own preset default (falling back to
+     * {@link #DEFAULT_MODEL} would hand e.g. xAI a Claude model name), otherwise
+     * {@link #DEFAULT_MODEL}.
+     */
+    public static String defaultModelFor(String provider) {
+        return OpenAiCompatibleProviders.find(provider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+    }
+
+    /**
      * Resolve the caller-supplied setup parameters, applying defaults.
      * <p>
      * The environment is parsed with {@link Deployment.Environment#parseStrict} —
@@ -1947,9 +1992,9 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
-                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
-                Deployment.Environment.parseStrict(environment));
+        String resolvedProvider = provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER;
+        String resolvedModel = model != null && !model.isBlank() ? model.trim() : defaultModelFor(resolvedProvider);
+        return new ResolvedParams(resolvedProvider, resolvedModel, deploy == null || deploy, Deployment.Environment.parseStrict(environment));
     }
 
     /**

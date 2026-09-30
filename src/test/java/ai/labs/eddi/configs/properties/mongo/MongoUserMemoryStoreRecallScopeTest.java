@@ -71,6 +71,7 @@ class MongoUserMemoryStoreRecallScopeTest {
         MongoDatabase database = mock(MongoDatabase.class);
         collection = mock(MongoCollection.class);
         when(database.getCollection("usermemories")).thenReturn(collection);
+        IdentityIndexStubs.stubInstalledIdentityIndexes(collection);
         store = new MongoUserMemoryStore(database);
     }
 

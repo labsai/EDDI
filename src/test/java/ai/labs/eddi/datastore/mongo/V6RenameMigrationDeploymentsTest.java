@@ -21,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -104,7 +105,7 @@ class V6RenameMigrationDeploymentsTest extends MongoTestBase {
         assertEquals("undeployed", survivor.get("deploymentStatus"));
         assertTrue(rows.stream().noneMatch(row -> row.containsKey("botId")), "no row may be left under its v5 names");
         // and the migration completes, instead of failing the same way on every boot
-        verify(migrationLog).createMigrationLog(any(MigrationLog.class));
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
     }
 
     /**
@@ -125,7 +126,7 @@ class V6RenameMigrationDeploymentsTest extends MongoTestBase {
         assertEquals(NEWER, rows.get(0).get("_id"));
         assertEquals("deployed", rows.get(0).get("deploymentStatus"));
         assertTrue(rows.stream().noneMatch(row -> row.containsKey("botId")), "no row may be left under its v5 names");
-        verify(migrationLog).createMigrationLog(any(MigrationLog.class));
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
     }
 
     /**
@@ -160,6 +161,6 @@ class V6RenameMigrationDeploymentsTest extends MongoTestBase {
         List<Document> rows = rows();
         assertEquals(2, rows.size(), "nothing collides here, so nothing may be removed: " + rows);
         assertTrue(rows.stream().allMatch(row -> "production".equals(row.get("environment")) && row.containsKey("agentId")));
-        verify(migrationLog).createMigrationLog(any(MigrationLog.class));
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
     }
 }

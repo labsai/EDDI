@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -330,6 +332,11 @@ class CascadingModelExecutor {
             // Tool cost tracked before this step, so a step whose result never arrives
             // (timeout, error) still charges its tools to the run's cost ceiling (m5).
             double toolCostBeforeStep = useAgentMode ? conversationToolCost(agentOrchestrator, memory) : 0.0;
+            // What this step starts from, and what its tool loop completes while it
+            // runs — read by the timeout and failure paths below, where the step's
+            // own result (and with it its returned exchange) never arrives.
+            List<ChatMessage> carried = List.copyOf(totals.carriedToolExchange);
+            var stepExchange = new ToolExchangeRecorder();
 
             try {
                 ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
@@ -381,12 +388,11 @@ class CascadingModelExecutor {
                 // JSON format the moment it would be paired with tools.
                 var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
 
-                List<ChatMessage> carried = List.copyOf(totals.carriedToolExchange);
                 StepResult stepResult;
                 try {
                     stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
-                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried);
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange);
                 } catch (Exception carriedRejected) {
                     if (!rejectedCarriedExchange(carriedRejected, carried)) {
                         throw carriedRejected;
@@ -405,9 +411,10 @@ class CascadingModelExecutor {
                     totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                     toolCostBeforeStep = conversationToolCost(agentOrchestrator, memory);
                     carried = List.of();
+                    stepExchange = new ToolExchangeRecorder();
                     stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
-                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried);
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange);
                 }
 
                 long durationMs = System.currentTimeMillis() - stepStart;
@@ -528,6 +535,7 @@ class CascadingModelExecutor {
             } catch (TimeoutException e) {
                 // The step's tools ran and were charged even though its result is lost.
                 totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
+                carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
@@ -577,6 +585,7 @@ class CascadingModelExecutor {
                 }
                 if (useAgentMode) {
                     totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
+                    carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 String errorType = isRetryableError(e) ? "retryable_error" : "error";
@@ -613,6 +622,36 @@ class CascadingModelExecutor {
 
         // Should be unreachable — last step always accepted or throws.
         return finalizeBest(bestSoFar, totals, trace, errors);
+    }
+
+    /**
+     * Hands the next step the tools a timed-out or failed step had completed before
+     * it was abandoned, by the same rule the success path applies: the step's
+     * exchange replaces the carried one, and since the step started FROM
+     * {@code carried}, its exchange is {@code carried} plus what it completed. A
+     * step that completed nothing leaves the carried exchange as it was — there is
+     * nothing new to hand on, and dropping an exchange the next provider might
+     * accept would only invite a replay.
+     * <p>
+     * The recorder holds complete call/result pairs only, so the next step never
+     * receives a call without its result. A tool still executing when the step was
+     * cancelled is not in it: its outcome is unknown, and the next step may run it
+     * again — the one replay this cannot prevent.
+     */
+    private static void carryCompletedExchange(ModelCascadeConfig cascade, RunTotals totals, List<ChatMessage> carried,
+                                               ToolExchangeRecorder stepExchange, Map<String, Object> stepTrace) {
+        if (!cascade.isCarryToolResultsOnEscalation()) {
+            return;
+        }
+        List<ChatMessage> completed = stepExchange.completedExchange();
+        if (completed.isEmpty()) {
+            return;
+        }
+        totals.carriedToolExchange.clear();
+        totals.carriedToolExchange.addAll(carried);
+        totals.carriedToolExchange.addAll(completed);
+        // Audit: the step's result is lost, but these tools of it did run.
+        stepTrace.put("completedToolMessages", completed.size());
     }
 
     /**
@@ -827,7 +866,7 @@ class CascadingModelExecutor {
                                               IAgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
                                               HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy, long timeoutMs,
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                              List<ChatMessage> carriedToolExchange)
+                                              List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange)
             throws Exception {
 
         // A cascade step runs on a virtual thread, so the caller binding on the
@@ -837,7 +876,7 @@ class CascadingModelExecutor {
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange);
+                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange);
             } else {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
                         heuristicConfig, jsonPolicy);
@@ -911,7 +950,7 @@ class CascadingModelExecutor {
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                            List<ChatMessage> carriedToolExchange)
+                                            List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange)
             throws LifecycleException {
 
         // Strip only the leading system message (the orchestrator re-adds
@@ -925,7 +964,7 @@ class CascadingModelExecutor {
         chatMessagesWithoutSystem.addAll(carriedToolExchange);
 
         var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
-                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy, stepExchange);
 
         if (agentResult != null) {
             String responseText = agentResult.response();
@@ -1057,7 +1096,8 @@ class CascadingModelExecutor {
 
     /**
      * Resolve the specific model name from provider-specific parameter keys. Falls
-     * back to the provider type when no explicit model key is present.
+     * back to the preset default model for a named OpenAI-compatible provider, and
+     * to the provider type otherwise, when no explicit model key is present.
      */
     private static String resolveModelName(Map<String, String> params, String fallbackType) {
         for (String key : List.of("modelName", "model", "modelId", "deploymentName")) {
@@ -1066,7 +1106,9 @@ class CascadingModelExecutor {
                 return v;
             }
         }
-        return fallbackType;
+        // A named OpenAI-compatible provider's builder falls back to its preset's
+        // default model; report that one rather than the bare provider type.
+        return OpenAiCompatibleProviders.find(fallbackType).map(OpenAiCompatibleProvider::defaultModel).orElse(fallbackType);
     }
 
     /**

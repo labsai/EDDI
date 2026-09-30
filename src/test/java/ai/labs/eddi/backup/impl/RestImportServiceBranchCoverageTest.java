@@ -333,7 +333,7 @@ class RestImportServiceBranchCoverageTest {
         @DisplayName("executeSync with null URL throws IllegalArgumentException")
         void executeSyncNullUrl() {
             assertThrows(BadRequestException.class,
-                    () -> importService.executeSync(null, "src", 1, "tgt", null, null, null));
+                    () -> importService.executeSync(null, "src", 1, "tgt", null, null, null, null));
         }
 
         @Test
@@ -347,7 +347,7 @@ class RestImportServiceBranchCoverageTest {
         @DisplayName("previewSync with null URL throws IllegalArgumentException")
         void previewSyncNullUrl() {
             assertThrows(BadRequestException.class,
-                    () -> importService.previewSync(null, "src", 1, "tgt", null));
+                    () -> importService.previewSync(null, "src", 1, "tgt", null, null));
         }
 
         @Test

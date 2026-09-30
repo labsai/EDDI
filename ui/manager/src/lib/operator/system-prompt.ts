@@ -7,7 +7,10 @@ import {
   grantsGroupDiscussion,
   grantsKnowledgeBaseReads,
   grantsIngestionStatusReads,
+  grantsIngestionRunReads,
+  grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
+  grantsKnowledgeBaseBinding,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -222,28 +225,60 @@ const BODY_TEST_DRIVE_GROUP = `Starting a group discussion:
  * exists to prevent for agents.
  */
 const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
-- A knowledge base is its own versioned document in the \`rag\` store, referenced
-  by a workflow's \`rag\` step. It holds the embedding provider and model, the
-  vector store type and its connection parameters, the chunking settings, and
-  the default retrieval parameters.
+- A knowledge base is its own versioned document in the \`rag\` store. It holds
+  its \`name\`, the embedding provider and model, the vector store type and its
+  connection parameters, the chunking settings, the default retrieval
+  parameters, and any ingestion \`sources\` (a crawled website or uploaded
+  files, each with an \`id\` and an optional \`cron\`).
 - Find one by name in the descriptor listing, then read it by id AND version —
   the by-id read needs both, and a name alone reaches nothing.
+- An agent retrieves from a knowledge base only when THREE things line up, and
+  any one missing fails silently — no error, just answers without context:
+  1. The knowledge base document exists.
+  2. The agent's workflow has an \`eddi://ai.labs.rag\` step whose \`config.uri\`
+     points at it (\`eddi://ai.labs.rag/ragstore/rags/<id>?version=<n>\`). This
+     step is the binding; without it nothing is retrieved. The usual cause.
+  3. The LLM task asks for it: \`knowledgeBases\` lists it BY THE DOCUMENT'S OWN
+     \`name\` FIELD (not its id, and not the descriptor's display name — they can
+     differ), or \`enableWorkflowRag: true\` retrieves from every bound one.
+     \`maxRagContextChars\` caps the injected text. \`httpCallRag\` is a separate
+     option: it names an API call whose response is injected, and needs neither
+     the step nor a vector store.
+- "Why is my agent not using its knowledge base?" — check those three in order,
+  reading the agent, its workflow and its LLM config, and say which one fails.
 - "Is it set up correctly?" is answered from the document: which embedding
   provider and model, and which vector store. Report what you actually checked.
-  Whether documents were ever ingested is NOT visible in the configuration — say
-  so rather than implying the config alone proves it.
+  A \`storeType\` of \`in-memory\` (the default) is dev/test only: it loses every
+  document on restart, after 30 minutes without a query, and whenever a secret
+  or global variable changes — flag it as the likely cause of "it worked
+  yesterday" and recommend a persistent store such as \`pgvector\`.
+- The configuration alone never proves documents were ingested — say so rather
+  than implying it does.
 - Documentation: the \`rag\` page.`;
 
 /**
- * The ingestion-status line, appended only when that endpoint is granted.
+ * The ingestion lines, each appended only when its own endpoint is granted.
  *
  * Separate from the section above rather than part of it: a deployment can grant
- * the two configuration reads without this one, and a prompt that promised an
- * ingestion check the agent holds no tool for is the same defect this whole
- * section exists to fix, one level down.
+ * the configuration reads without these, and a prompt that promised an ingestion
+ * check the agent holds no tool for is the same defect this whole section exists
+ * to fix, one level down.
  */
-const BODY_KNOWLEDGE_BASES_INGESTION = `- You can also check an ingestion run's status by its ingestion id — which is
-  what answers "did the documents actually land?" when you have one.`;
+const BODY_KNOWLEDGE_BASES_RUNS = `- To answer "did the documents actually land?" for a configured source, read
+  that source's run history: the knowledge base id, the source's \`id\` (or its
+  \`name\` when it has no id) and the knowledge base VERSION are all required.
+  Each run reports documents seen, ingested, unchanged, failed and removed,
+  segments stored, cost and any error. No runs means it was never run.`;
+
+const BODY_KNOWLEDGE_BASES_FILES = `- For a source of type \`upload\`, you can also list the files it holds.`;
+
+const BODY_KNOWLEDGE_BASES_NO_SOURCES = `- A knowledge base with no \`sources\` is filled by direct uploads through its
+  ingest call, which leave no history you can read. There, say plainly that you
+  cannot tell whether anything was ingested.`;
+
+const BODY_KNOWLEDGE_BASES_INGESTION = `- An ingestion id (from a direct ingest call, which only the person who made it
+  has) can be checked with the ingestion-status read. You will never find one on
+  your own — do not go looking for it.`;
 
 /**
  * Appended when knowledge bases can be read but not changed — the current
@@ -251,9 +286,9 @@ const BODY_KNOWLEDGE_BASES_INGESTION = `- You can also check an ingestion run's 
  * write later cannot leave the prompt claiming the opposite.
  */
 const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge base, and you cannot ingest a document
-  into one — you have no tool for either. Point the user at the knowledge base
-  under Resources in the manager, and offer to read the current configuration
-  for them first.`;
+  into one or start a source's run — you have no tool for any of it. Point the
+  user at the knowledge base under Resources in the manager, and offer to read
+  the current configuration for them first.`;
 
 /**
  * Shown INSTEAD of the section above when the reads are not granted.
@@ -352,6 +387,29 @@ const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's system
   at the agent's page in the manager for those.`;
 
 /**
+ * Appended only when `grantsKnowledgeBaseBinding` — connecting a knowledge base
+ * that already exists to an agent, through the workflow and LLM writes the
+ * operator already holds.
+ *
+ * Two consequences are spelled out because the operator cannot see or fix
+ * either. The vault-grant check (`eddi.vault.grant-enforcement`, `enforce` by
+ * default) refuses to deploy an agent whose configuration names a vault key it
+ * was not granted — a knowledge base's embedding and vector-store keys included
+ * — and granting one is a secrets write the operator is never given. And
+ * binding a knowledge base is also a data decision: its documents become
+ * answerable to everyone who can talk to that agent.
+ */
+const BODY_AUTHORING_KNOWLEDGE_BASE_BINDING = `- You can connect an EXISTING knowledge base to an agent: add an
+  \`eddi://ai.labs.rag\` step to its workflow and name the knowledge base in the
+  LLM task's \`knowledgeBases\` (by the document's \`name\` field), then repoint
+  and deploy as with any other change. Say which knowledge base, and that its
+  documents become answerable to everyone who can talk to that agent — that is
+  what the approver is deciding.
+- If the deploy is refused because the agent is not granted a vault key the
+  knowledge base uses, stop there: you cannot grant secrets. Tell the user which
+  key, and that it is granted on the Secrets page in the manager.`;
+
+/**
  * The ORIGINAL "cannot author an agent at all" text, now shown only when
  * NEITHER agent-creation NOR agent-modification is granted — a write-capable
  * operator (e.g. deploy/undeploy only) that still cannot touch an agent's own
@@ -382,6 +440,10 @@ function buildKnowledgeBaseSection(endpoints: readonly string[]): string {
   if (!grantsKnowledgeBaseReads(endpoints)) return BODY_KNOWLEDGE_BASES_NO_READS;
 
   const lines = [BODY_KNOWLEDGE_BASES];
+  if (grantsIngestionRunReads(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_RUNS);
+  if (grantsIngestionFileReads(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_FILES);
+  // Only meaningful once there is SOME source-based check to contrast it with.
+  if (grantsIngestionRunReads(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_NO_SOURCES);
   if (grantsIngestionStatusReads(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_INGESTION);
   if (!grantsKnowledgeBaseAuthoring(endpoints)) lines.push(BODY_KNOWLEDGE_BASES_READ_ONLY);
   return lines.join("\n");
@@ -396,6 +458,7 @@ function buildAuthoringSection(endpoints: readonly string[]): string {
   const lines = [BODY_AUTHORING_HEADER];
   if (grantsAgentCreation(endpoints)) lines.push(BODY_AUTHORING_AGENT_CREATE);
   if (grantsAgentModification(endpoints)) lines.push(BODY_AUTHORING_AGENT_MODIFY);
+  if (grantsKnowledgeBaseBinding(endpoints)) lines.push(BODY_AUTHORING_KNOWLEDGE_BASE_BINDING);
   if (!grantsAgentCreation(endpoints) && !grantsAgentModification(endpoints)) {
     lines.push(BODY_AUTHORING_NO_AGENT);
   }
@@ -414,15 +477,28 @@ function buildAuthoringSection(endpoints: readonly string[]): string {
  * Unconditional, not gated by scope or granted endpoints — knowing where the
  * admin is doing does not depend on what the operator is allowed to do about
  * it.
+ *
+ * Every key here must be one the drawer actually sends AND one the engine lets
+ * a client set. The group used to arrive as `groupId`, which is an
+ * engine-reserved context key (`ClientContextGuard.RESERVED_KEYS`): since the
+ * reserved-key hardening the backend strips it from every client-started turn,
+ * so "(group …)" silently never rendered. Hence `viewedGroupId`. The resource,
+ * conversation and channel ids were sent all along and simply never read — on a
+ * knowledge base's own page, "is this set up right?" reached the operator with
+ * no way to tell which one was meant.
  */
 const BODY_APP_CONTEXT = `{#if context.screen}
 The administrator is currently viewing: {context.screen}\
 {#if context.agentId} (agent {context.agentId}){/if}\
 {#if context.workflowId} (workflow {context.workflowId}){/if}\
-{#if context.groupId} (group {context.groupId}){/if}\
+{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}\
+{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}\
+{#if context.conversationId} (conversation {context.conversationId}){/if}\
+{#if context.channelId} (channel {context.channelId}){/if}\
 {#if context.boardId} (workforce board {context.boardId}){/if}.
-If a question about which agent, workflow, group, or board is meant is
-ambiguous, assume this one unless told otherwise.
+If a question about which agent, workflow, group, resource, conversation or
+board is meant is ambiguous, assume this one unless told otherwise. A resource
+read by id also needs its version: find it before reading.
 {/if}`;
 
 /**
@@ -436,10 +512,12 @@ ambiguous, assume this one unless told otherwise.
  * rather than left to be recalled.
  *
  * A snapshot, deliberately: the body is stored on the agent at provisioning
- * time and stays editable afterwards, like every other section. Re-activating
- * refreshes it. The rule below is written so a stale list still behaves
- * correctly — the operator must never argue a model out of existence, whether
- * or not it appears here.
+ * time and stays editable afterwards, like every other section. It is refreshed
+ * by the operator UPGRADE (`operator-revision.ts`) when the admin has not edited
+ * the instructions, or chooses the new default — this list is part of the
+ * revision fingerprint, so a change here is what announces the upgrade. The
+ * rule below is written so a stale list still behaves correctly — the operator
+ * must never argue a model out of existence, whether or not it appears here.
  */
 function buildModelCatalogueSection(): string {
   const lines = Object.entries(MODEL_SUGGESTIONS)

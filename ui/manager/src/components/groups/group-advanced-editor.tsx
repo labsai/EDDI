@@ -7,6 +7,7 @@ import { useUpdateGroup } from "@/hooks/use-groups";
 import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
+import { ProviderSelect } from "@/components/shared/provider-select";
 import {
   ARTIFACT_DEFAULT_MAX_PER_DISCUSSION,
   CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES,
@@ -347,11 +348,10 @@ export function GroupAdvancedEditor({
                   <label htmlFor={`${uid}-sum-provider`} className="text-[10px] text-muted-foreground">
                     {t("groups.contextWindowSummarizer", "Summarizer")}
                   </label>
-                  <select
+                  <ProviderSelect
                     id={`${uid}-sum-provider`}
                     value={summarizerProvider}
-                    onChange={(e) => {
-                      const next = e.target.value;
+                    onChange={(next) => {
                       setSummarizerProvider(next);
                       // Seed the provider's default model so picking a provider is
                       // enough to make summarization actually run.
@@ -359,15 +359,11 @@ export function GroupAdvancedEditor({
                       if (preset && !summarizerModel.trim()) setSummarizerModel(preset.defaultModel);
                     }}
                     className={`${inputCls} w-40`}
-                    data-testid="adv-window-provider"
-                  >
-                    <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
-                    {LLM_PROVIDERS.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    testId="adv-window-provider"
+                    leadingOptions={
+                      <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
+                    }
+                  />
                   <input
                     value={summarizerModel}
                     onChange={(e) => setSummarizerModel(e.target.value)}

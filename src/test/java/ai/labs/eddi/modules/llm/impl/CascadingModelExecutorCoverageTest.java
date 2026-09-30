@@ -126,7 +126,7 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", List.of(Map.of("type", "tool_call"))));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -157,7 +157,7 @@ class CascadingModelExecutorCoverageTest {
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         // Hedging → heuristic ~0.4 < 0.9 → escalate to step 2 (last, accepted).
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("I'm not sure, I don't know.", List.of()));
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
@@ -184,8 +184,9 @@ class CascadingModelExecutorCoverageTest {
         when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
-        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenReturn(null); // no
-                                                                                                                                                  // tools
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
+                .thenReturn(null); // no
+        // tools
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
                 Map.of(), false, false, false);
@@ -218,7 +219,7 @@ class CascadingModelExecutorCoverageTest {
         var pause = new ToolApprovalRequiredException("needs human approval", null);
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         doThrow(pause).when(orchestrator)
-                .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
+                .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any());
 
         var thrown = assertThrows(ToolApprovalRequiredException.class,
                 () -> executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null),
@@ -707,6 +708,26 @@ class CascadingModelExecutorCoverageTest {
         verify(templatingEngine).processTemplate(eq("{properties.tier}"), anyMap());
         // ...but NEVER for the credential value — apiKey is in TEMPLATE_SKIP_PARAMS.
         verify(templatingEngine, never()).processTemplate(eq("secret-key"), anyMap());
+    }
+
+    @Test
+    @DisplayName("a named OpenAI-compatible step without a model traces the preset default, not the bare type")
+    void compatibleProviderStepTracesPresetDefaultModel() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("xai");
+        cascade.setSteps(List.of(step));
+
+        ChatModel answering = modelReturning("answer");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(answering);
+
+        var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
+                mock(AgentOrchestrator.class), Map.of(), false, false, false);
+
+        assertEquals("grok-4.7", result.trace().get(0).get("model"));
     }
 
     @Test

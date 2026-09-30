@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
     "deployToProduction": "프로덕션에 배포",
     "undeployFromProduction": "프로덕션에서 제거",
-    "deployFailedIn": "{{environment}}에 배포하지 못했습니다"
+    "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
+    "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다."
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -678,7 +679,9 @@
     "exportMd": "Markdown으로 내보내기",
     "toolSummary": "도구 사용 요약",
     "totalCost": "총 비용",
-    "cacheHitRate": "캐시 적중률"
+    "cacheHitRate": "캐시 적중률",
+    "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
+    "stepAgentVersion": "에이전트 버전 {{version}}이(가) 응답함"
   },
   "chat": {
     "hide": "숨기기",
@@ -1335,6 +1338,10 @@
     "streamingTimeoutSecondsHint": "엔진 기본값(120초)을 재정의합니다. 스트리밍 중에만 적용됩니다. 비어 있음 = 기본값 사용.",
     "taskPricing": "일반 호출 요금",
     "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다.",
+    "unknownType": "{{type}} (사용자 지정)",
+    "compatibleEndpoint": "엔드포인트: {{url}} — 재정의하려면 baseUrl 또는 region 매개변수를 추가하세요",
+    "compatibleEndpointOverridden": "엔드포인트: {{url}}",
+    "modelType": "모델 유형",
     "paramName": "매개변수 이름",
     "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요."
   },
@@ -3111,6 +3118,9 @@
     "new": "신규",
     "updated": "업데이트됨",
     "unchanged": "변경 없음",
+    "removed": "제거됨",
+    "conflicts": "여기서 변경됨",
+    "conflictHint": "충돌로 표시된 리소스는 마지막 동기화 이후 이 인스턴스에서 변경되었습니다. 선택하지 않으면 그대로 유지되며, 선택하면 로컬 변경 사항을 덮어씁니다.",
     "selected": "선택됨",
     "mergeNow": "선택 항목 가져오기",
     "syncNow": "지금 동기화",
@@ -3156,6 +3166,9 @@
     "previewFirst": "동기화 전에 변경사항 미리보기",
     "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
     "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
+    "outcomeCounts": "{{updated}}개 업데이트 · {{created}}개 생성 · {{skipped}}개 변경 없음",
+    "redeployHint": "동기화된 변경 사항은 새 버전으로 저장됩니다. 실행 중인 항목은 그대로 유지되며, 새 버전을 배포해야 적용됩니다.",
+    "overwrite": "로컬 변경 사항 덮어쓰기",
     "previewFailed": "미리보기 실패",
     "noPreviewReturned": "소스가 이 에이전트의 미리보기를 반환하지 않았습니다."
   },
@@ -3163,7 +3176,8 @@
     "actionCreate": "신규",
     "actionUpdate": "업데이트",
     "actionSkip": "최신 상태",
-    "actionConflict": "충돌"
+    "actionConflict": "충돌",
+    "actionRemove": "제거"
   },
   "userConversations": {
     "title": "사용자 대화",
@@ -4387,7 +4401,10 @@
       "platformBaseUrlAuto": "서버에서 확인",
       "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요.",
       "platformBaseUrlQueryFailed": "서버에 자신의 주소를 물어볼 수 없었습니다. 여기에 입력하지 않으면 활성화가 실패합니다. 다시 시도하려면 페이지를 새로 고침하세요.",
-      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요."
+      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요.",
+      "llmEndpoint": "모델 엔드포인트",
+      "promptBodyDiffers": "이 지침은 현재 기본값과 다릅니다. 편집되었거나 이전 버전의 Manager가 작성했습니다.",
+      "promptBodyReset": "기본값으로 재설정"
     },
     "authMode": {
       "none": {
@@ -4553,6 +4570,28 @@
     },
     "superseded": {
       "title": "이전 오퍼레이터 에이전트가 여전히 배포되어 있습니다."
+    },
+    "upgrade": {
+      "hint": "Platform Operator 업데이트를 사용할 수 있습니다.",
+      "blockerBaseUrl": "모델 서버 주소가 기록되지 않았습니다. 업그레이드하려면 다시 입력하세요.",
+      "addedTools_other": "새 도구 {{count}}개",
+      "action": "업그레이드",
+      "addedTools_one": "새 도구 {{count}}개",
+      "blockerProvider": "이 모델 공급자는 더 이상 이 방식으로 설정할 수 없습니다. 업그레이드하려면 다른 공급자를 선택하세요.",
+      "useNewDefault": "새 기본값으로 바꾸기",
+      "confirmBody": "현재 지침과 도구로 새 오퍼레이터를 만들고 새 활성화처럼 검증한 뒤에야 이전 오퍼레이터를 제거합니다. 모델, 키, 환경, 액세스 설정은 유지됩니다. 열려 있는 오퍼레이터 채팅은 종료되며, 이전 오퍼레이터와의 대화는 더 이상 기록에 표시되지 않습니다.",
+      "description": "이전 버전의 Manager로 설정되었기 때문에(리비전 {{from}}, 이 버전은 {{to}}) 지침과 도구가 오래되었습니다.",
+      "blockerCredential": "모델 키가 일반 텍스트로 입력되었으며 일반 텍스트는 저장되지 않습니다. 업그레이드하려면 다시 입력하세요.",
+      "reviewAction": "검토 후 업그레이드",
+      "instructionsUnknown": "오퍼레이터 지침이 현재 기본값과 다릅니다. 이전 기본값이거나 직접 편집한 내용입니다.",
+      "instructionsCustomized": "오퍼레이터 지침을 편집했습니다.",
+      "confirmTitle": "Platform Operator를 업그레이드할까요?",
+      "removedTools_other": "도구 {{count}}개 제거됨",
+      "removedTools_one": "도구 {{count}}개 제거됨",
+      "confirm": "지금 업그레이드",
+      "hintAction": "업그레이드",
+      "keepCurrent": "현재 텍스트 유지(새 기본값에 추가된 내용은 반영되지 않음)",
+      "title": "Platform Operator 업데이트를 사용할 수 있습니다"
     }
   },
   "groupWorkspace": {
@@ -5053,5 +5092,40 @@
     "workflowMissingResource": "워크플로 {{workflowId}}(버전 {{version}})이(가) {{resource}}을(를) 참조하지 않으므로 여기서 저장해도 에이전트가 바뀌지 않습니다. 아무것도 저장되지 않았습니다.",
     "agentWorkflowMismatch": "에이전트 {{agentId}}(버전 {{version}})은(는) 워크플로 {{workflowId}}의 버전 {{expected}}이(가) 아닌 버전 {{found}}을(를) 참조합니다. 이 페이지를 연 후 에이전트가 변경되었습니다. 새로 고치세요. 아무것도 저장되지 않았습니다.",
     "agentMissingWorkflow": "에이전트 {{agentId}}(버전 {{version}})이(가) 워크플로 {{workflowId}}을(를) 참조하지 않습니다. 아무것도 저장되지 않았습니다."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "모델 연구소",
+      "compatible": "OpenAI 호환 제공업체",
+      "cloud": "클라우드 플랫폼",
+      "local": "로컬 / 자체 호스팅"
+    },
+    "region": {
+      "label": "리전",
+      "intl": "국제",
+      "cn": "중국 본토",
+      "us": "미국",
+      "custom": "사용자 지정 URL(아래에서 설정)"
+    },
+    "compatibleNote": "제공업체의 OpenAI 호환 API({{url}})를 통해 연결합니다. 프록시나 다른 리전을 사용할 때만 변경하세요.",
+    "keyHint": "{{url}}에서 API 키를 받으세요",
+    "select": "공급자 선택"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "이전 버전과 호환 — 진행 중인 대화가 이 버전으로 전환될 수 있습니다",
+    "compatibleHint": "진행 중인 대화를 깨뜨릴 수 없는 변경(예: 프롬프트 문구나 다른 모델)에만 사용하세요. 속성, 액션 또는 워크플로 단계의 이름을 바꾸거나 삭제했다면 선택하지 마세요.",
+    "compatibleLegacyNote": "현재 버전은 버전 추종 기능 이전의 버전이므로 이미 실행 중인 대화는 그대로 유지됩니다. 다음 호환 저장부터 체인이 연결됩니다.",
+    "compatibleUnknownNote": "버전 추종 기능 이전 버전의 대화는 그 버전에 그대로 유지됩니다.",
+    "generationBadge": "호환 세대 {{generation}}",
+    "generationTooltip": "호환 세대 {{generation}}: 같은 세대의 이 에이전트 버전들은 서로 호환되므로 진행 중인 대화는 다음 턴에 최신 배포 버전으로 이동합니다. 호환되지 않는 저장은 새 세대를 시작합니다.",
+    "impactTitle": "v{{version}}을(를) {{environment}}에 배포 — 진행 중인 대화",
+    "impactFollow_other": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
+    "impactStay_other": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다",
+    "impactReasonNewer": "더 최신 버전",
+    "impactReasonLegacy": "버전 추종 기능 이전",
+    "impactReasonBreaking": "호환되지 않는 변경",
+    "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
+    "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
+    "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
   }
 }

@@ -96,6 +96,11 @@ interface UpdatePromptVars {
   agentId: string;
   promptData: AgentPromptData;
   newSystemMessage: string;
+  /**
+   * The agent version the cascade writes is compatible with the one it
+   * replaces — see `UpdateAgentOptions.compatible`. Omitted means breaking.
+   */
+  compatible?: boolean;
 }
 
 /**
@@ -131,7 +136,7 @@ export function useUpdateAgentPrompt() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ agentId, promptData, newSystemMessage }: UpdatePromptVars) => {
+    mutationFn: async ({ agentId, promptData, newSystemMessage, compatible }: UpdatePromptVars) => {
       // Build updated LLM config with new system message
       const updatedTasks = [...(promptData.llmConfig.tasks ?? [])];
       const firstTask = updatedTasks[0];
@@ -173,7 +178,8 @@ export function useUpdateAgentPrompt() {
           promptData.llmId,
           llmVersion,
           updatedLlmConfig,
-          context
+          context,
+          compatible ? { compatible: true } : undefined
         );
         recoveries.delete(recoveryKey);
         return result;

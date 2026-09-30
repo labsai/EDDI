@@ -55,6 +55,17 @@ class ModelCapabilityServiceTest {
                 "oracle-genai,meta.llama-3.2-90b-vision,true",
                 "jlama,tjake/llama,false",
                 "huggingface,any-model,false",
+                "xai,grok-4.7,true",
+                "deepseek,deepseek-v4-pro,false",
+                "deepseek,deepseek-flash,true",
+                "moonshot,kimi-k3,true",
+                "qwen,qwen3.7-plus,true",
+                "qwen,qwen3.7-max,false",
+                "zhipu,glm-5.3,false",
+                "zhipu,glm-5.3-flash,true",
+                "minimax,MiniMax-M2.7,false",
+                "groq,openai/gpt-oss-120b,false",
+                "openrouter,openrouter/auto,true",
                 "unknown-provider,some-model,false"})
         void visionDefaults(String provider, String model, boolean expected) {
             assertEquals(expected, service.supportsVision(provider, model),

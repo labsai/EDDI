@@ -106,6 +106,13 @@ export interface SimpleConversationMemorySnapshot {
   conversationProperties?: Record<string, unknown>;
   undoAvailable?: boolean;
   redoAvailable?: boolean;
+  /**
+   * Why the conversation ended, when it was ended for a reason the backend
+   * records — today only {@link END_REASON_AGENT_VERSION_RETIRED}. Absent
+   * otherwise. Note `agentVersion` is the version the conversation is on NOW:
+   * with version following it can change between turns.
+   */
+  endReason?: string;
   // HITL bookmark fields (set when conversationState === "AWAITING_HUMAN")
   hitlPausedWorkflowId?: string;
   hitlPausedAbsoluteTaskIndex?: number;
@@ -297,6 +304,44 @@ export function extractActions(step: SimpleConversationStep): string[] {
   if (Array.isArray(entry.value)) return entry.value as string[];
   if (typeof entry.value === "string") return [entry.value];
   return [];
+}
+
+/**
+ * `endReason` of a conversation ended because the agent version it ran on was
+ * undeployed with "end all active conversations" (backend
+ * `IConversationService.END_REASON_AGENT_VERSION_RETIRED`).
+ */
+export const END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
+
+/** Anything carrying a step's key/value entries — simple or detailed snapshot. */
+interface StepEntries {
+  conversationStep?: { key: string; value: unknown }[] | null;
+}
+
+/**
+ * The agent version that ran this step — step data `agent:version`
+ * (`MemoryKeys.AGENT_VERSION`). Not a public key: only detailed views carry it,
+ * and steps recorded before version following never do. `null` when absent.
+ */
+export function extractAgentVersion(step: StepEntries | undefined): number | null {
+  const entry = step?.conversationStep?.find((d) => d.key === "agent:version");
+  const value = entry?.value;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The version move recorded on the first step a new version ran — step data
+ * `agent:switch` = `{ from, to }` (`MemoryKeys.AGENT_VERSION_CHANGE`). `null`
+ * when the step carries none, or one that is not shaped like a move.
+ */
+export function extractAgentSwitch(
+  step: StepEntries | undefined
+): { from: number; to: number } | null {
+  const entry = step?.conversationStep?.find((d) => d.key === "agent:switch");
+  const value = entry?.value;
+  if (!value || typeof value !== "object") return null;
+  const { from, to } = value as { from?: unknown; to?: unknown };
+  return typeof from === "number" && typeof to === "number" ? { from, to } : null;
 }
 
 export interface ConversationMemorySnapshot {

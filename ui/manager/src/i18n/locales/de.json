@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
-    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen"
+    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
+    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr."
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -678,7 +679,9 @@
     "exportMd": "Als Markdown exportieren",
     "toolSummary": "Werkzeugnutzung",
     "totalCost": "Gesamtkosten",
-    "cacheHitRate": "Cache-Trefferquote"
+    "cacheHitRate": "Cache-Trefferquote",
+    "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
+    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
   },
   "chat": {
     "hide": "Ausblenden",
@@ -1335,6 +1338,10 @@
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
     "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "unknownType": "{{type}} (benutzerdefiniert)",
+    "compatibleEndpoint": "Endpunkt: {{url}} — zum Überschreiben einen Parameter baseUrl oder region hinzufügen",
+    "compatibleEndpointOverridden": "Endpunkt: {{url}}",
+    "modelType": "Modelltyp",
     "paramName": "Parametername",
     "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
   },
@@ -3277,6 +3284,9 @@
     "new": "neu",
     "updated": "aktualisiert",
     "unchanged": "unverändert",
+    "removed": "entfernt",
+    "conflicts": "hier geändert",
+    "conflictHint": "Als Konflikt markierte Ressourcen wurden seit der letzten Synchronisierung auf dieser Instanz geändert. Sie bleiben unverändert, solange Sie sie nicht auswählen – eine Auswahl überschreibt die lokale Änderung.",
     "selected": "ausgewählt",
     "mergeNow": "Ausgewählte importieren",
     "syncNow": "Jetzt synchronisieren",
@@ -3322,6 +3332,9 @@
     "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
     "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
     "syncIdentical": "Bereits aktuell – nichts zu schreiben",
+    "outcomeCounts": "{{updated}} aktualisiert · {{created}} erstellt · {{skipped}} unverändert",
+    "redeployHint": "Synchronisierte Änderungen werden als neue Versionen gespeichert. Was läuft, läuft weiter – stellen Sie die neue Version bereit, um sie live zu schalten.",
+    "overwrite": "Lokale Änderung überschreiben",
     "previewFailed": "Vorschau fehlgeschlagen",
     "noPreviewReturned": "Die Quelle hat für diesen Agenten keine Vorschau geliefert."
   },
@@ -3329,7 +3342,8 @@
     "actionCreate": "Neu",
     "actionUpdate": "Aktualisieren",
     "actionSkip": "Aktuell",
-    "actionConflict": "Konflikt"
+    "actionConflict": "Konflikt",
+    "actionRemove": "Entfernen"
   },
   "userConversations": {
     "title": "Nutzer-Konversationen",
@@ -4387,7 +4401,10 @@
       "platformBaseUrlAuto": "vom Server ermittelt",
       "platformBaseUrlDiffers": "Diese Installation meldet ihre eigene Adresse derzeit als {{serverUrl}}. Der Wert oben weicht davon ab — behalten Sie ihn nur, wenn Sie ihn bewusst gesetzt haben.",
       "platformBaseUrlQueryFailed": "Der Server konnte nicht nach seiner eigenen Adresse gefragt werden. Die Aktivierung schlägt fehl, sofern Sie sie nicht hier eintragen — oder laden Sie neu, um es erneut zu versuchen.",
-      "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein."
+      "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein.",
+      "llmEndpoint": "Modell-Endpunkt",
+      "promptBodyDiffers": "Diese Anweisungen weichen vom aktuellen Standard ab — sie wurden bearbeitet oder von einer älteren Version des Managers geschrieben.",
+      "promptBodyReset": "Auf Standard zurücksetzen"
     },
     "authMode": {
       "none": {
@@ -4553,6 +4570,28 @@
     },
     "superseded": {
       "title": "Der vorherige Operator-Agent ist weiterhin deployed."
+    },
+    "upgrade": {
+      "hint": "Für den Platform Operator ist ein Update verfügbar.",
+      "blockerBaseUrl": "Die Adresse seines Modellservers wurde nicht gespeichert — gib sie für das Update erneut ein.",
+      "addedTools_other": "{{count}} neue Werkzeuge",
+      "action": "Aktualisieren",
+      "addedTools_one": "{{count}} neues Werkzeug",
+      "blockerProvider": "Sein Modellanbieter kann auf diesem Weg nicht mehr eingerichtet werden — wähle für das Update einen anderen.",
+      "useNewDefault": "Durch den neuen Standard ersetzen",
+      "confirmBody": "Ein neuer Operator wird mit den aktuellen Anweisungen und Werkzeugen erstellt und wie bei einer Neuaktivierung geprüft; erst dann wird der alte entfernt. Modell, Schlüssel, Umgebung und Zugriffseinstellungen bleiben erhalten. Der offene Operator-Chat wird beendet, und Gespräche mit dem alten Operator erscheinen nicht mehr im Verlauf.",
+      "description": "Er wurde von einer älteren Version des Managers eingerichtet (Revision {{from}}; diese Version liefert {{to}}), daher sind seine Anweisungen und Werkzeuge veraltet.",
+      "blockerCredential": "Sein Modellschlüssel wurde als Klartext eingegeben und daher nie gespeichert — gib ihn für das Update erneut ein.",
+      "reviewAction": "Prüfen und aktualisieren",
+      "instructionsUnknown": "Die Anweisungen des Operators weichen vom aktuellen Standard ab — entweder ein älterer Standard oder deine eigenen Änderungen.",
+      "instructionsCustomized": "Du hast die Anweisungen des Operators bearbeitet.",
+      "confirmTitle": "Platform Operator aktualisieren?",
+      "removedTools_other": "{{count}} Werkzeuge entfernt",
+      "removedTools_one": "{{count}} Werkzeug entfernt",
+      "confirm": "Jetzt aktualisieren",
+      "hintAction": "Aktualisieren",
+      "keepCurrent": "Aktuellen Text behalten (er lernt nicht, was der neue Standard ergänzt)",
+      "title": "Für den Platform Operator ist ein Update verfügbar"
     }
   },
   "groupWorkspace": {
@@ -5053,5 +5092,40 @@
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
     "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "KI-Labore",
+      "compatible": "OpenAI-kompatible Anbieter",
+      "cloud": "Cloud-Plattformen",
+      "local": "Lokal / selbst gehostet"
+    },
+    "region": {
+      "label": "Region",
+      "intl": "International",
+      "cn": "Festland-China",
+      "us": "Vereinigte Staaten",
+      "custom": "Eigene URL (unten festgelegt)"
+    },
+    "compatibleNote": "Verbindet über die OpenAI-kompatible API des Anbieters ({{url}}). Nur für einen Proxy oder eine andere Region überschreiben.",
+    "keyHint": "API-Schlüssel erhalten unter {{url}}",
+    "select": "Anbieter auswählen"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Kompatibel mit der vorherigen Version — laufende Unterhaltungen dürfen zu ihr wechseln",
+    "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
+    "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
+    "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
+    "generationBadge": "Kompat.-Gen. {{generation}}",
+    "generationTooltip": "Kompatibilitätsgeneration {{generation}}: Versionen dieses Agents mit derselben Generation sind kompatibel, sodass eine laufende Unterhaltung bei ihrem nächsten Zug zur neuesten bereitgestellten wechselt. Ein inkompatibles Speichern beginnt eine neue Generation.",
+    "impactTitle": "Bereitstellung von v{{version}} in {{environment}} — laufende Unterhaltungen",
+    "impactFollow_one": "{{count}} aktive Unterhaltung auf v{{from}} wird auf v{{to}} fortgesetzt",
+    "impactFollow_other": "{{count}} aktive Unterhaltungen auf v{{from}} werden auf v{{to}} fortgesetzt",
+    "impactStay_one": "{{count}} aktive Unterhaltung auf v{{from}} bleibt auf v{{from}}",
+    "impactStay_other": "{{count}} aktive Unterhaltungen auf v{{from}} bleiben auf v{{from}}",
+    "impactReasonNewer": "neuere Version",
+    "impactReasonLegacy": "älter als die Versionsfolge",
+    "impactReasonBreaking": "inkompatible Änderung",
+    "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
   }
 }

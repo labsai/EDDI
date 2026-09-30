@@ -78,6 +78,42 @@ class VaultSecretProviderGrantTest {
         provider.store(REF, PLAINTEXT, "LLM provider key", allowedAgents);
     }
 
+    // ─── Create-if-absent ───
+
+    @Test
+    @DisplayName("storeIfAbsent creates a missing secret and it resolves")
+    void storeIfAbsentCreates() throws Exception {
+        assertTrue(provider.storeIfAbsent(REF, PLAINTEXT, "first", List.of("*")));
+
+        assertEquals(PLAINTEXT, provider.resolve(REF));
+        assertEquals(1, persistence.insertIfAbsentCalls);
+        assertEquals(0, persistence.upsertSecretCalls, "a create-if-absent must never reach the upsert");
+    }
+
+    @Test
+    @DisplayName("storeIfAbsent leaves an existing secret exactly as it was")
+    void storeIfAbsentDoesNotOverwrite() throws Exception {
+        provider.store(REF, PLAINTEXT, "original", List.of("agent-one"));
+        SecretMetadata before = provider.getMetadata(REF);
+
+        assertFalse(provider.storeIfAbsent(REF, "a-different-value", "second", List.of("*")));
+
+        // Metadata first: resolve() stamps lastAccessedAt, which is not what is under
+        // test.
+        assertEquals(before, provider.getMetadata(REF), "checksum, grant and description all untouched");
+        assertEquals(PLAINTEXT, provider.resolve(REF));
+    }
+
+    @Test
+    @DisplayName("storeIfAbsent does not read before it writes — the insert is the existence check")
+    void storeIfAbsentDoesNotReadFirst() throws Exception {
+        int readsBefore = persistence.findSecretCalls;
+
+        provider.storeIfAbsent(REF, PLAINTEXT, "first", List.of("*"));
+
+        assertEquals(readsBefore, persistence.findSecretCalls);
+    }
+
     // ─── Widening ───
 
     @Test

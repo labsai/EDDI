@@ -147,10 +147,22 @@ class LlmTaskPromptBoundsTest {
             var configured = new ConversationSummaryConfig();
             configured.setLlmProvider("openai");
 
-            var effective = LlmTask.resolveEffectiveSummaryConfig(configured, "anthropic", "gpt-4o-mini");
+            var effective = LlmTask.resolveEffectiveSummaryConfig(configured, "openai", "gpt-4o-mini");
 
             assertEquals("openai", effective.getLlmProvider());
             assertEquals("gpt-4o-mini", effective.getLlmModel());
+        }
+
+        @Test
+        @DisplayName("a summary on another provider never inherits the parent's model")
+        void crossProviderDoesNotInheritModel() {
+            var configured = new ConversationSummaryConfig();
+            configured.setLlmProvider("anthropic");
+
+            var effective = LlmTask.resolveEffectiveSummaryConfig(configured, "xai", "grok-4.7");
+
+            assertEquals("anthropic", effective.getLlmProvider());
+            assertNull(effective.getLlmModel(), "grok-4.7 sent to Anthropic cannot work; its builder picks its own default");
         }
 
         @Test
