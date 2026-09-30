@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -24,6 +25,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupMemberNotFoundException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -153,6 +155,21 @@ public class GroupLifecycleOps {
         }
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
+            // H14b: deleting a RUNNING discussion must stop it. The guard above never
+            // sees one — the first discuss() leg is not an "operation in progress" —
+            // so the teardown below used to end its members and delete its ephemeral
+            // agents mid-run, and the leg's next write (then an upsert) recreated the
+            // deleted document. Signal the leg on this node now; its next write finds
+            // the document gone (update() no longer recreates one) and it ends as a
+            // cancel. A leg on another node has no token here and is stopped by that
+            // same write.
+            DiscussionControlToken runningLeg = discussionControls.get(groupConversationId);
+            if (runningLeg != null) {
+                runningLeg.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                runningLeg.cancelActiveFuture();
+                LOGGER.infof("Deleting group conversation %s while it runs — cancelling the running leg first",
+                        LogSanitizer.sanitize(groupConversationId));
+            }
             // #12: deleting a paused discussion must run the same cleanup as
             // cancel-of-paused. executeDiscussion's finally deliberately skipped
             // cleanup while AWAITING_APPROVAL, so without this the armed timeout
@@ -199,6 +216,11 @@ public class GroupLifecycleOps {
     public List<GroupConversation> listGroupConversations(String groupId, int index, int limit)
             throws IResourceStore.ResourceStoreException {
         return conversationStore.listByGroupId(groupId, index, limit);
+    }
+
+    public List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException {
+        return conversationStore.listByGroupId(groupId, ownerUserId, index, limit);
     }
 
     public GroupConversation followUpWithMember(String groupConversationId, String targetAgentId, String question)
@@ -623,7 +645,25 @@ public class GroupLifecycleOps {
             }
 
             try {
-                boolean shouldDelete = policy == LifecyclePolicy.EPHEMERAL || policy == LifecyclePolicy.AGENT_DECIDES;
+                // The created list alone used to decide a PERMANENT delete here, the
+                // same trust teardown_agent placed in it. The agent's own dynamicOrigin
+                // must name this discussion too (review #3):
+                // - names this discussion: the policy applies in full;
+                // - names another conversation/discussion: not ours — left alone;
+                // - no marker (created before markers existed, or never created by
+                // create_sub_agent at all) or unreadable: undeploy only, never delete.
+                OriginVerdict verdict = originVerdict(agentId, gc.getId());
+                if (verdict == OriginVerdict.FOREIGN) {
+                    LOGGER.warnf("Ephemeral cleanup: agent '%s' was not created by group conversation %s — leaving it alone",
+                            LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(gc.getId()));
+                    continue;
+                }
+                boolean shouldDelete = (policy == LifecyclePolicy.EPHEMERAL || policy == LifecyclePolicy.AGENT_DECIDES)
+                        && verdict == OriginVerdict.CREATED_HERE;
+                if (verdict == OriginVerdict.UNVERIFIED && policy != LifecyclePolicy.UNDEPLOY_ONLY) {
+                    LOGGER.warnf("Ephemeral cleanup: agent '%s' carries no verifiable dynamic origin — undeploying only, not deleting",
+                            LogSanitizer.sanitize(agentId));
+                }
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
@@ -635,6 +675,35 @@ public class GroupLifecycleOps {
             } catch (Exception e) {
                 LOGGER.warnf("Ephemeral cleanup failed for agent '%s': %s", agentId, e.getMessage());
             }
+        }
+    }
+
+    /** What an agent's {@code dynamicOrigin} says about who created it. */
+    enum OriginVerdict {
+        CREATED_HERE, FOREIGN, UNVERIFIED
+    }
+
+    /**
+     * Reads the agent's current configuration and compares its
+     * {@code dynamicOrigin} with this discussion. Never throws: anything that
+     * cannot be read is {@link OriginVerdict#UNVERIFIED}, which the caller turns
+     * into "undeploy, never delete".
+     */
+    OriginVerdict originVerdict(String agentId, String groupConversationId) {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            AgentConfiguration.DynamicOrigin origin = configuration != null ? configuration.getDynamicOrigin() : null;
+            if (origin == null) {
+                return OriginVerdict.UNVERIFIED;
+            }
+            return groupConversationId != null && groupConversationId.equals(origin.getCreatedInGroupConversationId())
+                    ? OriginVerdict.CREATED_HERE
+                    : OriginVerdict.FOREIGN;
+        } catch (Exception e) {
+            LOGGER.debugf("Ephemeral cleanup: could not read agent '%s' to verify its origin: %s", LogSanitizer.sanitize(agentId),
+                    e.getMessage());
+            return OriginVerdict.UNVERIFIED;
         }
     }
 

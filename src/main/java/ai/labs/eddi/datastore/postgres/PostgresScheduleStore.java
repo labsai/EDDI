@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -732,15 +733,29 @@ public class PostgresScheduleStore implements IScheduleStore {
      * the query, like {@link #hitlRedactionClause}, so limit/offset count only the
      * rows the caller may see: shared schedules (no owner, blank owner, the system
      * placeholder) plus, when the caller has an id, the caller's own, the same set
-     * as {@link ScheduleOwnerScope#admits}. Values are bound by
+     * as {@link ScheduleOwnerScope#admits(String, String, java.util.Map)}, with its
+     * creator and team-cadence refinements. Values are bound by
      * {@link #bindOwnerScope}; no caller input is concatenated.
      */
-    private static String ownerScopeClause(ScheduleOwnerScope ownerScope, String keyword) {
+    static String ownerScopeClause(ScheduleOwnerScope ownerScope, String keyword) {
         if (ownerScope == null || ownerScope.unrestricted()) {
             return "";
         }
-        return keyword + "(user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?"
-                + (ownerScope.callerId() != null ? " OR user_id = ?" : "") + ")";
+        String shared = "user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?";
+        List<String> visible = new ArrayList<>();
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            visible.add(shared);
+        } else if (ownerScope.callerId() != null) {
+            visible.add("((" + shared + ") AND created_by = ?)");
+        }
+        if (ownerScope.callerId() != null) {
+            visible.add("user_id = ?");
+        }
+        if (ownerScope.includeTeamCadences()) {
+            visible.add("metadata->>'" + TeamCadenceService.METADATA_TYPE_KEY + "' = '"
+                    + TeamCadenceService.METADATA_TYPE_CADENCE + "'");
+        }
+        return keyword + (visible.isEmpty() ? "FALSE" : "(" + String.join(" OR ", visible) + ")");
     }
 
     /**
@@ -751,7 +766,12 @@ public class PostgresScheduleStore implements IScheduleStore {
         if (ownerScope == null || ownerScope.unrestricted()) {
             return index;
         }
-        ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+        } else if (ownerScope.callerId() != null) {
+            ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+            ps.setString(index++, ownerScope.callerId());
+        }
         if (ownerScope.callerId() != null) {
             ps.setString(index++, ownerScope.callerId());
         }
@@ -785,6 +805,8 @@ public class PostgresScheduleStore implements IScheduleStore {
     public List<ScheduleConfiguration> findDueSchedules(Instant now, Instant leaseExpiry, int maxRetries)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        // Most overdue first (id breaks ties): an unordered LIMIT returns an
+        // arbitrary subset once more rows are due than one poll batch holds.
         long nowMs = now.toEpochMilli();
         long leaseMs = leaseExpiry.toEpochMilli();
 
@@ -796,6 +818,7 @@ public class PostgresScheduleStore implements IScheduleStore {
                     OR (fire_status = 'CLAIMED' AND claimed_at <= ?)
                     OR (fire_status = 'FAILED' AND next_retry_at <= ? AND fail_count < ?)
                 )
+                ORDER BY next_fire ASC, id ASC
                 LIMIT ?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -977,11 +1000,45 @@ public class PostgresScheduleStore implements IScheduleStore {
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
             }
-            LOGGER.infof("Requeued dead-lettered schedule %s", scheduleId);
+            LOGGER.infof("Requeued dead-lettered schedule %s", sanitize(scheduleId));
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw e;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to requeue: " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        ensureSchema();
+        long nowMs = Instant.now().toEpochMilli();
+        // Conditional on DEAD_LETTERED — see IScheduleStore#dismissDeadLetter.
+        String sql = nextFire != null ? """
+                UPDATE eddi_schedules SET fire_status='PENDING', fail_count=0, claimed_by=NULL, claimed_at=NULL,
+                    fire_id=NULL, next_retry_at=NULL, next_fire=?, updated_at=?
+                WHERE id=? AND fire_status='DEAD_LETTERED'
+                """ : """
+                UPDATE eddi_schedules SET fire_status='PENDING', fail_count=0, claimed_by=NULL, claimed_at=NULL,
+                    fire_id=NULL, next_retry_at=NULL, enabled=false, next_fire=NULL, updated_at=?
+                WHERE id=? AND fire_status='DEAD_LETTERED'
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            int i = 1;
+            if (nextFire != null) {
+                ps.setLong(i++, nextFire.toEpochMilli());
+            }
+            ps.setLong(i++, nowMs);
+            ps.setString(i, scheduleId);
+            int rows = ps.executeUpdate();
+            if (rows == 0) {
+                throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
+            }
+            LOGGER.infof("Dismissed dead-lettered schedule %s", sanitize(scheduleId));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw e;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to dismiss dead letter: " + scheduleId, e);
         }
     }
 

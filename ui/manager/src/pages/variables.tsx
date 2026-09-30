@@ -19,6 +19,7 @@ import {
   useVariables,
   useUpsertVariable,
   useDeleteVariable,
+  VariableExistsError,
 } from "@/hooks/use-variables";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
@@ -40,6 +41,8 @@ export function VariablesPage() {
   const [formExportable, setFormExportable] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<GlobalVariable | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  /* The key an "Add Variable" was refused for because it already exists. */
+  const [existingKey, setExistingKey] = useState<string | null>(null);
 
   /* ─── Queries ─── */
   const { data: variables, isLoading, isError, refetch } = useVariables();
@@ -89,23 +92,27 @@ export function VariablesPage() {
 
   /* ─── Open create dialog ─── */
   const openCreate = useCallback(() => {
+    upsertMut.reset();
+    setExistingKey(null);
     setEditMode(false);
     setFormKey("");
     setFormValue("");
     setFormDescription("");
     setFormExportable(true);
     setShowDialog(true);
-  }, []);
+  }, [upsertMut]);
 
   /* ─── Open edit dialog ─── */
   const openEdit = useCallback((v: GlobalVariable) => {
+    upsertMut.reset();
+    setExistingKey(null);
     setEditMode(true);
     setFormKey(v.key);
     setFormValue(v.value);
     setFormDescription(v.description ?? "");
     setFormExportable(v.exportable ?? true);
     setShowDialog(true);
-  }, []);
+  }, [upsertMut]);
 
   /* ─── Close dialog ─── */
   const closeDialog = useCallback(() => {
@@ -126,7 +133,8 @@ export function VariablesPage() {
       exportable: formExportable,
     };
     upsertMut.mutate(
-      { key: variable.key, variable },
+      // "Add" must not replace an existing variable; "Edit" is the upsert.
+      { key: variable.key, variable, createOnly: !editMode },
       {
         onSuccess: () => {
           toast.success(
@@ -137,11 +145,16 @@ export function VariablesPage() {
           );
           closeDialog();
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : String(err)),
+        onError: (err) => {
+          if (err instanceof VariableExistsError) {
+            setExistingKey(err.key);
+            return;
+          }
+          toast.error(err instanceof Error ? err.message : String(err));
+        },
       },
     );
-  }, [canSubmit, formKey, formValue, formDescription, formExportable, upsertMut, t, closeDialog]);
+  }, [canSubmit, formKey, formValue, formDescription, formExportable, editMode, upsertMut, t, closeDialog]);
 
   /* ─── Delete handler ─── */
   const handleDelete = useCallback(() => {
@@ -461,7 +474,10 @@ export function VariablesPage() {
                   id="var-key"
                   type="text"
                   value={formKey}
-                  onChange={(e) => setFormKey(e.target.value)}
+                  onChange={(e) => {
+                    setFormKey(e.target.value);
+                    setExistingKey(null);
+                  }}
                   disabled={editMode}
                   placeholder={t(
                     "variables.keyPlaceholder",
@@ -475,6 +491,14 @@ export function VariablesPage() {
                 {keyTouched && !keyValid && (
                   <p className="mt-1 text-xs text-destructive" data-testid="key-error">
                     {t("variables.keyError", KEY_HINT)}
+                  </p>
+                )}
+                {existingKey !== null && (
+                  <p role="alert" className="mt-1 text-xs text-destructive" data-testid="var-exists-error">
+                    {t("variables.keyExists", {
+                      key: existingKey,
+                      defaultValue: `A variable named "${existingKey}" already exists. Edit it from the list instead.`,
+                    })}
                   </p>
                 )}
                 {!editMode && (

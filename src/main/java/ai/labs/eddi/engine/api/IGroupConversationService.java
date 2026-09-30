@@ -98,6 +98,14 @@ public interface IGroupConversationService {
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
     /**
+     * List the group conversations of one owner ({@code null} = every owner), with
+     * the owner restriction applied in the query so paging covers only that owner's
+     * conversations.
+     */
+    List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
      * Send a follow-up question to a specific member agent within a completed group
      * conversation. The exchange (user question + agent response) is appended to
      * the group transcript. The agent retains full context from its participation
@@ -270,6 +278,19 @@ public interface IGroupConversationService {
 
         public GroupDiscussionException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * A group HITL decision named a pause ({@code HitlDecision.pauseId}) that is no
+     * longer the discussion's current one: it was resumed and has paused again on
+     * something the reviewer never saw. A {@link GroupDiscussionException} so every
+     * existing wrong-state handler still treats it as a conflict; surfaces that can
+     * tell the reviewer more (MCP's {@code PAUSE_CHANGED}) catch it first.
+     */
+    class GroupPauseMismatchException extends GroupDiscussionException {
+        public GroupPauseMismatchException(String message) {
+            super(message);
         }
     }
 

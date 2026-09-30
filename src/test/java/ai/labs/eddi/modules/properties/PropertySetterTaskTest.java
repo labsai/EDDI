@@ -19,6 +19,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.impl.PropertySetterTask;
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
@@ -96,7 +97,7 @@ public class PropertySetterTaskTest {
         when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
 
         propertySetterTask = new PropertySetterTask(expressionProvider, memoryItemConverter, templateEngine, dataFactory, resourceClientLibrary,
-                new ObjectMapper(), secretProvider);
+                new ObjectMapper(), new SecretPropertyVault(secretProvider, dataFactory));
     }
 
     // ==================== Identity Tests ====================
@@ -432,6 +433,7 @@ public class PropertySetterTaskTest {
             when(currentStep.getAllData(KEY_CONTEXT)).thenReturn(null);
             when(currentStep.getLatestData(KEY_ACTIONS)).thenReturn(new Data<>(KEY_ACTIONS, List.of("store_key")));
             when(conversationMemory.getAgentId()).thenReturn("agent-123");
+            when(conversationMemory.getConversationId()).thenReturn("conv123");
 
             PropertyInstruction instruction = new PropertyInstruction();
             instruction.setName("userApiKey");

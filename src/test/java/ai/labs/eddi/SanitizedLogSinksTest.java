@@ -104,8 +104,11 @@ class SanitizedLogSinksTest {
                     sink("(aborted wave) — pausing for human review instead of skipping them", "gc.getId()"),
                     sink("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", "gc.getId()"),
                     sink("Group %s hit its cost ceiling with no remaining SYNTHESIS phase — completing without an answer", "gc.getGroupId()"),
-                    sink("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED", "gc.getId()"),
-                    sink("Group discussion %s was deleted while running — discarding its result", "gc.getId()")),
+                    // H14a folded the completion CAS's two catch branches into stopAsSuperseded /
+                    // stopAsDeleted, which every conditional leg write now shares; these are the
+                    // same two CodeQL sinks under their new wording.
+                    sink("Group discussion %s was moved to %s elsewhere — this leg stops without overwriting it", "gc.getId()"),
+                    sink("Group discussion %s was deleted while running — stopping without persisting", "gc.getId()")),
 
             sinksOf("src/main/java/ai/labs/eddi/engine/internal/groups/MemberTurnExecutor.java",
                     sink("auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer", "gc.getId()",

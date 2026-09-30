@@ -83,6 +83,8 @@ spec:
       #
       # Same shape, and the same reason, as the fsGroup on mongodb.yaml and
       # postgres.yaml.
+      # Keycloak never talks to the Kubernetes API.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

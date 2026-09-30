@@ -156,7 +156,7 @@ export function SnippetEditor({
               <p className="mt-1 text-[10px] text-muted-foreground font-mono">
                 {t("snippetEditor.usageHint", "Usage:")}{" "}
                 <code className="rounded bg-primary/10 px-1 py-0.5 text-primary">
-                  {"{{"}snippets.{data.name}{"}}"}
+                  {"{"}snippets.{data.name}{"}"}
                 </code>
               </p>
             )}
@@ -245,7 +245,7 @@ export function SnippetEditor({
           <p className="text-[10px] text-muted-foreground ps-5 -mt-1">
             {t(
               "snippetEditor.templateEnabledHint",
-              "When disabled, {{}} markers in the content are treated as literal text (useful for code examples)."
+              "When disabled, { } markers in the content are treated as literal text (useful for code examples)."
             )}
           </p>
         </div>

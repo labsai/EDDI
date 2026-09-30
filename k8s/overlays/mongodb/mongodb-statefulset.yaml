@@ -1,5 +1,10 @@
 # MongoDB StatefulSet for EDDI
 # Provides persistent data storage with a headless service for DNS-based discovery.
+#
+# Runs WITH authentication. The root user comes from the `mongodb-secrets`
+# Secret, which you create before the first apply — see kustomization.yaml.
+# The pod does not start until it exists (CreateContainerConfigError:
+# secret "mongodb-secrets" not found).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -22,6 +27,9 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # MongoDB never calls the Kubernetes API, so the pod does not mount the
+      # service account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:
@@ -30,6 +38,21 @@ spec:
           ports:
             - containerPort: 27017
               name: mongo
+          # The image's entrypoint creates this root user when it initialises an
+          # EMPTY data directory, and starts mongod with --auth whenever both are
+          # set. Named keys, not envFrom: the Secret also holds
+          # mongodb-secrets.properties, which is not a legal variable name.
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secrets
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secrets
+                  key: MONGO_INITDB_ROOT_PASSWORD
           volumeMounts:
             - name: mongodb-data
               mountPath: /data/db

@@ -10,6 +10,12 @@ import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
+import io.quarkus.qute.Expression;
+import io.quarkus.qute.ResultMapper;
+import io.quarkus.qute.Results;
+import io.quarkus.qute.TemplateNode.Origin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -113,28 +119,26 @@ class CapabilityMatchConditionTest {
 
     @Test
     void execute_resolvesTemplateVariablesInSkill() throws ITemplatingEngine.TemplateEngineException {
-        condition.setConfigs(Map.of("skill", "{{properties.requiredSkill.valueString}}"));
+        condition.setConfigs(Map.of("skill", "{properties.requiredSkill}"));
 
-        Map<String, Object> templateData = Map.of("properties", Map.of("requiredSkill", Map.of("valueString", "translation")));
+        Map<String, Object> templateData = Map.of("properties", Map.of("requiredSkill", "translation"));
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
-        when(templatingEngine.processTemplate(eq("{{properties.requiredSkill.valueString}}"), eq(templateData)))
-                .thenReturn("translation");
+        when(templatingEngine.processTemplate(eq("{properties.requiredSkill}"), eq(templateData))).thenReturn("translation");
 
         when(registryService.findBySkill("translation", "highest_confidence"))
                 .thenReturn(List.of(new CapabilityMatch("agent-1", "translation", "high", Map.of())));
 
         assertEquals(SUCCESS, condition.execute(memory, List.of()));
-        verify(templatingEngine).processTemplate(eq("{{properties.requiredSkill.valueString}}"), eq(templateData));
+        verify(templatingEngine).processTemplate(eq("{properties.requiredSkill}"), eq(templateData));
     }
 
     @Test
     void execute_resolvesTemplateVariablesInStrategy() throws ITemplatingEngine.TemplateEngineException {
-        condition.setConfigs(Map.of("skill", "coding", "strategy", "{{context.routingStrategy}}"));
+        condition.setConfigs(Map.of("skill", "coding", "strategy", "{context.routingStrategy}"));
 
         Map<String, Object> templateData = Map.of("context", Map.of("routingStrategy", "round_robin"));
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
-        when(templatingEngine.processTemplate(eq("{{context.routingStrategy}}"), eq(templateData)))
-                .thenReturn("round_robin");
+        when(templatingEngine.processTemplate(eq("{context.routingStrategy}"), eq(templateData))).thenReturn("round_robin");
 
         when(registryService.findBySkill("coding", "round_robin"))
                 .thenReturn(List.of(new CapabilityMatch("agent-1", "coding", "high", Map.of())));
@@ -144,18 +148,72 @@ class CapabilityMatchConditionTest {
 
     @Test
     void execute_fallsBackToRawValueOnTemplateError() throws ITemplatingEngine.TemplateEngineException {
-        condition.setConfigs(Map.of("skill", "{{invalid.template}}"));
+        condition.setConfigs(Map.of("skill", "{invalid.template"));
 
         Map<String, Object> templateData = Map.of();
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
-        when(templatingEngine.processTemplate(eq("{{invalid.template}}"), eq(templateData)))
+        when(templatingEngine.processTemplate(eq("{invalid.template"), eq(templateData)))
                 .thenThrow(new ITemplatingEngine.TemplateEngineException("bad template", new RuntimeException()));
 
-        // Falls back to raw "{{invalid.template}}" which won't match any skill
-        when(registryService.findBySkill("{{invalid.template}}", "highest_confidence"))
-                .thenReturn(List.of());
+        // Falls back to the raw value, which won't match any skill
+        when(registryService.findBySkill("{invalid.template", "highest_confidence")).thenReturn(List.of());
 
         assertEquals(FAIL, condition.execute(memory, List.of()));
+    }
+
+    // --- M-Q2: the documented single-brace form, rendered by the REAL engine ---
+
+    /** Production's quarkus.qute.property-not-found-strategy=NOOP. */
+    private static final ResultMapper RENDER_NOTHING = new ResultMapper() {
+        @Override
+        public boolean appliesTo(Origin origin, Object result) {
+            return Results.isNotFound(result);
+        }
+
+        @Override
+        public String map(Object result, Expression expression) {
+            return "";
+        }
+    };
+
+    private CapabilityMatchCondition withRealEngine() {
+        return new CapabilityMatchCondition(registryService, memoryItemConverter,
+                new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).addResultMapper(RENDER_NOTHING).build()));
+    }
+
+    @Test
+    void execute_realEngine_rendersDocumentedPropertyExpression() {
+        var real = withRealEngine();
+        real.setConfigs(Map.of("skill", "{properties.requiredSkill}", "strategy", "{context.routingStrategy}"));
+        when(memoryItemConverter.convert(memory))
+                .thenReturn(Map.of("properties", Map.of("requiredSkill", "legal-analysis"), "context", Map.of("routingStrategy", "all")));
+        when(registryService.findBySkill("legal-analysis", "all"))
+                .thenReturn(List.of(new CapabilityMatch("agent-legal", "legal-analysis", "high", Map.of())));
+
+        assertEquals(SUCCESS, real.execute(memory, List.of()));
+        verify(registryService).findBySkill("legal-analysis", "all");
+    }
+
+    @Test
+    void execute_realEngine_missingPropertyFailsWithoutQueryingTheLiteral() {
+        var real = withRealEngine();
+        real.setConfigs(Map.of("skill", "{properties.requiredSkill}"));
+        when(memoryItemConverter.convert(memory)).thenReturn(Map.of("properties", Map.of()));
+
+        assertEquals(FAIL, real.execute(memory, List.of()));
+        verifyNoInteractions(registryService);
+    }
+
+    @Test
+    void execute_realEngine_blankStrategyFallsBackToDefault() {
+        var real = withRealEngine();
+        real.setConfigs(Map.of("skill", "coding", "strategy", "{context.routingStrategy}"));
+        when(memoryItemConverter.convert(memory)).thenReturn(Map.of("context", Map.of()));
+        when(registryService.findBySkill("coding", "highest_confidence"))
+                .thenReturn(List.of(new CapabilityMatch("a1", "coding", "high", Map.of())));
+
+        assertEquals(SUCCESS, real.execute(memory, List.of()));
+        verify(registryService).findBySkill("coding", "highest_confidence");
     }
 
     @Test

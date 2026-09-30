@@ -219,6 +219,47 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             assertEquals(12, store.readAllSchedules(100, 0, false, ScheduleOwnerScope.ALL).size());
             assertEquals(12, store.readAllSchedules(100, 0, false).size(), "the unscoped overload filters nothing");
         }
+
+        /**
+         * The workspace refinements of the owner scope run in the query against a real
+         * database: shared rows only when the caller created them, and every team
+         * cadence only when asked.
+         */
+        @Test
+        @DisplayName("owner scope refinements — shared rows by creator, team cadences on request")
+        void ownerScopeRefinements() throws Exception {
+            var mine = owned(createCronSchedule("mine", "a", "t"), "alice");
+            var theirs = owned(createCronSchedule("theirs", "a", "t"), "bob");
+            var systemByAlice = owned(createCronSchedule("system-by-alice", "a", "t"), ScheduleOwnerScope.SHARED_OWNER);
+            systemByAlice.setCreatedBy("alice");
+            var systemByBob = owned(createCronSchedule("system-by-bob", "a", "t"), ScheduleOwnerScope.SHARED_OWNER);
+            systemByBob.setCreatedBy("bob");
+            var legacy = createCronSchedule("legacy-no-user", "a", "t");
+            var bobsCadence = owned(createCronSchedule("bobs-cadence", "a", "t"), "bob");
+            bobsCadence.setMetadata(Map.of("teamCadenceType", "team_cadence", "groupId", "g1", "cadenceId", "c1"));
+            for (var s : List.of(mine, theirs, systemByAlice, systemByBob, legacy, bobsCadence)) {
+                store.createSchedule(s);
+            }
+
+            var alice = ScheduleOwnerScope.visibleTo("alice");
+            assertEquals(Set.of("mine", "system-by-alice"),
+                    names(store.readAllSchedules(100, 0, false, alice.sharedOnlyIfCreatedByCaller())));
+            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user"),
+                    names(store.readAllSchedules(100, 0, false, alice)));
+            assertEquals(Set.of("mine", "system-by-alice", "system-by-bob", "legacy-no-user", "bobs-cadence"),
+                    names(store.readAllSchedules(100, 0, false, alice.withTeamCadences())));
+            assertEquals(Set.of("mine", "system-by-alice"), names(store.readSchedulesByAgentId("a", 100, 0, true,
+                    alice.sharedOnlyIfCreatedByCaller())));
+            assertEquals(Set.of(), names(store.readAllSchedules(100, 0, false,
+                    ScheduleOwnerScope.visibleTo(null).sharedOnlyIfCreatedByCaller())),
+                    "no caller id and shared rows restricted to their creator admits nothing");
+        }
+
+        private Set<String> names(List<ScheduleConfiguration> schedules) {
+            Set<String> names = new HashSet<>();
+            schedules.forEach(s -> names.add(s.getName()));
+            return names;
+        }
     }
 
     private static ScheduleConfiguration owned(ScheduleConfiguration cfg, String userId) {

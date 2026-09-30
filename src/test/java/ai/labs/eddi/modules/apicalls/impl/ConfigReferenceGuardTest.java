@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -220,5 +221,33 @@ class ConfigReferenceGuardTest {
                 "Bearer ${vault:agent1.apiKey}", "header", DATA, Map.of()));
         assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
                 "Bearer ${vault:agent1.apiKey}", "header", DATA, null));
+    }
+
+    @Test
+    @DisplayName("LLM parameters: a reference the template wrote is allowed, one conversation data supplied is refused")
+    void parameterReferences() {
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("apiKey", "${vault:openai}"),
+                Map.of("apiKey", "${vault:openai}"), Set.of(), "LLM", DATA, VAULTED));
+        var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredParameters(
+                Map.of("modelName", "{context.model}"), Map.of("modelName", "${vault:other-agents-key}"), Set.of(), "LLM", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("LLM parameter 'modelName'"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("LLM parameters: exempt keys (the prompts) are never checked")
+    void exemptParameters() {
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("prompt", "{context.model}"),
+                Map.of("prompt", "${vault:other-agents-key}"), Set.of("prompt"), "LLM", DATA, VAULTED));
+    }
+
+    @Test
+    @DisplayName("a ${vars:} parameter reference must be one the template wrote whole, not text inside another reference")
+    void variableReferenceMatchedWhole() {
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:model}-{context.suffix}"),
+                Map.of("modelName", "${vars:model}-large"), Set.of(), "LLM", DATA, VAULTED));
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:outer${vars:model}"),
+                        Map.of("modelName", "${vars:model}"), Set.of(), "LLM", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("${vars:model}"), e.getMessage());
     }
 }

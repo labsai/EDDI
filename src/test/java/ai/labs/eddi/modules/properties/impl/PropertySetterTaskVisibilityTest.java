@@ -58,7 +58,7 @@ class PropertySetterTaskVisibilityTest {
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(invocation -> invocation.getArgument(0));
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter, templatingEngine, new DataFactory(),
-                mock(IResourceClientLibrary.class), new ObjectMapper(), mock(ISecretProvider.class));
+                mock(IResourceClientLibrary.class), new ObjectMapper(), new SecretPropertyVault(mock(ISecretProvider.class), new DataFactory()));
         memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
         memory.getCurrentStep().storeData(new Data<>("actions", List.of("set")));
     }
