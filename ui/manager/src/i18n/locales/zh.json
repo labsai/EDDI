@@ -3111,6 +3111,9 @@
     "new": "新",
     "updated": "已更新",
     "unchanged": "未更改",
+    "removed": "移除",
+    "conflicts": "已在此处更改",
+    "conflictHint": "标记为“冲突”的资源在上次同步后已在此实例上被更改。除非勾选，否则不会改动它们——勾选即会覆盖本地更改。",
     "selected": "已选择",
     "mergeNow": "导入所选",
     "syncNow": "立即同步",
@@ -3156,6 +3159,9 @@
     "previewFirst": "同步前预览变更",
     "syncPartial": "同步未完成 — 部分资源未写入",
     "syncIdentical": "已是最新 — 无需写入",
+    "outcomeCounts": "{{updated}} 个已更新 · {{created}} 个已创建 · {{skipped}} 个未更改",
+    "redeployHint": "同步的更改会保存为新版本。正在运行的内容保持不变——部署新版本后才会生效。",
+    "overwrite": "覆盖本地更改",
     "previewFailed": "预览失败",
     "noPreviewReturned": "源实例未返回此代理的预览。"
   },
@@ -3163,7 +3169,8 @@
     "actionCreate": "新建",
     "actionUpdate": "更新",
     "actionSkip": "已是最新",
-    "actionConflict": "冲突"
+    "actionConflict": "冲突",
+    "actionRemove": "移除"
   },
   "userConversations": {
     "title": "用户对话",

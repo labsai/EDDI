@@ -86,12 +86,16 @@ public interface IRestImportService {
     @POST
     @Path("/sync/preview")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Preview a single-agent sync from a remote EDDI instance to a local target agent.")
+    @Operation(description = "Preview a single-agent sync from a remote EDDI instance to a local target agent. "
+            + "Without targetAgentId, the agent an earlier sync promoted from this source (matched by originId) "
+            + "is the target; a new one is created only when there is none, or when createNew=true. More than one "
+            + "earlier promotion answers 409 naming them.")
     ImportPreview previewSync(@QueryParam("sourceUrl") String sourceUrl,
                               @QueryParam("sourceAgentId") String sourceAgentId,
                               @QueryParam("sourceAgentVersion") Integer sourceVersion,
                               @QueryParam("targetAgentId") String targetAgentId,
-                              @HeaderParam("X-Source-Authorization") String sourceAuth);
+                              @HeaderParam("X-Source-Authorization") String sourceAuth,
+                              @QueryParam("createNew") Boolean createNew);
 
     @POST
     @Path("/sync/preview/batch")
@@ -109,14 +113,17 @@ public interface IRestImportService {
             + "Answers 201 when something was written, 200 when source and target were already identical "
             + "(no agent version is burned), and 207 Multi-Status when some resources failed; the body is "
             + "an UpgradeResult listing per-resource outcomes. All three are 2xx, so a client must branch "
-            + "on the status code rather than on response.ok.")
+            + "on the status code rather than on response.ok. Without targetAgentId the target is found as for "
+            + "the preview. selectedResources, when present, must name at least one resource (400 otherwise); "
+            + "leave it out to sync everything. A CONFLICT row is written only when named in selectedResources.")
     Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
                          @QueryParam("sourceAgentId") String sourceAgentId,
                          @QueryParam("sourceAgentVersion") Integer sourceVersion,
                          @QueryParam("targetAgentId") String targetAgentId,
                          @QueryParam("selectedResources") String selectedResources,
                          @QueryParam("workflowOrder") String workflowOrder,
-                         @HeaderParam("X-Source-Authorization") String sourceAuth);
+                         @HeaderParam("X-Source-Authorization") String sourceAuth,
+                         @QueryParam("createNew") Boolean createNew);
 
     @POST
     @Path("/sync/batch")

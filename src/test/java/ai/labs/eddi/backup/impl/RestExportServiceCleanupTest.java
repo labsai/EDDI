@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.connections.IConnectionStore;
@@ -91,7 +92,7 @@ class RestExportServiceCleanupTest {
 
         exportService = new RestExportService(
                 documentDescriptorStore, agentStore, workflowStore,
-                mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
+                mock(IParserStore.class), mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class),
                 mock(ILlmStore.class), mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IPromptSnippetStore.class),
                 jsonSerialization, zipArchive, secretScrubber, scheduleStore, mock(ResourceAccessGuard.class), mock(BackupMetrics.class),

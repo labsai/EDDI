@@ -33,6 +33,10 @@ import java.util.List;
  *            batch preview fills it — a single preview reports failure with an
  *            HTTP status. It exists so a failed row in a batch is a real field
  *            rather than an {@code "Error: ..."} prefix smuggled into the name
+ * @param warnings
+ *            what the operator should know before approving, that is not a
+ *            failure — e.g. two source snippets sharing a name, of which only
+ *            one can travel. Never null
  * @since 6.0.0
  */
 public record ImportPreview(
@@ -41,7 +45,12 @@ public record ImportPreview(
         String targetAgentId,
         String targetAgentName,
         List<ResourceDiff> resources,
-        String error) {
+        String error,
+        List<String> warnings) {
+
+    public ImportPreview {
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
 
     /** A preview that was produced successfully — {@code error} is null. */
     public ImportPreview(String sourceAgentId,
@@ -49,7 +58,17 @@ public record ImportPreview(
             String targetAgentId,
             String targetAgentName,
             List<ResourceDiff> resources) {
-        this(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, null);
+        this(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, null, List.of());
+    }
+
+    /** A preview with an error and no warnings. */
+    public ImportPreview(String sourceAgentId,
+            String sourceAgentName,
+            String targetAgentId,
+            String targetAgentName,
+            List<ResourceDiff> resources,
+            String error) {
+        this(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, error, List.of());
     }
 
     /**
@@ -64,7 +83,9 @@ public record ImportPreview(
      * @param name
      *            human-readable name from DocumentDescriptor or snippet.name
      * @param action
-     *            what will happen: CREATE, UPDATE, SKIP, or CONFLICT
+     *            what will happen: CREATE, UPDATE, SKIP, CONFLICT or REMOVE. For a
+     *            REMOVE row {@code sourceId} is the target's own id — there is no
+     *            source resource — and it is what {@code selectedResources} names
      * @param targetId
      *            matched target resource ID (null if CREATE)
      * @param targetVersion
@@ -101,7 +122,19 @@ public record ImportPreview(
         UPDATE,
         /** Resource will be skipped (matched, content identical). */
         SKIP,
-        /** Match is ambiguous — user must resolve manually. */
-        CONFLICT
+        /**
+         * The target's copy was changed on this instance since the last sync or import
+         * wrote it, and the source differs too. Written only when named explicitly in
+         * {@code selectedResources}: a sync of everything leaves it alone and reports
+         * it, so a hotfix made here is never overwritten by accident.
+         */
+        CONFLICT,
+        /**
+         * The target has this and the source no longer does: a workflow step the source
+         * removed, or a whole workflow. The step goes when its workflow is adopted; a
+         * workflow is taken off the agent. Nothing is deleted from the store — earlier
+         * versions still name it.
+         */
+        REMOVE
     }
 }

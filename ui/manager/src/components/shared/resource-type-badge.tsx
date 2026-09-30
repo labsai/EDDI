@@ -11,6 +11,7 @@ const colors: Record<string, string> = {
   output: "bg-cyan-500/10 text-cyan-500",
   property: "bg-orange-500/10 text-orange-500",
   propertysetter: "bg-orange-500/10 text-orange-500",
+  parser: "bg-sky-500/10 text-sky-500",
   dictionary: "bg-teal-500/10 text-teal-500",
   regulardictionary: "bg-teal-500/10 text-teal-500",
   mcpcalls: "bg-indigo-500/10 text-indigo-500",

@@ -3147,6 +3147,9 @@
     "new": "novo",
     "updated": "atualizado",
     "unchanged": "inalterado",
+    "removed": "removidos",
+    "conflicts": "alterados aqui",
+    "conflictHint": "Os recursos marcados como Conflito foram alterados nesta instância desde a última sincronização. Ficam como estão, a menos que os marque — marcar um substitui a alteração local.",
     "selected": "selecionados",
     "mergeNow": "Importar selecionados",
     "syncNow": "Sincronizar agora",
@@ -3193,6 +3196,9 @@
     "previewFirst": "Pré-visualizar alterações antes de sincronizar",
     "syncPartial": "Sincronização incompleta — alguns recursos não foram gravados",
     "syncIdentical": "Já está atualizado — nada a gravar",
+    "outcomeCounts": "{{updated}} atualizados · {{created}} criados · {{skipped}} inalterados",
+    "redeployHint": "As alterações sincronizadas são guardadas como novas versões. O que está em execução continua — implante a nova versão para a colocar em produção.",
+    "overwrite": "Substituir a alteração local",
     "previewFailed": "Falha na pré-visualização",
     "noPreviewReturned": "A origem não devolveu nenhuma pré-visualização para este agente."
   },
@@ -3200,7 +3206,8 @@
     "actionCreate": "Novo",
     "actionUpdate": "Atualizar",
     "actionSkip": "Atualizado",
-    "actionConflict": "Conflito"
+    "actionConflict": "Conflito",
+    "actionRemove": "Remover"
   },
   "userConversations": {
     "title": "Conversas do usuário",
