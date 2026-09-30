@@ -54,6 +54,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -1488,15 +1490,18 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Parameter keys that belong to the provider that issued them: credentials and
-     * the endpoint coordinates that address that provider's account. Everything
-     * else (temperature, maxTokens, timeout, …) is vendor-neutral and safe to carry
-     * across a provider boundary.
+     * Parameter keys that belong to the provider that issued them: credentials, the
+     * endpoint coordinates that address that provider's account, and the model keys
+     * ({@link ModelParameterKeys#MODEL_KEYS}) — a model id means nothing to another
+     * vendor, and an inherited {@code modelName} would override the summary
+     * provider's own default. Everything else (temperature, maxTokens, timeout, …)
+     * is vendor-neutral and safe to carry across a provider boundary.
      */
-    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Set.of(
+    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint", "deploymentName",
-            "compartmentId", "configProfile", "projectId", "region", "location");
+            "baseUrl", "endpoint",
+            "compartmentId", "configProfile", "projectId", "region", "location"),
+            ModelParameterKeys.MODEL_KEYS.stream()).collect(Collectors.toUnmodifiableSet());
 
     /**
      * The second half of the F13 inheritance decision: <em>which</em> of the parent
@@ -1549,7 +1554,7 @@ public class LlmTask implements ILifecycleTask {
 
         if (!dropped.isEmpty()) {
             LOGGER.warnf("[SUMMARY] conversationSummary runs on provider '%s' while the task runs on '%s' — not inheriting %s. "
-                    + "Credentials must never cross a provider boundary; configure them for '%s' "
+                    + "Credentials, endpoints and model ids never cross a provider boundary; configure them for '%s' "
                     + "(global variable or vault-backed default), or omit llmProvider to reuse the task's model.",
                     sanitize(summaryProvider), sanitize(parentProvider), dropped, sanitize(summaryProvider));
         }

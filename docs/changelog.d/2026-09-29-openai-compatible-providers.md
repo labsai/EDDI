@@ -165,6 +165,13 @@ model stays unset and the summary provider's builder applies its own default. Th
 `inheritsModelOnly` test had pinned the cross-provider inheritance with a contrived pair and now uses
 a same-provider parent; `crossProviderDoesNotInheritModel` covers the fix.
 
+That fixed only the summary *config*. CodeRabbit's next review found the second path: on a provider
+mismatch `resolveInheritedSummaryParameters` stripped credentials and endpoints but let the parent's
+`modelName` (and `model`, `modelId`, `modelID`) through in the inherited parameters, where
+`SummarizationService` would still apply it. `PROVIDER_BOUND_PARAMETERS` now includes every key in
+`ModelParameterKeys.MODEL_KEYS` (`deploymentName` was already there). Tested end to end and at the
+helper; removing the model keys fails both.
+
 ### Design decisions
 
 ```decision-log
