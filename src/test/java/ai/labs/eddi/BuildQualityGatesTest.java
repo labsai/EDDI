@@ -42,6 +42,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -194,6 +195,23 @@ class BuildQualityGatesTest {
      */
     private static final List<String> LANGCHAIN4J_VERSION_PROPERTIES = List.of(
             "${langchain4j.version}", "${langchain4j-beta.version}");
+
+    /**
+     * The one sanctioned exception to the two release lines: an artifact
+     * langchain4j publishes on its own schedule, which can trail the beta line it
+     * belongs to. It may use its own property, but only a patch-level lag is
+     * allowed (see
+     * {@link #laggingLangchain4jArtifactsStayOnTheReleaseLineAndExpire()}), and the
+     * exception fails the build as soon as the property catches up with the beta
+     * line, so it cannot outlive its reason. Dependabot's langchain4j group bumps
+     * the property when a newer release appears.
+     * <p>
+     * {@code langchain4j-community-oci-genai}: newest release 1.20.0-beta30 when
+     * the rest of the beta line moved to 1.20.2-beta30. Its builder tests pass
+     * against the 1.20.2 core.
+     */
+    private static final Map<String, String> LANGCHAIN4J_LAGGING_ARTIFACTS = Map.of(
+            "langchain4j-community-oci-genai", "${langchain4j-community-oci.version}");
 
     /**
      * checkstyle.xml carries a DOCTYPE pointing at puppycrawl.com, so the doctype
@@ -402,11 +420,13 @@ class BuildQualityGatesTest {
             if (!"dev.langchain4j".equals(childText(dependency, "groupId"))) {
                 continue;
             }
+            String artifactId = childText(dependency, "artifactId");
             String version = childText(dependency, "version");
             if (version == null) {
-                offenders.add(childText(dependency, "artifactId") + " -> no <version>");
-            } else if (!LANGCHAIN4J_VERSION_PROPERTIES.contains(version)) {
-                offenders.add(childText(dependency, "artifactId") + " -> " + version);
+                offenders.add(artifactId + " -> no <version>");
+            } else if (!LANGCHAIN4J_VERSION_PROPERTIES.contains(version)
+                    && !version.equals(LANGCHAIN4J_LAGGING_ARTIFACTS.get(artifactId))) {
+                offenders.add(artifactId + " -> " + version);
             }
         }
 
@@ -416,6 +436,36 @@ class BuildQualityGatesTest {
                         + " NoSuchMethodError rather than a build failure. An artifact with no <version> at all is"
                         + " the same failure with nothing to read: it resolves through a BOM or a transitive tree,"
                         + " so the two release lines can part company without either property changing.");
+    }
+
+    /**
+     * The exception in {@link #LANGCHAIN4J_LAGGING_ARTIFACTS} is bounded twice. The
+     * lagging artifact must stay on the same major.minor line as the core, so only
+     * a patch-level difference, the kind langchain4j keeps binary compatible, is
+     * ever tolerated. And the exception expires: once its property equals the beta
+     * property, the artifact must rejoin the beta line and the entry must go, or
+     * this test fails.
+     */
+    @Test
+    @DisplayName("a lagging langchain4j artifact trails only by a patch, and its exception expires")
+    void laggingLangchain4jArtifactsStayOnTheReleaseLineAndExpire() throws Exception {
+        Element properties = child(parse(POM).getDocumentElement(), "properties").orElseThrow();
+        String core = childText(properties, "langchain4j.version");
+        String beta = childText(properties, "langchain4j-beta.version");
+        String coreLine = core.substring(0, core.lastIndexOf('.'));
+
+        for (Map.Entry<String, String> lagging : LANGCHAIN4J_LAGGING_ARTIFACTS.entrySet()) {
+            String property = lagging.getValue().substring(2, lagging.getValue().length() - 1);
+            String version = childText(properties, property);
+            assertNotNull(version, "<" + property + "> is not defined in pom.xml, but " + lagging.getKey()
+                    + " is listed as lagging behind it");
+            assertNotEquals(beta, version, lagging.getKey() + " has caught up with the beta line (" + beta
+                    + "): pin it to ${langchain4j-beta.version} again and remove its LANGCHAIN4J_LAGGING_ARTIFACTS"
+                    + " entry and the <" + property + "> property");
+            assertTrue(version.startsWith(coreLine + "."), lagging.getKey() + " is on " + version + " while the"
+                    + " core is on " + core + ": only a patch-level lag on the same " + coreLine + " line is"
+                    + " tolerated, since that is what langchain4j keeps binary compatible");
+        }
     }
 
     /**
