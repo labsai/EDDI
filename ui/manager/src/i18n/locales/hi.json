@@ -1210,7 +1210,7 @@
     "cascadeInAgent": "एजेंट मोड (उपकरण सहित) में भी कैस्केड उपयोग करें",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "जैसे claude-sonnet-5",
+    "cascadeModelName": "जैसे claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "खाली = हमेशा स्वीकार",
     "cascadeTimeout": "टाइमआउट (मि.से.)",
@@ -3111,6 +3111,9 @@
     "new": "नया",
     "updated": "अद्यतन",
     "unchanged": "अपरिवर्तित",
+    "removed": "हटाए गए",
+    "conflicts": "यहाँ बदले गए",
+    "conflictHint": "संघर्ष चिह्नित संसाधन पिछले सिंक के बाद इस इंस्टेंस पर बदले गए हैं। जब तक आप इन्हें चुनते नहीं, ये जैसे हैं वैसे ही रहते हैं — किसी को चुनने पर स्थानीय बदलाव अधिलेखित हो जाता है।",
     "selected": "चयनित",
     "mergeNow": "चयनित आयात करें",
     "syncNow": "अभी सिंक करें",
@@ -3156,6 +3159,9 @@
     "previewFirst": "सिंक से पहले बदलावों का पूर्वावलोकन करें",
     "syncPartial": "सिंक अधूरा — कुछ संसाधन नहीं लिखे गए",
     "syncIdentical": "पहले से अद्यतित — लिखने के लिए कुछ नहीं",
+    "outcomeCounts": "{{updated}} अपडेट · {{created}} बनाए गए · {{skipped}} अपरिवर्तित",
+    "redeployHint": "सिंक किए गए बदलाव नए संस्करण के रूप में सहेजे जाते हैं। जो चल रहा है वह चलता रहता है — इसे लाइव करने के लिए नया संस्करण डिप्लॉय करें।",
+    "overwrite": "स्थानीय बदलाव अधिलेखित करें",
     "previewFailed": "पूर्वावलोकन विफल",
     "noPreviewReturned": "स्रोत ने इस एजेंट के लिए कोई पूर्वावलोकन नहीं लौटाया।"
   },
@@ -3163,7 +3169,8 @@
     "actionCreate": "नया",
     "actionUpdate": "अपडेट",
     "actionSkip": "अद्यतित",
-    "actionConflict": "विवाद"
+    "actionConflict": "विवाद",
+    "actionRemove": "हटाएँ"
   },
   "userConversations": {
     "title": "उपयोगकर्ता वार्तालाप",
@@ -4284,7 +4291,7 @@
       "llmDefaultsDesc": "यहाँ बनाए गए हर सलाहकार पर लागू होता है, जब तक सलाहकार नीचे अपना अलग न चुने।",
       "llmDefaultsKeyRequired": "यहाँ एक कुंजी जोड़ें ताकि वह हर उस सलाहकार पर लागू हो जो अपनी कुंजी नहीं देता।",
       "model": "मॉडल",
-      "modelPlaceholder": "उदा. claude-sonnet-5",
+      "modelPlaceholder": "उदा. claude-sonnet-5-5",
       "nameRequired": "इस सलाहकार को एक नाम दें।",
       "new": "नया",
       "next": "आगे",

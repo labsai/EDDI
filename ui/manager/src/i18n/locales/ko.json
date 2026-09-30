@@ -1210,7 +1210,7 @@
     "cascadeInAgent": "에이전트 모드(도구 사용)에서도 캐스케이드 적용",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "예: claude-sonnet-5",
+    "cascadeModelName": "예: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "비워두면 항상 수락",
     "cascadeTimeout": "타임아웃 (ms)",
@@ -3111,6 +3111,9 @@
     "new": "신규",
     "updated": "업데이트됨",
     "unchanged": "변경 없음",
+    "removed": "제거됨",
+    "conflicts": "여기서 변경됨",
+    "conflictHint": "충돌로 표시된 리소스는 마지막 동기화 이후 이 인스턴스에서 변경되었습니다. 선택하지 않으면 그대로 유지되며, 선택하면 로컬 변경 사항을 덮어씁니다.",
     "selected": "선택됨",
     "mergeNow": "선택 항목 가져오기",
     "syncNow": "지금 동기화",
@@ -3156,6 +3159,9 @@
     "previewFirst": "동기화 전에 변경사항 미리보기",
     "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
     "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
+    "outcomeCounts": "{{updated}}개 업데이트 · {{created}}개 생성 · {{skipped}}개 변경 없음",
+    "redeployHint": "동기화된 변경 사항은 새 버전으로 저장됩니다. 실행 중인 항목은 그대로 유지되며, 새 버전을 배포해야 적용됩니다.",
+    "overwrite": "로컬 변경 사항 덮어쓰기",
     "previewFailed": "미리보기 실패",
     "noPreviewReturned": "소스가 이 에이전트의 미리보기를 반환하지 않았습니다."
   },
@@ -3163,7 +3169,8 @@
     "actionCreate": "신규",
     "actionUpdate": "업데이트",
     "actionSkip": "최신 상태",
-    "actionConflict": "충돌"
+    "actionConflict": "충돌",
+    "actionRemove": "제거"
   },
   "userConversations": {
     "title": "사용자 대화",
@@ -4284,7 +4291,7 @@
       "llmDefaultsDesc": "여기서 만드는 모든 자문에 적용됩니다(아래에서 자문이 직접 설정한 경우 제외).",
       "llmDefaultsKeyRequired": "여기에 키를 추가하면 자체 키를 설정하지 않은 모든 자문에 적용됩니다.",
       "model": "모델",
-      "modelPlaceholder": "예: claude-sonnet-5",
+      "modelPlaceholder": "예: claude-sonnet-5-5",
       "nameRequired": "이 자문에 이름을 지정하세요.",
       "new": "새로 만들기",
       "next": "다음",

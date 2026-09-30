@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
@@ -66,6 +67,8 @@ export function PreviewStep({
         </p>
       </div>
 
+      <PreviewNotices preview={preview} />
+
       {/* Resource table */}
       <div className="flex-1 overflow-auto rounded-lg border min-h-0">
         <table className="w-full text-sm">
@@ -74,9 +77,14 @@ export function PreviewStep({
               <th className="px-3 py-2 text-start w-8">
                 <input
                   type="checkbox"
-                  checked={selected.size === preview.resources.length}
+                  // Checked when every non-conflict row is: conflicts are never part of
+                  // "select all" (see ImportAgentDialog.toggleAll).
+                  checked={preview.resources
+                    .filter((r) => r.action !== "CONFLICT")
+                    .every((r) => selected.has(r.sourceId))}
                   onChange={onToggleAll}
                   className="accent-primary"
+                  data-testid="preview-toggle-all"
                 />
               </th>
               <th className="px-3 py-2 text-start text-xs font-medium text-muted-foreground uppercase">
@@ -133,6 +141,18 @@ export function PreviewStep({
           {preview.resources.filter((r) => r.action === "SKIP").length}{" "}
           {t("importDialog.unchanged", "unchanged")}
         </span>
+        {preview.resources.some((r) => r.action === "REMOVE") && (
+          <span>
+            {preview.resources.filter((r) => r.action === "REMOVE").length}{" "}
+            {t("importDialog.removed", "removed")}
+          </span>
+        )}
+        {preview.resources.some((r) => r.action === "CONFLICT") && (
+          <span className="text-destructive">
+            {preview.resources.filter((r) => r.action === "CONFLICT").length}{" "}
+            {t("importDialog.conflicts", "changed here")}
+          </span>
+        )}
         <span>
           {selected.size} {t("importDialog.selected", "selected")}
         </span>
@@ -167,6 +187,41 @@ export function PreviewStep({
 }
 
 /* ─── Helper sub-components ─── */
+
+/**
+ * What the operator should read before approving: the backend's warnings, and —
+ * when there are any — what a CONFLICT means, since it is the one row that is
+ * deliberately left unticked.
+ */
+export function PreviewNotices({ preview }: { preview: ImportPreview }) {
+  const { t } = useTranslation();
+  const hasConflicts = preview.resources.some((r) => r.action === "CONFLICT");
+  const warnings = preview.warnings ?? [];
+  if (!hasConflicts && warnings.length === 0) return null;
+
+  return (
+    <div
+      className="space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-foreground"
+      data-testid="preview-notices"
+    >
+      {hasConflicts && (
+        <p className="flex items-start gap-1.5">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          {t(
+            "importDialog.conflictHint",
+            "Resources marked Conflict were changed on this instance since the last sync. They are left alone unless you tick them — ticking one overwrites the local change."
+          )}
+        </p>
+      )}
+      {warnings.map((warning) => (
+        <p key={warning} className="flex items-start gap-1.5">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          {warning}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 function MatchBadge({ strategy }: { strategy: string | null }) {
   if (!strategy) return null;
@@ -204,7 +259,10 @@ function PreviewRow({
   workflowOrder: string[];
   onMoveWorkflow: (id: string, dir: -1 | 1) => void;
 }) {
-  const hasDiff = resource.action === "UPDATE" && (resource.sourceContent || resource.targetContent);
+  // A conflict is the row whose diff matters most; a removal shows what goes.
+  const hasDiff =
+    (resource.action === "UPDATE" || resource.action === "CONFLICT" || resource.action === "REMOVE") &&
+    (resource.sourceContent || resource.targetContent);
   const isCreateWorkflow = resource.resourceType === "workflow" && resource.action === "CREATE";
   const wfIdx = workflowOrder.indexOf(resource.sourceId);
 

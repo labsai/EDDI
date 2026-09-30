@@ -1266,7 +1266,7 @@
     "cascadeInAgent": "استخدام التسلسل أيضاً في وضع الوكيل (مع الأدوات)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "مثال: claude-sonnet-5",
+    "cascadeModelName": "مثال: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "فارغ = قبول دائم",
     "cascadeTimeout": "المهلة (مللي ثانية)",
@@ -3255,6 +3255,9 @@
     "new": "جديد",
     "updated": "مُحدث",
     "unchanged": "بدون تغيير",
+    "removed": "مُزالة",
+    "conflicts": "مُعدَّلة هنا",
+    "conflictHint": "الموارد المعلَّمة بـ «تعارض» تم تعديلها على هذا المثيل منذ آخر مزامنة. تبقى دون تغيير ما لم تحددها — تحديد أحدها يستبدل التعديل المحلي.",
     "selected": "محدد",
     "mergeNow": "استيراد المحدد",
     "syncNow": "مزامنة الآن",
@@ -3304,6 +3307,9 @@
     "previewFirst": "معاينة التغييرات قبل المزامنة",
     "syncPartial": "المزامنة غير مكتملة — لم تُكتب بعض الموارد",
     "syncIdentical": "محدَّث بالفعل — لا شيء لكتابته",
+    "outcomeCounts": "{{updated}} محدَّثة · {{created}} منشأة · {{skipped}} دون تغيير",
+    "redeployHint": "تُحفظ التغييرات المُزامَنة كإصدارات جديدة. ما يعمل الآن يستمر في العمل — انشر الإصدار الجديد لتفعيله.",
+    "overwrite": "استبدال التعديل المحلي",
     "previewFailed": "فشلت المعاينة",
     "noPreviewReturned": "لم يُرجع المصدر أي معاينة لهذا الوكيل."
   },
@@ -3311,7 +3317,8 @@
     "actionCreate": "جديد",
     "actionUpdate": "تحديث",
     "actionSkip": "محدّث",
-    "actionConflict": "تعارض"
+    "actionConflict": "تعارض",
+    "actionRemove": "إزالة"
   },
   "userConversations": {
     "title": "محادثات المستخدم",
@@ -4460,7 +4467,7 @@
       "llmDefaultsDesc": "يُستخدم لكل مستشار يُنشأ هنا ما لم يحدّد المستشار إعداداته الخاصة أدناه.",
       "llmDefaultsKeyRequired": "أضف مفتاحًا هنا ليشمل كل مستشار لا يحدّد مفتاحه الخاص.",
       "model": "النموذج",
-      "modelPlaceholder": "مثال: claude-sonnet-5",
+      "modelPlaceholder": "مثال: claude-sonnet-5-5",
       "nameRequired": "امنح هذا المستشار اسمًا.",
       "new": "جديد",
       "next": "التالي",

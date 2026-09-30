@@ -1224,7 +1224,7 @@
     "cascadeInAgent": "Usar cascada también en modo agente (con herramientas)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "p. ej. claude-sonnet-5",
+    "cascadeModelName": "p. ej. claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vacío = aceptar siempre",
     "cascadeTimeout": "Tiempo límite (ms)",
@@ -3147,6 +3147,9 @@
     "new": "nuevo",
     "updated": "actualizado",
     "unchanged": "sin cambios",
+    "removed": "quitados",
+    "conflicts": "cambiados aquí",
+    "conflictHint": "Los recursos marcados como Conflicto se cambiaron en esta instancia desde la última sincronización. No se tocan a menos que los marques; marcar uno sobrescribe el cambio local.",
     "selected": "seleccionados",
     "mergeNow": "Importar seleccionados",
     "syncNow": "Sincronizar ahora",
@@ -3193,6 +3196,9 @@
     "previewFirst": "Vista previa de los cambios antes de sincronizar",
     "syncPartial": "Sincronización incompleta: algunos recursos no se escribieron",
     "syncIdentical": "Ya está actualizado: nada que escribir",
+    "outcomeCounts": "{{updated}} actualizados · {{created}} creados · {{skipped}} sin cambios",
+    "redeployHint": "Los cambios sincronizados se guardan como versiones nuevas. Lo que está en ejecución sigue igual: despliega la nueva versión para ponerla en marcha.",
+    "overwrite": "Sobrescribir el cambio local",
     "previewFailed": "Error en la vista previa",
     "noPreviewReturned": "El origen no devolvió ninguna vista previa para este agente."
   },
@@ -3200,7 +3206,8 @@
     "actionCreate": "Nuevo",
     "actionUpdate": "Actualizar",
     "actionSkip": "Actualizado",
-    "actionConflict": "Conflicto"
+    "actionConflict": "Conflicto",
+    "actionRemove": "Quitar"
   },
   "userConversations": {
     "title": "Conversaciones de usuario",
@@ -4328,7 +4335,7 @@
       "llmDefaultsDesc": "Se usa para cada asesor creado aquí, salvo que el asesor defina el suyo más abajo.",
       "llmDefaultsKeyRequired": "Añade una clave aquí para cubrir a todos los asesores que no definan la suya.",
       "model": "Modelo",
-      "modelPlaceholder": "p. ej., claude-sonnet-5",
+      "modelPlaceholder": "p. ej., claude-sonnet-5-5",
       "nameRequired": "Asigna un nombre a este asesor.",
       "new": "Nuevo",
       "next": "Siguiente",

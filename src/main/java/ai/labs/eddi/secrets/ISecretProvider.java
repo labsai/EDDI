@@ -65,6 +65,24 @@ public interface ISecretProvider {
     void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException;
 
     /**
+     * Store a new secret only if none exists under {@code reference}.
+     * <p>
+     * Unlike {@link #store}, which is an explicit upsert (rotation, the REST
+     * create-or-replace), this never replaces an existing value. The check and the
+     * write are one atomic operation in the persistence layer, so it is the only
+     * safe way to claim a key name: a read of {@link #getMetadata} followed by a
+     * {@link #store} lets two callers both see the key as absent and the later
+     * write silently replace the earlier.
+     *
+     * @return {@code true} if this call created the secret, {@code false} if one
+     *         already existed (left exactly as it was)
+     * @throws SecretProviderException
+     *             if storage fails
+     */
+    boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+            throws SecretProviderException;
+
+    /**
      * Change which agents may use an existing secret, without touching its value.
      * <p>
      * <b>Why this is separate from {@link #store}.</b> {@code store} was the only

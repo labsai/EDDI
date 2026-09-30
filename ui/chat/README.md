@@ -61,7 +61,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 ### Standalone Development
 
 ```bash
-# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.3), EDDI backend on localhost:7070
+# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 24.21.0), EDDI backend on localhost:7070
 npm install
 npm run dev        # Vite dev server on http://localhost:5174
 ```
@@ -189,8 +189,8 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 
 | Layer     | Technology                                             |
 | --------- | ------------------------------------------------------ |
-| Build     | Vite 6                                                 |
-| UI        | React 19 + TypeScript 5.7 (strict)                     |
+| Build     | Vite 8                                                 |
+| UI        | React 19 + TypeScript 5.9 (strict)                     |
 | Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
 | Markdown  | react-markdown 10 + remark-gfm + remark-math           |
 | Math      | KaTeX 0.18 (loaded on first use)                       |

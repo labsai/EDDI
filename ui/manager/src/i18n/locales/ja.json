@@ -1210,7 +1210,7 @@
     "cascadeInAgent": "エージェントモード（ツール使用時）でもカスケードを使用",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例: claude-sonnet-5",
+    "cascadeModelName": "例: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 常に受け入れ",
     "cascadeTimeout": "タイムアウト (ms)",
@@ -3111,6 +3111,9 @@
     "new": "新規",
     "updated": "更新済み",
     "unchanged": "変更なし",
+    "removed": "削除",
+    "conflicts": "ここで変更済み",
+    "conflictHint": "「競合」と表示されたリソースは、前回の同期以降にこのインスタンスで変更されています。チェックしない限り変更されません。チェックするとローカルの変更が上書きされます。",
     "selected": "選択済み",
     "mergeNow": "選択した項目をインポート",
     "syncNow": "今すぐ同期",
@@ -3156,6 +3159,9 @@
     "previewFirst": "同期前に変更をプレビュー",
     "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
     "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "outcomeCounts": "更新 {{updated}} · 作成 {{created}} · 変更なし {{skipped}}",
+    "redeployHint": "同期された変更は新しいバージョンとして保存されます。実行中のものはそのまま動き続けます。有効にするには新しいバージョンをデプロイしてください。",
+    "overwrite": "ローカルの変更を上書き",
     "previewFailed": "プレビューに失敗しました",
     "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
@@ -3163,7 +3169,8 @@
     "actionCreate": "新規",
     "actionUpdate": "更新",
     "actionSkip": "最新です",
-    "actionConflict": "競合"
+    "actionConflict": "競合",
+    "actionRemove": "削除"
   },
   "userConversations": {
     "title": "ユーザー会話",
@@ -4284,7 +4291,7 @@
       "llmDefaultsDesc": "ここで作成する各アドバイザーに適用されます（下で個別に設定した場合を除く）。",
       "llmDefaultsKeyRequired": "ここにキーを追加すると、個別にキーを設定していないすべてのアドバイザーに適用されます。",
       "model": "モデル",
-      "modelPlaceholder": "例: claude-sonnet-5",
+      "modelPlaceholder": "例: claude-sonnet-5-5",
       "nameRequired": "このアドバイザーに名前を付けてください。",
       "new": "新規",
       "next": "次へ",
