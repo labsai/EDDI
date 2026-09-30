@@ -72,9 +72,6 @@ const EXEMPT: Record<string, string> = {
   "POST */snippetstore/snippets/:id":
     "DRIFT, tracked: the backend exposes put/get/delete on {id} for snippets, not post. parserstore does have post, which is probably where this was copied from.",
 
-  "GET */administration/:env/deploymentimpact/:agentId":
-    "Newer than the snapshot, not drift: the deployment-impact preview (IRestAgentAdministration.getDeploymentImpact) ships with version following, after 6.4.0. Remove this entry when openapi:refresh is next run against a build that has it.",
-
   "GET */logs/recent":
     "Dead mock: production reads /administration/logs (logs.ts BASE + query string), which the snapshot does contain. Nothing calls this.",
 };
