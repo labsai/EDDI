@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
-    "deployFailedIn": "{{environment}} へのデプロイに失敗しました"
+    "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
+    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -678,7 +679,9 @@
     "exportMd": "Markdownでエクスポート",
     "toolSummary": "ツール使用状況",
     "totalCost": "合計コスト",
-    "cacheHitRate": "キャッシュヒット率"
+    "cacheHitRate": "キャッシュヒット率",
+    "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
+    "stepAgentVersion": "エージェントのバージョン {{version}} が応答"
   },
   "chat": {
     "hide": "非表示",
@@ -3115,6 +3118,9 @@
     "new": "新規",
     "updated": "更新済み",
     "unchanged": "変更なし",
+    "removed": "削除",
+    "conflicts": "ここで変更済み",
+    "conflictHint": "「競合」と表示されたリソースは、前回の同期以降にこのインスタンスで変更されています。チェックしない限り変更されません。チェックするとローカルの変更が上書きされます。",
     "selected": "選択済み",
     "mergeNow": "選択した項目をインポート",
     "syncNow": "今すぐ同期",
@@ -3160,6 +3166,9 @@
     "previewFirst": "同期前に変更をプレビュー",
     "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
     "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "outcomeCounts": "更新 {{updated}} · 作成 {{created}} · 変更なし {{skipped}}",
+    "redeployHint": "同期された変更は新しいバージョンとして保存されます。実行中のものはそのまま動き続けます。有効にするには新しいバージョンをデプロイしてください。",
+    "overwrite": "ローカルの変更を上書き",
     "previewFailed": "プレビューに失敗しました",
     "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
@@ -3167,7 +3176,8 @@
     "actionCreate": "新規",
     "actionUpdate": "更新",
     "actionSkip": "最新です",
-    "actionConflict": "競合"
+    "actionConflict": "競合",
+    "actionRemove": "削除"
   },
   "userConversations": {
     "title": "ユーザー会話",
@@ -5076,5 +5086,22 @@
     "compatibleNote": "プロバイダーの OpenAI 互換 API（{{url}}）経由で接続します。プロキシや別のリージョンを使う場合のみ変更してください。",
     "keyHint": "API キーは {{url}} で取得できます",
     "select": "プロバイダーを選択"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "前のバージョンと互換 — 進行中の会話がこのバージョンに切り替わる場合があります",
+    "compatibleHint": "進行中の会話を壊さない変更（プロンプトの言い回しや別のモデルなど）の場合のみ。プロパティ、アクション、ワークフローのステップを名前変更または削除した場合はチェックしないでください。",
+    "compatibleLegacyNote": "現在のバージョンはバージョン追従より前のものなので、すでに実行中の会話はそのまま残ります。次の互換保存からチェーンがつながります。",
+    "compatibleUnknownNote": "バージョン追従より前のバージョンの会話はそのバージョンに残ります。",
+    "generationBadge": "互換世代 {{generation}}",
+    "generationTooltip": "互換世代 {{generation}}：同じ世代を持つこのエージェントのバージョンは互換性があるため、進行中の会話は次のターンで最新のデプロイ済みバージョンに移ります。互換性のない保存は新しい世代を開始します。",
+    "impactTitle": "v{{version}} を{{environment}}にデプロイ — 進行中の会話",
+    "impactFollow_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります",
+    "impactReasonNewer": "より新しいバージョン",
+    "impactReasonLegacy": "バージョン追従より前",
+    "impactReasonBreaking": "互換性のない変更",
+    "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
+    "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
   }
 }

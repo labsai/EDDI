@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}} 채팅을 새 탭에서 열기",
     "deployToProduction": "프로덕션에 배포",
     "undeployFromProduction": "프로덕션에서 제거",
-    "deployFailedIn": "{{environment}}에 배포하지 못했습니다"
+    "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
+    "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다."
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -678,7 +679,9 @@
     "exportMd": "Markdown으로 내보내기",
     "toolSummary": "도구 사용 요약",
     "totalCost": "총 비용",
-    "cacheHitRate": "캐시 적중률"
+    "cacheHitRate": "캐시 적중률",
+    "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
+    "stepAgentVersion": "에이전트 버전 {{version}}이(가) 응답함"
   },
   "chat": {
     "hide": "숨기기",
@@ -3115,6 +3118,9 @@
     "new": "신규",
     "updated": "업데이트됨",
     "unchanged": "변경 없음",
+    "removed": "제거됨",
+    "conflicts": "여기서 변경됨",
+    "conflictHint": "충돌로 표시된 리소스는 마지막 동기화 이후 이 인스턴스에서 변경되었습니다. 선택하지 않으면 그대로 유지되며, 선택하면 로컬 변경 사항을 덮어씁니다.",
     "selected": "선택됨",
     "mergeNow": "선택 항목 가져오기",
     "syncNow": "지금 동기화",
@@ -3160,6 +3166,9 @@
     "previewFirst": "동기화 전에 변경사항 미리보기",
     "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
     "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
+    "outcomeCounts": "{{updated}}개 업데이트 · {{created}}개 생성 · {{skipped}}개 변경 없음",
+    "redeployHint": "동기화된 변경 사항은 새 버전으로 저장됩니다. 실행 중인 항목은 그대로 유지되며, 새 버전을 배포해야 적용됩니다.",
+    "overwrite": "로컬 변경 사항 덮어쓰기",
     "previewFailed": "미리보기 실패",
     "noPreviewReturned": "소스가 이 에이전트의 미리보기를 반환하지 않았습니다."
   },
@@ -3167,7 +3176,8 @@
     "actionCreate": "신규",
     "actionUpdate": "업데이트",
     "actionSkip": "최신 상태",
-    "actionConflict": "충돌"
+    "actionConflict": "충돌",
+    "actionRemove": "제거"
   },
   "userConversations": {
     "title": "사용자 대화",
@@ -5076,5 +5086,22 @@
     "compatibleNote": "제공업체의 OpenAI 호환 API({{url}})를 통해 연결합니다. 프록시나 다른 리전을 사용할 때만 변경하세요.",
     "keyHint": "{{url}}에서 API 키를 받으세요",
     "select": "공급자 선택"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "이전 버전과 호환 — 진행 중인 대화가 이 버전으로 전환될 수 있습니다",
+    "compatibleHint": "진행 중인 대화를 깨뜨릴 수 없는 변경(예: 프롬프트 문구나 다른 모델)에만 사용하세요. 속성, 액션 또는 워크플로 단계의 이름을 바꾸거나 삭제했다면 선택하지 마세요.",
+    "compatibleLegacyNote": "현재 버전은 버전 추종 기능 이전의 버전이므로 이미 실행 중인 대화는 그대로 유지됩니다. 다음 호환 저장부터 체인이 연결됩니다.",
+    "compatibleUnknownNote": "버전 추종 기능 이전 버전의 대화는 그 버전에 그대로 유지됩니다.",
+    "generationBadge": "호환 세대 {{generation}}",
+    "generationTooltip": "호환 세대 {{generation}}: 같은 세대의 이 에이전트 버전들은 서로 호환되므로 진행 중인 대화는 다음 턴에 최신 배포 버전으로 이동합니다. 호환되지 않는 저장은 새 세대를 시작합니다.",
+    "impactTitle": "v{{version}}을(를) {{environment}}에 배포 — 진행 중인 대화",
+    "impactFollow_other": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
+    "impactStay_other": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다",
+    "impactReasonNewer": "더 최신 버전",
+    "impactReasonLegacy": "버전 추종 기능 이전",
+    "impactReasonBreaking": "호환되지 않는 변경",
+    "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
+    "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
+    "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
   }
 }

@@ -722,6 +722,18 @@ jobs:
           grep -qF 'mongodb://eddi:a%2Fb%2Bc%40d@' <<<"$rendered" \
             || { echo "::error::mongodb.rootPassword is not URL-encoded in mongodb.connectionString"; exit 1; }
 
+          # The startup probe checks liveness (readiness is false for the whole
+          # first-boot migration), and its limits come from eddi.startupProbe.
+          echo "--- startup probe: liveness by default, configurable"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.startupProbe.failureThreshold=900)
+          grep -qE 'failureThreshold: 900$' <<<"$rendered" \
+            || { echo "::error::eddi.startupProbe.failureThreshold is not rendered into the startup probe"; exit 1; }
+          # Captured first, then matched, for the same pipefail reason as above.
+          startup=$(grep -A3 'startupProbe:' <<<"$rendered" || true)
+          grep -qF 'path: /q/health/live' <<<"$startup" \
+            || { echo "::error::the startup probe does not default to /q/health/live"; exit 1; }
+
           echo "--- PostgreSQL + in-chart Keycloak"
           helm template eddi helm/eddi \
             --set eddi.vaultMasterKey=$key \

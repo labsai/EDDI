@@ -63,11 +63,12 @@ class BackupModelsTest {
 
     @Test
     void diffAction_allValues() {
-        assertEquals(4, DiffAction.values().length);
+        assertEquals(5, DiffAction.values().length);
         assertNotNull(DiffAction.valueOf("CREATE"));
         assertNotNull(DiffAction.valueOf("UPDATE"));
         assertNotNull(DiffAction.valueOf("SKIP"));
         assertNotNull(DiffAction.valueOf("CONFLICT"));
+        assertNotNull(DiffAction.valueOf("REMOVE"));
     }
 
     // ==================== ExportPreview ====================

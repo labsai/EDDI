@@ -41,6 +41,10 @@ interface DebugDrawerProps {
   agentId: string | null;
 }
 
+/**
+ * Bottom drawer with the conversation debugger's tabs for the current chat.
+ * Open state and active tab come from the debug store.
+ */
 export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const { t } = useTranslation();
   const isOpen = useDebugStore((s) => s.isDebugOpen);
@@ -59,7 +63,7 @@ export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const handleTabKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>) => {
       const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
-      let nextIndex: number | null = null;
+      let nextIndex: number;
 
       switch (e.key) {
         case "ArrowRight":

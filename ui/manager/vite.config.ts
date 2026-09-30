@@ -115,7 +115,7 @@ export default defineConfig({
      * dev-server entry only, and the backend keeps its own hand-written
      * `index.html` redirect shell.
      */
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         manage: fileURLToPath(new URL("./manage.html", import.meta.url)),
         welcome: fileURLToPath(new URL("./welcome.html", import.meta.url)),

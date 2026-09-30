@@ -86,6 +86,12 @@ public class LlmModule {
         registerCompatibleProviders(OpenAiCompatibleProviders.all(), languageModelApiConnectorBuilders, langModelBuilderInstance);
 
         lifecycleTaskProviders.put(LlmTask.ID, () -> lifecycleTaskInstance.select(LlmTask.class).get());
+        // V5 alias: ai.labs.langchain -> ai.labs.llm. The rename migration rewrites the
+        // step type, but only on the boot that runs it: a database migrated by 6.0-6.4
+        // recorded the migration complete with the old type still in its workflows,
+        // and a v5 ZIP imports it verbatim. Both then failed to deploy with
+        // "Extension 'ai.labs.langchain' not found".
+        lifecycleTaskProviders.put("ai.labs.langchain", lifecycleTaskProviders.get(LlmTask.ID));
         LOGGER.debug("Added LLM Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 

@@ -473,6 +473,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption and auto-vaulting              |
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
+| **[Upgrading from 5.x](docs/upgrading-from-5x.md)**          | First boot of an EDDI 5 database on 6.x            |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |

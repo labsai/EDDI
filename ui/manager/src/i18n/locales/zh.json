@@ -265,7 +265,8 @@
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
-    "deployFailedIn": "在 {{environment}} 中部署失败"
+    "deployFailedIn": "在 {{environment}} 中部署失败",
+    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -678,7 +679,9 @@
     "exportMd": "导出为 Markdown",
     "toolSummary": "工具使用概览",
     "totalCost": "总成本",
-    "cacheHitRate": "缓存命中率"
+    "cacheHitRate": "缓存命中率",
+    "endReasonRetired": "已结束：该智能体版本已被停用",
+    "stepAgentVersion": "由智能体版本 {{version}} 回答"
   },
   "chat": {
     "hide": "隐藏",
@@ -3115,6 +3118,9 @@
     "new": "新",
     "updated": "已更新",
     "unchanged": "未更改",
+    "removed": "移除",
+    "conflicts": "已在此处更改",
+    "conflictHint": "标记为“冲突”的资源在上次同步后已在此实例上被更改。除非勾选，否则不会改动它们——勾选即会覆盖本地更改。",
     "selected": "已选择",
     "mergeNow": "导入所选",
     "syncNow": "立即同步",
@@ -3160,6 +3166,9 @@
     "previewFirst": "同步前预览变更",
     "syncPartial": "同步未完成 — 部分资源未写入",
     "syncIdentical": "已是最新 — 无需写入",
+    "outcomeCounts": "{{updated}} 个已更新 · {{created}} 个已创建 · {{skipped}} 个未更改",
+    "redeployHint": "同步的更改会保存为新版本。正在运行的内容保持不变——部署新版本后才会生效。",
+    "overwrite": "覆盖本地更改",
     "previewFailed": "预览失败",
     "noPreviewReturned": "源实例未返回此代理的预览。"
   },
@@ -3167,7 +3176,8 @@
     "actionCreate": "新建",
     "actionUpdate": "更新",
     "actionSkip": "已是最新",
-    "actionConflict": "冲突"
+    "actionConflict": "冲突",
+    "actionRemove": "移除"
   },
   "userConversations": {
     "title": "用户对话",
@@ -5076,5 +5086,22 @@
     "compatibleNote": "通过提供商兼容 OpenAI 的 API（{{url}}）连接。仅在使用代理或其他区域时才需要覆盖。",
     "keyHint": "在 {{url}} 获取 API 密钥",
     "select": "选择提供商"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "与上一版本兼容 — 进行中的会话可以切换到此版本",
+    "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
+    "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
+    "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
+    "generationBadge": "兼容代 {{generation}}",
+    "generationTooltip": "兼容代 {{generation}}：此智能体中兼容代相同的版本彼此兼容，因此进行中的会话会在下一轮切换到最新部署的版本。不兼容的保存会开始新的兼容代。",
+    "impactTitle": "将 v{{version}} 部署到{{environment}} — 进行中的会话",
+    "impactFollow_other": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_other": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}",
+    "impactReasonNewer": "更新的版本",
+    "impactReasonLegacy": "早于版本跟随功能",
+    "impactReasonBreaking": "不兼容的更改",
+    "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
+    "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
   }
 }

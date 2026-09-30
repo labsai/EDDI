@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.configs.parser.IParserStore;
 import io.quarkus.security.ForbiddenException;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -109,7 +110,7 @@ class RestExportServiceExtendedBranchTest {
         openMocks(this);
         exportService = new RestExportService(
                 documentDescriptorStore, agentStore, workflowStore,
-                dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
+                mock(IParserStore.class), dictionaryStore, ruleSetStore, apiCallsStore, llmStore,
                 propertySetterStore, outputStore, mcpCallsStore, ragStore,
                 snippetStore, jsonSerialization, zipArchive, secretScrubber,
                 scheduleStore, resourceAccessGuard, mock(BackupMetrics.class), mock(IConnectionStore.class));

@@ -292,7 +292,8 @@
     "openExternalChatIn": "Open {{environment}} chat in a new tab",
     "deployToProduction": "Deploy to production",
     "undeployFromProduction": "Undeploy from production",
-    "deployFailedIn": "Deployment failed in {{environment}}"
+    "deployFailedIn": "Deployment failed in {{environment}}",
+    "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn."
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -705,7 +706,9 @@
     "exportMd": "Export as Markdown",
     "toolSummary": "Tool Usage Summary",
     "totalCost": "Total Cost",
-    "cacheHitRate": "Cache Hit Rate"
+    "cacheHitRate": "Cache Hit Rate",
+    "endReasonRetired": "Ended: the agent version was retired",
+    "stepAgentVersion": "Answered by agent version {{version}}"
   },
   "chat": {
     "hide": "Hide",
@@ -3335,6 +3338,9 @@
     "new": "new",
     "updated": "updated",
     "unchanged": "unchanged",
+    "removed": "removed",
+    "conflicts": "changed here",
+    "conflictHint": "Resources marked Conflict were changed on this instance since the last sync. They are left alone unless you tick them — ticking one overwrites the local change.",
     "selected": "selected",
     "mergeNow": "Import Selected",
     "syncNow": "Sync Now",
@@ -3356,7 +3362,8 @@
     "actionCreate": "New",
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
-    "actionConflict": "Conflict"
+    "actionConflict": "Conflict",
+    "actionRemove": "Remove"
   },
   "syncPage": {
     "title": "Agent Sync",
@@ -3386,6 +3393,9 @@
     "previewFirst": "Preview changes before syncing",
     "syncPartial": "Sync incomplete — some resources were not written",
     "syncIdentical": "Already up to date — nothing to write",
+    "outcomeCounts": "{{updated}} updated · {{created}} created · {{skipped}} unchanged",
+    "redeployHint": "Synced changes are saved as new versions. What is running keeps running — deploy the new version to make it live.",
+    "overwrite": "Overwrite local change",
     "previewFailed": "Preview failed",
     "noPreviewReturned": "The source returned no preview for this agent."
   },
@@ -5076,5 +5086,22 @@
     "compatibleNote": "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
     "keyHint": "Get an API key at {{url}}",
     "select": "Select a provider"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatible with the previous version — running conversations may switch to it",
+    "compatibleHint": "Only for changes that cannot break a conversation in progress, e.g. prompt wording or a different model. Leave unticked if properties, actions or workflow steps were renamed or removed.",
+    "compatibleLegacyNote": "The current version predates version following, so conversations already running on it stay on it. The next compatible save links up.",
+    "compatibleUnknownNote": "Conversations on a version that predates version following stay on it.",
+    "generationBadge": "compat. gen {{generation}}",
+    "generationTooltip": "Compatibility generation {{generation}}: versions of this agent with the same generation are compatible, so a running conversation moves to the newest deployed one on its next turn. A breaking save starts a new generation.",
+    "impactTitle": "Deploying v{{version}} to {{environment}} — running conversations",
+    "impactFollow_one": "{{count}} active conversation on v{{from}} will continue on v{{to}}",
+    "impactFollow_other": "{{count}} active conversations on v{{from}} will continue on v{{to}}",
+    "impactStay_one": "{{count}} active conversation on v{{from}} will stay on v{{from}}",
+    "impactStay_other": "{{count}} active conversations on v{{from}} will stay on v{{from}}",
+    "impactReasonNewer": "newer version",
+    "impactReasonLegacy": "predates version following",
+    "impactReasonBreaking": "breaking change",
+    "switchNotice": "Agent moved from v{{from}} to v{{to}}"
   }
 }

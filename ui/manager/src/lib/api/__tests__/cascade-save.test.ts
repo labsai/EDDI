@@ -971,3 +971,47 @@ describe("a parent superseded elsewhere", () => {
     });
   });
 });
+
+describe("compatible agent versions", () => {
+  function primeCascade() {
+    vi.mocked(updateResource).mockResolvedValue({
+      location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+    });
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(getAgent).mockResolvedValue({
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1"],
+    });
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+    });
+  }
+
+  it("a cascade save passes compatible: true to the agent write when asked", async () => {
+    primeCascade();
+    await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT, { compatible: true });
+    expect(vi.mocked(updateAgent).mock.calls[0]![3]).toEqual({ compatible: true });
+  });
+
+  it("a cascade save without the option writes a breaking version", async () => {
+    primeCascade();
+    await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
+    expect(vi.mocked(updateAgent).mock.calls[0]![3]).toBeUndefined();
+  });
+
+  it("cascadeVersionUpdate threads the flag to the agent write", async () => {
+    primeCascade();
+    await cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT, { compatible: true });
+    expect(vi.mocked(updateAgent).mock.calls[0]![3]).toEqual({ compatible: true });
+  });
+
+  it("cascadeVersionUpdate stays breaking with compatible: false", async () => {
+    primeCascade();
+    await cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT, { compatible: false });
+    expect(vi.mocked(updateAgent).mock.calls[0]![3]).toBeUndefined();
+  });
+});

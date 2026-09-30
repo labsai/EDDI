@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
-    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen"
+    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
+    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr."
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -678,7 +679,9 @@
     "exportMd": "Als Markdown exportieren",
     "toolSummary": "Werkzeugnutzung",
     "totalCost": "Gesamtkosten",
-    "cacheHitRate": "Cache-Trefferquote"
+    "cacheHitRate": "Cache-Trefferquote",
+    "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
+    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
   },
   "chat": {
     "hide": "Ausblenden",
@@ -3281,6 +3284,9 @@
     "new": "neu",
     "updated": "aktualisiert",
     "unchanged": "unverändert",
+    "removed": "entfernt",
+    "conflicts": "hier geändert",
+    "conflictHint": "Als Konflikt markierte Ressourcen wurden seit der letzten Synchronisierung auf dieser Instanz geändert. Sie bleiben unverändert, solange Sie sie nicht auswählen – eine Auswahl überschreibt die lokale Änderung.",
     "selected": "ausgewählt",
     "mergeNow": "Ausgewählte importieren",
     "syncNow": "Jetzt synchronisieren",
@@ -3326,6 +3332,9 @@
     "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
     "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
     "syncIdentical": "Bereits aktuell – nichts zu schreiben",
+    "outcomeCounts": "{{updated}} aktualisiert · {{created}} erstellt · {{skipped}} unverändert",
+    "redeployHint": "Synchronisierte Änderungen werden als neue Versionen gespeichert. Was läuft, läuft weiter – stellen Sie die neue Version bereit, um sie live zu schalten.",
+    "overwrite": "Lokale Änderung überschreiben",
     "previewFailed": "Vorschau fehlgeschlagen",
     "noPreviewReturned": "Die Quelle hat für diesen Agenten keine Vorschau geliefert."
   },
@@ -3333,7 +3342,8 @@
     "actionCreate": "Neu",
     "actionUpdate": "Aktualisieren",
     "actionSkip": "Aktuell",
-    "actionConflict": "Konflikt"
+    "actionConflict": "Konflikt",
+    "actionRemove": "Entfernen"
   },
   "userConversations": {
     "title": "Nutzer-Konversationen",
@@ -5076,5 +5086,22 @@
     "compatibleNote": "Verbindet über die OpenAI-kompatible API des Anbieters ({{url}}). Nur für einen Proxy oder eine andere Region überschreiben.",
     "keyHint": "API-Schlüssel erhalten unter {{url}}",
     "select": "Anbieter auswählen"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Kompatibel mit der vorherigen Version — laufende Unterhaltungen dürfen zu ihr wechseln",
+    "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
+    "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
+    "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
+    "generationBadge": "Kompat.-Gen. {{generation}}",
+    "generationTooltip": "Kompatibilitätsgeneration {{generation}}: Versionen dieses Agents mit derselben Generation sind kompatibel, sodass eine laufende Unterhaltung bei ihrem nächsten Zug zur neuesten bereitgestellten wechselt. Ein inkompatibles Speichern beginnt eine neue Generation.",
+    "impactTitle": "Bereitstellung von v{{version}} in {{environment}} — laufende Unterhaltungen",
+    "impactFollow_one": "{{count}} aktive Unterhaltung auf v{{from}} wird auf v{{to}} fortgesetzt",
+    "impactFollow_other": "{{count}} aktive Unterhaltungen auf v{{from}} werden auf v{{to}} fortgesetzt",
+    "impactStay_one": "{{count}} aktive Unterhaltung auf v{{from}} bleibt auf v{{from}}",
+    "impactStay_other": "{{count}} aktive Unterhaltungen auf v{{from}} bleiben auf v{{from}}",
+    "impactReasonNewer": "neuere Version",
+    "impactReasonLegacy": "älter als die Versionsfolge",
+    "impactReasonBreaking": "inkompatible Änderung",
+    "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
   }
 }

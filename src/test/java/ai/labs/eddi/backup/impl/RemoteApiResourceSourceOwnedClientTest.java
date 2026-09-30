@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -90,7 +91,7 @@ class RemoteApiResourceSourceOwnedClientTest {
     @Test
     @DisplayName("the public constructor configures the client it builds")
     void publicConstructorConfiguresItsOwnClient() {
-        new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, "Bearer t", jsonSerialization);
+        new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, "Bearer t", jsonSerialization, UnaryOperator.identity());
 
         verify(builder).followRedirects(HttpClient.Redirect.NEVER);
         verify(builder).connectTimeout(any(Duration.class));
@@ -105,7 +106,7 @@ class RemoteApiResourceSourceOwnedClientTest {
     @Test
     @DisplayName("closing a source closes the client it built")
     void closingASourceClosesTheClientItBuilt() {
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, UnaryOperator.identity());
 
         source.close();
 
