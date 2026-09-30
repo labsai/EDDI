@@ -55,18 +55,25 @@ present. The Manager's `npm update` hit an npm bug with its `overrides` block
 
 ### Verification
 
+Before main was merged in (2026-09-28):
+
 - **`./mvnw clean test`:** 18,043 tests ran.
   - 12 failures and 210 errors, all "Unable to establish loopback connection" or Netty "failed to
     create a child event loop". That is this machine's environmental baseline for tests that bind
     loopback sockets.
   - Plus the swagger-annotations constant, since fixed.
-  - The Azure / `reactor-netty` transport is exercised by `ReactorNettyNettyCompatibilityTest`, which builds Reactor Netty's client event loop on the resolved Netty.
 - **Guard tests** (`BuildQualityGatesTest`, `ReleaseVersionSourceTest`, `DeploymentManifestsTest`,
   `ImportStyleTest`, `ComposeStackTest`): pass, apart from the three `DeploymentManifestsTest`
   PowerShell tests that fail identically on `origin/main` here.
 - **Manager:** lint, typecheck, `i18n:check`, and `vitest run --coverage` (426 files, 6,858 tests,
   no unhandled errors) all pass, as does `vite build`.
 - **Chat:** typecheck, vitest (15 files, 278 tests) and build pass.
+
+After merging main (2026-09-30), which brought #831–#853:
+
+- **Guard tests** (`BuildQualityGatesTest`, `ChangelogFragmentTest`, `Documentation*Test`, `ImportStyleTest`, `DeploymentManifestsTest`): 139 of 142 pass; the three failures are the same `DeploymentManifestsTest` PowerShell tests, whose files the merge leaves identical to `origin/main`.
+- **`ReactorNettyNettyCompatibilityTest`** (new): passes on 1.2.18 and fails on 1.3.7 with `NoClassDefFoundError: io/netty/channel/MultiThreadIoEventLoopGroup`, the error a plain-Java request reproduced on 1.3.7.
+- **Manager and Chat suites:** not rerun on this branch after the merge; CI's UI jobs are the check. (The UI-majors branch reran both after the same merge: Chat 338/338; Manager 7,324/7,327, the three failures being the Windows-only CRLF test and two rag-upload tests that need the toolchain branch's Node 24 fix.)
 
 ### Next
 
