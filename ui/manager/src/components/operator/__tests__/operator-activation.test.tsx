@@ -6,6 +6,7 @@ import { server } from "@/test/mocks/server";
 import { OperatorActivation } from "../operator-activation";
 import { extractVaultKeyName } from "@/lib/operator/vault-ref";
 import { defaultOperatorConfig } from "@/lib/api/operator";
+import { getProviderConfig } from "@/lib/api/agent-setup";
 
 const authState = { method: "none" as "none" | "keycloak" };
 vi.mock("@/hooks/use-auth", () => ({
@@ -522,7 +523,8 @@ describe("OperatorActivation — stored provider the setup flow no longer offers
 
     const select = screen.getByTestId("operator-provider") as HTMLSelectElement;
     expect(select.value).toBe("anthropic");
-    expect(screen.getByTestId("operator-model")).toHaveValue("claude-sonnet-5");
+    // From the provider table, not a literal: a default-model bump must not break this.
+    expect(screen.getByTestId("operator-model")).toHaveValue(getProviderConfig("anthropic")!.defaultModel);
     expect(screen.getByTestId("operator-api-key-input")).toHaveValue("");
   });
 });

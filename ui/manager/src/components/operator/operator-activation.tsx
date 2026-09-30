@@ -66,7 +66,9 @@ export function OperatorActivation({
   const [apiKey, setApiKey] = useState(
     keepsStoredProvider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
-  const [baseUrl, setBaseUrl] = useState("");
+  // Seeded from the stored model-server address (recorded since the upgrade
+  // work) under the same rule as the key: only while the provider is unchanged.
+  const [baseUrl, setBaseUrl] = useState(keepsStoredProvider ? (initial.llmBaseUrl ?? "") : "");
   /**
    * The address EDDI can reach ITSELF at — what the generated tools will target.
    *
@@ -147,9 +149,23 @@ export function OperatorActivation({
   const grantedEndpoints = useMemo(() => endpointsForScope(scope), [scope]);
   const safetyPreamble = useMemo(() => safetyPreambleForScope(scope), [scope]);
 
+  /**
+   * Seeded with TODAY's default unless the admin had edited the text.
+   *
+   * This used to be `initial.promptBody || default` — the stored body, whatever
+   * it was. Stored is a snapshot from whenever the operator was activated, so
+   * every Reconfigure re-provisioned the OLD default and no prompt improvement
+   * ever reached an operator that already existed. `promptBodyIsDefault` (set by
+   * activation) says whether the stored text is the admin's or just a stale
+   * copy of ours; a config from before that flag keeps its text, and the reset
+   * button below is how to get the current default.
+   */
   const [promptBody, setPromptBody] = useState(
-    initial.promptBody || defaultOperatorPromptBody(scope),
+    initial.promptBody && initial.promptBodyIsDefault !== true
+      ? initial.promptBody
+      : defaultOperatorPromptBody(scope),
   );
+  const promptBodyDiffersFromDefault = promptBody !== defaultOperatorPromptBody(scope);
 
   /**
    * Swaps the editable body to the new scope's default when the admin flips
@@ -490,6 +506,25 @@ export function OperatorActivation({
                 id="operator-prompt-body"
                 data-testid="operator-prompt-body"
               />
+              {promptBodyDiffersFromDefault && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="flex-1">
+                    {t(
+                      "operator.activation.promptBodyDiffers",
+                      "These instructions differ from the current default — they were edited, or written by an earlier version of the Manager.",
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPromptBody(defaultOperatorPromptBody(scope))}
+                    data-testid="operator-prompt-body-reset"
+                  >
+                    {t("operator.activation.promptBodyReset", "Reset to default")}
+                  </Button>
+                </div>
+              )}
             </Field>
 
             <Field

@@ -4438,7 +4438,9 @@
       "platformBaseUrlAuto": "resolvida pelo servidor",
       "platformBaseUrlDiffers": "Esta instalação indica atualmente o seu próprio endereço como {{serverUrl}}. O valor acima é diferente — mantenha-o apenas se o definiu de propósito.",
       "platformBaseUrlQueryFailed": "Não foi possível perguntar ao servidor o seu próprio endereço. A ativação falhará a menos que o introduza aqui — ou recarregue para tentar de novo.",
-      "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui."
+      "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui.",
+      "promptBodyDiffers": "Estas instruções diferem da predefinição atual — foram editadas ou escritas por uma versão anterior do Manager.",
+      "promptBodyReset": "Repor a predefinição"
     },
     "authMode": {
       "none": {
@@ -4606,6 +4608,30 @@
     },
     "superseded": {
       "title": "O agente operador anterior continua implantado."
+    },
+    "upgrade": {
+      "title": "Há uma atualização disponível para o Platform Operator",
+      "description": "Ele foi configurado por uma versão anterior do Manager (revisão {{from}}; esta versão traz a {{to}}), por isso as suas instruções e ferramentas estão desatualizadas.",
+      "addedTools_one": "{{count}} ferramenta nova",
+      "addedTools_other": "{{count}} ferramentas novas",
+      "addedTools_many": "{{count}} ferramentas novas",
+      "removedTools_one": "{{count}} ferramenta removida",
+      "removedTools_other": "{{count}} ferramentas removidas",
+      "removedTools_many": "{{count}} ferramentas removidas",
+      "blockerCredential": "A chave do modelo foi introduzida como texto simples, que nunca é guardado — introduza-a novamente para atualizar.",
+      "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
+      "blockerProvider": "O fornecedor do modelo já não pode ser configurado desta forma — escolha outro para atualizar.",
+      "reviewAction": "Rever e atualizar",
+      "action": "Atualizar",
+      "confirmTitle": "Atualizar o Platform Operator?",
+      "confirmBody": "É criado um novo operador com as instruções e ferramentas atuais e verificado como numa nova ativação; só então o antigo é removido. O modelo, a chave, o ambiente e as definições de acesso são mantidos. O chat aberto com o operador termina, e as conversas com o operador antigo deixam de aparecer no histórico.",
+      "confirm": "Atualizar agora",
+      "instructionsCustomized": "Editou as instruções do operador.",
+      "instructionsUnknown": "As instruções do operador diferem da predefinição atual — ou uma predefinição antiga ou as suas próprias edições.",
+      "useNewDefault": "Substituí-las pela nova predefinição",
+      "keepCurrent": "Manter o texto atual (não aprenderá o que a nova predefinição acrescenta)",
+      "hint": "Há uma atualização disponível para o Platform Operator.",
+      "hintAction": "Atualizar"
     }
   },
   "groupWorkspace": {

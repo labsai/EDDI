@@ -32,7 +32,7 @@ describe("useCurrentScreenContext", () => {
     });
     expect(renderAt("/manage/groups/grp-1").result.current).toEqual({
       screen: "group-detail",
-      groupId: "grp-1",
+      viewedGroupId: "grp-1",
     });
     expect(renderAt("/manage/channels/ch-1").result.current).toEqual({
       screen: "channel-detail",
@@ -107,6 +107,18 @@ describe("useCurrentScreenContext", () => {
 });
 
 describe("toContextPayload — the wire shape the backend actually accepts", () => {
+  it("never sends an engine-reserved key, which the backend would strip", () => {
+    // `groupId` is reserved (ClientContextGuard.RESERVED_KEYS): sent by a client
+    // it is dropped, so the viewed group travels as `viewedGroupId` instead.
+    const payload = toContextPayload({ screen: "group-detail", viewedGroupId: "grp-1" });
+    expect(payload).toEqual({
+      screen: { type: "string", value: "group-detail" },
+      viewedGroupId: { type: "string", value: "grp-1" },
+    });
+    const legacy = toContextPayload({ screen: "group-detail", groupId: "grp-1" } as unknown as CurrentScreenContext);
+    expect(legacy).not.toHaveProperty("groupId");
+  });
+
   it("wraps every value as {type,value}, not a bare string", () => {
     // InputData.context is Map<String, Context> where Context is {type, value}.
     // A bare string cannot be deserialized into Context, so the whole

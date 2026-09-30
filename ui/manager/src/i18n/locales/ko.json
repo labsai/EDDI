@@ -4394,7 +4394,9 @@
       "platformBaseUrlAuto": "서버에서 확인",
       "platformBaseUrlDiffers": "이 배포는 현재 자신의 주소를 {{serverUrl}}(으)로 보고합니다. 위의 값은 이와 다릅니다. 의도적으로 설정한 경우에만 유지하세요.",
       "platformBaseUrlQueryFailed": "서버에 자신의 주소를 물어볼 수 없었습니다. 여기에 입력하지 않으면 활성화가 실패합니다. 다시 시도하려면 페이지를 새로 고침하세요.",
-      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요."
+      "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요.",
+      "promptBodyDiffers": "이 지침은 현재 기본값과 다릅니다. 편집되었거나 이전 버전의 Manager가 작성했습니다.",
+      "promptBodyReset": "기본값으로 재설정"
     },
     "authMode": {
       "none": {
@@ -4560,6 +4562,28 @@
     },
     "superseded": {
       "title": "이전 오퍼레이터 에이전트가 여전히 배포되어 있습니다."
+    },
+    "upgrade": {
+      "title": "Platform Operator 업데이트를 사용할 수 있습니다",
+      "description": "이전 버전의 Manager로 설정되었기 때문에(리비전 {{from}}, 이 버전은 {{to}}) 지침과 도구가 오래되었습니다.",
+      "addedTools_one": "새 도구 {{count}}개",
+      "addedTools_other": "새 도구 {{count}}개",
+      "removedTools_one": "도구 {{count}}개 제거됨",
+      "removedTools_other": "도구 {{count}}개 제거됨",
+      "blockerCredential": "모델 키가 일반 텍스트로 입력되었으며 일반 텍스트는 저장되지 않습니다. 업그레이드하려면 다시 입력하세요.",
+      "blockerBaseUrl": "모델 서버 주소가 기록되지 않았습니다. 업그레이드하려면 다시 입력하세요.",
+      "blockerProvider": "이 모델 공급자는 더 이상 이 방식으로 설정할 수 없습니다. 업그레이드하려면 다른 공급자를 선택하세요.",
+      "reviewAction": "검토 후 업그레이드",
+      "action": "업그레이드",
+      "confirmTitle": "Platform Operator를 업그레이드할까요?",
+      "confirmBody": "현재 지침과 도구로 새 오퍼레이터를 만들고 새 활성화처럼 검증한 뒤에야 이전 오퍼레이터를 제거합니다. 모델, 키, 환경, 액세스 설정은 유지됩니다. 열려 있는 오퍼레이터 채팅은 종료되며, 이전 오퍼레이터와의 대화는 더 이상 기록에 표시되지 않습니다.",
+      "confirm": "지금 업그레이드",
+      "instructionsCustomized": "오퍼레이터 지침을 편집했습니다.",
+      "instructionsUnknown": "오퍼레이터 지침이 현재 기본값과 다릅니다. 이전 기본값이거나 직접 편집한 내용입니다.",
+      "useNewDefault": "새 기본값으로 바꾸기",
+      "keepCurrent": "현재 텍스트 유지(새 기본값에 추가된 내용은 반영되지 않음)",
+      "hint": "Platform Operator 업데이트를 사용할 수 있습니다.",
+      "hintAction": "업그레이드"
     }
   },
   "groupWorkspace": {
