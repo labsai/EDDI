@@ -4,6 +4,13 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import java.util.Collection;
+import org.mockito.ArgumentCaptor;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -193,6 +200,29 @@ class RestConversationStoreTest {
         }
     }
 
+    private static final String OLD_SECRET = "${vault:agent.u0123456789abcdef.0123456789ab.apiKey}";
+    private static final String NEW_SECRET = "${vault:agent.u0123456789abcdef.ba9876543210.apiKey}";
+
+    /**
+     * A conversation whose secret was overwritten once, so undo can restore the old
+     * slot.
+     */
+    private static ConversationMemorySnapshot snapshotWithSecretHistory() {
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent", 1, "user-1");
+        memory.getConversationProperties().put("apiKey", vaultedProperty(OLD_SECRET));
+        memory.startNextStep();
+        var baseline = memory.serializedProperties();
+        memory.getConversationProperties().put("apiKey", vaultedProperty(NEW_SECRET));
+        memory.recordPropertyChanges(baseline);
+        return ConversationMemoryUtilities.convertConversationMemory(memory);
+    }
+
+    private static Property vaultedProperty(String reference) {
+        var property = new Property("apiKey", reference, Property.Scope.conversation);
+        property.setAutoVaulted(Boolean.TRUE);
+        return property;
+    }
+
     @Nested
     @DisplayName("deleteConversationLog")
     class DeleteConversationLog {
@@ -343,8 +373,10 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("the ownership gate still runs before a soft delete")
         void softDelete_checksOwnershipFirst() {
+            // Delete is irreversible, so it uses the STRICT owner guard (finding 10):
+            // a legacy no-owner conversation is refused to a non-admin, not admitted.
             doThrow(new ForbiddenException("not yours"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-other");
+                    .when(conversationAccessGuard).requireConversationOwnerStrict(eq("conv-other"), any());
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.deleteConversationLog("conv-other", false));
@@ -357,6 +389,45 @@ class RestConversationStoreTest {
         void throwsForNull() {
             assertThrows(IllegalArgumentException.class,
                     () -> restConversationStore.deleteConversationLog(null, true));
+        }
+
+        @Test
+        @DisplayName("a vault failure keeps the conversation: its snapshot is the only record of the secret slots")
+        @SuppressWarnings("unchecked")
+        void vaultFailureKeepsTheConversation() throws Exception {
+            var cleaner = mock(AutoVaultedSecrets.class);
+            Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+            when(cleanerInstance.isResolvable()).thenReturn(true);
+            when(cleanerInstance.get()).thenReturn(cleaner);
+            restConversationStore.autoVaultedSecretsInstance = cleanerInstance;
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithSecretHistory());
+            when(cleaner.deleteForConversation(any(), any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
+
+            assertThrows(ResourceStoreException.class, () -> restConversationStore.deleteConversationLog("conv-1", true));
+
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor("conv-1");
+        }
+
+        @Test
+        @DisplayName("every secret version is swept, including the one only the undo history still references")
+        @SuppressWarnings("unchecked")
+        void sweepsEverySecretVersion() throws Exception {
+            var cleaner = mock(AutoVaultedSecrets.class);
+            Instance<AutoVaultedSecrets> cleanerInstance = mock(Instance.class);
+            when(cleanerInstance.isResolvable()).thenReturn(true);
+            when(cleanerInstance.get()).thenReturn(cleaner);
+            restConversationStore.autoVaultedSecretsInstance = cleanerInstance;
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithSecretHistory());
+
+            restConversationStore.deleteConversationLog("conv-1", true);
+
+            var versions = ArgumentCaptor.forClass(Collection.class);
+            verify(cleaner).deleteForConversation(versions.capture(), eq("user-1"));
+            var references = ((Collection<Property>) versions.getValue()).stream().map(Property::getValueString).toList();
+            assertTrue(references.contains(OLD_SECRET), references.toString());
+            assertTrue(references.contains(NEW_SECRET), references.toString());
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
         }
 
         @Test
@@ -422,7 +493,7 @@ class RestConversationStoreTest {
                     .getMethod("getActiveConversations", String.class, Integer.class)
                     .getAnnotation(RolesAllowed.class);
             RolesAllowed end = IRestConversationStore.class
-                    .getMethod("endActiveConversations", List.class)
+                    .getMethod("endActiveConversations", List.class, String.class)
                     .getAnnotation(RolesAllowed.class);
 
             assertNotNull(active, "getActiveConversations must declare @RolesAllowed");
@@ -471,8 +542,9 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("deleteConversationLog denies a foreign conversation and deletes nothing")
         void deleteIsGuarded() {
+            // Delete uses the strict owner guard (finding 10).
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationOwnerStrict(eq("conv-of-user-a"), any());
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.deleteConversationLog("conv-of-user-a", true));
@@ -494,7 +566,11 @@ class RestConversationStoreTest {
             restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
             restConversationStore.deleteConversationLog("conv-1", false);
 
-            verify(conversationAccessGuard, times(3)).requireConversationOwner("conv-1");
+            // Reads use the plain owner guard; the irreversible delete uses the strict
+            // variant (finding 10). Both are ForbiddenException-throwing owner checks —
+            // every per-conversation call is still gated.
+            verify(conversationAccessGuard, times(2)).requireConversationOwner("conv-1");
+            verify(conversationAccessGuard, times(1)).requireConversationOwnerStrict(eq("conv-1"), any());
         }
     }
 
@@ -776,7 +852,7 @@ class RestConversationStoreTest {
         void doesNotLoadSnapshots() throws Exception {
             storedConversation("conv-1", AGENT_A, ConversationState.READY);
 
-            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)));
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)), null);
 
             verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
             verify(resourceAccessGuard).requireAccess(AGENT_A, AccessLevel.EDIT, "agent");
@@ -788,9 +864,48 @@ class RestConversationStoreTest {
             storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
             when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
 
-            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", null)));
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", null)), null);
 
             verify(conversationService).endConversation("conv-paused", "editor-1");
+        }
+
+        @Test
+        @DisplayName("an accepted endReason is recorded on every conversation ended")
+        void recordsAcceptedEndReason() throws Exception {
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+            when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
+
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)),
+                    IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+
+            verify(conversationService).endConversation("conv-1", "editor-1", IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+        }
+
+        /**
+         * The reason is stored on the conversation and shown to its user by clients, so
+         * it must be a code they know — never caller-supplied text.
+         */
+        @Test
+        @DisplayName("an unknown endReason is refused before anything is ended")
+        void refusesUnknownEndReason() throws Exception {
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+
+            assertThrows(BadRequestException.class,
+                    () -> restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)), "<b>you were fired</b>"));
+
+            verify(conversationService, never()).endConversation(anyString(), anyString());
+            verify(conversationService, never()).endConversation(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("a blank endReason means none")
+        void blankEndReasonIsNone() throws Exception {
+            storedConversation("conv-1", AGENT_A, ConversationState.READY);
+            when(conversationAccessGuard.callerActor(anyString())).thenReturn("editor-1");
+
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)), "");
+
+            verify(conversationService).endConversation("conv-1", "editor-1");
         }
 
         @Test
@@ -802,7 +917,7 @@ class RestConversationStoreTest {
             doThrow(new IllegalStateException("boom")).when(conversationService).endConversation(eq("conv-bad"), anyString());
 
             Response response = restConversationStore.endActiveConversations(List.of(
-                    statusOf("conv-bad", null), statusOf("conv-good", null), statusOf("conv-ended", null)));
+                    statusOf("conv-bad", null), statusOf("conv-good", null), statusOf("conv-ended", null)), null);
 
             assertEquals(500, response.getStatus());
             verify(conversationService).endConversation("conv-good", "system:admin-end");
@@ -820,7 +935,7 @@ class RestConversationStoreTest {
             doThrow(new ResourceStoreException("db"))
                     .when(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0), any());
 
-            Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)));
+            Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)), null);
 
             assertEquals(200, response.getStatus());
             verify(conversationService).endConversation("conv-1", "system:admin-end");
@@ -833,7 +948,7 @@ class RestConversationStoreTest {
             storedConversation("conv-2", AGENT_A, ConversationState.IN_PROGRESS);
 
             Response response = restConversationStore.endActiveConversations(
-                    List.of(statusOf("conv-1", null), statusOf("conv-2", null)));
+                    List.of(statusOf("conv-1", null), statusOf("conv-2", null)), null);
 
             assertEquals(200, response.getStatus());
             verify(conversationService).endConversation("conv-1", "system:admin-end");
@@ -849,7 +964,7 @@ class RestConversationStoreTest {
         void pausedClaimedReady_stillEndedThroughService() throws Exception {
             storedConversation("conv-paused", AGENT_A, ConversationState.AWAITING_HUMAN);
 
-            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", ConversationState.READY)));
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-paused", ConversationState.READY)), null);
 
             // endConversation reads the previous state itself and runs the approval
             // cleanup + cancellation audit; the request's claim is never consulted.
@@ -861,7 +976,7 @@ class RestConversationStoreTest {
         void endedClaimedPaused_isSkipped() throws Exception {
             storedConversation("conv-ended", AGENT_A, ConversationState.ENDED);
 
-            restConversationStore.endActiveConversations(List.of(statusOf("conv-ended", ConversationState.AWAITING_HUMAN)));
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-ended", ConversationState.AWAITING_HUMAN)), null);
 
             verify(conversationService, never()).endConversation(anyString(), anyString());
             verify(conversationService, never()).endConversation(anyString());
@@ -873,7 +988,7 @@ class RestConversationStoreTest {
             storedConversation("conv-1", AGENT_A, ConversationState.READY);
             storedConversation("conv-2", AGENT_A, ConversationState.READY);
 
-            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null), statusOf("conv-2", null)));
+            restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null), statusOf("conv-2", null)), null);
 
             verify(resourceAccessGuard, times(1)).requireAccess(AGENT_A, AccessLevel.EDIT, "agent");
         }
@@ -886,7 +1001,7 @@ class RestConversationStoreTest {
                     .when(resourceAccessGuard).requireAccess(AGENT_B, AccessLevel.EDIT, "agent");
 
             assertThrows(ForbiddenException.class,
-                    () -> restConversationStore.endActiveConversations(List.of(statusOf("conv-foreign", null))));
+                    () -> restConversationStore.endActiveConversations(List.of(statusOf("conv-foreign", null)), null));
 
             verify(conversationService, never()).endConversation(anyString(), anyString());
             verify(conversationDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
@@ -901,7 +1016,7 @@ class RestConversationStoreTest {
                     .when(resourceAccessGuard).requireAccess(AGENT_B, AccessLevel.EDIT, "agent");
 
             assertThrows(ForbiddenException.class, () -> restConversationStore.endActiveConversations(
-                    List.of(statusOf("conv-mine", null), statusOf("conv-foreign", null))));
+                    List.of(statusOf("conv-mine", null), statusOf("conv-foreign", null)), null));
 
             verify(conversationService, never()).endConversation(anyString(), anyString());
         }
@@ -912,7 +1027,7 @@ class RestConversationStoreTest {
             storedConversation("conv-1", AGENT_A, ConversationState.READY);
 
             Response response = restConversationStore.endActiveConversations(
-                    List.of(statusOf("conv-missing", null), statusOf("conv-1", null)));
+                    List.of(statusOf("conv-missing", null), statusOf("conv-1", null)), null);
 
             assertEquals(200, response.getStatus());
             verify(conversationService, never()).endConversation(eq("conv-missing"), anyString());
@@ -927,7 +1042,7 @@ class RestConversationStoreTest {
                     .thenThrow(new ResourceNotFoundException("archived"));
             when(conversationDescriptorStore.readDescriptorWithHistory("conv-soft", 0)).thenReturn(descriptorOfAgent(AGENT_A));
 
-            Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-soft", null)));
+            Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-soft", null)), null);
 
             assertEquals(200, response.getStatus());
             verify(conversationService).endConversation("conv-soft", "system:admin-end");
@@ -936,7 +1051,7 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("a missing body is a 400")
         void nullBodyRejected() {
-            assertThrows(BadRequestException.class, () -> restConversationStore.endActiveConversations(null));
+            assertThrows(BadRequestException.class, () -> restConversationStore.endActiveConversations(null, null));
         }
     }
 
@@ -1635,7 +1750,7 @@ class RestConversationStoreTest {
                     .thenThrow(new ResourceStoreException("DB error"));
 
             assertThrows(ResourceStoreException.class,
-                    () -> restConversationStore.endActiveConversations(List.of(status)));
+                    () -> restConversationStore.endActiveConversations(List.of(status), null));
             verify(conversationService, never()).endConversation(anyString(), anyString());
         }
     }

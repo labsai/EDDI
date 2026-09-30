@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -83,6 +84,7 @@ class GroupWorkspaceStoreTest {
 
         assertEquals("5", workspace.getRevision());
         verify(storage).storeIfFieldEquals(res, "revision", "4");
+        verify(storage, never()).storeIfFieldEqualsOrMissing(any(), anyString(), anyString());
         verify(storage, never()).store(any(IResourceStorage.IResource.class));
     }
 
@@ -104,8 +106,29 @@ class GroupWorkspaceStoreTest {
     }
 
     @Test
-    @DisplayName("a pre-revision document is stamped with one plain write, then CAS'd forever after")
-    void casRevision_legacyNullRevision_stampsWithPlainWrite() throws Exception {
+    @DisplayName("revision \"0\" — what a stored document WITHOUT the field reads as — also matches a missing field")
+    void casRevision_initialRevision_alsoMatchesAMissingField() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("0");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+
+        assertTrue(store.casRevision(workspace));
+
+        assertEquals("1", workspace.getRevision());
+        // A strict revision == "0" filter never matches a stored document that has
+        // no revision (on either backend), so such a document could never be
+        // written again — every backlog and cadence write would 409.
+        verify(storage).storeIfFieldEqualsOrMissing(res, "revision", "0");
+        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    @Test
+    @DisplayName("an explicit null revision is treated as unstamped — guarded write, stamped \"1\", never blind")
+    void casRevision_nullRevision_isGuardedAndStamped() throws Exception {
         var workspace = new GroupWorkspace();
         workspace.setId("ws-1");
         workspace.setGroupId(GROUP_ID);
@@ -116,8 +139,67 @@ class GroupWorkspaceStoreTest {
         assertTrue(store.casRevision(workspace));
 
         assertEquals("1", workspace.getRevision());
-        verify(storage).store(any(IResourceStorage.IResource.class));
-        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+        verify(storage).storeIfFieldEqualsOrMissing(res, "revision", "0");
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    @Test
+    @DisplayName("an unstamped writer that lost the race returns false and restores its stamp")
+    void casRevision_initialRevision_lostRace_returnsFalse() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("0");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+        doThrow(new IResourceStore.ResourceModifiedException("the other first write stamped it"))
+                .when(storage).storeIfFieldEqualsOrMissing(any(), eq("revision"), eq("0"));
+
+        assertFalse(store.casRevision(workspace));
+
+        assertEquals("0", workspace.getRevision());
+    }
+
+    // =================================================================
+    // casRunningDiscussion — the same revision guard (H14c)
+    // =================================================================
+
+    @Test
+    @DisplayName("a run claim is guarded by the REVISION, so it cannot drop a concurrent backlog edit")
+    void casRunningDiscussion_guardsOnRevision_andBumpsIt() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        workspace.setRunningDiscussionId("gc-new");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+
+        assertTrue(store.casRunningDiscussion(workspace));
+
+        assertEquals("8", workspace.getRevision(),
+                "the claim bumps the revision, so a backlog add read before it now loses its CAS instead of "
+                        + "writing the claim away");
+        verify(storage).storeIfFieldEquals(res, "revision", "7");
+        verify(storage, never()).storeIfFieldEquals(any(), eq("runningDiscussionId"), anyString());
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    @Test
+    @DisplayName("a run claim that lost to ANY concurrent write reports false and restores the stamp")
+    void casRunningDiscussion_lostToConcurrentWrite_returnsFalse() throws Exception {
+        var workspace = new GroupWorkspace();
+        workspace.setId("ws-1");
+        workspace.setGroupId(GROUP_ID);
+        workspace.setRevision("7");
+        var res = resource(workspace, "ws-1");
+        when(storage.newResource(eq("ws-1"), anyInt(), eq(workspace))).thenReturn(res);
+        doThrow(new IResourceStore.ResourceModifiedException("a backlog add landed first"))
+                .when(storage).storeIfFieldEquals(any(), eq("revision"), eq("7"));
+
+        assertFalse(store.casRunningDiscussion(workspace));
+
+        assertEquals("7", workspace.getRevision());
     }
 
     @Test
@@ -128,7 +210,7 @@ class GroupWorkspaceStoreTest {
         workspace.setGroupId(GROUP_ID);
         workspace.setRevision("not-a-number");
 
-        var thrown = org.junit.jupiter.api.Assertions.assertThrows(
+        var thrown = assertThrows(
                 IResourceStore.ResourceStoreException.class, () -> store.casRevision(workspace));
 
         assertTrue(thrown.getMessage().contains("not-a-number"), thrown.getMessage());

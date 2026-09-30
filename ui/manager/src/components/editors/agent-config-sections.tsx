@@ -17,7 +17,8 @@ import {
   Trash2,
   AlertTriangle,
   Search,
-  HandMetal,
+  Hand,
+  NotebookPen,
 } from "lucide-react";
 import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { useSkills } from "@/hooks/use-capabilities";
@@ -808,7 +809,7 @@ export const UserMemorySection = memo(function UserMemorySection({
             disabled={updateAgent.isPending}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
           />
-          <Brain className="h-3.5 w-3.5 text-teal-500" />
+          <NotebookPen className="h-3.5 w-3.5 text-teal-500" />
           {t("agentDetail.enableMemoryTools", "Enable Memory Tools")}
         </label>
 
@@ -933,7 +934,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
@@ -1110,7 +1111,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   return (
     <EditorSection
       label={t("agentDetail.hitlConfig", "Human-in-the-Loop")}
-      icon={HandMetal}
+      icon={Hand}
       accent="text-amber-500"
       variant="card"
       defaultOpen={enabled}

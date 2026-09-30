@@ -9,7 +9,6 @@ import {
   Bot,
   Workflow,
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Plus,
@@ -30,8 +29,11 @@ import {
   ArrowUpCircle,
   Sparkles,
   Info,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -68,7 +70,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 const envLabels: Record<string, string> = {
@@ -101,6 +103,12 @@ export function AgentDetailPage() {
   }, [id]);
 
   const { data: versions } = useAgentVersions(id!);
+  // Delete (and sharing) need OWN. An EDIT grantee was offered Delete here and
+  // met a 403 — the agents list already hid it for them via the same level.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versions, id, workspacesEnforced);
 
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
@@ -388,7 +396,9 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // Named, not defaulted: this branch deploys to production, and
+                  // the drawer's "New conversation" must start there too.
+                  drawerStore.open(id!, agentDisplayName, "production");
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
@@ -429,7 +439,11 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // The environment the conversation is started in, so the
+                  // drawer's "New conversation" lands there as well. Left to
+                  // the default it restarted a test-only agent in production,
+                  // where it is not deployed.
+                  drawerStore.open(id!, agentDisplayName, chatEnvironment);
                   if (isChatReachable) {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
@@ -496,14 +510,16 @@ export function AgentDetailPage() {
               <Download className="h-3.5 w-3.5" />
               {t("agents.export", "Export")}
             </button>
-            <button
-              onClick={() => setShowDeleteDialog(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
-              data-testid="delete-agent-btn"
-              aria-label={t("agents.deleteAgent", "Delete agent")}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            {access.canOwn && (
+              <button
+                onClick={() => setShowDeleteDialog(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                data-testid="delete-agent-btn"
+                aria-label={t("agents.deleteAgent", "Delete agent")}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            )}
           </div>
         </div>
       </div>

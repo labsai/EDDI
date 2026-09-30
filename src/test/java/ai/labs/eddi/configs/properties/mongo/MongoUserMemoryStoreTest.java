@@ -4,6 +4,17 @@
  */
 package ai.labs.eddi.configs.properties.mongo;
 
+import org.bson.BsonString;
+import org.bson.BsonInt32;
+import org.bson.BsonDocument;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.WriteError;
+import com.mongodb.ServerAddress;
+import com.mongodb.MongoWriteException;
+import org.mockito.ArgumentCaptor;
+import com.mongodb.MongoCommandException;
+import com.mongodb.MongoClientSettings;
+import java.util.Set;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
@@ -85,6 +96,106 @@ class MongoUserMemoryStoreTest {
 
         assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> store.mergeProperties(TEST_USER, properties));
         verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    // ==================== upsertIfOwnedBy ====================
+
+    private static UserMemoryEntry globalEntry(String key, String owner) {
+        return new UserMemoryEntry(null, TEST_USER, key, "v", "fact", Visibility.global, owner, List.of(), "conv-1", false, 0, null, null);
+    }
+
+    private static MongoWriteException duplicateKey() {
+        return new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress());
+    }
+
+    @Test
+    @DisplayName("builds a unique partial index on global (userId, key)")
+    void buildsGlobalKeyIndex() {
+        var options = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(collection, atLeastOnce()).createIndex(any(Bson.class), options.capture());
+        IndexOptions global = options.getAllValues().stream().filter(o -> "idx_um_upsert_global".equals(o.getName())).findFirst()
+                .orElseThrow();
+        assertTrue(global.isUnique());
+        assertEquals(new BsonDocument("visibility", new BsonString("global")),
+                global.getPartialFilterExpression().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()));
+    }
+
+    @Test
+    @DisplayName("upsertIfOwnedBy — filters the upsert on the writer as owner")
+    void upsertIfOwnedBy_filtersOnOwner() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenReturn(UpdateResult.acknowledged(0, 0L, new BsonObjectId(TEST_OID)));
+
+        assertTrue(assertDoesNotThrow(() -> store.upsertIfOwnedBy(globalEntry("lang", TEST_AGENT), TEST_AGENT)));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        var options = ArgumentCaptor.forClass(UpdateOptions.class);
+        verify(collection).updateOne(filter.capture(), any(Bson.class), options.capture());
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry())
+                .toJson();
+        assertTrue(rendered.contains("\"sourceAgentId\": \"agent-1\""), rendered);
+        assertTrue(rendered.contains("\"visibility\": \"global\""), rendered);
+        assertTrue(options.getValue().isUpsert());
+    }
+
+    @Test
+    @DisplayName("upsertIfOwnedBy — a duplicate-key refusal means another agent holds the key")
+    void upsertIfOwnedBy_duplicateKeyIsARefusal() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenThrow(duplicateKey());
+
+        assertFalse(assertDoesNotThrow(() -> store.upsertIfOwnedBy(globalEntry("lang", TEST_AGENT), TEST_AGENT)));
+        verify(collection, times(1)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("upsertIfOwnedBy — other write errors propagate")
+    void upsertIfOwnedBy_otherWriteErrorsPropagate() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenThrow(
+                new MongoWriteException(new WriteError(121, "Document failed validation", new BsonDocument()), new ServerAddress()));
+
+        assertThrows(MongoWriteException.class, () -> store.upsertIfOwnedBy(globalEntry("lang", TEST_AGENT), TEST_AGENT));
+    }
+
+    @Test
+    @DisplayName("upsertIfOwnedBy — without the unique index, falls back to refusing a key another agent holds")
+    void upsertIfOwnedBy_fallbackWithoutUniqueIndex() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> degraded = mock(MongoCollection.class);
+        when(database.getCollection("usermemories")).thenReturn(degraded);
+        when(degraded.createIndex(any(Bson.class), argThat((IndexOptions o) -> o != null && "idx_um_upsert_global".equals(o.getName()))))
+                .thenThrow(new MongoCommandException(new BsonDocument("code", new BsonInt32(11000)), new ServerAddress()));
+        var degradedStore = new MongoUserMemoryStore(database);
+
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(degraded.find(any(Bson.class))).thenReturn(iterable);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        doReturn(cursor).when(iterable).iterator();
+        when(cursor.hasNext()).thenReturn(true, false);
+        when(cursor.next()).thenReturn(new Document("sourceAgentId", "agent-OTHER"));
+
+        assertFalse(assertDoesNotThrow(() -> degradedStore.upsertIfOwnedBy(globalEntry("lang", TEST_AGENT), TEST_AGENT)));
+        verify(degraded, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — losing the insert race on a global key reports 'already there', not an error")
+    void insertIfAbsent_duplicateKeyMeansAlreadyThere() {
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenThrow(duplicateKey());
+
+        assertNull(assertDoesNotThrow(() -> store.insertIfAbsent(globalEntry("lang", TEST_AGENT))));
+    }
+
+    @Test
+    @DisplayName("upsert — a lost insert race on a global key is retried as an update")
+    void upsert_retriesDuplicateKeyOnce() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null, new Document("_id", TEST_OID).append("sourceAgentId", TEST_AGENT));
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenThrow(duplicateKey())
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+
+        assertEquals(TEST_OID.toHexString(), assertDoesNotThrow(() -> store.upsert(globalEntry("lang", TEST_AGENT))));
+        verify(collection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
     }
 
     // ==================== readProperties ====================
@@ -417,5 +528,48 @@ class MongoUserMemoryStoreTest {
                 .append("accessCount", 0)
                 .append("createdAt", timestamp.toString())
                 .append("updatedAt", timestamp.toString());
+    }
+
+    // ==================== insertIfAbsent ====================
+
+    @Test
+    @DisplayName("insertIfAbsent — one upserting updateOne whose update is $setOnInsert only, so an existing value is never replaced")
+    void insertIfAbsentNeverReplaces() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(null); // an entry was already there
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        String inserted = store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "OLD-v5", "legacy", Visibility.global, null,
+                List.of(), null, false, 0, null, null));
+
+        assertNull(inserted, "an entry was already there");
+        var update = ArgumentCaptor.forClass(Bson.class);
+        var options = ArgumentCaptor.forClass(UpdateOptions.class);
+        verify(collection).updateOne(any(Bson.class), update.capture(), options.capture());
+        var json = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), json.keySet(), json.toJson());
+        assertTrue(options.getValue().isUpsert());
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — refuses a reserved _gdpr_ key like upsert does, and never reaches the collection")
+    void insertIfAbsentRefusesReservedKeys() {
+        var reserved = new UserMemoryEntry(null, TEST_USER, "_gdpr_processing_restricted", "false", "legacy", Visibility.global, null,
+                List.of(), null, false, 0, null, null);
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> store.insertIfAbsent(reserved));
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent — reports an insert when the upsert created the document")
+    void insertIfAbsentInserts() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getUpsertedId()).thenReturn(new BsonObjectId(TEST_OID));
+        when(collection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(updateResult);
+
+        assertEquals(TEST_OID.toHexString(),
+                store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
+                        false, 0, null, null)));
     }
 }

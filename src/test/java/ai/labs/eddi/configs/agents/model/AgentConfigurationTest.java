@@ -327,6 +327,24 @@ class AgentConfigurationTest {
             assertEquals(3, configured.getMaxSummarizationCalls());
         }
 
+        /**
+         * The store serializes the whole agent. When the default {@code 10} was written
+         * out, reading the document back called the setter, and every config that never
+         * mentioned the field counted as having "set" the deprecated ceiling after its
+         * first save.
+         */
+        @Test
+        void untouchedCeilingDoesNotBecomeExplicitAfterASaveLoadRoundTrip() throws Exception {
+            var mapper = new ObjectMapper();
+
+            String stored = mapper.writeValueAsString(new AgentConfiguration.DreamConfig());
+            assertFalse(stored.contains("maxSummarizationCalls"), "the default must not be written into stored agents: " + stored);
+
+            var reloaded = mapper.readValue(stored, AgentConfiguration.DreamConfig.class);
+            assertFalse(reloaded.isMaxSummarizationCallsSet(), "an untouched ceiling must stay untouched across save/load");
+            assertEquals(10, reloaded.getMaxSummarizationCalls());
+        }
+
         @Test
         void maxSummarizationCallsMarkerSurvivesJsonRoundTrip() throws Exception {
             var mapper = new ObjectMapper();

@@ -258,6 +258,11 @@ A agent is simply a **list of workflow references**:
 }
 ```
 
+Every agent version also carries a server-assigned `compatibilityGeneration`. Versions with the
+same generation are declared compatible, and a running conversation follows the newest deployed
+one from its next turn; every save is a breaking change unless the save says otherwise. See
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
 ### 2. Workflow Level
 
 **File**: `{workflowId}.workflow.json`
@@ -974,7 +979,7 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
 4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
 5. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (5min default) and clock-skew (30s default) checks. Duplicate nonces are rejected
-6. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key before sending context
+6. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key. This is **detect-and-log, not a gate**: a failed or unsigned prior entry is recorded at ERROR (for security monitoring) but is **not currently dropped or blocked** — the transcript is still passed to the receiving agent. Hard enforcement (excluding unverified entries from the context the receiver sees) is a planned follow-up; do not rely on this flag to keep tampered peer content out of an agent's context today
 
 **What is NOT covered:** MCP invocation signing is not yet implemented — the `signMcpInvocations` config field has been removed until the feature is built.
 
@@ -1002,7 +1007,7 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 Production response headers (configured via `application.properties`):
 - `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
+- `X-Frame-Options: DENY` (everywhere except the embeddable Chat UI at `/chat`, whose framing is `eddi.chat.frame-ancestors`, default `'none'`)
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-XSS-Protection: 0`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`

@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -98,6 +99,10 @@ public class McpConversationTools {
     // (CDI overwrites it with the real registry in production).
     @Inject
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    // Same pattern: the strict default for directly constructed unit tests.
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
@@ -857,6 +862,12 @@ public class McpConversationTools {
             try {
                 agentTriggerStore.readAgentTrigger(intent);
             } catch (Exception triggerEx) {
+                if (triggerEx instanceof IRestAgentTriggerStore.TriggerNotVisibleException) {
+                    // The trigger still exists but now routes to an agent this caller may
+                    // not use. Refuse, but keep the mapping: it is not stale, and deleting
+                    // it would destroy the user's standing conversation over a sharing change.
+                    throw new RuntimeException("Agent trigger for intent '" + intent + "' is not available to you");
+                }
                 if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
                     userConversationStore.deleteUserConversation(intent, userId);
                     throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
@@ -900,7 +911,10 @@ public class McpConversationTools {
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
         resourceAccessGuard.requireAgentUseAccess(agentId);
-        var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
+        // The same boundary the REST trigger path applies (RestAgentManagement goes
+        // through RestAgentEngine): engine-reserved keys are never taken from a
+        // trigger's initial context — see ClientContextGuard.
+        var initialContext = new HashMap<String, Context>(clientContextGuard.strip(deployment.getInitialContext()));
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 

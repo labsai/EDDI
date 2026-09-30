@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.LegacyTarget;
@@ -24,6 +24,8 @@ import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -42,7 +44,7 @@ class ChannelTargetRouterDeepBranchTest {
     void setUp() throws Exception {
         var channelStore = mock(IChannelIntegrationStore.class);
         var descriptorStore = mock(IDocumentDescriptorStore.class);
-        var agentAdmin = mock(IRestAgentAdministration.class);
+        var agentAdmin = mock(IDeploymentStatusReader.class);
         var agentStore = mock(IAgentStore.class);
         var secretResolver = mock(SecretResolver.class);
         var cacheFactory = mock(ICacheFactory.class);
@@ -50,7 +52,7 @@ class ChannelTargetRouterDeepBranchTest {
         doReturn(threadTargetLock).when(cacheFactory).getCache(anyString(), any(Duration.class));
 
         doReturn(List.of()).when(descriptorStore).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
-        doReturn(List.of()).when(agentAdmin).getDeploymentStatuses(any());
+        doReturn(List.of()).when(agentAdmin).readAllDeploymentStatuses(any());
 
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, cacheFactory);
         // Prevent refresh from running during tests
@@ -370,6 +372,82 @@ class ChannelTargetRouterDeepBranchTest {
         }
     }
 
+    // ─── Routes bound to the verifying app ──────────────────────────────
+
+    @Nested
+    @DisplayName("routes bound to the app whose secret verified the event")
+    class SignerBoundRoutes {
+
+        private ChannelTarget agentTarget(String agentId) {
+            var target = createTarget(agentId, List.of());
+            target.setTargetId(agentId);
+            return target;
+        }
+
+        private ChannelIntegrationConfiguration integrationWith(String name, String secret, ChannelTarget target) {
+            var integration = createIntegration(target.getName(), List.of(target),
+                    Map.of("channelId", "C_" + name, "signingSecret", secret, "botToken", "xoxb-" + name));
+            integration.setName(name);
+            return integration;
+        }
+
+        @Test
+        @DisplayName("DM thread credentials come only from an app holding the secret AND serving the locked target")
+        void threadCredentialsRequireSecretAndTarget() throws Exception {
+            var integrationA = integrationWith("int-a", "secret-a", agentTarget("agent-A"));
+            var integrationB = integrationWith("int-b", "secret-b", agentTarget("agent-B"));
+            setField(router, "integrationMap", Map.of("slack:C_int-a", integrationA, "slack:C_int-b", integrationB));
+
+            var own = router.threadCredentialsForDm("slack", agentTarget("agent-A"), "secret-a");
+            assertNotNull(own);
+            assertSame(integrationA, own.integration());
+            assertEquals("xoxb-int-a", own.botToken());
+
+            // B's secret cannot continue a thread locked to A's agent.
+            assertNull(router.threadCredentialsForDm("slack", agentTarget("agent-A"), "secret-b"));
+            assertNull(router.threadCredentialsForDm("slack", agentTarget("agent-A"), null));
+        }
+
+        @Test
+        @DisplayName("DM thread credentials of a legacy connector: same secret and same target")
+        void threadCredentialsFromLegacyConnector() throws Exception {
+            setField(router, "legacyMap", Map.of("C_L", new LegacyTarget("agent-L", "xoxb-l", "secret-l", null)));
+
+            var own = router.threadCredentialsForDm("slack", agentTarget("agent-L"), "secret-l");
+            assertNotNull(own);
+            assertEquals("xoxb-l", own.botToken());
+            assertEquals("secret-l", own.signingSecret());
+            assertNull(router.threadCredentialsForDm("slack", agentTarget("agent-L"), "secret-x"));
+            assertNull(router.threadCredentialsForDm("slack", agentTarget("agent-Z"), "secret-l"));
+        }
+
+        @Test
+        @DisplayName("a legacy connector's DM goes to the connector holding the secret, never to an integration")
+        void legacyDmGoesToItsConnector() throws Exception {
+            var integration = integrationWith("int-a", "secret-a", agentTarget("agent-A"));
+            setField(router, "integrationMap", Map.of("slack:C_int-a", integration));
+            setField(router, "legacyMap", Map.of(
+                    "C_L1", new LegacyTarget("agent-L1", "xoxb-l1", "secret-l1", null),
+                    "C_L2", new LegacyTarget("agent-L2", "xoxb-l2", "secret-l2", null)));
+
+            var resolved = router.resolveLegacyDefaultForDm("hello", "secret-l2");
+            assertNotNull(resolved);
+            assertEquals("agent-L2", resolved.target().getTargetId());
+            assertEquals("xoxb-l2", resolved.botToken());
+            assertNull(router.resolveLegacyDefaultForDm("hello", "secret-a"), "an integration's secret selects no legacy DM");
+            assertNull(router.resolveLegacyDefaultForDm("help", "secret-l2"));
+        }
+
+        @Test
+        @DisplayName("secretsEqual: equal non-blank secrets only")
+        void secretsEqual() {
+            assertTrue(ChannelTargetRouter.secretsEqual("s", "s"));
+            assertFalse(ChannelTargetRouter.secretsEqual("s", "t"));
+            assertFalse(ChannelTargetRouter.secretsEqual(null, null));
+            assertFalse(ChannelTargetRouter.secretsEqual(" ", " "));
+        }
+    }
+
     // ─── getBotToken ────────────────────────────────────────────────────
 
     @Nested
@@ -476,6 +554,50 @@ class ChannelTargetRouterDeepBranchTest {
         @DisplayName("null channel type → false")
         void nullType() {
             assertFalse(router.hasAnyChannels(null));
+        }
+    }
+
+    // ─── getIntegrationByName — ambiguity refusal (Finding C) ─────────────
+
+    @Nested
+    @DisplayName("getIntegrationByName — non-unique display name")
+    class GetIntegrationByNameAmbiguity {
+
+        private ChannelIntegrationConfiguration named(String channelId, String name, String secret) {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setName(name);
+            cfg.setChannelType("slack");
+            var pc = new HashMap<String, String>();
+            pc.put("channelId", channelId);
+            pc.put("signingSecret", secret);
+            cfg.setPlatformConfig(pc);
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("unique name resolves")
+        void uniqueNameResolves() throws Exception {
+            setField(router, "integrationMap", Map.of(
+                    "slack:C_VICTIM", named("C_VICTIM", "Support Hub", "victim-secret")));
+            var resolved = router.getIntegrationByName("slack", "Support Hub");
+            assertTrue(resolved.isPresent());
+            assertEquals("victim-secret", resolved.get().getPlatformConfig().get("signingSecret"));
+        }
+
+        @Test
+        @DisplayName("two integrations sharing a name → refuse (empty), so an attacker "
+                + "cannot bind a decision to the victim by copying its name")
+        void duplicateNameRefused() throws Exception {
+            // Victim integration and an attacker's integration (different channel, its own
+            // secret) both named "Support Hub".
+            setField(router, "integrationMap", new LinkedHashMap<>(Map.of(
+                    "slack:C_VICTIM", named("C_VICTIM", "Support Hub", "victim-secret"),
+                    "slack:C_ATTACKER", named("C_ATTACKER", "Support Hub", "attacker-secret"))));
+
+            var resolved = router.getIntegrationByName("slack", "Support Hub");
+
+            assertTrue(resolved.isEmpty(),
+                    "an ambiguous name must resolve to no integration (fail-closed), never to either one");
         }
     }
 

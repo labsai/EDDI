@@ -5,10 +5,10 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  CheckCircle,
   AlertCircle,
   ArrowRightLeft,
   Sparkles,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
@@ -29,6 +29,7 @@ import type {
   SyncRequest,
 } from "@/lib/api/backup";
 import { hasFailures, parseResourceUri } from "@/lib/api/backup";
+import { getErrorMessage } from "@/lib/api-client";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;
@@ -49,6 +50,18 @@ interface AgentMapping {
 }
 
 
+
+/** A preview entry standing in for one the source did not return. */
+function missingPreview(sourceAgentId: string, message: string): ImportPreview {
+  return {
+    sourceAgentId,
+    sourceAgentName: null,
+    targetAgentId: null,
+    targetAgentName: null,
+    resources: [],
+    error: message,
+  };
+}
 
 export function SyncPage() {
   const { t } = useTranslation();
@@ -131,6 +144,24 @@ export function SyncPage() {
     );
   }
 
+  const noPreviewMessage = t(
+    "syncPage.noPreviewReturned",
+    "The source returned no preview for this agent."
+  );
+
+  // The agent list and every preview belong to the source they were fetched
+  // from. Editing the URL or credentials used to keep both, so a sync could run
+  // against a different instance than the one that was previewed.
+  function handleSourceChange(apply: () => void) {
+    apply();
+    if (mappings.length > 0) {
+      setMappings([]);
+      setExpandedAgent(null);
+      previewBatchMutation.reset();
+      executeBatchMutation.reset();
+    }
+  }
+
   function handlePreviewAll() {
     const selected = mappings.filter((m) => m.checked);
     if (selected.length === 0) return;
@@ -146,6 +177,15 @@ export function SyncPage() {
     // replace; leaving it on screen reads as the result of what is about to happen.
     executeBatchMutation.reset();
 
+    // Previews from an earlier run must not survive this one. They used to:
+    // a mapping the new response did not cover (or every mapping, when the
+    // request failed) kept its OLD preview, and "Sync Selected" — which is
+    // enabled by any previewed selection — then synced on the strength of a
+    // diff nobody had just looked at. That includes UNCHECKED mappings: one
+    // unchecked before a failed run and re-checked after it re-armed Sync with
+    // its old preview.
+    setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -157,7 +197,13 @@ export function SyncPage() {
               const p = previews.find(
                 (pr) => pr.sourceAgentId === m.remoteId
               );
-              if (!p) return m;
+              if (!p) {
+                return {
+                  ...m,
+                  preview: missingPreview(m.remoteId, noPreviewMessage),
+                  overwrite: [],
+                };
+              }
               // With no target named, the backend previews onto the agent an earlier
               // sync promoted from this source. Adopt it, so the row shows which agent
               // will be written and the sync names the same one.
@@ -253,8 +299,8 @@ export function SyncPage() {
         <SyncConfigPanel
           url={syncUrl}
           auth={syncAuth}
-          onUrlChange={setSyncUrl}
-          onAuthChange={setSyncAuth}
+          onUrlChange={(v) => handleSourceChange(() => setSyncUrl(v))}
+          onAuthChange={(v) => handleSourceChange(() => setSyncAuth(v))}
           onConnected={handleConnected}
         />
         {localAgentsFailed && (
@@ -431,13 +477,25 @@ export function SyncPage() {
               {checkedCount} {t("syncPage.agentsSelected", "agents selected")} ·{" "}
               {totalResources} {t("syncPage.totalResources", "resources")}
             </span>
+            {previewBatchMutation.isError && (
+              // A failed preview used to leave the page silent: the spinner
+              // stopped and nothing else changed.
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                data-testid="sync-preview-all-error"
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                {getErrorMessage(previewBatchMutation.error) ||
+                  t("syncPage.previewFailed", "Preview failed")}
+              </span>
+            )}
             {executeBatchMutation.isError && (
               <span
                 className="inline-flex items-center gap-1 text-destructive"
                 data-testid="sync-outcome-error"
               >
                 <AlertCircle className="h-3.5 w-3.5" />
-                {(executeBatchMutation.error as Error)?.message ||
+                {getErrorMessage(executeBatchMutation.error) ||
                   t("syncPage.syncError", "Sync failed")}
               </span>
             )}
@@ -511,7 +569,7 @@ function SyncOutcome({
           </>
         ) : (
           <>
-            <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             <span className="text-emerald-600 dark:text-emerald-400">
               {wrote > 0
                 ? t("syncPage.syncSuccess", "Sync complete")

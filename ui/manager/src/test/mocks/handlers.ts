@@ -679,6 +679,19 @@ export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
+/**
+ * A chat message containing this makes the mocked turn fail the way a rejected
+ * LLM call does: `conversationState: ERROR`, no reply, and the reason under
+ * `taskErrors` — on the plain and the streaming path.
+ */
+export const TASK_FAILURE_TRIGGER = "trigger a task failure";
+
+/** The reason the mocked failed turn reports. */
+export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
+
+/** What the mocked ingestion status says for a `replace=true` ingestion. */
+export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
+
 function readSeed<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -1389,8 +1402,58 @@ export const handlers = [
     });
   }),
 
+  // Streaming send (v6: POST /agents/:conversationId/stream). A plain reply, or —
+  // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
+  http.post("*/agents/:conversationId/stream", async ({ request }) => {
+    const body = await request.clone().text();
+    const frame = (name: string, data: unknown) =>
+      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+    const frames = body.includes(TASK_FAILURE_TRIGGER)
+      ? [
+          frame("task_failed", {
+            taskId: "eddi://ai.labs.llm",
+            taskType: "langchain",
+            errorType: "unknown",
+            error: "Streaming chat failed: `temperature` is deprecated for this model.",
+          }),
+          frame("done", {
+            conversationState: "ERROR",
+            conversationOutputs: [
+              {
+                actions: ["send_message"],
+                taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+              },
+            ],
+          }),
+        ]
+      : [
+          frame("token", "Happy to help."),
+          frame("done", {
+            conversationState: "READY",
+            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+          }),
+        ];
+    return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
+  }),
+
   // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
-  http.post("*/agents/:conversationId", () => {
+  http.post("*/agents/:conversationId", async ({ request }) => {
+    if ((await request.clone().text()).includes(TASK_FAILURE_TRIGGER)) {
+      return HttpResponse.json({
+        agentId: "agent1",
+        agentVersion: 3,
+        conversationId: "conv-mock",
+        conversationState: "ERROR",
+        environment: "production",
+        conversationSteps: [],
+        conversationOutputs: [
+          {
+            actions: ["send_message"],
+            taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+          },
+        ],
+      });
+    }
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 3,
@@ -2286,6 +2349,7 @@ export const handlers = [
             maxDepth: 3,
             maxPages: 200,
             excludePatterns: ["*.pdf"],
+            sitemapUrls: ["https://example.com/docs/sitemap.xml"],
             requestDelayMs: 500,
             respectRobots: true,
           },
@@ -2300,15 +2364,20 @@ export const handlers = [
   }),
 
   // RAG ingestion endpoints (mock)
-  http.post("*/ragstore/rags/:id/ingest", () => {
+  http.post("*/ragstore/rags/:id/ingest", ({ request }) => {
+    // The id records whether the client asked to replace, so the status below can
+    // answer the way a store that cannot delete by metadata does.
+    const replace = new URL(request.url).searchParams.get("replace") === "true";
     return HttpResponse.json({
-      ingestionId: `ingest-${Date.now()}`,
+      ingestionId: `ingest-${replace ? "replace-" : ""}${Date.now()}`,
     });
   }),
 
-  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", () => {
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", ({ params }) => {
+    const replaced = String(params.ingestionId).startsWith("ingest-replace-");
     return HttpResponse.json({
       status: "completed",
+      ...(replaced ? { warning: MOCK_REPLACE_WARNING } : {}),
     });
   }),
 
@@ -3434,7 +3503,19 @@ export const logAdminHandlers = [
 ];
 
 // --- Secrets Vault Mock ---
-const MOCK_SECRETS = [
+type MockSecret = {
+  tenantId: string;
+  keyName: string;
+  createdAt: string;
+  lastAccessedAt: string | null;
+  lastRotatedAt: string | null;
+  checksum: string;
+  description: string;
+  allowedAgents: string[];
+};
+
+/** The seed. Never mutated: the handlers work on `secretsState` below. */
+const MOCK_SECRETS: readonly MockSecret[] = [
   {
     tenantId: "default",
     keyName: "openai-api-key",
@@ -3625,6 +3706,27 @@ export const variablesHandlers = [
   }),
 ];
 
+/**
+ * **These handlers hold state.** The list, metadata GET, store PUT, grant PUT
+ * and DELETE all read and write this one array, so a key created through the
+ * mocked Add flow is found by the next lookup (and a second create of it is
+ * refused as a duplicate), and a deleted key is gone. A fixed array the writes
+ * never touched let a lookup contradict a write that had just succeeded.
+ * `server.resetHandlers()` does not reset module state, so `src/test/setup.ts`
+ * calls {@link resetSecretsMockState} after every test.
+ */
+let secretsState: MockSecret[] = [];
+
+/** Restore the seed secrets; called after every test. */
+export function resetSecretsMockState(): void {
+  secretsState = MOCK_SECRETS.map((s) => ({ ...s, allowedAgents: [...s.allowedAgents] }));
+}
+resetSecretsMockState();
+
+function findMockSecret(tenantId: unknown, keyName: unknown): MockSecret | undefined {
+  return secretsState.find((s) => s.tenantId === tenantId && s.keyName === keyName);
+}
+
 export const secretsHandlers = [
   // List secrets (tenant-scoped, no agentId)
   http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
@@ -3634,10 +3736,18 @@ export const secretsHandlers = [
     // Skip paths like /tenantId/keyName (those are getMetadata)
     const segments = url.pathname.split("/").filter(Boolean);
     if (segments.length > 3) return;
-    const filtered = MOCK_SECRETS.filter(
+    const filtered = secretsState.filter(
       (s) => s.tenantId === params.tenantId,
     );
     return HttpResponse.json(filtered);
+  }),
+
+  // One key's metadata (never its value); 404 when the key does not exist.
+  http.get("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const found = findMockSecret(params.tenantId, params.keyName);
+    return found
+      ? HttpResponse.json(found)
+      : HttpResponse.json({ error: "Secret not found" }, { status: 404 });
   }),
 
   // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
@@ -3653,9 +3763,7 @@ export const secretsHandlers = [
         allowedAgents?: string[];
         description?: string;
       };
-      const existing = MOCK_SECRETS.find(
-        (s) => s.tenantId === tenantId && s.keyName === keyName,
-      );
+      const existing = findMockSecret(tenantId, keyName);
       if (!existing) {
         return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
       }
@@ -3669,6 +3777,12 @@ export const secretsHandlers = [
         );
       }
       const url = new URL(request.url);
+      const dryRun = url.searchParams.get("dryRun") === "true";
+      const previousAllowedAgents = existing.allowedAgents;
+      if (!dryRun) {
+        existing.allowedAgents = [...body.allowedAgents];
+        if (body.description !== undefined) existing.description = body.description;
+      }
       return HttpResponse.json({
         reference:
           tenantId === "default"
@@ -3676,9 +3790,9 @@ export const secretsHandlers = [
             : `\${vault:${tenantId}/${keyName}}`,
         tenantId,
         keyName,
-        dryRun: url.searchParams.get("dryRun") === "true",
+        dryRun,
         allowedAgents: body.allowedAgents,
-        previousAllowedAgents: existing.allowedAgents,
+        previousAllowedAgents,
         grantsAllAgents: body.allowedAgents.includes("*"),
         description: body.description ?? existing.description,
         createdAt: existing.createdAt,
@@ -3688,10 +3802,33 @@ export const secretsHandlers = [
     },
   ),
 
-  // Store secret (tenant-scoped)
-  http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+  // Store secret (tenant-scoped): create, or replace the value of an existing
+  // key. The value itself is never kept — only the metadata a lookup returns.
+  http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ params, request }) => {
     const tenantId = params.tenantId as string;
     const keyName = params.keyName as string;
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+    };
+    const now = new Date().toISOString();
+    const existing = findMockSecret(tenantId, keyName);
+    if (existing) {
+      existing.lastRotatedAt = now;
+      if (body.description !== undefined) existing.description = body.description;
+      if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+    } else {
+      secretsState.push({
+        tenantId,
+        keyName,
+        createdAt: now,
+        lastAccessedAt: null,
+        lastRotatedAt: null,
+        checksum: "0".repeat(64),
+        description: body.description ?? "",
+        allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+      });
+    }
     const ref = tenantId === "default"
       ? `\${vault:${keyName}}`
       : `\${vault:${tenantId}/${keyName}}`;
@@ -3706,28 +3843,24 @@ export const secretsHandlers = [
   }),
 
   // Delete secret (tenant-scoped)
-  http.delete(
-    "*/secretstore/secrets/:tenantId/:keyName",
-    () => new HttpResponse(null, { status: 204 }),
-  ),
+  http.delete("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const index = secretsState.findIndex(
+      (s) => s.tenantId === params.tenantId && s.keyName === params.keyName,
+    );
+    if (index < 0) {
+      return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+    }
+    secretsState.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   // Health check
   http.get("*/secretstore/secrets/health", () =>
     HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
 
-  // Rotate secret
-  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
-    const tenantId = params.tenantId as string;
-    const keyName = params.keyName as string;
-    const ref = tenantId === "default"
-      ? `\${vault:${keyName}}`
-      : `\${vault:${tenantId}/${keyName}}`;
-    return HttpResponse.json(
-      { reference: ref, tenantId, keyName },
-      { status: 200 },
-    );
-  }),
+  // No rotate handler: EDDI has no rotate endpoint. A rotation is a PUT of the
+  // new value with the current grant (see `rotateSecret`), answered above.
 ];
 
 // ─── Audit Trail Handlers ────────────────────────────────────────────────────
@@ -3838,7 +3971,37 @@ const MOCK_AUDIT_ENTRIES = [
   },
 ];
 
+/** A clean `AuditVerificationReport` for the mock entries — every signature recomputes. */
+function mockAuditVerification(scope: "conversation" | "agent", scopeId: string) {
+  return {
+    scope,
+    scopeId,
+    signingEnabled: true,
+    entriesChecked: MOCK_AUDIT_ENTRIES.length,
+    valid: MOCK_AUDIT_ENTRIES.length,
+    recovered: 0,
+    recoverySkipped: 0,
+    invalid: 0,
+    unsigned: 0,
+    chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
+    missingSequences: [],
+    undeliveredSequences: [],
+    duplicateSequences: [],
+    problems: [],
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
 export const auditHandlers = [
+  // Integrity verification — registered before `/:conversationId`, which would
+  // otherwise never see these two-segment paths anyway, but keeps the intent plain.
+  http.get("*/auditstore/verify/agent/:agentId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("agent", params.agentId as string)),
+  ),
+  http.get("*/auditstore/verify/:conversationId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
+  ),
+
   // Get audit trail by conversation
   http.get("*/auditstore/:conversationId/count", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);

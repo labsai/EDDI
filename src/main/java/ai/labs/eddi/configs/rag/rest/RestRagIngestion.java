@@ -56,10 +56,24 @@ public class RestRagIngestion implements IRestRagIngestion {
         this.ingestedFileService = ingestedFileService;
     }
 
+    /**
+     * The name {@code documentName} defaults to — see {@link IRestRagIngestion}.
+     */
+    static final String UNNAMED_DOCUMENT = "unnamed";
+
     @Override
-    public Response ingestDocument(String ragConfigId, Integer version, String kbId, String documentName, String documentContent) {
+    public Response ingestDocument(String ragConfigId, Integer version, String kbId, String documentName, Boolean replace,
+                                   String documentContent) {
         if (documentContent == null || documentContent.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Document content is required")).build();
+        }
+        boolean replacing = Boolean.TRUE.equals(replace);
+        if (replacing && (documentName == null || documentName.isBlank() || UNNAMED_DOCUMENT.equals(documentName))) {
+            // Replacement is keyed on the name. Without one, every document ingested
+            // without a name shares "unnamed", and replacing would delete all of them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "replace=true needs an explicit documentName: it replaces what was ingested under that name"))
+                    .build();
         }
 
         // EDIT, not the VIEW that reading the config needs. Ingestion writes documents
@@ -83,7 +97,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         // Use provided kbId, or fall back to the RAG config name, or the config ID
         String effectiveKbId = kbId != null && !kbId.isBlank() ? kbId : ragConfig.getName() != null ? ragConfig.getName() : ragConfigId;
 
-        String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig);
+        String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig, replacing);
 
         LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(effectiveKbId), sanitize(documentName),
                 documentContent.length());
@@ -104,6 +118,10 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .entity(Map.of("ingestionId", ingestionId, "status", status, "error",
                             "No ingestion with this id is known (statuses are kept for one hour)"))
                     .build();
+        }
+        String warning = ragIngestionService.getWarning(ingestionId);
+        if (warning != null) {
+            return Response.ok(Map.of("ingestionId", ingestionId, "status", status, "warning", warning)).build();
         }
         return Response.ok(Map.of("ingestionId", ingestionId, "status", status)).build();
     }
@@ -182,16 +200,17 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (resolved.error() != null) {
             return resolved.error();
         }
-        if (sourceIngestionService.activeRun(ragConfigId, resolved.source()).isPresent()) {
-            // The purge deletes the run history, including the RUNNING row that is the
-            // only thing stopping a second crawl into the same knowledge base — and
-            // the worker still going would write its state rows back afterwards.
+        // Refused while a run is in flight, and decided by the purge itself, under the
+        // source's run claim: it deletes the run history, including the RUNNING row
+        // that is the only thing stopping a second crawl into the same knowledge
+        // base, and a worker still going would write its state rows back afterwards.
+        // A check made here first let a run start between the check and the purge.
+        if (!sourceIngestionService.purge(ragConfigId, resolved.source())) {
             return Response.status(Response.Status.CONFLICT)
                     .entity(Map.of("error", "A run is in flight for this source. Purge once it has finished.",
                             "sourceId", sourceId))
                     .build();
         }
-        sourceIngestionService.purge(ragConfigId, resolved.source());
         LOGGER.infof("Purged ingestion state for source %s of RAG config %s", sanitize(sourceId), sanitize(ragConfigId));
         return Response.ok(Map.of("status", "purged", "sourceId", sourceId)).build();
     }
@@ -220,9 +239,11 @@ public class RestRagIngestion implements IRestRagIngestion {
 
         // Handed over as suppliers, not as bytes: the service reads one file at a
         // time, so a batch costs one file of memory rather than the whole request.
-        // The runtime has already spooled every part to disk.
+        // The runtime has already spooled every part to disk, and says how big each
+        // one is — so a file over the source's limit is refused on that figure,
+        // before its bytes are read into memory at all.
         List<IngestedFileService.IncomingFile> incoming = files.stream()
-                .map(file -> new IngestedFileService.IncomingFile(file.fileName(),
+                .map(file -> new IngestedFileService.IncomingFile(file.fileName(), file.size(),
                         () -> Files.readAllBytes(file.uploadedFile())))
                 .toList();
 
@@ -292,6 +313,10 @@ public class RestRagIngestion implements IRestRagIngestion {
             case BUSY -> Response.status(Response.Status.CONFLICT)
                     .entity(Map.of("error", "A run started for this source. Delete files once it has finished.",
                             "sourceId", sourceId))
+                    .build();
+            case REMOVAL_FAILED -> Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The vector store could not remove the text this file produced, so "
+                            + "the file was kept. Try deleting it again.", "fileId", fileId))
                     .build();
             case DELETED -> Response.ok(Map.of("status", "deleted", "fileId", fileId)).build();
             case DELETED_BUT_CHUNKS_REMAIN -> Response.ok(Map.of(

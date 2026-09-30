@@ -14,9 +14,11 @@ import io.vertx.core.Handler;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpMethod;
+import io.vertx.core.streams.WriteStream;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.HttpResponse;
-import io.vertx.ext.web.client.WebClientSession;
+import io.vertx.ext.web.client.WebClient;
+import io.vertx.ext.web.codec.BodyCodec;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -46,7 +48,7 @@ public class HttpClientWrapper implements IHttpClient {
     private static final String KEY_EQUALS = "=";
     private static final String KEY_MAX_LENGTH = "maxLength";
     private static final int TEXT_LIMIT = 150;
-    private final WebClientSession webClient;
+    private final WebClient webClient;
     private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
@@ -70,6 +72,24 @@ public class HttpClientWrapper implements IHttpClient {
         request.putHeader("User-Agent", userAgent);
 
         return new RequestWrapper(uri, request, vertxMethod);
+    }
+
+    /**
+     * Performs the actual piped send: streams the response body into {@code sink}
+     * (size-capped) and hands the response — sans body, which lives in the sink —
+     * to {@code responseHandler}. Package-private and on the outer class so a unit
+     * test can stub the transport (the one part that needs a real Vert.x exchange)
+     * while still exercising the real {@code doSend}/{@code handleResponse} logic
+     * through {@code responseHandler} and {@code sink}.
+     */
+    void executePipedSend(HttpRequest<Buffer> vertxRequest, Buffer body, CappedBufferSink sink,
+                          Handler<AsyncResult<HttpResponse<Void>>> responseHandler) {
+        HttpRequest<Void> piped = vertxRequest.as(BodyCodec.pipe(sink, false));
+        if (body != null) {
+            piped.sendBuffer(body, responseHandler);
+        } else {
+            piped.send(responseHandler);
+        }
     }
 
     /**
@@ -183,8 +203,9 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public IRequest setMaxResponseSize(int maxLength) {
             this.maxLength = maxLength;
-            // Note: Vert.x WebClient buffers the entire response by default.
-            // Size limits are validated in handleResponse() after the response is received.
+            // Enforced while the body streams: doSend pipes the response into a
+            // CappedBufferSink that fails the transfer once it would exceed maxLength,
+            // rather than buffering the whole body and measuring it afterwards.
             return this;
         }
 
@@ -231,8 +252,12 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void doSend(Handler<AsyncResult<IResponse>> handler) {
-            // Buffer entire response in memory; check size limits in handleResponse to
-            // mitigate large responses.
+            // Stream the response into a size-capped sink instead of buffering the
+            // whole body and checking the length afterwards. A body that exceeds
+            // maxLength fails the sink mid-stream, so the transfer is aborted rather
+            // than pulled fully into memory first.
+            CappedBufferSink sink = new CappedBufferSink(maxLength);
+            Handler<AsyncResult<HttpResponse<Void>>> responseHandler = ar -> handleResponse(ar, sink, handler);
             if (requestBody != null) {
                 Buffer buffer;
                 try {
@@ -241,17 +266,19 @@ public class HttpClientWrapper implements IHttpClient {
                     handler.handle(Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
                     return;
                 }
-                request.sendBuffer(buffer, ar -> handleResponse(ar, handler));
+                executePipedSend(request, buffer, sink, responseHandler);
             } else {
-                request.send(ar -> handleResponse(ar, handler));
+                executePipedSend(request, null, sink, responseHandler);
             }
         }
 
-        private void handleResponse(AsyncResult<HttpResponse<Buffer>> ar,
+        private void handleResponse(AsyncResult<HttpResponse<Void>> ar, CappedBufferSink sink,
                                     Handler<AsyncResult<IResponse>> handler) {
             if (ar.succeeded()) {
-                HttpResponse<Buffer> response = ar.result();
-                // Check Content-Length header if available
+                HttpResponse<Void> response = ar.result();
+                // A declared Content-Length over the cap is rejected up front for a
+                // clear message; the sink enforces the same bound for chunked or
+                // mis-declared bodies while they stream.
                 String contentLengthHeader = response.getHeader("Content-Length");
                 if (contentLengthHeader != null) {
                     try {
@@ -267,14 +294,7 @@ public class HttpClientWrapper implements IHttpClient {
                     }
                 }
 
-                Buffer body = response.body();
-                if (body != null && body.length() > maxLength) {
-                    String message = String.format("Response body length %d exceeds maximum allowed length %d", body.length(), maxLength);
-                    log.warn(message);
-                    handler.handle(Future.failedFuture(new IResponse.HttpResponseException(message)));
-                    return;
-                }
-
+                Buffer body = sink.captured();
                 ResponseWrapper responseWrapper = new ResponseWrapper();
                 if (body != null && body.length() > 0) {
                     responseWrapper.setContentAsString(body.toString());
@@ -287,7 +307,13 @@ public class HttpClientWrapper implements IHttpClient {
                 responseWrapper.setHttpHeader(convertHeaderToMap(response.headers()));
                 handler.handle(Future.succeededFuture(responseWrapper));
             } else {
-                handler.handle(Future.failedFuture(ar.cause()));
+                Throwable cause = ar.cause();
+                if (cause instanceof ResponseSizeExceededException) {
+                    log.warn(cause.getMessage());
+                    handler.handle(Future.failedFuture(new IResponse.HttpResponseException(cause.getMessage())));
+                } else {
+                    handler.handle(Future.failedFuture(cause));
+                }
             }
         }
 
@@ -374,6 +400,87 @@ public class HttpClientWrapper implements IHttpClient {
         @Override
         public int hashCode() {
             return Objects.hash(uri, request, method, maxLength, requestBody, requestEncoding, currentTimeout, queryParamsMap);
+        }
+    }
+
+    /** Raised by {@link CappedBufferSink} when a streamed body exceeds the cap. */
+    static final class ResponseSizeExceededException extends RuntimeException {
+        ResponseSizeExceededException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A {@link WriteStream} that accumulates the response body into a buffer and
+     * fails the stream as soon as it would exceed {@code maxLength}, so an
+     * over-sized or endlessly-streaming response is aborted while it arrives rather
+     * than buffered whole and rejected afterwards.
+     */
+    static final class CappedBufferSink implements WriteStream<Buffer> {
+        private final long maxLength;
+        private final Buffer captured = Buffer.buffer();
+        private boolean exceeded;
+        private Handler<Throwable> exceptionHandler;
+
+        CappedBufferSink(long maxLength) {
+            this.maxLength = maxLength;
+        }
+
+        Buffer captured() {
+            return captured;
+        }
+
+        @Override
+        public WriteStream<Buffer> exceptionHandler(Handler<Throwable> handler) {
+            this.exceptionHandler = handler;
+            return this;
+        }
+
+        @Override
+        public Future<Void> write(Buffer data) {
+            if (exceeded) {
+                return Future.failedFuture(sizeError());
+            }
+            if (captured.length() + (long) data.length() > maxLength) {
+                exceeded = true;
+                ResponseSizeExceededException error = sizeError();
+                if (exceptionHandler != null) {
+                    exceptionHandler.handle(error);
+                }
+                return Future.failedFuture(error);
+            }
+            captured.appendBuffer(data);
+            return Future.succeededFuture();
+        }
+
+        @Override
+        public void write(Buffer data, Handler<AsyncResult<Void>> handler) {
+            handler.handle(write(data));
+        }
+
+        @Override
+        public void end(Handler<AsyncResult<Void>> handler) {
+            handler.handle(Future.succeededFuture());
+        }
+
+        @Override
+        public WriteStream<Buffer> setWriteQueueMaxSize(int maxSize) {
+            return this;
+        }
+
+        @Override
+        public boolean writeQueueFull() {
+            return false;
+        }
+
+        @Override
+        public WriteStream<Buffer> drainHandler(Handler<Void> handler) {
+            return this;
+        }
+
+        private ResponseSizeExceededException sizeError() {
+            return new ResponseSizeExceededException(
+                    String.format("Response body exceeds maximum allowed length %d", maxLength));
         }
     }
 

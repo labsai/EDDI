@@ -212,7 +212,7 @@ public class StructuralMatcher {
         // the Manager moves the agent's workflow URIs, and that is not an edit to
         // the agent's own settings.
         DiffAction action;
-        if (contentEquals(sourceJson, targetJson)) {
+        if (contentEquals(withoutStoreOwnedAgentFields(sourceJson), withoutStoreOwnedAgentFields(targetJson))) {
             action = DiffAction.SKIP;
         } else if (targetVersion != null && changedLocally(targetAgentId, targetVersion, targetJson,
                 version -> adoptableAgentJson(agentStore.readAgent(targetAgentId, version), targetConfig))) {
@@ -231,7 +231,8 @@ public class StructuralMatcher {
     /**
      * The source agent's configuration as a sync would write it onto the target:
      * the source's settings, with every workflow the target already has at that
-     * position named by the target's own URI, and the target's {@code identity}.
+     * position named by the target's own URI, and the target's {@code identity} and
+     * {@code compatibilityGeneration}.
      * <p>
      * Comparing the raw source instead made every agent read as changed on every
      * sync — its workflow URIs name the source instance's ids, which the target
@@ -260,6 +261,9 @@ public class StructuralMatcher {
             }
             copy.setWorkflows(sourceWorkflows);
             copy.setIdentity(target.getIdentity());
+            // Numbered by each instance's own store, which assigns it on every write:
+            // the source's value says nothing about this agent here.
+            copy.setCompatibilityGeneration(target.getCompatibilityGeneration());
             return serializeSafe(copy);
         } catch (Exception e) {
             LOGGER.debugf("Could not rewrite the source agent onto the target's workflows: %s", e.getMessage());
@@ -936,6 +940,39 @@ public class StructuralMatcher {
             return sourceJson;
         }
     }
+
+    /**
+     * Agent JSON without the fields the target's store assigns itself, which say
+     * nothing about the agent's content.
+     * <p>
+     * {@code compatibilityGeneration} is numbered per instance: the source's value
+     * and the target's are unrelated, and the import writes neither. Compared as
+     * content, it made an unchanged agent differ on every sync — and each such
+     * "change" wrote a new agent version, which, being undeclared, is a breaking
+     * one, so the agent's running conversations were cut off from every later
+     * compatible version for nothing.
+     *
+     * @return the JSON without those fields, or the input unchanged when it cannot
+     *         be parsed as an object
+     */
+    private String withoutStoreOwnedAgentFields(String agentJson) {
+        if (agentJson == null) {
+            return null;
+        }
+        try {
+            if (jsonSerialization.deserialize(agentJson) instanceof Map<?, ?> map && map.containsKey(COMPATIBILITY_GENERATION_FIELD)) {
+                Map<Object, Object> copy = new LinkedHashMap<>(map);
+                copy.remove(COMPATIBILITY_GENERATION_FIELD);
+                String stripped = jsonSerialization.serialize(copy);
+                return stripped != null ? stripped : agentJson;
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not drop store-owned agent fields before comparing: %s", e.getMessage());
+        }
+        return agentJson;
+    }
+
+    private static final String COMPATIBILITY_GENERATION_FIELD = "compatibilityGeneration";
 
     /**
      * Compares two configs for equality of <em>content</em>, not of text.

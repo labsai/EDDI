@@ -12,11 +12,14 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentImpact;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -49,7 +52,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestAgentAdministration implements IRestAgentAdministration {
+public class RestAgentAdministration implements IRestAgentAdministration, IDeploymentStatusReader {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
@@ -356,15 +359,45 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         // any colleague's live agent.
         resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
+        // Every version this call takes out of service. None of them can be where a
+        // conversation moves to: the undeploys run asynchronously, so while the loop
+        // checks v5 the record for v6 — undeployed a moment ago in this same call —
+        // may still say "deployed".
+        final int highestUndeployed = version;
+        final int lowestUndeployed = Boolean.TRUE.equals(undeployThisAndAllPreviousAgentVersions) ? 1 : version;
         try {
+            // Schedules belong to the agent, not to a version, and a fire starts on
+            // whatever version is deployed. They used to be disabled by ANY undeploy —
+            // so retiring v5 after deploying v6, the normal way to roll a version out,
+            // silently switched every heartbeat of the agent off. Now only when this
+            // call leaves no version of the agent deployed here.
+            //
+            // Uncertainty falls back to the old behaviour, deliberately. deployedVersions
+            // swallows a failed lookup, so a failure can only SHRINK the set: an empty or
+            // partial set makes this true and the schedules are disabled, exactly as every
+            // undeploy did before. The alternative — keep them enabled when a lookup fails
+            // — leaves heartbeats firing at an agent that may have no deployed version at
+            // all, failing until they dead-letter. Keeping them enabled needs positive
+            // evidence: another deployed version actually seen.
+            final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
+                    .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
             do {
                 Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(agentId, version);
-                if (activeConversationCount > 0) {
+                Integer successor = activeConversationCount > 0
+                        ? compatibleDeployedVersion(environment, agentId, version, lowestUndeployed, highestUndeployed)
+                        : null;
+                if (successor != null) {
+                    // Nothing to end and nothing to refuse: these conversations move to the
+                    // compatible version on their next turn.
+                    log.infof("%d active conversation(s) of Agent %s v%d continue on compatible v%d", activeConversationCount,
+                            sanitize(agentId), version, successor);
+                } else if (activeConversationCount > 0) {
                     if (endAllActiveConversations) {
                         var activeConversations = restConversationStore.getActiveConversations(agentId, version);
                         // Ending continues past a failed conversation and reports it in
                         // a 500; do not undeploy on top of conversations still open.
-                        var endResponse = restConversationStore.endActiveConversations(activeConversations);
+                        var endResponse = restConversationStore.endActiveConversations(activeConversations,
+                                IConversationService.END_REASON_AGENT_VERSION_RETIRED);
                         if (endResponse != null && endResponse.getStatus() >= 300) {
                             throw new IllegalStateException(String.format(
                                     "Could not end every active conversation of agent %s (version %s) — not undeploying",
@@ -376,7 +409,7 @@ public class RestAgentAdministration implements IRestAgentAdministration {
                     }
                 }
 
-                undeploy(environment, agentId, version);
+                undeploy(environment, agentId, version, agentLeavesEnvironment);
                 log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
                         environment));
             } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
@@ -386,6 +419,97 @@ public class RestAgentAdministration implements IRestAgentAdministration {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * A deployed version outside {@code [lowestUndeployed, highestUndeployed]} with
+     * the same compatibility generation as {@code version} — somewhere its
+     * conversations can move — or {@code null} when there is none.
+     * <p>
+     * "Deployed" is the union of the deployment records, which every node follows,
+     * and this node's own registry, which also holds deployments made with
+     * {@code autoDeploy=false} that are never recorded. Anything that cannot be
+     * read answers {@code null}: the undeploy then behaves as it always did — 409,
+     * or end the conversations — rather than stranding them on a version that is
+     * gone.
+     */
+    Integer compatibleDeployedVersion(Deployment.Environment environment, String agentId, int version, int lowestUndeployed,
+                                      int highestUndeployed) {
+        Integer generation = generationOf(agentId, version);
+        if (generation == null) {
+            return null;
+        }
+        for (Integer other : deployedVersions(environment, agentId)) {
+            if ((other < lowestUndeployed || other > highestUndeployed) && generation.equals(generationOf(agentId, other))) {
+                return other;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Every deployed version of the agent in {@code environment}, highest first.
+     */
+    private SortedSet<Integer> deployedVersions(Deployment.Environment environment, String agentId) {
+        SortedSet<Integer> versions = new TreeSet<>(Comparator.reverseOrder());
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
+                if (agentId.equals(info.getAgentId()) && info.getEnvironment() == environment && info.getAgentVersion() != null) {
+                    versions.add(info.getAgentVersion());
+                }
+            }
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            log.warnf("Could not read the deployment records of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+        }
+        try {
+            for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
+                if (agentId.equals(agent.getAgentId()) && agent.getDeploymentStatus() == READY && agent.getAgentVersion() != null) {
+                    versions.add(agent.getAgentVersion());
+                }
+            }
+        } catch (ServiceException | RuntimeException e) {
+            log.warnf("Could not list the running versions of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+        }
+        return versions;
+    }
+
+    /**
+     * The version's compatibility generation, or {@code null} when it has none or
+     * cannot be read.
+     */
+    private Integer generationOf(String agentId, Integer version) {
+        try {
+            var configuration = agentStore.read(agentId, version);
+            return configuration != null ? configuration.getCompatibilityGeneration() : null;
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | RuntimeException e) {
+            log.debugf("No compatibility generation for Agent %s v%s: %s", sanitize(agentId), version, sanitize(e.getMessage()));
+            return null;
+        }
+    }
+
+    @Override
+    public DeploymentImpact getDeploymentImpact(Deployment.Environment environment, String agentId, Integer version) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+        RuntimeUtilities.checkNotNull(agentId, "agentId");
+        RuntimeUtilities.checkNotNull(version, "version");
+        // Conversation counts are an operator's view of the agent: the same EDIT the
+        // undeploy that ends them takes.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+        requireAgentExists(agentId, version);
+
+        Integer generation = generationOf(agentId, version);
+        List<DeploymentImpact.VersionImpact> impacts = new ArrayList<>();
+        for (Integer deployed : deployedVersions(environment, agentId)) {
+            if (deployed.equals(version)) {
+                continue;
+            }
+            Integer deployedGeneration = generationOf(agentId, deployed);
+            boolean follows = generation != null && generation.equals(deployedGeneration) && deployed < version;
+            Long active = conversationMemoryStore.getActiveConversationCount(agentId, deployed);
+            impacts.add(new DeploymentImpact.VersionImpact(deployed, deployedGeneration, active != null ? active : 0L,
+                    follows ? DeploymentImpact.Outcome.FOLLOW : DeploymentImpact.Outcome.STAY));
+        }
+        return new DeploymentImpact(agentId, version, generation, impacts);
     }
 
     private static String getConflictExplanations(String agentId, Integer version, Long activeConversationCount) {
@@ -403,14 +527,17 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         return message;
     }
 
-    private void undeploy(Deployment.Environment environment, String agentId, Integer version) {
+    private void undeploy(Deployment.Environment environment, String agentId, Integer version, boolean disableSchedules) {
         Callable<Void> undeployAgentCallable = () -> {
             try {
                 agentFactory.undeployAgent(environment, agentId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
 
-                // Lifecycle hook: auto-disable schedules for this agent
-                disableSchedulesForAgent(agentId);
+                // Lifecycle hook: auto-disable the agent's schedules once no version of
+                // it is left to run them — see undeployAgent.
+                if (disableSchedules) {
+                    disableSchedulesForAgent(agentId);
+                }
             } catch (ServiceException e) {
                 throwError(agentId, version, e, "Error while undeploying agent! (agentId=%s , version=%s)");
             } catch (IllegalAccessException e) {
@@ -441,8 +568,43 @@ public class RestAgentAdministration implements IRestAgentAdministration {
         return Response.ok(Map.of("status", status), MediaType.APPLICATION_JSON).build();
     }
 
+    /**
+     * The caller's view of the deployed-agent set: only the agents they may
+     * {@link AccessLevel#USE}, each descriptor redacted for them.
+     * <p>
+     * This backs {@code GET /administration/{env}/deploymentstatus} and,
+     * in-process, the MCP {@code list_agents} and {@code discover_agents} tools —
+     * all of them reachable by a viewer. It used to serialise every deployed
+     * agent's raw descriptor, grant list and access index included, which is the
+     * audience of a private share disclosed to anybody who asked, and with
+     * workspaces enforced it listed agents the caller could not even start a
+     * conversation with.
+     * <p>
+     * Redaction applies with workspaces off as well: the grant list is recorded
+     * whenever authentication is on, and
+     * {@link ResourceAccessGuard#redactUnlessOwner} answers the owner-or-admin
+     * question structurally in that state. Engine code that needs the full set
+     * reads {@link #readAllDeploymentStatuses} instead.
+     */
     @Override
     public List<AgentDeploymentStatus> getDeploymentStatuses(Deployment.Environment environment) {
+        List<AgentDeploymentStatus> visible = new LinkedList<>();
+        for (AgentDeploymentStatus status : readAllDeploymentStatuses(environment)) {
+            // Decided against the CURRENT descriptor, not the deployed version's: sharing
+            // writes land on the current version, so an older one can carry a previous
+            // era's owner and grants.
+            AccessLevel level = resourceAccessGuard.currentLevel(status.getAgentId());
+            if (level == null || !level.includes(AccessLevel.USE)) {
+                continue;
+            }
+            resourceAccessGuard.redactUnlessOwner(status.getDescriptor(), level);
+            visible.add(status);
+        }
+        return visible;
+    }
+
+    @Override
+    public List<AgentDeploymentStatus> readAllDeploymentStatuses(Deployment.Environment environment) {
         RuntimeUtilities.checkNotNull(environment, "environment");
 
         try {

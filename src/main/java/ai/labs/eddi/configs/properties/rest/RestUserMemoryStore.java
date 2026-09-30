@@ -6,9 +6,11 @@ package ai.labs.eddi.configs.properties.rest;
 
 import ai.labs.eddi.configs.properties.IRestUserMemoryStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
@@ -32,16 +34,19 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     private final IUserMemoryStore userMemoryStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     private static final Logger LOGGER = Logger.getLogger(RestUserMemoryStore.class);
 
     @Inject
     public RestUserMemoryStore(IUserMemoryStore userMemoryStore,
             SecurityIdentity identity,
-            OwnershipValidator ownershipValidator) {
+            OwnershipValidator ownershipValidator,
+            ResourceAccessGuard resourceAccessGuard) {
         this.userMemoryStore = userMemoryStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -58,6 +63,14 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     @Override
     public List<UserMemoryEntry> getVisibleMemories(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries) {
         ownershipValidator.validateUserAccess(identity, userId);
+        // Every group a recall names must be one the caller may use. A group id does
+        // two things here: it admits the user's own group-visible entries tagged with
+        // it and, additively, the team-owned "group:<id>" lessons a RETRO writes. The
+        // first is the caller's own data, the second is the team's, and taking the ids
+        // verbatim let anybody read any team's lessons by naming its group id. USE is
+        // the bar because it is what convening the group takes. A no-op while
+        // workspaces are not enforced, when there is no membership to check against.
+        resourceAccessGuard.requireUseAccessToEach(groupIds, "group");
         try {
             return userMemoryStore.getVisibleEntries(userId, agentId, groupIds != null ? groupIds : List.of(), recallOrder, maxEntries);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -106,17 +119,9 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response upsertMemory(UserMemoryEntry entry) {
-        if (entry == null) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Request body is required")).build();
-        }
-        if (entry.userId() == null || entry.userId().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "userId is required")).build();
-        }
-        if (entry.key() == null || entry.key().isBlank()) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key is required")).build();
-        }
-        if (entry.key().length() > 255) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
+        String violation = UserMemoryWriteRules.validate(entry);
+        if (violation != null) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", violation)).build();
         }
         // Ownership first: a caller with no access to this user learns nothing
         // about which keys are reserved — they get the same 403 as for any key.
@@ -125,7 +130,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
             return reservedKeyRefusal(entry.key());
         }
         try {
-            String id = userMemoryStore.upsert(entry);
+            String id = userMemoryStore.upsert(UserMemoryWriteRules.withDefaults(entry));
             return Response.ok(Map.of("id", id)).build();
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Failed to upsert memory entry", e);

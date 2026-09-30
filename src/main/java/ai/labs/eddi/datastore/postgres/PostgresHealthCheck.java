@@ -11,6 +11,7 @@ import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.HealthCheckResponseBuilder;
 import org.eclipse.microprofile.health.Readiness;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
@@ -28,6 +29,8 @@ import java.sql.Statement;
 @DefaultBean
 public class PostgresHealthCheck implements HealthCheck {
 
+    private static final Logger LOGGER = Logger.getLogger(PostgresHealthCheck.class);
+
     private final Instance<DataSource> dataSourceInstance;
 
     @Inject
@@ -40,10 +43,16 @@ public class PostgresHealthCheck implements HealthCheck {
         HealthCheckResponseBuilder builder = HealthCheckResponse.named("PostgreSQL connection");
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute("SELECT 1");
-            return builder.up().withData("database", conn.getMetaData().getDatabaseProductName()).withData("url", conn.getMetaData().getURL())
-                    .build();
+            // Status only. The JDBC URL (host, port, database, sometimes credentials)
+            // and the raw exception text were previously returned here, but
+            // /q/health/* is anonymous — neither may reach an unauthenticated caller.
+            // The connection failure detail stays in the server log.
+            return builder.up().build();
         } catch (Exception e) {
-            return builder.down().withData("error", e.getMessage()).build();
+            // Server-side only: the detail (which can name the JDBC host) must not reach
+            // the anonymous probe response.
+            LOGGER.warn("PostgreSQL readiness check failed", e);
+            return builder.down().build();
         }
     }
 }

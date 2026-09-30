@@ -460,6 +460,87 @@ class PostgresSecretPersistenceUnitTest {
         assertThrows(PersistenceException.class, () -> persistence.getMetaValue("k"));
     }
 
+    // ─── deleteMetaValue (H6a) ───
+
+    @Test
+    void deleteMetaValue_deletesTheKey() throws Exception {
+        persistence.deleteMetaValue("vault-kek-salt-pending");
+        verify(preparedStatement).setString(1, "vault-kek-salt-pending");
+        verify(preparedStatement).executeUpdate();
+    }
+
+    // ─── upsertSecret "not supplied" (S1) / updateDekWrapping (H6c) / conditional
+    // grant (S6) ───
+
+    @Test
+    void upsertSecret_unsuppliedGrantAndDescription_areKeptOnConflict() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedAgents(null);
+        secret.setDescription(null);
+
+        persistence.upsertSecret(secret);
+
+        // The CASE guards in the ON CONFLICT branch: false keeps the stored column.
+        verify(preparedStatement).setBoolean(12, false);
+        verify(preparedStatement).setBoolean(13, false);
+    }
+
+    @Test
+    void upsertSecret_suppliedGrantAndDescription_areWritten() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        persistence.upsertSecret(createTestSecret());
+
+        verify(preparedStatement).setBoolean(12, true);
+        verify(preparedStatement).setBoolean(13, true);
+    }
+
+    @Test
+    void updateDekWrapping_isGuardedOnTheIvAndNeverInserts() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.updateDekWrapping(new EncryptedDek("id", "tenant-1", 2, "newEnc", "newIv", Instant.now()), "oldIv"));
+
+        verify(preparedStatement).setString(5, "oldIv");
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().noneMatch(s -> s.contains("INSERT INTO secret_vault_deks")));
+    }
+
+    @Test
+    void updateSecretGrantIfUnchanged_preconditionIsSetEqualityInTheWhereClause() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.updateSecretGrantIfUnchanged("tenant-1", "api-key", List.of("a", "b"), List.of("a"), null));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("allowed_agents @> ?::jsonb AND allowed_agents <@ ?::jsonb")),
+                sql.getAllValues().toString());
+        verify(preparedStatement).setString(5, "[\"a\",\"b\"]");
+    }
+
+    @Test
+    void deleteDekIfWrappedWith_isGuardedOnTheIv() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.deleteDekIfWrappedWith("tenant-1", 2, "theIv"));
+
+        verify(preparedStatement).setString(3, "theIv");
+    }
+
+    @Test
+    void deleteMetaValuesWithPrefix_usesStartsWithNotLike() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(2);
+
+        assertEquals(2, persistence.deleteMetaValuesWithPrefix("system-value:"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(q -> q.contains("starts_with(key, ?)")), sql.getAllValues().toString());
+    }
+
     // ─── setMetaValue ───
 
     @Test
@@ -474,6 +555,24 @@ class PostgresSecretPersistenceUnitTest {
     void setMetaValue_sqlException_throwsPersistenceException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
         assertThrows(PersistenceException.class, () -> persistence.setMetaValue("k", "v"));
+    }
+
+    // ─── setMetaValueIfAbsent ───
+
+    @Test
+    void setMetaValueIfAbsent_insertsWithDoNothing_andReturnsStoredValue() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("value")).thenReturn("winner");
+
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+        verify(resultSet).close();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("ON CONFLICT (key) DO NOTHING")), sql.getAllValues().toString());
+        assertTrue(sql.getAllValues().stream().noneMatch(s -> s.contains("DO UPDATE")), "an existing value must never be replaced");
     }
 
     // ─── ensureSchema idempotency ───

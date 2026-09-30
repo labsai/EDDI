@@ -7,7 +7,7 @@ import {
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History, X,
-  AlertTriangle, Plus, Boxes,
+  AlertTriangle, Plus, SquareKanban,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -47,7 +47,7 @@ import {
   type GroupConversationState,
 } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
-import { STYLE_THEME } from "@/components/groups/discussion-transcript";
+import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
 const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" } as const;
@@ -835,7 +835,7 @@ export function GroupDetailPage() {
               title={t("groupWorkspace.title", "Standing Team Workspace")}
               data-testid="open-workspace-btn"
             >
-              <Boxes className="h-4 w-4" />
+              <SquareKanban className="h-4 w-4" />
               <span className="hidden sm:inline">{t("groupWorkspace.navLabel", "Workspace")}</span>
             </Button>
           )}

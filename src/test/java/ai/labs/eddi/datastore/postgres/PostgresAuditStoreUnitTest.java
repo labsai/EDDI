@@ -5,6 +5,8 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.audit.AuditHmac;
+import ai.labs.eddi.engine.audit.AuditKeyring;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -494,6 +496,28 @@ class PostgresAuditStoreUnitTest {
         assertEquals(3, store.pseudonymizeByUserId("user-1", "anon-123"));
         verify(preparedStatement).setString(1, "anon-123");
         verify(preparedStatement).setString(2, "user-1");
+    }
+
+    /**
+     * L-S2: v5 rows get the keyed pseudonym of the key that signed them first; the
+     * catch-all then gives the remaining rows the caller's pseudonym.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void pseudonymizeByUserId_keysV5RowsFirst() throws Exception {
+        AuditKeyring keyring = AuditKeyring.fromMasterKey("master-key-1234567890");
+        Instance<AuditKeyring> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(keyring);
+        var keyed = new PostgresAuditStore(dataSourceInstance, jsonSerialization, instance);
+        when(preparedStatement.executeUpdate()).thenReturn(2, 1);
+
+        assertEquals(3, keyed.pseudonymizeByUserId("user-1", "anon-123"));
+
+        var key = keyring.signingKey();
+        verify(preparedStatement).setString(1, AuditHmac.keyedPseudonymFor("user-1", key.pseudonymKey()));
+        verify(preparedStatement).setString(3, "v5:" + key.id() + ":%");
+        verify(preparedStatement).setString(1, "anon-123");
     }
 
     @Test

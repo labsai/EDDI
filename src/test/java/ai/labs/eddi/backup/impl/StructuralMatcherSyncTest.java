@@ -248,6 +248,29 @@ class StructuralMatcherSyncTest {
     }
 
     /**
+     * Each instance's store numbers {@code compatibilityGeneration} itself and
+     * moves it on every write, so the synced version and today's differ in it
+     * whenever anything was saved here — which is not an edit to the agent's
+     * settings.
+     */
+    @Test
+    @DisplayName("an agent whose store-owned compatibility generation moved here is no conflict")
+    void compatibilityGenerationIsNoAgentConflict() throws Exception {
+        var baseline = new AgentConfiguration();
+        baseline.setWorkflows(new ArrayList<>(List.of(uri("workflow", TARGET_WF, 3))));
+        baseline.setCompatibilityGeneration(1);
+        when(agentStore.readAgent(TARGET_AGENT, 6)).thenReturn(baseline);
+        descriptorWithSyncedVersion(TARGET_AGENT, 7, 6);
+        targetAgent.setCompatibilityGeneration(2);
+        var sourceAgent = sourceAgentConfig();
+        sourceAgent.setCompatibilityGeneration(9);
+        sourceAgent.setDescription("from staging");
+
+        assertEquals(DiffAction.UPDATE,
+                row(matcher.buildPreview(source(sourceAgent, LLM_JSON), TARGET_AGENT, true), "agent").action());
+    }
+
+    /**
      * Adopting the source's steps drops a step added here. That has to be a choice,
      * not a side effect of an unrelated promotion.
      */

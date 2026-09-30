@@ -1025,7 +1025,7 @@ class McpAdminToolsSwitchCoverageTest {
         void emptyMappings() throws Exception {
             when(jsonSerialization.deserialize(eq("[]"), eq(List.class))).thenReturn(List.of());
             when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.applyAgentChanges("agent1", 1, "[]", null, null);
+            String result = tools.applyAgentChanges("agent1", 1, "[]", null, null, null);
             assertNotNull(result);
         }
 
@@ -1034,7 +1034,7 @@ class McpAdminToolsSwitchCoverageTest {
         void nullVersion() throws Exception {
             when(jsonSerialization.deserialize(eq("[]"), eq(List.class))).thenReturn(List.of());
             when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.applyAgentChanges("agent1", null, "[]", null, null);
+            String result = tools.applyAgentChanges("agent1", null, "[]", null, null, null);
             assertNotNull(result);
         }
 
@@ -1044,7 +1044,7 @@ class McpAdminToolsSwitchCoverageTest {
             when(jsonSerialization.deserialize(anyString(), eq(List.class)))
                     .thenReturn(List.of(Map.of("oldUri", "old", "newUri", "new")));
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(null);
-            String result = tools.applyAgentChanges("agent1", 1, "[{}]", null, null);
+            String result = tools.applyAgentChanges("agent1", 1, "[{}]", null, null, null);
             assertTrue(result.contains("error"));
         }
 
@@ -1073,13 +1073,13 @@ class McpAdminToolsSwitchCoverageTest {
 
             Response agentResp = mock(Response.class);
             doReturn("/agentstore/agents/agent1?version=2").when(agentResp).getHeaderString("Location");
-            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResp);
+            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any(), any())).thenReturn(agentResp);
 
             when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.applyAgentChanges("agent1", 1, "[{}]", false, null);
+            String result = tools.applyAgentChanges("agent1", 1, "[{}]", false, null, null);
             assertNotNull(result);
             verify(workflowStore).updateWorkflow(eq("wf1"), eq(1), any());
-            verify(restAgentStore).updateAgent(eq("agent1"), eq(1), any());
+            verify(restAgentStore).updateAgent(eq("agent1"), eq(1), any(), any());
         }
 
         @Test
@@ -1107,14 +1107,14 @@ class McpAdminToolsSwitchCoverageTest {
 
             Response agentResp = mock(Response.class);
             doReturn((String) null).when(agentResp).getHeaderString("Location");
-            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResp);
+            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any(), any())).thenReturn(agentResp);
 
             Response deployResp = mock(Response.class);
             when(deployResp.getStatus()).thenReturn(200);
             when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), anyBoolean(), anyBoolean())).thenReturn(deployResp);
 
             when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.applyAgentChanges("agent1", 1, "[{}]", true, "production");
+            String result = tools.applyAgentChanges("agent1", 1, "[{}]", true, "production", null);
             assertNotNull(result);
             verify(agentAdmin).deployAgent(any(), eq("agent1"), eq(2), anyBoolean(), anyBoolean());
         }
@@ -1144,13 +1144,13 @@ class McpAdminToolsSwitchCoverageTest {
 
             Response agentResp = mock(Response.class);
             doReturn("agent1?version=2").when(agentResp).getHeaderString("Location");
-            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResp);
+            when(restAgentStore.updateAgent(eq("agent1"), eq(1), any(), any())).thenReturn(agentResp);
 
             when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
                     .thenThrow(new RuntimeException("deploy fail"));
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
-            String result = tools.applyAgentChanges("agent1", 1, "[{}]", true, null);
+            String result = tools.applyAgentChanges("agent1", 1, "[{}]", true, null, null);
             assertNotNull(result);
         }
 
@@ -1169,9 +1169,9 @@ class McpAdminToolsSwitchCoverageTest {
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(null);
 
             when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.applyAgentChanges("agent1", 1, "[{}]", false, null);
+            String result = tools.applyAgentChanges("agent1", 1, "[{}]", false, null, null);
             assertNotNull(result);
-            verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
         }
     }
 

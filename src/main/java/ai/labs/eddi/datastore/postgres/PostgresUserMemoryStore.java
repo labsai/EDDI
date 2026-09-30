@@ -97,6 +97,29 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     private static final String ORDER_BY_ACCESS_COUNT = " ORDER BY access_count DESC";
     private static final String ORDER_BY_RECENCY = " ORDER BY updated_at DESC";
 
+    /**
+     * Global upsert whose UPDATE arm only fires when the existing row is owned by
+     * the writer. {@code ON CONFLICT} runs against the unique
+     * {@code idx_um_upsert_global} index, so a concurrent insert of the same key
+     * waits for the other transaction and then evaluates the {@code WHERE} against
+     * the committed row: exactly one agent can claim a free key. A NULL owner never
+     * equals the writer, and a blank one never equals a non-blank writer, so both
+     * count as not owned. When the {@code WHERE} fails, no row is written and
+     * {@code RETURNING} yields nothing.
+     */
+    private static final String UPSERT_GLOBAL_IF_OWNED = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, 'global', ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key) WHERE visibility = 'global'
+            DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
+                group_ids = EXCLUDED.group_ids,
+                source_conversation_id = EXCLUDED.source_conversation_id,
+                conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+            WHERE usermemories.source_agent_id = EXCLUDED.source_agent_id
+            RETURNING id
+            """;
+
     /** Recall order that ranks entries by how often they have been recalled. */
     private static final String RECALL_ORDER_MOST_ACCESSED = "most_accessed";
 
@@ -209,6 +232,73 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             throw new IllegalArgumentException("upsertReserved accepts only reserved keys, got '" + entry.key() + "'");
         }
         return write(entry);
+    }
+
+    private static final String INSERT_IF_ABSENT_GLOBAL = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key) WHERE visibility = 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    private static final String INSERT_IF_ABSENT_SCOPED = """
+            INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
+                group_ids, source_conversation_id, conflicted)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+            ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
+            DO NOTHING
+            RETURNING id
+            """;
+
+    /**
+     * Atomic: {@code ON CONFLICT ... DO NOTHING} against the same unique partial
+     * indexes {@link #upsert} targets, so an entry another writer created in the
+     * meantime is left exactly as it is and no row comes back.
+     */
+    @Override
+    public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        ensureSchema();
+        String sql = entry.visibility() == Visibility.global ? INSERT_IF_ABSENT_GLOBAL : INSERT_IF_ABSENT_SCOPED;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, entry.userId());
+            ps.setString(2, entry.key());
+            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(4, entry.category());
+            ps.setString(5, entry.visibility() != null ? entry.visibility().name() : "self");
+            ps.setString(6, entry.sourceAgentId());
+            ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(8, entry.sourceConversationId());
+            ps.setBoolean(9, entry.conflicted());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString("id") : null;
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to insert memory entry", e);
+        }
+    }
+
+    @Override
+    public boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.checkOwnedWrite(entry, agentId);
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(UPSERT_GLOBAL_IF_OWNED)) {
+            ps.setString(1, entry.userId());
+            ps.setString(2, entry.key());
+            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(4, entry.category());
+            ps.setString(5, agentId);
+            ps.setString(6, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(7, entry.sourceConversationId());
+            ps.setBoolean(8, entry.conflicted());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to upsert memory entry", e);
+        }
     }
 
     private String write(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {

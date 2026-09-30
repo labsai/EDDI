@@ -39,8 +39,10 @@ services:
     image: ollama/ollama:0.34.0
     restart: always
     ports:
-      # Host-visible so the `ollama` CLI and curl still reach it directly.
-      - "${OLLAMA_PORT:-11434}:11434"
+      # Host-visible (loopback only) so the `ollama` CLI and curl still reach it
+      # directly, without exposing an unauthenticated model server to the LAN.
+      # EDDI reaches it container-to-container as http://ollama:11434 regardless.
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     volumes:
       # Named volume, so pulled models survive `docker compose down`. Model
       # weights are measured in gigabytes — re-pulling them on every restart is

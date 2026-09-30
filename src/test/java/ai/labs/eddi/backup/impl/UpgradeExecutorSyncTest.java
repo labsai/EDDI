@@ -108,7 +108,7 @@ class UpgradeExecutorSyncTest {
         targetAgent.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
         lenient().when(agentStore.getCurrentResourceId(AGENT)).thenReturn(resourceId(AGENT, 5));
         lenient().when(agentStore.readAgent(AGENT, 5)).thenReturn(targetAgent);
-        lenient().when(agentStore.updateAgent(eq(AGENT), eq(5), any())).thenReturn(Response.ok().build());
+        lenient().when(agentStore.updateAgent(eq(AGENT), eq(5), any(), any())).thenReturn(Response.ok().build());
         lenient().when(descriptorStore.readDescriptor(anyString(), anyInt())).thenAnswer(inv -> new DocumentDescriptor());
 
         lenient().when(workflowStore.readWorkflow(WF, 2)).thenReturn(workflow(step("llm", uri("llm", LLM, 3))));
@@ -212,7 +212,7 @@ class UpgradeExecutorSyncTest {
         assertEquals(List.of(uri("output", CREATED_OUT, 1).toString()),
                 WorkflowExtensions.scan(created.getValue()).stream().map(ref -> ref.extensionUri().toString()).toList());
         var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
-        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture());
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
         assertEquals(List.of(uri("workflow", WF, 2), uri("workflow", CREATED_WF, 1)), agent.getValue().getWorkflows());
     }
 
@@ -229,7 +229,7 @@ class UpgradeExecutorSyncTest {
 
         assertTrue(result.agentUpdated());
         var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
-        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture());
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
         assertEquals(List.of(uri("workflow", WF, 2)), agent.getValue().getWorkflows());
     }
 
@@ -252,7 +252,7 @@ class UpgradeExecutorSyncTest {
         // agent UPDATE in the preview and never arrived.
         assertTrue(result.agentUpdated());
         var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
-        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture());
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
         assertEquals("promoted from staging", agent.getValue().getDescription());
         assertEquals("did:target", agent.getValue().getIdentity().getAgentDid());
     }
@@ -298,7 +298,7 @@ class UpgradeExecutorSyncTest {
         UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
 
         var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
-        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture());
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
         assertEquals("production hotfix", agent.getValue().getDescription(), "the local settings stay");
         assertEquals(List.of(uri("workflow", WF, 3)), agent.getValue().getWorkflows(), "the workflow update lands");
         assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType())), result.failures().toString());

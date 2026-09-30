@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
@@ -55,7 +57,7 @@ class PrePostUtilsTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory);
+        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
     }
 
     // ==================== verifyHttpCode ====================
@@ -182,6 +184,31 @@ class PrePostUtilsTest {
 
             assertSame(refreshedData, result);
             verify(memoryItemConverter).convert(memory);
+        }
+
+        @Test
+        @DisplayName("the instruction's visibility is carried onto the property — a longTerm self property must not persist as global")
+        void preRequestInstruction_keepsVisibility() throws Exception {
+            var memory = mock(IConversationMemory.class);
+            var properties = mock(ConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(properties);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+            when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(i -> i.getArgument(0));
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("apiUser");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("alice");
+            instruction.setScope(Property.Scope.longTerm);
+            instruction.setVisibility(Property.Visibility.self);
+            var preRequest = new PreRequest();
+            preRequest.setPropertyInstructions(List.of(instruction));
+
+            prePostUtils.executePreRequestPropertyInstructions(memory, new HashMap<>(), preRequest);
+
+            var stored = ArgumentCaptor.forClass(Property.class);
+            verify(properties).put(eq("apiUser"), stored.capture());
+            assertEquals(Property.Visibility.self, stored.getValue().getVisibility());
         }
     }
 

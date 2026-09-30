@@ -124,7 +124,7 @@ class UpgradeExecutorParserTest {
         when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(null);
         lenient().when(descriptorStore.readCurrentDescriptor(AGENT_ID)).thenReturn(descriptorAt(AGENT_ID, 3));
         lenient().when(agentStore.readAgent(AGENT_ID, 3)).thenReturn(agentConfig);
-        lenient().when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any())).thenReturn(Response.ok().build());
+        lenient().when(agentStore.updateAgent(eq(AGENT_ID), eq(3), any(), any())).thenReturn(Response.ok().build());
         lenient().when(descriptorStore.readDescriptor(anyString(), anyInt()))
                 .thenAnswer(inv -> descriptorAt(inv.getArgument(0), inv.getArgument(1)));
 
@@ -237,6 +237,10 @@ class UpgradeExecutorParserTest {
         var written = ArgumentCaptor.forClass(ParserConfiguration.class);
         verify(parserStore).updateParser(eq(PARSER_T), eq(2), written.capture());
         assertTrue(mapper.writeValueAsString(written.getValue()).contains(DICT + DICT_T + "?version=3"));
+        // The dictionary, the parser that names it and the workflow that names the
+        // parser. The dictionary is placed by the parser document, not the workflow,
+        // so it is delivered once the parser's step is.
+        assertEquals(3, result.updated(), "the dictionary counts once the parser naming it is delivered");
     }
 
     @Test

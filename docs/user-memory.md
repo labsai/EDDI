@@ -78,7 +78,7 @@ The LLM task (`langchain.json`) must separately enable built-in tools — `built
 
 Attaching the memory tools is a three-way conjunction across the two configuration files: the agent's `enableMemoryTools: true` **and** its `userMemoryConfig` **and** the LLM task's `enableBuiltInTools: true`, with `builtInToolsWhitelist` either omitted (all built-ins) or containing `"usermemory"`. Miss any part and the agent gets no memory tools, with only a WARN in the log.
 
-> **Note:** Basic `longTerm` property persistence (via `PropertySetterTask`) works for **all** agents regardless of `enableMemoryTools`. The flag only gates advanced features: LLM UserMemoryTool, Dream consolidation, write guardrails, and custom recall settings.
+> **Note:** `enableMemoryTools` gates exactly one thing: attaching the LLM `UserMemoryTool` (and with it the `guardrails`, which only that tool enforces). Everything else in `userMemoryConfig` applies whenever the block is declared, with or without the flag — `defaultVisibility` and the recall settings govern the `longTerm` property path that **every** agent uses, and Dream is switched on by `dream.enabled` plus a schedule. Earlier releases ignored the whole block unless `enableMemoryTools` was on, so a rule-based agent's `"defaultVisibility": "self"` silently persisted as `global`.
 
 ### Configuration Reference
 
@@ -87,9 +87,9 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user |
 | `maxRecallEntries` | `int` | `50` | Maximum entries returned by recall |
 | `recallOrder` | `String` | `"most_recent"` | `"most_recent"` (by updatedAt) or `"most_accessed"` (by accessCount) |
-| `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (refuse the write once `maxEntriesPerUser` is reached) or `"evict_oldest"` (permanently delete this agent's oldest entries to make room — entries owned by other agents are never evicted) |
-| `defaultVisibility` | `String` | `"self"` | Visibility applied to a `longTerm` property that sets none (an unparseable value, or no `userMemoryConfig` at all, falls back to `global`) |
-| `autoRecallCategories` | `List<String>` | `["preference","fact"]` | Categories recalled automatically at conversation start |
+| `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (refuse a **new** entry once `maxEntriesPerUser` is reached — updating an existing one is always allowed, it adds no row) or `"evict_oldest"` (permanently delete this agent's oldest entries to make room — entries owned by other agents are never evicted) |
+| `defaultVisibility` | `String` | `"self"` | Visibility applied to a `longTerm` property that sets none (an unparseable value, or no `userMemoryConfig` at all, falls back to `global`). Applies without `enableMemoryTools` |
+| `autoRecallCategories` | `List<String>` | `["preference","fact"]` | **Reserved — not applied.** Every visible category is recalled at conversation start. It cannot be switched on retroactively: the store writes this default into every saved agent, so a stored value is indistinguishable from an explicit one, and enforcing it would stop recalling `context`, `legacy` and `property` entries for all of them |
 
 ### Guardrails
 
@@ -97,8 +97,10 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 |---|---|---|---|
 | `maxKeyLength` | `int` | `100` | Maximum characters for memory keys |
 | `maxValueLength` | `int` | `1000` | Maximum characters for memory values |
-| `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn |
+| `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn. A re-save of a fact that is already stored unchanged is not a write and does not count |
 | `allowedCategories` | `List<String>` | `["preference","fact","context"]` | Allowed memory categories |
+| `allowedVisibilities` | `List<String>` | `["self"]` | Visibilities the `rememberFact` tool may write (`self`, `group`, `global`). By default the model can only store memories private to this agent, so a prompt-injected model cannot broadcast to every agent (`global`) or the group. The configured `defaultVisibility` is always added, so a default can never block every write |
+| `allowGlobalKeyOverwrite` | `boolean` | `false` | Whether a `global` write may replace the value of an existing global key this agent does not provably own — one owned by another agent, or one whose entry records no owning agent (legacy/migrated data). Off by default: such a write is refused with a message suggesting a different key or `self` visibility |
 
 ### Dream Configuration
 
@@ -109,7 +111,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `detectContradictions` | `boolean` | `true` | Flag entries with same key but different values |
 | `summarizeInteractions` | `boolean` | `false` | Enable LLM-driven memory consolidation |
 | `summarizeMinEntries` | `int` | `5` | Minimum entries in a group before summarization triggers |
-| `summarizeTargetEntries` | `int` | `2` | Target number of entries per group after consolidation |
+| `summarizeTargetEntries` | `int` | `2` | Target number of entries per group after consolidation. It is passed to the model; an answer above it (but below the original count) is kept whole — never truncated, because the originals are deleted |
 | `summarizeGroupBy` | `String` | `"category"` | Grouping strategy: `"category"` or `"all"` |
 | `preserveAgentProvenance` | `boolean` | `false` | Sub-group by `sourceAgentId` (preserves per-agent provenance) |
 | `maxSummarizationCalls` | `int` | `10` | **Deprecated** — prefer `maxCostPerRun`. Still honoured as a secondary backstop *if you set it explicitly*, because silently dropping a bound an operator wrote is worse than enforcing a redundant one. A call count is a poor budget: consolidations differ wildly in cost. |
@@ -117,10 +119,12 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling |
 | `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
-| `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations |
+| `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
 | `parameters` | `Map<String,String>` | `{}` | Model parameters for the consolidation LLM — `apiKey`, `baseUrl`, `temperature`, … — passed to the model registry exactly like an LLM task's `parameters` block, so `${vault:…}` and `${vars:…}` resolve. **Required when `summarizeInteractions` is `true`**: a background dream cycle has no parent LLM task to inherit credentials from, so without it every summarization step fails with a provider 401 while stale pruning keeps working. |
 | `schedule` | `String` | `"0 3 * * *"` | Cron expression the dream schedule should use |
 | `contradictionResolution` | `String` | `"keep_newest"` | Reserved. The current detector counts and logs contradictions without resolving them. |
+
+`rememberFact` resolves which stored entry a write lands on before writing: re-stating an unchanged fact answers `✅ Already remembered (unchanged)` without writing, and an update of an existing entry never counts against `maxEntriesPerUser`.
 
 ## LLM Tools
 
@@ -183,13 +187,27 @@ Returns: "✅ Forgotten: favorite_color"
 
 | Scope | Description | Upsert Key |
 |---|---|---|
-| `self` | Only the agent that stored it can see it | `(userId, key, sourceAgentId)` |
-| `group` | All agents in the same group conversation can see it | `(userId, key, sourceAgentId)` |
+| `self` | Only the agent that stored it can see it | `(userId, key, sourceAgentId)` among the agent's non-global entries |
+| `group` | All agents in the same group conversation can see it | `(userId, key, sourceAgentId)` among the agent's non-global entries |
 | `global` | All agents for this user can see it | `(userId, key)` |
+
+A `self` or `group` write never touches the shared `global` entry with the same key — an agent can hold a private note and a shared fact under one key. (MongoDB used to key self/group writes without the visibility term, so saving a private note flipped the agent's own shared entry to `self` and every other agent lost it; PostgreSQL always had this identity.)
 
 ### Group Memory
 
-When agents participate in a [Group Conversation](group-conversations.md), the `groupId` is automatically injected into the conversation context. Memories stored with `group` visibility are visible to all agents in that group.
+When agents participate in a [Group Conversation](group-conversations.md), the `groupId` is automatically injected into the conversation context. Memories stored with `group` visibility are visible to all agents in that group — whether written by `rememberFact` or by a `longTerm` property with `"visibility": "group"`, both of which stamp the conversation's group id on the entry. A `group` property in a conversation that belongs to no group is stored as `self`: without a group id no reader could ever match it, and `self` keeps it reachable without widening it.
+
+The group is taken only from that injected context value. A client cannot supply
+`groupId` in its own request context (see [Reserved Context Keys](passing-context-information.md#reserved-context-keys)),
+and a conversation *property* named `groupId` does not select a group scope for the
+`usermemory` tool.
+
+A `groupId` found only on an earlier step of the conversation — a turn the owner sends
+into a member conversation directly carries no group context — is used, by the
+`usermemory` tool and when `longTerm` properties are persisted alike, only while the
+discussion named on that step is running on this instance, this conversation is one of its
+members, and it belongs to that group. Otherwise the turn is self-scoped, so a value a
+client forged before reserved keys were filtered does not keep working.
 
 ## REST API
 
@@ -202,10 +220,18 @@ Base path: `/usermemorystore/memories`
 | `GET` | `/{userId}/search?q=` | Search memories by keyword |
 | `GET` | `/{userId}/category/{category}` | Get memories filtered by category |
 | `GET` | `/{userId}/key/{key}` | Get a specific memory by key |
-| `PUT` | `/` | Upsert a memory entry (JSON body) |
+| `PUT` | `/` | Upsert a memory entry (JSON body) — validated, see below |
 | `DELETE` | `/entry/{entryId}` | Delete a specific memory |
 | `DELETE` | `/{userId}` | Delete ALL memories for a user (GDPR) |
 | `GET` | `/{userId}/count` | Count memory entries |
+
+### Write validation
+
+REST `PUT` and MCP `upsert_user_memory` share one rule set (`UserMemoryWriteRules`) and answer 400 / an error instead of storing:
+
+- `userId`, `key` and `visibility` are required; keys are at most 255 characters and values at most 64 KiB of JSON;
+- `self` and `group` entries need a `sourceAgentId` (MCP: `agentId`), and `group` entries need `groupIds` — an entry without them could never be read by anyone;
+- `category` must be one of `preference`, `fact`, `context`, `legacy`, `property`; an absent category is stored as `fact`.
 
 ### Example: Upsert a memory
 
@@ -239,7 +265,7 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 | `search_user_memories` | `eddi-viewer` | Search by keyword |
 | `get_memory_by_key` | `eddi-viewer` | Look up by key name |
 | `count_user_memories` | `eddi-viewer` | Count entries |
-| `upsert_user_memory` | `eddi-admin` | Insert or update an entry |
+| `upsert_user_memory` | `eddi-admin` | Insert or update an entry (`groupIds` — comma-separated — for `group` visibility) |
 | `delete_user_memory` | `eddi-admin` | Delete a specific entry |
 | `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
 
@@ -255,9 +281,9 @@ The Dream service performs background maintenance on user memories:
 
 1. **Stale Pruning** — Removes entries whose `updatedAt` (last write) is older than `pruneStaleAfterDays` days. Recalling an entry does **not** refresh `updatedAt`, so a fact read in every conversation is still pruned if nothing has rewritten it. This is a deterministic operation with zero LLM cost.
 
-2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
+2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). Detection is read-only, so unlike pruning and summarization it looks past the firing agent's own entries: every entry is considered for a key the firing agent holds (a disagreement between two *other* agents is not its to report). The log names the key and agents at INFO; the conflicting values are logged at DEBUG only. V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
 
-3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled into `summarizeTargetEntries` entries. Safety guarantees: new entries are inserted before originals are deleted; LLM failures or invalid responses preserve the original entries.
+3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled toward `summarizeTargetEntries` entries. Safety guarantees: every write target is resolved before anything is written; new entries are inserted before originals are deleted; an original that receives a consolidated entry (the model reused its key) is updated in place and **not** deleted; a key that would overwrite a memory outside the group skips the group untouched; duplicate keys in the answer are merged; a failed insert restores any original it overwrote; an answer that only repeats originals verbatim may drop an original only when it duplicated a kept value (otherwise it merged nothing and the group is skipped); LLM failures or invalid responses preserve the original entries.
 
 ### Scheduling a Dream Cycle
 
@@ -275,19 +301,23 @@ Setting `dream.enabled: true` does not start anything on its own — it is the p
 }
 ```
 
+Create it with `POST /schedulestore/schedules`. A Dream schedule needs no `message` (it dispatches to `DreamService`, not to a conversation), but it does need a real `userId` — one without is rejected at creation, since the cycle consolidates exactly that user's memories.
+
 `ScheduleFireExecutor` recognises the `dreamType` marker and dispatches to `DreamService` with the schedule's `agentId`, `agentVersion` and `userId`. The cron expression lives on the schedule — `dream.schedule` in the agent config is a documentation-only hint that the engine never reads.
 
 ### Metrics
 
-The Dream service exposes Micrometer metrics:
+The Dream service exposes Micrometer metrics (Prometheus names at `/q/metrics` replace the dots with underscores, e.g. `eddi_dream_entries_pruned_total`):
 
 | Metric | Type | Description |
 |---|---|---|
-| `dream.users.processed` | Counter | Users processed across all dream cycles |
-| `dream.entries.pruned` | Counter | Total entries pruned |
-| `dream.contradictions.found` | Counter | Contradictions detected |
-| `dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
-| `dream.duration` | Timer | Duration of dream cycles |
+| `eddi.dream.users.processed` | Counter | Users processed across all dream cycles |
+| `eddi.dream.entries.pruned` | Counter | Total entries pruned |
+| `eddi.dream.contradictions.found` | Counter | Contradictions detected |
+| `eddi.dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
+| `eddi.dream.cycles.failed` | Counter | Cycles that were rejected or ended with an error |
+| `eddi.dream.summarization.failed` | Counter | Consolidation LLM calls that failed |
+| `eddi.dream.duration` | Timer | Duration of dream cycles |
 
 ## Migration from Legacy Properties
 
@@ -308,7 +338,7 @@ Legacy flat property operations (`readProperties`, `mergeProperties`, `deletePro
 
 ### Startup Migration (MongoDB only)
 
-On first startup, `PropertiesMigrationService` automatically migrates existing `properties` documents into `usermemories` as `global` entries with `category=legacy`. The old collection is renamed to `properties_migrated_v6` as a safety backup. This migration is idempotent and skipped if no legacy collection exists.
+On first startup, `PropertiesMigrationService` automatically migrates existing `properties` documents into `usermemories` as `global` entries with `category=legacy`. A key the user already has in `usermemories` keeps its value — it is newer than the frozen v5 data (or the result of an earlier, partial run), so migration never overwrites it. A legacy document without a `userId` cannot be migrated and is skipped (not counted as a failure). Once every key made it across, the old collection is renamed to `properties_migrated_v6` as a safety backup; after a partial failure it stays in place and the next startup retries. The migration is idempotent and skipped if no legacy collection exists.
 
 > **Note:** PostgreSQL deployments do not need migration — the `properties` table only existed in MongoDB (v5).
 

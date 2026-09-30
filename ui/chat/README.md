@@ -32,7 +32,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 
 - 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and raw HTML
 - 🌊 **SSE Streaming** — Real-time token-by-token agent responses with thinking indicator
-- 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$inline$` and `$$block$$`)
+- 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$$…$$`, inline or on its own lines; a single `$` stays a dollar sign)
 - 🎨 **Syntax Highlighting** — Code blocks with language-aware highlighting via `rehype-highlight`
 - 🌗 **Dark / Light Themes** — Toggle via UI button, URL parameter, or system preference
 - ⚡ **Quick Replies** — Pill buttons for suggested responses returned by the agent
@@ -61,7 +61,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 ### Standalone Development
 
 ```bash
-# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.2), EDDI backend on localhost:7070
+# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.3), EDDI backend on localhost:7070
 npm install
 npm run dev        # Vite dev server on http://localhost:5174
 ```
@@ -127,7 +127,15 @@ interface ChatConfig {
 
 ## 📦 Embedding
 
-The chat UI can be embedded in any HTML page via iframe:
+The chat UI can be embedded in any HTML page via iframe — **once EDDI is told which pages may do it.** By default `/chat` answers with `Content-Security-Policy: frame-ancestors 'none'`, and the browser refuses to render it in anyone's iframe. List the embedding origins, space-separated:
+
+```properties
+# application.properties, or EDDI_CHAT_FRAME_ANCESTORS in the environment
+# (Helm: eddi.chat.frameAncestors)
+eddi.chat.frame-ancestors=https://www.example.com https://*.example.org
+```
+
+Only `/chat` takes this setting; the Manager and the API always refuse to be framed.
 
 ```html
 <iframe
@@ -184,9 +192,9 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 | Build     | Vite 6                                                 |
 | UI        | React 19 + TypeScript 5.7 (strict)                     |
 | Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
-| Markdown  | react-markdown 9 + remark-gfm + remark-math            |
-| Math      | KaTeX 0.16                                             |
-| Code      | rehype-highlight                                       |
+| Markdown  | react-markdown 10 + remark-gfm + remark-math           |
+| Math      | KaTeX 0.18 (loaded on first use)                       |
+| Code      | rehype-highlight (loaded on first use)                 |
 | Routing   | React Router v7                                        |
 | Streaming | Native `fetch` + `ReadableStream` (SSE via AsyncGenerator) |
 | Tests     | Vitest 5 + React Testing Library                       |

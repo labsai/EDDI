@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.properties;
 
+import java.util.Objects;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -166,6 +168,79 @@ public interface IUserMemoryStore {
      * @return the entry ID (generated or existing)
      */
     String upsert(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Writes {@code entry} only when nothing exists yet at its upsert identity —
+     * {@code (userId, key)} for a {@code global} entry, {@code (userId, key,
+     * sourceAgentId)} for a self or group one — and never replaces a value that is
+     * there. For writers whose value must lose to anything already stored, such as
+     * a migration of frozen legacy data, or that must never land on an entry they
+     * did not account for, such as Dream's newly consolidated entries.
+     * <p>
+     * This default checks and then writes, so a concurrent writer can slip in
+     * between; stores that can do it atomically override it.
+     *
+     * @return the id of the inserted entry, or {@code null} when one already
+     *         existed
+     */
+    default String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        boolean global = entry.visibility() == Visibility.global;
+        boolean exists = getAllEntries(entry.userId()).stream()
+                .anyMatch(e -> entry.key().equals(e.key()) && (global
+                        ? e.visibility() == Visibility.global
+                        : e.visibility() != Visibility.global && Objects.equals(entry.sourceAgentId(), e.sourceAgentId())));
+        return exists ? null : upsert(entry);
+    }
+
+    /**
+     * Writes a {@code global} entry only if its key is free or already owned by
+     * {@code agentId}, deciding both in one atomic write. A global entry is keyed
+     * on {@code (userId, key)} and shared across agents, so {@link #upsert} applies
+     * any agent's value to it (keeping the original owner). Checking ownership
+     * first and then calling {@link #upsert} leaves a window in which two agents
+     * both see the key as free and the later write wins; here the store decides in
+     * the write itself.
+     * <p>
+     * An existing entry that records no owner (null or blank {@code sourceAgentId},
+     * e.g. legacy or migrated data) counts as not owned, so the write is refused. A
+     * new entry is stamped with {@code agentId} as its owner. Refuses a
+     * {@linkplain #isReservedKey reserved key} like {@link #upsert}.
+     *
+     * @param entry
+     *            a {@code global} entry whose {@code sourceAgentId} is
+     *            {@code agentId}
+     * @param agentId
+     *            the writing agent; must not be null or blank
+     * @return {@code true} if the entry was inserted or updated; {@code false} if
+     *         another agent, or no recorded owner, holds the key and nothing was
+     *         written
+     * @throws IllegalArgumentException
+     *             if the entry is not {@code global}, or {@code agentId} is blank
+     *             or differs from the entry's {@code sourceAgentId}
+     */
+    boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Argument checks shared by every {@link #upsertIfOwnedBy} implementation.
+     */
+    static void checkOwnedWrite(UserMemoryEntry entry, String agentId) {
+        if (entry == null) {
+            throw new IllegalArgumentException("entry must not be null");
+        }
+        if (entry.visibility() != Visibility.global) {
+            throw new IllegalArgumentException("upsertIfOwnedBy accepts only global entries, got " + entry.visibility());
+        }
+        if (agentId == null || agentId.isBlank()) {
+            throw new IllegalArgumentException("upsertIfOwnedBy needs the writing agent's id");
+        }
+        if (!agentId.equals(entry.sourceAgentId())) {
+            throw new IllegalArgumentException("upsertIfOwnedBy: the entry's sourceAgentId must be the writing agent");
+        }
+        if (entry.userId() == null || entry.key() == null) {
+            throw new IllegalArgumentException("upsertIfOwnedBy needs a userId and a key");
+        }
+        rejectReservedKey(entry.key());
+    }
 
     /**
      * The one write path for {@linkplain #isReservedKey reserved keys}, for

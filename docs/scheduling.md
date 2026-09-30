@@ -46,9 +46,16 @@ rather than recurring. Exactly one of the two is required.
 
 ### Conversation Strategies
 
+A schedule belongs to its agent, not to a version: a `new` fire starts on the latest deployed
+version, and a `persistent` conversation follows compatible versions like any other conversation (see
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions)).
+Undeploying a version disables the agent's schedules only when no version of the agent is left
+deployed in that environment — retiring an old version after deploying a new one leaves them
+running.
+
 | Strategy | Behavior | Use When |
 |----------|----------|----------|
-| `persistent` | Reuses the same conversation across all fires. Context accumulates. | Dream consolidation, ongoing monitoring, stateful agents |
+| `persistent` | Reuses the same conversation across all fires. Context accumulates — and so does the conversation document, one step per fire; see [Long-running persistent schedules](#long-running-persistent-schedules). If that conversation has ended (the idle sweep, or an undeploy with `endAllActiveConversations`), the next fire starts a fresh one and records it on the schedule instead of failing until the schedule dead-letters. | Dream consolidation, ongoing monitoring, stateful agents |
 | `new` | Creates a fresh conversation for each fire. Clean context each time. | Report generation, data pipelines, stateless tasks |
 
 ## Configuration
@@ -123,12 +130,12 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `conversationStrategy` | string | varies | `new` or `persistent` |
 | `message` | string | — | Message text sent to the agent on each fire |
 | `userId` | string | `system:scheduler` | User identity for the fire |
-| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`) |
+| `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active |
 | `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
-| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle) |
+| `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
 
 ### Managing Schedules
 
@@ -149,6 +156,13 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > `createdAt` first, id breaking ties) and takes `limit`/`offset`. A response
 > holding exactly `limit` entries may be truncated — ask for the next page to find
 > out.
+>
+> A non-admin's listing holds only the schedules that run as the caller plus shared
+> ones (no `userId`, or the `system:scheduler` placeholder), refined for team
+> cadences and workspaces as described in
+> [Who Can See and Manage a Schedule](#who-can-see-and-manage-a-schedule), and HITL
+> approval timeouts are left out. Both restrictions are part of the query, so `limit`/`offset`
+> count only the rows the caller can see and a short page really is the last one.
 >
 > **`limit=0` is now `400`, on all three listing endpoints.** It used to be passed
 > through to the store, where the two backends read it opposite ways: the MongoDB
@@ -178,14 +192,46 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > comes back. The fire itself continues, and the schedule stays claimed until it
 > ends — a retry in the meantime answers `409`.
 
+### Who Can See and Manage a Schedule
+
+With authorization on, schedule access follows who the schedule **runs as**:
+
+- A schedule whose `userId` names a real user (a per-user dream schedule, a
+  schedule created with your own `userId`) belongs to that user. Other non-admin
+  callers do not see it in the listing, get `403` reading it or its fire logs, and
+  cannot update, fire, enable, disable, delete, retry or dismiss it — **with
+  workspaces on or off**. Administrators see and manage everything. HITL approval
+  timeouts are hidden from non-admins on a direct read too, as in the listing.
+- A **team cadence** schedule runs as the cadence's creator but belongs to its
+  group: callers with VIEW on the group can read it, and callers with EDIT can
+  enable, disable or delete it. Firing or re-pointing it still takes the creator
+  (or an admin), and firing also needs EDIT on the group. With workspaces off every
+  cadence is listed; with them on, a co-editor reaches another member's cadence by
+  id or through the group workspace, not through the listing. A create or update
+  whose body carries the cadence marker (`teamCadenceType`) is refused with `400`,
+  unless it is an update of that same cadence echoing its own markers.
+- A **shared** schedule (`userId` absent, blank or `system:scheduler`) is open to
+  every editor while workspaces are off. With workspaces enforced it belongs to its
+  creator (`createdBy`) and to whoever holds EDIT (VIEW, to read it) on what it
+  drives: the agent, the knowledge base of an ingestion schedule, or the group of
+  a cadence.
+- **Listing under enforcement.** The listing filter runs inside the database
+  query, so it cannot ask about agent access row by row. Without `?agentId=`, a
+  non-admin sees their own schedules and the shared ones they created. To see a
+  team's other shared schedules — including ones created before `createdBy` was
+  recorded — list with `?agentId=` of an agent you may edit, or open them by id.
+- The failed-fires view (`/admin/failed`) shows non-admins only the entries of
+  schedules they can see, so a page can hold fewer entries than `limit`.
+- Agent export and its preview leave out schedules that run as another user.
+
 ### Admin Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
-| `GET` | `/schedulestore/schedules/admin/failed` | List all failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500) |
+| `GET` | `/schedulestore/schedules/admin/failed` | List failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500); non-admins get only the entries of schedules they can see |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
-| `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry |
+| `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry, re-armed at its next regular fire. It does **not** change `enabled`: a schedule that was disabled (by `/disable`, or because its agent was undeployed) stays disabled — use `/enable` to re-arm it. `409` unless the schedule is currently `DEAD_LETTERED` — the write itself is conditional on that state, so it can never reset a running fire |
 
 ## Dream Consolidation
 
@@ -272,6 +318,20 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > consolidation fire reports its own **estimated LLM** cost. Compare a fire log
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
+
+> **A RAG ingestion fire starts a run; it does not wait for it.** The fire claims
+> the source's run and hands it to a worker of its own, then logs `COMPLETED` —
+> a crawl outlasts the scheduler's lease, and running it inside the fire meant
+> the scheduler cancelled it mid-crawl. When the run later **fails**, its worker
+> writes a second entry for the same fire with status `FAILED` and the run's
+> error, so a crawl that fails every night shows up in the fire log (and in
+> `admin/failed`). That entry does **not** raise the schedule's `failCount`, so
+> a failing crawl never retries early and never dead-letters; the run's own
+> history, under the knowledge base's source, has the detail. A fire that finds
+> a run still going logs `COMPLETED` with "already running". On a graceful
+> shutdown, runs in flight on that instance are closed as `CANCELLED`, so the
+> next fire or "Run now" is not refused until they would have been reaped. See
+> [rag.md](rag.md#ingestion-sources).
 
 ### Fire Logs and Erasure
 
@@ -367,8 +427,44 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |
 | `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. Keep it at or below `lease-timeout` — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.persistent-conversation-max-steps` | `0` (off) | Steps after which a `persistent` schedule ends its conversation and starts a new one — see [Long-running persistent schedules](#long-running-persistent-schedules) |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — note that a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The DELETE is by timestamp and therefore idempotent, so it needs no cluster claim |
+
+### Long-running persistent schedules
+
+A `persistent` schedule appends one step to the same conversation on every fire. A
+MongoDB document cannot exceed 16 MB, and a conversation past that limit can no longer
+be written: every fire after it is lost. A 60-second heartbeat that stores a few KB per
+turn gets there in weeks.
+
+Once a persistent conversation passes 1000 steps, EDDI logs a WARN naming it (once per
+conversation). To bound it, set `eddi.schedule.persistent-conversation-max-steps`. When
+the conversation reaches that many steps **and is idle** (`READY`, `ERROR` or
+`EXECUTION_INTERRUPTED`), the next fire ends it and starts a new one:
+
+- The old conversation is ended, not trimmed; its full history stays readable.
+- `conversation`-scoped properties are copied into the new conversation (anything its
+  own start turn set wins), provided the old conversation belongs to the schedule's
+  current `userId` — state written for another user is never handed on. `longTerm`
+  properties need no copying — they live in user memory.
+- If ending the old conversation fails, the fire keeps using it and a later idle fire
+  tries the rollover again, so no conversation is left open beside its replacement.
+- The model's **conversation history does not carry over**: the new conversation's LLM
+  context starts empty. An agent that needs facts across a rollover should keep them in
+  properties.
+- A conversation that is `AWAITING_HUMAN` or busy is never rolled over — that would end
+  the pending approval or the running turn. The fire is skipped as usual and the rollover
+  happens on a later, idle fire.
+
+The setting applies to every persistent schedule, including those already past the limit
+when it is enabled: each rolls over on its first idle fire after that.
+
+Independent of the setting, a persistent schedule only replaces its conversation when
+that conversation is provably gone (the store reports it missing, or it belongs to another
+agent) or has `ENDED`. A store that cannot be read fails the fire instead, and the retry
+runs against the same conversation — a brief outage does not cost the schedule its
+history.
 
 ### Observability
 

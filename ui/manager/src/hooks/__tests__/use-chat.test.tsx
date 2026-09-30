@@ -777,6 +777,30 @@ describe("useSendMessage", () => {
     expect(userMessages[0]!.content).toBe("Hello");
   });
 
+  it("shows why a turn failed instead of rendering nothing", async () => {
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          conversationState: "ERROR",
+          conversationSteps: [],
+          conversationOutputs: [
+            {
+              actions: ["send_message"],
+              taskErrors: [{ type: "errorDigest", text: "Task 'eddi://ai.labs.llm' failed: invalid x-api-key" }],
+            },
+          ],
+        }),
+      ),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper: createWrapper() });
+    result.current.mutate({ message: "Hello" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const agentMessages = useChatStore.getState().messages.filter((m) => m.role === "agent");
+    expect(agentMessages.map((m) => m.content)).toEqual(["⚠️ Task 'eddi://ai.labs.llm' failed: invalid x-api-key"]);
+  });
+
   it("enables Undo once a turn lands — it used to stay off until a reload", async () => {
     server.use(
       http.post("*/agents/:conversationId", () =>
@@ -864,6 +888,10 @@ describe("useSendMessage", () => {
       http.post("*/agents/:conversationId", () => {
         return new HttpResponse(null, { status: 409 });
       }),
+      // A 409 is read as a pause only when the conversation says so.
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+      ),
     );
 
     const { result } = renderHook(() => useSendMessage(), {

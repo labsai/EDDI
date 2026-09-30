@@ -6,13 +6,13 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
+import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
@@ -81,8 +81,21 @@ class ContextualToolsProvider implements ToolSourceProvider {
             Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24))
                     .<String, Boolean>build().asMap());
 
+    /**
+     * Verifies an earlier step's {@code groupId} before it is trusted — see
+     * {@link #resolveGroupIds(IConversationMemory, LiveDiscussionRegistry)}. May be
+     * null, in which case only the current step's value counts.
+     */
+    private final LiveDiscussionRegistry liveDiscussionRegistry;
+
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
+        this(userMemoryStore, attachmentStore, attachmentTextExtractor, null);
+    }
+
+    ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
+            AttachmentTextExtractor attachmentTextExtractor, LiveDiscussionRegistry liveDiscussionRegistry) {
+        this.liveDiscussionRegistry = liveDiscussionRegistry;
         this.userMemoryStore = userMemoryStore;
         this.attachmentStore = attachmentStore;
         this.attachmentTextExtractor = attachmentTextExtractor;
@@ -172,7 +185,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
-        if (ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
+        if (!ctx.memory().isMemoryToolsEnabled() || ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;
         }
         // Suppressed per agent, not per turn: this fires on every turn of a
@@ -196,11 +209,15 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * context.
      */
     void addUserMemoryToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        // The config alone is not the switch: it is present for every agent that
+        // declares a userMemoryConfig block (its recall and visibility settings apply
+        // to the longTerm property path of every agent). Only enableMemoryTools
+        // grants the persistent cross-conversation WRITE capability this tool is.
         AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
-        if (config == null || userMemoryStore == null)
+        if (!memory.isMemoryToolsEnabled() || config == null || userMemoryStore == null)
             return;
 
-        List<String> groupIds = resolveGroupIds(memory);
+        List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
                 memory::isCancelled);
@@ -230,55 +247,23 @@ class ContextualToolsProvider implements ToolSourceProvider {
      * on PR #626; the defect predates this branch — R2a moved it verbatim out of
      * {@code AgentOrchestrator}.
      * <p>
-     * Reads {@code context:groupId} the way {@code DynamicAgentToolsProvider}
-     * resolves its own delegation-depth context, falling back to the current step
-     * and then to any earlier step, since a resumed turn re-enters without the
-     * original context map. The property read is kept as a last resort so a config
-     * that genuinely does set a {@code groupId} property still works.
+     * Reads {@code context:groupId} from the current step, and from an earlier step
+     * only when {@code registry} confirms this conversation is a member of the
+     * running discussion that step names, in that group — see
+     * {@link ConversationGroups#resolveGroupIds(IConversationMemory, ConversationGroups.MembershipCheck)}.
+     * Without a registry only the current step counts.
+     * <p>
+     * The context value is the only source. A {@code groupId} conversation
+     * <em>property</em> used to be honoured as a last resort, but properties are
+     * not a trusted channel — a client can set them per turn through
+     * {@code properties} context expressions, and property setters can capture user
+     * input into them — so the fallback let a conversation claim membership of any
+     * group and reach its shared memories. Group membership is a runtime fact the
+     * group orchestrator asserts, and {@code ClientContextGuard} keeps clients from
+     * asserting it through the context key instead.
      */
-    static List<String> resolveGroupIds(IConversationMemory memory) {
-        String contextKey = "context:groupId";
-
-        var currentStep = memory.getCurrentStep();
-        if (currentStep != null) {
-            String fromCurrent = contextValueAsString(currentStep.getLatestData(contextKey));
-            if (fromCurrent != null) {
-                return List.of(fromCurrent);
-            }
-        }
-
-        var allSteps = memory.getAllSteps();
-        if (allSteps != null) {
-            List<IData<Object>> priorEntries = allSteps.getAllLatestData(contextKey);
-            if (priorEntries != null) {
-                for (IData<Object> entry : priorEntries) {
-                    String value = contextValueAsString(entry);
-                    if (value != null) {
-                        return List.of(value);
-                    }
-                }
-            }
-        }
-
-        var props = memory.getConversationProperties();
-        if (props != null && props.get("groupId") instanceof Property p && p.getValueString() != null) {
-            return List.of(p.getValueString());
-        }
-        return List.of();
-    }
-
-    /** Unwraps a {@code context:*} data entry, which holds a {@link Context}. */
-    private static String contextValueAsString(IData<?> data) {
-        if (data == null || data.getResult() == null) {
-            return null;
-        }
-        Object result = data.getResult();
-        Object value = result instanceof Context ctx ? ctx.getValue() : result;
-        if (value == null) {
-            return null;
-        }
-        String asString = String.valueOf(value);
-        return asString.isBlank() ? null : asString;
+    static List<String> resolveGroupIds(IConversationMemory memory, LiveDiscussionRegistry registry) {
+        return ConversationGroups.resolveGroupIds(memory, registry != null ? registry::isLiveMember : null);
     }
 
     /**

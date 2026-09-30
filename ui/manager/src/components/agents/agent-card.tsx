@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import {
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Copy,
@@ -12,6 +11,7 @@ import {
   Share2,
   MessageSquare,
   Sparkles,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatuses, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
@@ -29,6 +29,7 @@ import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState, useCallback, useId, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 
 interface AgentCardProps {
   agent: AgentDescriptor & { id: string; version: number };
@@ -43,7 +44,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/20" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/20" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10", ring: "ring-destructive/20" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
 };
 
 export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: AgentCardProps) {
@@ -95,12 +96,32 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
     );
   }
 
+  // Undeploying takes a live agent offline for everyone chatting with it, so
+  // the card asks first, as the agent page always has. It used to fire on the
+  // first click, and a refusal toasted a bare "Undeploy failed": the backend's
+  // 409 names the active conversations that block it and how to proceed, and
+  // that sentence was thrown away.
+  const [confirmUndeploy, setConfirmUndeploy] = useState(false);
+  const [undeployEndConversations, setUndeployEndConversations] = useState(false);
+
+  function closeUndeployDialog() {
+    setConfirmUndeploy(false);
+    setUndeployEndConversations(false);
+  }
+
   function handleUndeploy() {
     undeployMutation.mutate(
-      { agentId: agent.id, version: agent.version },
       {
-        onSuccess: () => toast.success(t("agents.undeploySuccess", "Agent undeployed")),
-        onError: () => toast.error(t("agents.undeployError", "Undeploy failed")),
+        agentId: agent.id,
+        version: agent.version,
+        endAllActiveConversations: undeployEndConversations,
+      },
+      {
+        onSuccess: () => {
+          toast.success(t("agents.undeploySuccess", "Agent undeployed"));
+          closeUndeployDialog();
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
   }
@@ -293,7 +314,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
               broken-looking outcome the row gating exists to remove. */}
           {access.canEdit && (
           <button
-            onClick={isProductionDeployed ? handleUndeploy : handleDeploy}
+            onClick={isProductionDeployed ? () => setConfirmUndeploy(true) : handleDeploy}
             disabled={isBusy}
             data-testid={`agent-deploy-toggle-${agent.id}`}
             className={cn(
@@ -317,6 +338,45 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={confirmUndeploy}
+        onOpenChange={(open) => {
+          if (!open) closeUndeployDialog();
+        }}
+        title={t("agents.confirmUndeploy", "Undeploy agent?")}
+        description={t(
+          "agents.confirmUndeployDescription",
+          "Version {{version}} will be undeployed from {{environment}}.",
+          { version: agent.version, environment: envLabel("production") },
+        )}
+        confirmLabel={t("agents.undeploy")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleUndeploy}
+        variant="destructive"
+        isPending={undeployMutation.isPending}
+      >
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-destructive"
+            checked={undeployEndConversations}
+            onChange={(e) => setUndeployEndConversations(e.target.checked)}
+            data-testid={`agent-undeploy-end-conversations-${agent.id}`}
+          />
+          <span className="text-muted-foreground">
+            <span className="block font-medium text-foreground">
+              {t("agents.undeployEndConversationsLabel", "End all active conversations")}
+            </span>
+            <span className="mt-0.5 block text-xs text-destructive">
+              {t(
+                "agents.undeployEndConversationsHint",
+                "Immediately terminates every in-progress conversation on this deployment. This cannot be undone."
+              )}
+            </span>
+          </span>
+        </label>
+      </AlertDialog>
     </div>
   );
 }

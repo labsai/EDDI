@@ -20,14 +20,14 @@
 
        cosign verify \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-         {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+         --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
+         {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
 {{- if not .Values.eddi.image.digest }}
 
      Then pin the digest, so the kubelet can never pull different bits under
      the same tag:
 
-       crane digest {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+       crane digest {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
        helm upgrade {{ .Release.Name }} ./helm/eddi \
          --set eddi.image.digest="sha256:..." \
          --namespace {{ .Release.Namespace }}
@@ -56,7 +56,7 @@
               echoed here, since install output lands in shell history, CI logs
               and terminal scrollback.
 
-  👤 Give the EDDI administrator a password — it ships without one:
+  👤 Give the EDDI administrator a password — no account ships with one:
 
     The realm seeds `eddi` with the eddi-admin, eddi-editor and eddi-viewer
     roles and NO credential, so nobody can log in to /manage until you set one. It used to
@@ -67,9 +67,24 @@
 
     Or grant all three realm roles to an account of your own — eddi-viewer
     included, because EDDI has no role hierarchy and an administrator without
-    it is refused every read tool over MCP. The unprivileged fixtures
-    (viewer/viewer, user/user) still log straight in.
+    it is refused every read tool over MCP.
 
+    The unprivileged fixtures `viewer` (eddi-viewer) and `user` (eddi-user)
+    are opt-in the same way: they ship with their roles and no password, and
+    stay unusable until you set one. They used to ship as viewer/viewer and
+    user/user, and the SPA client allowed the password grant, so one curl
+    against a reachable Keycloak returned a token that could run LLM turns.
+
+{{- end }}
+
+{{- if and .Values.ingress.enabled (empty .Values.ingress.tls) }}
+
+  ⚠️  Ingress is enabled but ingress.tls is empty.
+
+     EDDI is being published over plain HTTP. Every request — including bearer
+     tokens and, without OIDC, unauthenticated API calls — crosses the network in
+     cleartext. Configure ingress.tls (a cert-manager Certificate or an existing
+     TLS Secret) before exposing this to anything but a trusted LAN.
 {{- end }}
 
   📊 Components:

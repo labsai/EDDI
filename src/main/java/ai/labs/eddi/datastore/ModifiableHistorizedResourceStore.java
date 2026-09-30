@@ -24,33 +24,51 @@ public class ModifiableHistorizedResourceStore<T> extends HistorizedResourceStor
         this.resourceStorage = resourceStore;
     }
 
+    /**
+     * Rewrites version {@code version} of a resource in place, without creating a
+     * new version.
+     * <p>
+     * Two defects used to hide here. Writing the <em>current</em> version replaced
+     * the row by id alone, so an update that committed between the read and the
+     * write was overwritten with the older content — the resource rolled back to
+     * {@code version} while the caller's view said nothing had happened. It is now
+     * version-checked, and a version that turns out to have moved into history is
+     * written there instead. Writing a <em>historized</em> version went through the
+     * archive's insert-if-absent path and was therefore a silent no-op that still
+     * answered success; it now rewrites the history row.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if the version does not exist, or the resource was deleted
+     */
     public Integer set(String id, Integer version, T content) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(id, "id");
         RuntimeUtilities.checkNotNull(version, "version");
         RuntimeUtilities.checkNotNull(content, "content");
 
-        IResourceStorage.IResource<T> resource = resourceStorage.read(id, version);
         try {
-            if (resource == null) {
-                IResourceStorage.IHistoryResource<T> historyLatest = resourceStorage.readHistoryLatest(id);
-
-                if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
-                    throw createResourceNotFoundException(id, version);
+            IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
+            if (resourceStorage.read(id, version) != null) {
+                try {
+                    resourceStorage.storeIfCurrentVersion(updatedResource, version);
+                    return version;
+                } catch (IResourceStore.ResourceModifiedException e) {
+                    // Moved on since the read: the version is history now — write it there,
+                    // never over the newer current row.
                 }
-
-                // it's a update request for a historized resource, so we update the history
-                // resource
-                IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
-                IResourceStorage.IHistoryResource<T> updatedHistorizedResource = resourceStorage.newHistoryResourceFor(updatedResource, false);
-                resourceStorage.store(updatedHistorizedResource);
-                return version;
-            } else {
-                // it's a update request for the current resource, so we update the current
-                // resource
-                IResourceStorage.IResource<T> updatedResource = resourceStorage.newResource(id, version, content);
-                resourceStorage.store(updatedResource);
-                return version;
             }
+
+            IResourceStorage.IHistoryResource<T> historyLatest = resourceStorage.readHistoryLatest(id);
+            if (historyLatest == null || historyLatest.isDeleted() || version > historyLatest.getVersion()) {
+                throw createResourceNotFoundException(id, version);
+            }
+            IResourceStorage.IHistoryResource<T> historized = resourceStorage.readHistory(id, version);
+            if (historized == null || historized.isDeleted()) {
+                throw createResourceNotFoundException(id, version);
+            }
+            if (!resourceStorage.replaceHistory(resourceStorage.newHistoryResourceFor(updatedResource, false))) {
+                throw createResourceNotFoundException(id, version);
+            }
+            return version;
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }

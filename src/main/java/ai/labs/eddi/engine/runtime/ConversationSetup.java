@@ -45,6 +45,14 @@ public class ConversationSetup implements IConversationSetup {
     }
 
     @Override
+    public void updateConversationAgentVersion(String conversationId, String agentId, Integer agentVersion)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+        descriptor.setAgentResource(createURI(IRestAgentStore.resourceURI, agentId, IRestAgentStore.versionQueryParam, agentVersion));
+        conversationDescriptorStore.setDescriptor(conversationId, 0, descriptor);
+    }
+
+    @Override
     public String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext) {
         return isNullOrEmpty(userId)
                 ? (userIdContext != null && userIdContext.getValue() instanceof String

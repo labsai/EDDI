@@ -27,6 +27,10 @@ const PRESETS_JAVA = resolve(
 /**
  * The value of a Java text block constant, per JLS 3.10.6.
  *
+ * - Line terminators are normalised to LF first, as javac does. A Windows
+ *   checkout (core.autocrlf) has CRLF; without this every line kept a trailing
+ *   carriage return, so a line-end `\` was not at the end of its line and the
+ *   continuation was never joined.
  * - The content starts on the line after the opening `"""`.
  * - The common indentation is computed over the non-blank content lines AND the
  *   closing delimiter's line (when the delimiter sits on a line of its own, its
@@ -39,7 +43,8 @@ const PRESETS_JAVA = resolve(
  * and the template needs none. If one appears, this test fails loudly and the
  * comparison is updated deliberately.
  */
-function javaTextBlock(source: string, name: string): string {
+function javaTextBlock(raw: string, name: string): string {
+  const source = raw.replace(/\r\n?/g, "\n");
   const start = source.indexOf(`${name} = """`);
   if (start < 0) throw new Error(`${name} not found`);
   const bodyStart = source.indexOf("\n", start) + 1;
@@ -75,6 +80,12 @@ describe("javaTextBlock (the drift test's parser)", () => {
   it("counts a dedented closing delimiter and keeps the final newline", () => {
     const src = 'X = """\n        a\n        b\n    """;';
     expect(javaTextBlock(src, "X")).toBe("    a\n    b\n");
+  });
+
+  it("reads a CRLF source the way javac does, joining continuations", () => {
+    // What a Windows checkout of the .java file looks like.
+    const src = 'X = """\r\n    one \\\r\n    two\r\n    """;';
+    expect(javaTextBlock(src, "X")).toBe("one two\n");
   });
 
   it("joins a line-end continuation and drops a closing delimiter on the last line", () => {

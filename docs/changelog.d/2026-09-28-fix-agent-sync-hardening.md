@@ -66,6 +66,15 @@ that document will be written (for a parser the target's step names but no longe
 has, only once the store confirms it is gone), and a batch entry names the agent it was written
 into.
 
+**Merged with `main` (2026-09-30).** `main` now counts workflows and extensions as
+updated only once the agent that loads them is written; a dictionary that only a
+parser document names follows the same rule, delivered with the parser's step. A
+synced agent write is never compatible (`updateAgent(..., false)`), and the agent's
+store-owned `compatibilityGeneration` is carried from the target like its identity,
+so a save made here is no agent CONFLICT. The parser-document rows moved with the
+§5 reference from `AGENTS.md` to
+[`agent-config-authoring.md`](../agent-config-authoring.md).
+
 **Smaller ones.** A sync without `targetAgentId` now finds the agent an earlier
 promotion made (by `originId`) instead of creating a copy on every call — `409`
 when several exist, `createNew=true` to force one. `selectedResources` present but

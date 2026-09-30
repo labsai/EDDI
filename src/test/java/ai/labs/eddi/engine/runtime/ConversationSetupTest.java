@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.runtime;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +35,23 @@ class ConversationSetupTest {
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         setup = new ConversationSetup(conversationDescriptorStore, documentDescriptorStore);
+    }
+
+    @Test
+    @DisplayName("updateConversationAgentVersion points the descriptor at the new version and keeps the rest")
+    void updateConversationAgentVersion() throws Exception {
+        var descriptor = new ConversationDescriptor();
+        descriptor.setAgentResource(URI.create("eddi://ai.labs.agent/agentstore/agents/agent-1?version=1"));
+        descriptor.setAgentName("My Agent");
+        doReturn(descriptor).when(conversationDescriptorStore).readDescriptor("conv-1", 0);
+
+        setup.updateConversationAgentVersion("conv-1", "agent-1", 3);
+
+        verify(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0), argThat(written -> {
+            assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/agent-1?version=3"), written.getAgentResource());
+            assertEquals("My Agent", written.getAgentName());
+            return true;
+        }));
     }
 
     // ==================== createConversationDescriptor ====================

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import io.quarkus.security.ForbiddenException;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -25,6 +27,7 @@ class McpMemoryToolsTest {
     private McpMemoryTools tools;
     private IUserMemoryStore userMemoryStore;
     private IJsonSerialization jsonSerialization;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
@@ -32,8 +35,9 @@ class McpMemoryToolsTest {
         jsonSerialization = mock(IJsonSerialization.class);
         var identity = mock(SecurityIdentity.class);
         var ownershipValidator = mock(OwnershipValidator.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         // authEnabled=false so no role checks
-        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, false);
+        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, resourceAccessGuard, false);
     }
 
     // ==================== listUserMemories ====================
@@ -75,6 +79,17 @@ class McpMemoryToolsTest {
     }
 
     // ==================== getVisibleMemories ====================
+
+    @Test
+    void getVisibleMemories_namingAGroupTheCallerMayNotUse_isRefused() throws Exception {
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
+                .requireUseAccessToEach(List.of("g1", "other-team"), "group");
+
+        var result = tools.getVisibleMemories("user1", "agent1", "g1, other-team", null, null);
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(userMemoryStore, never()).getVisibleEntries(any(), any(), any(), any(), anyInt());
+    }
 
     @Test
     void getVisibleMemories_success() throws Exception {
@@ -152,38 +167,38 @@ class McpMemoryToolsTest {
     void upsertUserMemory_success() throws Exception {
         when(userMemoryStore.upsert(any())).thenReturn("new-id");
         when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"upserted\"}");
-        var result = tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self");
+        var result = tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self", null);
         assertNotNull(result);
         verify(userMemoryStore).upsert(any());
     }
 
     @Test
     void upsertUserMemory_nullUserId() {
-        var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null);
+        var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null, null);
         assertTrue(result.contains("userId is required"));
     }
 
     @Test
     void upsertUserMemory_nullKey() {
-        var result = tools.upsertUserMemory("user1", null, "val", "agent", null, null);
+        var result = tools.upsertUserMemory("user1", null, "val", "agent", null, null, null);
         assertTrue(result.contains("key is required"));
     }
 
     @Test
     void upsertUserMemory_nullValue() {
-        var result = tools.upsertUserMemory("user1", "key", null, "agent", null, null);
+        var result = tools.upsertUserMemory("user1", "key", null, "agent", null, null, null);
         assertTrue(result.contains("value is required"));
     }
 
     @Test
     void upsertUserMemory_nullAgentId() {
-        var result = tools.upsertUserMemory("user1", "key", "val", null, null, null);
+        var result = tools.upsertUserMemory("user1", "key", "val", null, null, null, null);
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void upsertUserMemory_invalidVisibility() {
-        var result = tools.upsertUserMemory("user1", "key", "val", "agent", null, "invalid");
+        var result = tools.upsertUserMemory("user1", "key", "val", "agent", null, "invalid", null);
         assertTrue(result.contains("Invalid visibility"));
     }
 
@@ -218,7 +233,7 @@ class McpMemoryToolsTest {
 
     @Test
     void upsertUserMemory_refusesAReservedKey() throws Exception {
-        var result = tools.upsertUserMemory("user1", "_gdpr_processing_restricted", "false", "agent1", "fact", "global");
+        var result = tools.upsertUserMemory("user1", "_gdpr_processing_restricted", "false", "agent1", "fact", "global", null);
         assertTrue(result.contains("reserved"), result);
         verify(userMemoryStore, never()).upsert(any());
     }

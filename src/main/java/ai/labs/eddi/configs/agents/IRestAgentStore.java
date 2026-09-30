@@ -84,6 +84,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
                                  @Parameter(name = "version", required = true, example = "1")
                                  @QueryParam("version") Integer version);
 
+    String COMPATIBLE_DESCRIPTION = "Whether the new version is compatible with the one it replaces. When true, conversations "
+            + "running on the previous version switch to the new one on their next turn once it is deployed; when false "
+            + "(the default) the new version is a breaking change and they stay on the version they started on. The "
+            + "server records the answer as the version's compatibilityGeneration; a value for that field in the body "
+            + "is ignored.";
+
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -91,7 +97,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateAgent(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,
-                         AgentConfiguration agentConfiguration);
+                         AgentConfiguration agentConfiguration,
+                         @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                         @QueryParam("compatible")
+                         @DefaultValue("false") Boolean compatible);
 
     @PUT
     @Path("/{id}/updateResourceUri")
@@ -100,7 +109,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateResourceInAgent(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
                                    @QueryParam("version") Integer version,
-                                   URI resourceURI);
+                                   URI resourceURI,
+                                   @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                                   @QueryParam("compatible")
+                                   @DefaultValue("false") Boolean compatible);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

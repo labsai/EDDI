@@ -138,12 +138,23 @@ export function useAgentVersions(agentId: string) {
     // Both are fixed by resolving the id alongside the version and keeping only
     // this agent's, one entry per version.
     select: (descriptors) => {
-      const byVersion = new Map<number, { version: number; lastModifiedOn: number; name: string }>();
+      // `resource` and `callerLevel` ride along so the detail page can decide
+      // which controls to offer (see `accessForDetail` in `@/lib/access`).
+      const byVersion = new Map<
+        number,
+        { version: number; lastModifiedOn: number; name: string; resource: string; callerLevel?: string }
+      >();
       for (const d of descriptors) {
         const { id, version } = parseResourceUri(d.resource);
         if (id !== agentId) continue;
         if (!byVersion.has(version)) {
-          byVersion.set(version, { version, lastModifiedOn: d.lastModifiedOn, name: d.name });
+          byVersion.set(version, {
+            version,
+            lastModifiedOn: d.lastModifiedOn,
+            name: d.name,
+            resource: d.resource,
+            callerLevel: d.callerLevel,
+          });
         }
       }
       return [...byVersion.values()].sort((a, b) => b.version - a.version);

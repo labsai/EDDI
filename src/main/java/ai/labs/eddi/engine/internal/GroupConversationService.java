@@ -54,6 +54,7 @@ import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
+import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
@@ -550,19 +551,50 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Starts a cadence-driven discussion (I13): {@code startAndDiscussAsync} with
+     * A cadence discussion that exists but has not started (I13). The caller claims
+     * the team's workspace for {@link #conversation()}'s id, then either
+     * {@link #launch() launches} it or {@link #abandon() abandons} it.
+     * <p>
+     * Split in two because the claim needs the discussion's id, and the run must
+     * not begin before the claim is won. The previous single call created AND
+     * submitted the discussion, so on a lost claim the cancel that followed raced a
+     * leg that could already be inside phase 0 — a graceful cancel lets the current
+     * phase finish, so a run nobody had claimed spent money and worked the backlog
+     * tasks another run now owned.
+     */
+    public interface CadenceDiscussion {
+
+        /** The created conversation, persisted {@code IN_PROGRESS}. */
+        GroupConversation conversation();
+
+        /**
+         * Starts the discussion on the executor. Call once, after winning the claim.
+         */
+        void launch() throws GroupDiscussionException;
+
+        /**
+         * Retires a discussion that never ran: CAS {@code IN_PROGRESS → CANCELLED}.
+         * Never throws — a failure is logged and leaves a zombie crash recovery cleans
+         * up, which is still better than a run nobody claimed.
+         */
+        void abandon();
+    }
+
+    /**
+     * Prepares a cadence-driven discussion (I13): {@code startAndDiscussAsync} with
      * two overrides a scheduled backlog run needs — the pulled backlog tasks
      * replace the config's pre-configured task list (a runtime copy; the stored
      * config is never written), and the cadence's dollar ceiling rides the
      * inherited-ceiling slot so {@code effectiveCostCeiling} takes the tighter of
-     * it and the group's own {@code maxCostPerDiscussion}.
+     * it and the group's own {@code maxCostPerDiscussion}. Nothing runs until
+     * {@link CadenceDiscussion#launch()}.
      * <p>
      * The config instance mutated here is this call's own fresh read from the store
      * — deserialized per read, shared with nothing.
      */
-    public GroupConversation startCadenceDiscussionAsync(String groupId, String question, String userId,
-                                                         List<AgentGroupConfiguration.TaskDefinition> injectedTasks,
-                                                         Double maxCostPerRun, GroupDiscussionEventListener listener)
+    public CadenceDiscussion prepareCadenceDiscussion(String groupId, String question, String userId,
+                                                      List<AgentGroupConfiguration.TaskDefinition> injectedTasks,
+                                                      Double maxCostPerRun, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         if (groupId == null) {
             throw new IllegalArgumentException("groupId must not be null");
@@ -590,20 +622,46 @@ public class GroupConversationService implements IGroupConversationService, User
         gc.setInheritedCostCeiling(maxCostPerRun);
         discussionControls.put(gc.getId(), new DiscussionControlToken());
         final var discussionCaller = callerIdentityContext.captureOrCurrent();
-        try {
-            executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
+        return new CadenceDiscussion() {
+            @Override
+            public GroupConversation conversation() {
+                return gc;
+            }
+
+            @Override
+            public void launch() throws GroupDiscussionException {
+                // The control was registered at prepare time, so a cancel landing
+                // between the claim and this submit finds a signalable token and the
+                // leg stops at its first phase check.
                 try {
-                    executeDiscussion(gc, config, phases, question, listener, 0);
-                } catch (Exception e) {
-                    LOGGER.errorf("Cadence group discussion failed for %s: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+                    executorService.submit(callerIdentityContext.withIdentity(discussionCaller, () -> {
+                        try {
+                            executeDiscussion(gc, config, phases, question, listener, 0);
+                        } catch (Exception e) {
+                            LOGGER.errorf("Cadence group discussion failed for %s: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+                        }
+                    }));
+                } catch (RuntimeException e) {
+                    discussionControls.remove(gc.getId());
+                    failConversation(gc);
+                    throw new GroupDiscussionException("Failed to start cadence discussion: " + e.getMessage(), e);
                 }
-            }));
-        } catch (RuntimeException e) {
-            discussionControls.remove(gc.getId());
-            failConversation(gc);
-            throw new GroupDiscussionException("Failed to start cadence discussion: " + e.getMessage(), e);
-        }
-        return gc;
+            }
+
+            @Override
+            public void abandon() {
+                discussionControls.remove(gc.getId());
+                try {
+                    if (conversationStore.compareAndSetState(gc.getId(), GroupConversationState.IN_PROGRESS,
+                            GroupConversationState.CANCELLED)) {
+                        gc.setState(GroupConversationState.CANCELLED);
+                    }
+                } catch (Exception e) {
+                    LOGGER.warnf("Could not retire unlaunched cadence discussion %s: %s", LogSanitizer.sanitize(gc.getId()),
+                            LogSanitizer.sanitize(e.getMessage()));
+                }
+            }
+        };
     }
 
     /**
@@ -776,12 +834,8 @@ public class GroupConversationService implements IGroupConversationService, User
                 // NEW-3: Check control token at top of phase loop
                 var token = discussionControls.get(gc.getId());
                 if (token != null && token.isCancelled()) {
-                    gc.setState(GroupConversationState.CANCELLED);
-                    gc.setLastModified(Instant.now());
-                    conversationStore.update(gc);
                     LOGGER.infof("Group discussion %s cancelled via control token at phase %d", LogSanitizer.sanitize(gc.getId()), phaseIdx);
-                    notifyCancelled(gc, listener);
-                    return gc;
+                    return persistCancelled(gc, listener);
                 }
 
                 // I1 SYNTHESIZE_NOW skip-ahead. Placed AFTER the cancel check above so
@@ -1026,7 +1080,8 @@ public class GroupConversationService implements IGroupConversationService, User
                     // plumbing convergence uses. Applied BEFORE the persist below so
                     // the table and the turns that produced it share one write.
                     if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
-                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat);
+                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat,
+                                config.getNegotiationConfig());
                         if (phase.type() == PhaseType.BARGAIN
                                 && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
                             outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
@@ -1172,7 +1227,9 @@ public class GroupConversationService implements IGroupConversationService, User
                     var stanceUpdates = StanceSummaryEngine.updateStances(gc, config.getStanceSummary(), protocol, summarizationService);
 
                     gc.setLastModified(Instant.now());
-                    conversationStore.update(gc);
+                    // H14a: conditional on the persisted state still being a running
+                    // one — a cancel committed on another pod must not be overwritten.
+                    persistWhileRunning(gc);
 
                     if (listener != null) {
                         for (var stance : stanceUpdates) {
@@ -1279,12 +1336,8 @@ public class GroupConversationService implements IGroupConversationService, User
                 {
                     var cancelToken = discussionControls.get(gc.getId());
                     if (cancelToken != null && cancelToken.isCancelled()) {
-                        gc.setState(GroupConversationState.CANCELLED);
-                        gc.setLastModified(Instant.now());
-                        conversationStore.update(gc);
                         LOGGER.infof("Group discussion %s cancelled before HITL gate at phase %d", LogSanitizer.sanitize(gc.getId()), phaseIdx);
-                        notifyCancelled(gc, listener);
-                        return gc;
+                        return persistCancelled(gc, listener);
                     }
                 }
 
@@ -1437,12 +1490,11 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT) {
                 return gc;
             }
-            // #27/#45: complete with a CAS on the running state this leg believes it
-            // holds (IN_PROGRESS or SYNTHESIZING). If a cross-pod cancel/ABORT
-            // already flipped the persisted state, the CAS fails and we honor the
-            // terminal state instead of resurrecting a completed answer for work a
-            // human tried to stop.
-            var expectedRunningState = gc.getState();
+            // #27/#45: complete with a CAS on the persisted state still being a
+            // running one (IN_PROGRESS or SYNTHESIZING — see RunningDiscussionWrites).
+            // If a cross-pod cancel/ABORT already flipped the persisted state, the
+            // CAS fails and we honor the terminal state instead of resurrecting a
+            // completed answer for work a human tried to stop.
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
@@ -1452,25 +1504,11 @@ public class GroupConversationService implements IGroupConversationService, User
             gc.setRuntimePhases(null);
             gc.clearFacilitatorExtensions();
             gc.setLastModified(Instant.now());
-            try {
-                conversationStore.updateIfState(gc, expectedRunningState);
-            } catch (IResourceStore.ResourceModifiedException e) {
-                LOGGER.infof("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED",
-                        LogSanitizer.sanitize(gc.getId()), expectedRunningState);
-                var persisted = conversationStore.read(gc.getId());
-                // This leg optimistically set COMPLETED before the CAS; align the
-                // in-memory state with the terminal value the racing writer committed so
-                // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
-                gc.setState(persisted.getState());
-                if (listener != null && persisted.getState() == GroupConversationState.CANCELLED) {
-                    notifyCancelled(persisted, listener);
-                }
-                return persisted;
-            } catch (IGroupConversationStore.GroupConversationGoneException e) {
-                // deleted while the leg was running — nothing to persist into
-                LOGGER.infof("Group discussion %s was deleted while running — discarding its result", LogSanitizer.sanitize(gc.getId()));
-                return gc;
-            }
+            // This leg optimistically sets COMPLETED before the CAS; a lost CAS
+            // (superseded / deleted) is handled by the catch blocks below, which
+            // align the in-memory state with what the racing writer committed so
+            // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
+            persistWhileRunning(gc);
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
@@ -1491,6 +1529,10 @@ public class GroupConversationService implements IGroupConversationService, User
             if (cancelToken != null && cancelToken.isCancelled()) {
                 return persistCancelled(gc, listener);
             }
+            GroupConversation endedElsewhere = stopIfEndedElsewhere(gc, listener);
+            if (endedElsewhere != null) {
+                return endedElsewhere;
+            }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
             if (listener != null) {
@@ -1508,6 +1550,11 @@ public class GroupConversationService implements IGroupConversationService, User
                 throw e;
             }
             throw new GroupExecutionException(e.getMessage(), e);
+        } catch (RunningDiscussionWrites.DiscussionSupersededException e) {
+            // H14a: a write found the persisted state no longer running — a cancel,
+            // close or failure committed elsewhere (possibly on another pod) while
+            // this leg ran. Adopt that outcome instead of overwriting it.
+            return stopAsSuperseded(gc, listener);
         } catch (Exception e) {
             if (isDeletedWhileRunning(e)) {
                 return stopAsDeleted(gc, listener);
@@ -1516,6 +1563,10 @@ public class GroupConversationService implements IGroupConversationService, User
             var cancelToken = discussionControls.get(gc.getId());
             if (cancelToken != null && cancelToken.isCancelled()) {
                 return persistCancelled(gc, listener);
+            }
+            GroupConversation endedElsewhere = stopIfEndedElsewhere(gc, listener);
+            if (endedElsewhere != null) {
+                return endedElsewhere;
             }
             LOGGER.errorf(e, "Group discussion %s failed", LogSanitizer.sanitize(gc.getId()));
             failConversation(gc);
@@ -1601,7 +1652,11 @@ public class GroupConversationService implements IGroupConversationService, User
         gc.setState(GroupConversationState.CANCELLED);
         gc.setLastModified(Instant.now());
         try {
-            conversationStore.update(gc);
+            // H14a: conditional like every other leg write — a terminal state another
+            // writer committed meanwhile is adopted, not overwritten with CANCELLED.
+            persistWhileRunning(gc);
+        } catch (RunningDiscussionWrites.DiscussionSupersededException e) {
+            return stopAsSuperseded(gc, listener);
         } catch (IGroupConversationStore.GroupConversationGoneException e) {
             LOGGER.infof("Group discussion %s was cancelled and deleted while running — nothing left to persist",
                     LogSanitizer.sanitize(gc.getId()));
@@ -1642,6 +1697,78 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
+    }
+
+    /**
+     * H14a: every whole-document write a running leg makes goes through here —
+     * conditional on the persisted state still being a running one. See
+     * {@link RunningDiscussionWrites}.
+     */
+    private void persistWhileRunning(GroupConversation gc) throws IResourceStore.ResourceStoreException {
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
+    }
+
+    /**
+     * Ends a leg whose document another writer moved out of the running states
+     * (H14a). Adopts the persisted state rather than overwriting it — aligned onto
+     * the in-memory copy too, so the finally makes the right ephemeral-agent
+     * decision — and always sends the listener a terminal event, so a streaming
+     * client's sink closes whatever the other writer decided: {@code cancelled} for
+     * CANCELLED, {@code group_complete} for COMPLETED/CLOSED, a curated
+     * {@code group_error} for anything else (FAILED, REJECTED, a pause committed
+     * elsewhere). Returns the persisted document: it, not this leg's copy, is the
+     * outcome.
+     */
+    private GroupConversation stopAsSuperseded(GroupConversation gc, GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        GroupConversation persisted;
+        try {
+            persisted = conversationStore.read(gc.getId());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return stopAsDeleted(gc, listener);
+        }
+        GroupConversationState state = persisted.getState();
+        LOGGER.infof("Group discussion %s was moved to %s elsewhere — this leg stops without overwriting it",
+                LogSanitizer.sanitize(gc.getId()), state);
+        gc.setState(state);
+        if (listener != null) {
+            if (state == GroupConversationState.CANCELLED) {
+                notifyCancelled(persisted, listener);
+            } else if (state == GroupConversationState.COMPLETED || state == GroupConversationState.CLOSED) {
+                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(state, persisted.getSynthesizedAnswer()));
+            } else {
+                listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
+                        "The group discussion was ended elsewhere (" + state + ")."));
+            }
+        }
+        return persisted;
+    }
+
+    /**
+     * Cross-node delete / terminal flip seen as a FAILURE (review finding): when
+     * another node deletes or ends a discussion, it also ends the member
+     * conversations and deletes the ephemeral agents, so this leg's next member
+     * turn usually fails before its next write would have found out. Re-read the
+     * document before treating the failure as the discussion's: gone means deleted,
+     * a non-running state means superseded — either ends the leg as the other
+     * writer decided, without an ERROR log, a failure metric or a 5xx.
+     *
+     * @return the leg's outcome, or {@code null} when the document is still running
+     *         here and the failure is genuinely this leg's
+     */
+    private GroupConversation stopIfEndedElsewhere(GroupConversation gc, GroupDiscussionEventListener listener) {
+        try {
+            GroupConversationState persisted = conversationStore.read(gc.getId()).getState();
+            if (persisted == GroupConversationState.IN_PROGRESS || persisted == GroupConversationState.SYNTHESIZING) {
+                return null;
+            }
+            return stopAsSuperseded(gc, listener);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return stopAsDeleted(gc, listener);
+        } catch (Exception e) {
+            // Could not tell — treat the failure as this leg's, as before.
+            return null;
+        }
     }
 
     private void commitPause(GroupConversation gc, int phaseIdx,
@@ -1728,6 +1855,12 @@ public class GroupConversationService implements IGroupConversationService, User
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException {
         return lifecycleOps().listGroupConversations(groupId, index, limit);
+    }
+
+    @Override
+    public List<GroupConversation> listGroupConversations(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException {
+        return lifecycleOps().listGroupConversations(groupId, ownerUserId, index, limit);
     }
 
     @Override
@@ -1819,7 +1952,7 @@ public class GroupConversationService implements IGroupConversationService, User
             throws IResourceStore.ResourceStoreException {
         gc.setRuntimePhases(List.copyOf(phaseList));
         gc.setLastModified(Instant.now());
-        conversationStore.update(gc);
+        persistWhileRunning(gc);
     }
 
     /**
@@ -2376,9 +2509,9 @@ public class GroupConversationService implements IGroupConversationService, User
      * GDPR erasure: cancels, immediately, every discussion running on this node for
      * {@code userId}. Deleting a running discussion's document did not stop it —
      * its next phase wrote the document back — so the cascade signals first. A
-     * discussion on another node is not reachable from here; it is stopped by
-     * {@code GroupConversationStore.update} refusing to recreate the deleted
-     * document, which fails that discussion's next write.
+     * discussion on another node is not reachable from here; it is stopped by its
+     * next conditional write ({@link RunningDiscussionWrites}) finding the document
+     * gone rather than recreating it.
      */
     @Override
     public int stopInFlightWork(String userId) {
