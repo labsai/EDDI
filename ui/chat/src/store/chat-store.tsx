@@ -36,6 +36,14 @@ export interface ChatState {
    * cost — those stay admin-side in EDDI-Manager.
    */
   isEscalating: boolean;
+  /**
+   * Name of the tool the agent is running right now, from the live `tool_call`
+   * event, or null. There is no "tool finished" event, so resumed output is the
+   * completion signal: the next token clears it, as does anything that ends the
+   * turn. Transient by design — it drives the status line only and never
+   * becomes part of the transcript.
+   */
+  activeTool: string | null;
   undoAvailable: boolean;
   redoAvailable: boolean;
   agentName: string | null;
@@ -89,6 +97,7 @@ export const initialState: ChatState = {
   isProcessing: false,
   isThinking: false,
   isEscalating: false,
+  activeTool: null,
   undoAvailable: false,
   redoAvailable: false,
   agentName: null,
@@ -122,6 +131,7 @@ export type ChatAction =
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
+  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
@@ -254,6 +264,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isProcessing: false,
         isThinking: false,
         isEscalating: false,
+        activeTool: null,
       };
     }
 
@@ -271,10 +282,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ? state
         : { ...state, isThinking: action.value };
 
-    case "SET_ESCALATING":
-      return state.isEscalating === action.value
+    case "SET_ESCALATING": {
+      // An escalation abandons the model that was calling tools, so a tool
+      // named before it is no longer what the agent is doing.
+      const activeTool = action.value ? null : state.activeTool;
+      return state.isEscalating === action.value && state.activeTool === activeTool
         ? state
-        : { ...state, isEscalating: action.value };
+        : { ...state, isEscalating: action.value, activeTool };
+    }
+
+    // Cleared on every token, so the same unchanged-value bail-out applies.
+    case "SET_ACTIVE_TOOL":
+      return state.activeTool === action.tool
+        ? state
+        : { ...state, activeTool: action.tool };
 
     case "CLEAR_MESSAGES":
       return {
@@ -292,6 +313,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isProcessing: false,
         isThinking: false,
         isEscalating: false,
+        activeTool: null,
         undoAvailable: false,
         redoAvailable: false,
         activeInputField: null,

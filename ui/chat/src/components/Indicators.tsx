@@ -1,9 +1,10 @@
 /* ──────────────────────────────────────────────
    TypingIndicator — Bouncing dots (agent is typing)
-   ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up
+   ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up,
+                       `tool` while a tool call is running
    ────────────────────────────────────────────── */
 
-import { Brain } from "lucide-react";
+import { Brain, Wrench } from "lucide-react";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
@@ -37,22 +38,51 @@ export function TypingIndicator() {
  * of it is the end user's business. "Harder" is avoided too — it implies the
  * first attempt was half-hearted — as is ⚡, which reads as *fast* when the
  * whole point of this state is that the answer is taking longer.
+ *
+ * `tool` names the tool the agent is running right now ("Using calculator…",
+ * the Manager's wording). It takes precedence over `escalating`: a tool called
+ * after an escalation is the stronger model at work, and the reducer drops the
+ * tool when an escalation follows it. The name is shown as sent — it is the
+ * identifier the agent designer gave the tool, not operator detail.
  */
-export function ThinkingIndicator({ escalating = false }: { escalating?: boolean }) {
+/**
+ * The words a status indicator shows, for the screen-reader announcement.
+ *
+ * The visual indicator lives inside the transcript, which is `aria-busy` for
+ * the whole turn so a streamed reply is read once rather than token by token.
+ * A live region inside a busy one may not be announced at all — and every
+ * state here exists only mid-turn — so the widget announces this text from a
+ * status region outside the transcript instead.
+ */
+export function indicatorStatusText(escalating: boolean, tool: string | null): string {
+  if (tool) return `Using ${tool}…`;
+  return escalating ? "Taking a closer look…" : "Thinking…";
+}
+
+export function ThinkingIndicator({
+  escalating = false,
+  tool = null,
+}: {
+  escalating?: boolean;
+  tool?: string | null;
+}) {
+  const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
+  // Hidden from assistive technology: the transcript is aria-busy while this is
+  // on screen, so ChatWidget announces indicatorStatusText() from a status
+  // region outside it. Announcing here as well would read it twice.
   return (
-    <div
-      className="indicator"
-      role="status"
-      aria-live="polite"
-      data-testid={escalating ? "escalating-indicator" : "thinking-indicator"}
-    >
+    <div className="indicator" aria-hidden="true" data-testid={`${mode}-indicator`}>
       <div className="indicator__avatar" aria-hidden="true">
         E
       </div>
       <div className="indicator__bubble">
         <div className="indicator__thinking">
-          <Brain className="indicator__brain" size="1em" />
-          <span>{escalating ? "Taking a closer look…" : "Thinking…"}</span>
+          {mode === "tool" ? (
+            <Wrench className="indicator__brain" size="1em" />
+          ) : (
+            <Brain className="indicator__brain" size="1em" />
+          )}
+          <span>{indicatorStatusText(escalating, tool)}</span>
         </div>
       </div>
     </div>

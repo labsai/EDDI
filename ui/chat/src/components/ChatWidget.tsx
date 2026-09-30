@@ -13,7 +13,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator } from "./Indicators";
+import { TypingIndicator, ThinkingIndicator, indicatorStatusText } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
@@ -54,6 +54,7 @@ import {
   extractOutputImages,
   findInputField,
   isTurnPaused,
+  parseToolCallName,
   UNCONSUMED_STREAM_ERROR_CODES,
   type OutputImage,
 } from "@/api/sse-events";
@@ -373,6 +374,8 @@ export function ChatWidget() {
           dispatch({ type: "SET_THINKING", value: false });
           // Text is flowing, so whichever model won the cascade is answering.
           dispatch({ type: "SET_ESCALATING", value: false });
+          // No event says a tool finished; resumed output is that signal.
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
           dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
           return false;
 
@@ -392,7 +395,19 @@ export function ChatWidget() {
           // (cascade escalation, retry), so `done`/`error` decides the final
           // outcome — but stop implying the agent is still composing.
           dispatch({ type: "SET_THINKING", value: false });
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
           return false;
+
+        // Emitted right before each tool runs — the name only; arguments come
+        // later, redacted, in task_complete's toolTrace. Deliberately NOT
+        // guarded on tokenCount: a model may write a sentence and then call a
+        // tool, and the silence while that tool runs is exactly the wait worth
+        // explaining. The next token clears it again.
+        case "tool_call": {
+          const tool = parseToolCallName(event.data);
+          if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
+          return false;
+        }
 
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come
@@ -840,8 +855,10 @@ export function ChatWidget() {
       dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
       dispatch({ type: "SET_PROCESSING", value: true });
       dispatch({ type: "SET_THINKING", value: true });
-      // Start every turn un-escalated, however the previous one ended.
+      // Start every turn un-escalated and tool-less, however the previous one
+      // ended.
       dispatch({ type: "SET_ESCALATING", value: false });
+      dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
 
       try {
         if (isDemo) {
@@ -1437,18 +1454,38 @@ export function ChatWidget() {
               />
             ) : (
               <>
-                {(state.isThinking || state.isEscalating) && (
-                  <ThinkingIndicator escalating={state.isEscalating} />
+                {(state.isThinking || state.isEscalating || state.activeTool) && (
+                  <ThinkingIndicator
+                    escalating={state.isEscalating}
+                    tool={state.activeTool}
+                  />
                 )}
-                {state.isProcessing && !state.isThinking && !state.isEscalating && (
-                  <TypingIndicator />
-                )}
+                {state.isProcessing &&
+                  !state.isThinking &&
+                  !state.isEscalating &&
+                  !state.activeTool && <TypingIndicator />}
               </>
             )}
 
             <div ref={messagesEndRef} />
           </>
         )}
+      </div>
+
+      {/* The indicator's announcement. It sits OUTSIDE the transcript because
+          the transcript is aria-busy for the whole turn, and a status inside a
+          busy region may never be announced — which would silence "Using
+          calculator…", a state that only exists mid-turn. Always mounted: a
+          live region added together with its text is often not read. */}
+      <div
+        className="chat-sr-only"
+        role="status"
+        aria-live="polite"
+        data-testid="chat-activity-status"
+      >
+        {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
+          ? indicatorStatusText(state.isEscalating, state.activeTool)
+          : ""}
       </div>
 
       <div style={{ position: "relative" }}>
