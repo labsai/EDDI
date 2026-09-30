@@ -1338,6 +1338,10 @@
     "streamingTimeoutSecondsHint": "Überschreibt den Engine-Standardwert (120s). Gilt nur beim Streaming; leer = Standard verwenden.",
     "taskPricing": "Preise für einfache Aufrufe",
     "taskPricingDesc": "Bepreist die normalen (nicht kaskadierten) Modellaufrufe dieser Aufgabe für die Kostenverfolgung und Gruppenkostenobergrenzen. Ohne Preis (leer) werden 0 $ berechnet.",
+    "unknownType": "{{type}} (benutzerdefiniert)",
+    "compatibleEndpoint": "Endpunkt: {{url}} — zum Überschreiben einen Parameter baseUrl oder region hinzufügen",
+    "compatibleEndpointOverridden": "Endpunkt: {{url}}",
+    "modelType": "Modelltyp",
     "paramName": "Parametername",
     "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
   },
@@ -4397,7 +4401,8 @@
       "platformBaseUrlAuto": "vom Server ermittelt",
       "platformBaseUrlDiffers": "Diese Installation meldet ihre eigene Adresse derzeit als {{serverUrl}}. Der Wert oben weicht davon ab — behalten Sie ihn nur, wenn Sie ihn bewusst gesetzt haben.",
       "platformBaseUrlQueryFailed": "Der Server konnte nicht nach seiner eigenen Adresse gefragt werden. Die Aktivierung schlägt fehl, sofern Sie sie nicht hier eintragen — oder laden Sie neu, um es erneut zu versuchen.",
-      "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein."
+      "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein.",
+      "llmEndpoint": "Modell-Endpunkt"
     },
     "authMode": {
       "none": {
@@ -5063,6 +5068,24 @@
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
     "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "KI-Labore",
+      "compatible": "OpenAI-kompatible Anbieter",
+      "cloud": "Cloud-Plattformen",
+      "local": "Lokal / selbst gehostet"
+    },
+    "region": {
+      "label": "Region",
+      "intl": "International",
+      "cn": "Festland-China",
+      "us": "Vereinigte Staaten",
+      "custom": "Eigene URL (unten festgelegt)"
+    },
+    "compatibleNote": "Verbindet über die OpenAI-kompatible API des Anbieters ({{url}}). Nur für einen Proxy oder eine andere Region überschreiben.",
+    "keyHint": "API-Schlüssel erhalten unter {{url}}",
+    "select": "Anbieter auswählen"
   },
   "agentVersioning": {
     "compatibleLabel": "Kompatibel mit der vorherigen Version — laufende Unterhaltungen dürfen zu ihr wechseln",

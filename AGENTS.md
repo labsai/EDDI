@@ -149,7 +149,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Storage — MongoDB or PostgreSQL behind one abstraction, Caffeine cache, NATS JetStream event bus | [`docs/architecture.md`](docs/architecture.md) |
 | Conversation memory, token-aware windowing, rolling summaries, recall tool, commit flags | [`docs/conversation-memory.md`](docs/conversation-memory.md), [`docs/memory-policy.md`](docs/memory-policy.md) |
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
-| LLM providers (12), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
+| LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
 | MCP server (80+ tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 discussion styles, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |

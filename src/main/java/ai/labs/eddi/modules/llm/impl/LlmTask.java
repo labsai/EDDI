@@ -29,6 +29,8 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -52,6 +54,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -429,7 +433,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
@@ -453,7 +457,7 @@ public class LlmTask implements ILifecycleTask {
             var audio = mm != null
                     ? ModelCapabilityService.Support.parse(mm.getAudio())
                     : ModelCapabilityService.Support.AUTO;
-            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams, resolvedType),
                     vision, documents, audio);
         }
 
@@ -697,7 +701,7 @@ public class LlmTask implements ILifecycleTask {
             // resolveModelName, not params["model"]: most providers take "modelName", so
             // the
             // ledger recorded the provider type ("anthropic") instead of the model id.
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -772,7 +776,8 @@ public class LlmTask implements ILifecycleTask {
                 // decided by resolveInheritedSummaryParameters — a summary config naming a
                 // different vendor gets the neutral tuning values and none of the
                 // credentials.
-                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams));
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
+                        resolveModelName(processedParams, resolvedType));
                 conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
@@ -1197,7 +1202,7 @@ public class LlmTask implements ILifecycleTask {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -1431,7 +1436,13 @@ public class LlmTask implements ILifecycleTask {
         var effective = new LlmConfiguration.ConversationSummaryConfig();
         effective.setEnabled(configured.isEnabled());
         effective.setLlmProvider(providerMissing ? parentProvider : configured.getLlmProvider());
-        effective.setLlmModel(modelMissing ? parentModel : configured.getLlmModel());
+        // The parent's model is only meaningful to the parent's provider: a summary
+        // config naming another vendor with no model of its own would otherwise send,
+        // say, an xAI parent's grok-4.7 to Anthropic. Left unset, the summary
+        // provider's builder applies its own default.
+        boolean sameProvider = providerMissing
+                || (!isNullOrEmpty(parentProvider) && configured.getLlmProvider().trim().equalsIgnoreCase(parentProvider.trim()));
+        effective.setLlmModel(modelMissing ? (sameProvider ? parentModel : null) : configured.getLlmModel());
         effective.setMaxSummaryTokens(configured.getMaxSummaryTokens());
         effective.setExcludePropertiesFromSummary(configured.isExcludePropertiesFromSummary());
         effective.setRecentWindowSteps(configured.getRecentWindowSteps());
@@ -1479,15 +1490,18 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Parameter keys that belong to the provider that issued them: credentials and
-     * the endpoint coordinates that address that provider's account. Everything
-     * else (temperature, maxTokens, timeout, …) is vendor-neutral and safe to carry
-     * across a provider boundary.
+     * Parameter keys that belong to the provider that issued them: credentials, the
+     * endpoint coordinates that address that provider's account, and the model keys
+     * ({@link ModelParameterKeys#MODEL_KEYS}) — a model id means nothing to another
+     * vendor, and an inherited {@code modelName} would override the summary
+     * provider's own default. Everything else (temperature, maxTokens, timeout, …)
+     * is vendor-neutral and safe to carry across a provider boundary.
      */
-    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Set.of(
+    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint", "deploymentName",
-            "compartmentId", "configProfile", "projectId", "region", "location");
+            "baseUrl", "endpoint",
+            "compartmentId", "configProfile", "projectId", "region", "location"),
+            ModelParameterKeys.MODEL_KEYS.stream()).collect(Collectors.toUnmodifiableSet());
 
     /**
      * The second half of the F13 inheritance decision: <em>which</em> of the parent
@@ -1540,7 +1554,7 @@ public class LlmTask implements ILifecycleTask {
 
         if (!dropped.isEmpty()) {
             LOGGER.warnf("[SUMMARY] conversationSummary runs on provider '%s' while the task runs on '%s' — not inheriting %s. "
-                    + "Credentials must never cross a provider boundary; configure them for '%s' "
+                    + "Credentials, endpoints and model ids never cross a provider boundary; configure them for '%s' "
                     + "(global variable or vault-backed default), or omit llmProvider to reuse the task's model.",
                     sanitize(summaryProvider), sanitize(parentProvider), dropped, sanitize(summaryProvider));
         }
@@ -1857,6 +1871,23 @@ public class LlmTask implements ILifecycleTask {
         if (name != null)
             return name;
         return processedParams.get("deploymentName");
+    }
+
+    /**
+     * As {@link #resolveModelName(Map)}, but a named OpenAI-compatible provider
+     * (xAI, DeepSeek, ...) configured without a model resolves to its preset's
+     * default model — the same one its builder will send. Without this, vision
+     * forwarding and the audit/cost records saw no model at all.
+     *
+     * @param resolvedType
+     *            the task type after global-variable resolution
+     */
+    public static String resolveModelName(Map<String, String> processedParams, String resolvedType) {
+        String name = resolveModelName(processedParams);
+        if (name == null || name.isBlank()) {
+            return OpenAiCompatibleProviders.find(resolvedType).map(OpenAiCompatibleProvider::defaultModel).orElse(name);
+        }
+        return name;
     }
 
     /**

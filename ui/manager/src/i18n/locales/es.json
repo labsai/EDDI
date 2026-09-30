@@ -1352,6 +1352,10 @@
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
     "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo",
+    "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
+    "modelType": "Tipo de modelo",
     "paramName": "Nombre del parámetro",
     "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
   },
@@ -4441,7 +4445,8 @@
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
-      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección.",
+      "llmEndpoint": "Endpoint del modelo"
     },
     "authMode": {
       "none": {
@@ -5115,6 +5120,24 @@
     "workflowMissingResource": "El flujo de trabajo {{workflowId}} (versión {{version}}) no hace referencia a {{resource}}, por lo que guardarlo aquí no cambiaría el agente. No se guardó nada.",
     "agentWorkflowMismatch": "El agente {{agentId}} (versión {{version}}) hace referencia al flujo de trabajo {{workflowId}} en la versión {{found}}, no en la versión {{expected}}. El agente cambió desde que se abrió esta página. Recárgala. No se guardó nada.",
     "agentMissingWorkflow": "El agente {{agentId}} (versión {{version}}) no hace referencia al flujo de trabajo {{workflowId}}. No se guardó nada."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratorios de modelos",
+      "compatible": "Proveedores compatibles con OpenAI",
+      "cloud": "Plataformas en la nube",
+      "local": "Local / autoalojado"
+    },
+    "region": {
+      "label": "Región",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abajo)"
+    },
+    "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
+    "keyHint": "Obtén una clave de API en {{url}}",
+    "select": "Selecciona un proveedor"
   },
   "agentVersioning": {
     "compatibleLabel": "Compatible con la versión anterior — las conversaciones en curso pueden cambiar a ella",

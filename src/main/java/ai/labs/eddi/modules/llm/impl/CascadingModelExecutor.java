@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -1057,7 +1059,8 @@ class CascadingModelExecutor {
 
     /**
      * Resolve the specific model name from provider-specific parameter keys. Falls
-     * back to the provider type when no explicit model key is present.
+     * back to the preset default model for a named OpenAI-compatible provider, and
+     * to the provider type otherwise, when no explicit model key is present.
      */
     private static String resolveModelName(Map<String, String> params, String fallbackType) {
         for (String key : List.of("modelName", "model", "modelId", "deploymentName")) {
@@ -1066,7 +1069,9 @@ class CascadingModelExecutor {
                 return v;
             }
         }
-        return fallbackType;
+        // A named OpenAI-compatible provider's builder falls back to its preset's
+        // default model; report that one rather than the bare provider type.
+        return OpenAiCompatibleProviders.find(fallbackType).map(OpenAiCompatibleProvider::defaultModel).orElse(fallbackType);
     }
 
     /**

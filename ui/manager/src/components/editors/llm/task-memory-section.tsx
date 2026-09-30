@@ -3,7 +3,7 @@ import { NumberInput } from "../number-input";
 import { ScrollText, RotateCcw } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import { ContentEditor } from "../content-editor";
-import { MODEL_TYPES } from "./types";
+import { ProviderSelect } from "@/components/shared/provider-select";
 import type { TaskSectionProps } from "./task-section-props";
 
 /**
@@ -117,21 +117,18 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                   <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     {t("llmEditor.summaryProvider", "Summary Provider")}
                   </label>
-                  <select
+                  <ProviderSelect
                     value={task.conversationSummary.llmProvider ?? "anthropic"}
-                    onChange={(e) =>
+                    onChange={(llmProvider) =>
                       onChange({
                         ...task,
-                        conversationSummary: { ...task.conversationSummary!, llmProvider: e.target.value },
+                        conversationSummary: { ...task.conversationSummary!, llmProvider },
                       })
                     }
                     disabled={readOnly}
                     className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                  >
-                    {MODEL_TYPES.map((mt) => (
-                      <option key={mt} value={mt}>{mt}</option>
-                    ))}
-                  </select>
+                    testId="summary-provider-select"
+                  />
                   <p className="mt-0.5 text-[10px] text-muted-foreground">
                     {t("llmEditor.summaryProviderHint", "Use a cheap/fast model for summarization")}
                   </p>
