@@ -40,6 +40,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -246,7 +248,7 @@ public class AgentSetupService {
         // is the whole point of provisioning a second agent against an existing one.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
             throw new AgentSetupException(
-                    "API key is required for cloud LLM providers (anthropic, openai, gemini) — pass apiKey, or vaultKeyName to reuse a key "
+                    "API key is required for cloud LLM providers (anthropic, openai, gemini, xai, deepseek, ...) — pass apiKey, or vaultKeyName to reuse a key "
                             + "already in the vault");
         }
         // Validate the HITL config HERE, before a single resource exists — same
@@ -1967,6 +1969,16 @@ public class AgentSetupService {
     }
 
     /**
+     * The model to use for {@code provider} when none was named: a named
+     * OpenAI-compatible provider's own preset default (falling back to
+     * {@link #DEFAULT_MODEL} would hand e.g. xAI a Claude model name), otherwise
+     * {@link #DEFAULT_MODEL}.
+     */
+    public static String defaultModelFor(String provider) {
+        return OpenAiCompatibleProviders.find(provider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+    }
+
+    /**
      * Resolve the caller-supplied setup parameters, applying defaults.
      * <p>
      * The environment is parsed with {@link Deployment.Environment#parseStrict} —
@@ -1980,9 +1992,9 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
-                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
-                Deployment.Environment.parseStrict(environment));
+        String resolvedProvider = provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER;
+        String resolvedModel = model != null && !model.isBlank() ? model.trim() : defaultModelFor(resolvedProvider);
+        return new ResolvedParams(resolvedProvider, resolvedModel, deploy == null || deploy, Deployment.Environment.parseStrict(environment));
     }
 
     /**

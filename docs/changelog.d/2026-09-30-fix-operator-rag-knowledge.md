@@ -25,7 +25,7 @@ A review of the Platform Operator against what shipped since its knowledge-base 
 **Operator upgrades** ([`operator-revision.ts`](../../ui/manager/src/lib/operator/operator-revision.ts), [`operator-upgrade.tsx`](../../ui/manager/src/components/operator/operator-upgrade.tsx), [`OperatorRevisionCheck.java`](../../src/main/java/ai/labs/eddi/engine/api/OperatorRevisionCheck.java))
 
 - A provisioning revision lives in [`operator-revision.json`](../../ui/manager/src/lib/operator/operator-revision.json), starting at 1; configs from before this are read as 0.
-- Activation stamps four fields into the config: `provisionedRevision`, `provisionedEndpoints`, `promptBodyIsDefault` and the Ollama `llmBaseUrl`.
+- Activation stamps three fields into the config: `provisionedRevision`, `provisionedEndpoints` and `promptBodyIsDefault`. An upgrade also carries the model endpoint `llmBaseUrl`, which named OpenAI-compatible providers (#904) started storing.
 - `operator-revision.test.ts` hashes everything provisioning derives (both scopes' endpoints, preambles and default bodies, plus the gate). It fails when that changes without a revision bump, and prints the new fingerprint.
 - **Shown in the Manager:**
   - an *Upgrade* banner on the operator page, listing the tools added and removed;
@@ -40,10 +40,6 @@ A review of the Platform Operator against what shipped since its knowledge-base 
 **Process** ([`AGENTS.md`](../../AGENTS.md) §4.6, [`ui/manager/AGENTS.md`](../../ui/manager/AGENTS.md))
 
 - New rule: when functionality is added, changed or removed, check the operator's prompt and allow-list alongside the docs. Any change to them is a revision bump.
-
-**Fixed in passing**
-
-- `operator-activation.test.tsx` still expected `claude-sonnet-5` as the fallback model and had been failing since the 09-29 default bump. It now reads the default from the provider table.
 
 ### Decisions
 

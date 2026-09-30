@@ -1378,6 +1378,10 @@
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
     "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "unknownType": "{{type}} (custom)",
+    "compatibleEndpoint": "Endpoint: {{url}} — add a baseUrl or region parameter to override",
+    "compatibleEndpointOverridden": "Endpoint: {{url}}",
+    "modelType": "Model type",
     "paramName": "Parameter name",
     "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
   },
@@ -4398,6 +4402,7 @@
       "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
       "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
       "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
+      "llmEndpoint": "Model endpoint",
       "promptBodyDiffers": "These instructions differ from the current default — they were edited, or written by an earlier version of the Manager.",
       "promptBodyReset": "Reset to default"
     },
@@ -4567,26 +4572,26 @@
       "title": "The previous operator agent is still deployed."
     },
     "upgrade": {
-      "title": "An update for the Platform Operator is available",
-      "description": "It was set up by an earlier version of the Manager (revision {{from}}; this version ships {{to}}), so its instructions and tools are out of date.",
-      "addedTools_one": "{{count}} new tool",
-      "addedTools_other": "{{count}} new tools",
-      "removedTools_one": "{{count}} tool removed",
-      "removedTools_other": "{{count}} tools removed",
-      "blockerCredential": "Its model key was entered as plain text, which is never stored — enter it again to upgrade.",
-      "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
-      "blockerProvider": "Its model provider can no longer be set up this way — choose another to upgrade.",
-      "reviewAction": "Review and upgrade",
-      "action": "Upgrade",
-      "confirmTitle": "Upgrade the Platform Operator?",
-      "confirmBody": "A new operator is built with the current instructions and tools and checked like a new activation; only then is the old one removed. Model, key, environment and access settings are kept. The open operator chat ends, and conversations with the old operator no longer appear in the history.",
-      "confirm": "Upgrade now",
-      "instructionsCustomized": "You edited the operator's instructions.",
-      "instructionsUnknown": "The operator's instructions differ from the current default — either an older default or your own edits.",
-      "useNewDefault": "Replace them with the new default",
-      "keepCurrent": "Keep the current text (it will not learn what the new default adds)",
       "hint": "An update for the Platform Operator is available.",
-      "hintAction": "Upgrade"
+      "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
+      "addedTools_other": "{{count}} new tools",
+      "action": "Upgrade",
+      "addedTools_one": "{{count}} new tool",
+      "blockerProvider": "Its model provider can no longer be set up this way — choose another to upgrade.",
+      "useNewDefault": "Replace them with the new default",
+      "confirmBody": "A new operator is built with the current instructions and tools and checked like a new activation; only then is the old one removed. Model, key, environment and access settings are kept. The open operator chat ends, and conversations with the old operator no longer appear in the history.",
+      "description": "It was set up by an earlier version of the Manager (revision {{from}}; this version ships {{to}}), so its instructions and tools are out of date.",
+      "blockerCredential": "Its model key was entered as plain text, which is never stored — enter it again to upgrade.",
+      "reviewAction": "Review and upgrade",
+      "instructionsUnknown": "The operator's instructions differ from the current default — either an older default or your own edits.",
+      "instructionsCustomized": "You edited the operator's instructions.",
+      "confirmTitle": "Upgrade the Platform Operator?",
+      "removedTools_other": "{{count}} tools removed",
+      "removedTools_one": "{{count}} tool removed",
+      "confirm": "Upgrade now",
+      "hintAction": "Upgrade",
+      "keepCurrent": "Keep the current text (it will not learn what the new default adds)",
+      "title": "An update for the Platform Operator is available"
     }
   },
   "groupWorkspace": {
@@ -5087,6 +5092,24 @@
     "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
     "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
     "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Model labs",
+      "compatible": "OpenAI-compatible providers",
+      "cloud": "Cloud platforms",
+      "local": "Local / self-hosted"
+    },
+    "region": {
+      "label": "Region",
+      "intl": "International",
+      "cn": "China mainland",
+      "us": "United States",
+      "custom": "Custom URL (set below)"
+    },
+    "compatibleNote": "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
+    "keyHint": "Get an API key at {{url}}",
+    "select": "Select a provider"
   },
   "agentVersioning": {
     "compatibleLabel": "Compatible with the previous version — running conversations may switch to it",

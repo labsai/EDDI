@@ -1352,6 +1352,10 @@
     "streamingTimeoutSecondsHint": "Substitui o padrão do mecanismo (120s). Aplica-se apenas durante o streaming; vazio = usar o padrão.",
     "taskPricing": "Preços de chamadas simples",
     "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — adicione um parâmetro baseUrl ou region para substituir",
+    "compatibleEndpointOverridden": "Ponto de extremidade: {{url}}",
+    "modelType": "Tipo de modelo",
     "paramName": "Nome do parâmetro",
     "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas."
   },
@@ -4442,6 +4446,7 @@
       "platformBaseUrlDiffers": "Esta instalação indica atualmente o seu próprio endereço como {{serverUrl}}. O valor acima é diferente — mantenha-o apenas se o definiu de propósito.",
       "platformBaseUrlQueryFailed": "Não foi possível perguntar ao servidor o seu próprio endereço. A ativação falhará a menos que o introduza aqui — ou recarregue para tentar de novo.",
       "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui.",
+      "llmEndpoint": "Endpoint do modelo",
       "promptBodyDiffers": "Estas instruções diferem da predefinição atual — foram editadas ou escritas por uma versão anterior do Manager.",
       "promptBodyReset": "Repor a predefinição"
     },
@@ -4613,28 +4618,28 @@
       "title": "O agente operador anterior continua implantado."
     },
     "upgrade": {
-      "title": "Há uma atualização disponível para o Platform Operator",
-      "description": "Ele foi configurado por uma versão anterior do Manager (revisão {{from}}; esta versão traz a {{to}}), por isso as suas instruções e ferramentas estão desatualizadas.",
-      "addedTools_one": "{{count}} ferramenta nova",
+      "hint": "Há uma atualização disponível para o Platform Operator.",
+      "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
       "addedTools_other": "{{count}} ferramentas novas",
-      "addedTools_many": "{{count}} ferramentas novas",
-      "removedTools_one": "{{count}} ferramenta removida",
-      "removedTools_other": "{{count}} ferramentas removidas",
+      "action": "Atualizar",
+      "addedTools_one": "{{count}} ferramenta nova",
+      "blockerProvider": "O fornecedor do modelo já não pode ser configurado desta forma — escolha outro para atualizar.",
+      "useNewDefault": "Substituí-las pela nova predefinição",
+      "confirmBody": "É criado um novo operador com as instruções e ferramentas atuais e verificado como numa nova ativação; só então o antigo é removido. O modelo, a chave, o ambiente e as definições de acesso são mantidos. O chat aberto com o operador termina, e as conversas com o operador antigo deixam de aparecer no histórico.",
+      "description": "Ele foi configurado por uma versão anterior do Manager (revisão {{from}}; esta versão traz a {{to}}), por isso as suas instruções e ferramentas estão desatualizadas.",
       "removedTools_many": "{{count}} ferramentas removidas",
       "blockerCredential": "A chave do modelo foi introduzida como texto simples, que nunca é guardado — introduza-a novamente para atualizar.",
-      "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
-      "blockerProvider": "O fornecedor do modelo já não pode ser configurado desta forma — escolha outro para atualizar.",
       "reviewAction": "Rever e atualizar",
-      "action": "Atualizar",
-      "confirmTitle": "Atualizar o Platform Operator?",
-      "confirmBody": "É criado um novo operador com as instruções e ferramentas atuais e verificado como numa nova ativação; só então o antigo é removido. O modelo, a chave, o ambiente e as definições de acesso são mantidos. O chat aberto com o operador termina, e as conversas com o operador antigo deixam de aparecer no histórico.",
-      "confirm": "Atualizar agora",
-      "instructionsCustomized": "Editou as instruções do operador.",
       "instructionsUnknown": "As instruções do operador diferem da predefinição atual — ou uma predefinição antiga ou as suas próprias edições.",
-      "useNewDefault": "Substituí-las pela nova predefinição",
+      "instructionsCustomized": "Editou as instruções do operador.",
+      "confirmTitle": "Atualizar o Platform Operator?",
+      "removedTools_other": "{{count}} ferramentas removidas",
+      "removedTools_one": "{{count}} ferramenta removida",
+      "addedTools_many": "{{count}} ferramentas novas",
+      "confirm": "Atualizar agora",
+      "hintAction": "Atualizar",
       "keepCurrent": "Manter o texto atual (não aprenderá o que a nova predefinição acrescenta)",
-      "hint": "Há uma atualização disponível para o Platform Operator.",
-      "hintAction": "Atualizar"
+      "title": "Há uma atualização disponível para o Platform Operator"
     }
   },
   "groupWorkspace": {
@@ -5141,6 +5146,24 @@
     "workflowMissingResource": "O fluxo de trabalho {{workflowId}} (versão {{version}}) não referencia {{resource}}, pelo que guardá-lo aqui não alteraria o agente. Nada foi guardado.",
     "agentWorkflowMismatch": "O agente {{agentId}} (versão {{version}}) referencia o fluxo de trabalho {{workflowId}} na versão {{found}}, não na versão {{expected}}. O agente mudou desde que esta página foi aberta. Recarregue-a. Nada foi guardado.",
     "agentMissingWorkflow": "O agente {{agentId}} (versão {{version}}) não referencia o fluxo de trabalho {{workflowId}}. Nada foi guardado."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratórios de modelos",
+      "compatible": "Provedores compatíveis com OpenAI",
+      "cloud": "Plataformas de nuvem",
+      "local": "Local / auto-hospedado"
+    },
+    "region": {
+      "label": "Região",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abaixo)"
+    },
+    "compatibleNote": "Conecta pela API compatível com OpenAI do provedor ({{url}}). Altere apenas para um proxy ou outra região.",
+    "keyHint": "Obtenha uma chave de API em {{url}}",
+    "select": "Selecione um provedor"
   },
   "agentVersioning": {
     "compatibleLabel": "Compatível com a versão anterior — conversas em andamento podem mudar para ela",

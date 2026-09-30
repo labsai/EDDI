@@ -109,10 +109,10 @@ export function instructionsState(config: OperatorConfig): InstructionsState {
 /**
  * Why the stored config is not enough to rebuild this operator without asking.
  *
- * The form holds two things the config never stored before this change: a
- * plaintext model key (never stored, by design — only a vault key NAME is) and
- * a local model server's base URL. An operator activated with either needs the
- * form once; every activation from here on records the base URL.
+ * The form holds two things an older config may not have: a plaintext model
+ * key (never stored, by design — only a vault key NAME is) and a local model
+ * server's base URL (`llmBaseUrl`, stored since named providers arrived). An
+ * operator activated with either missing needs the form once.
  */
 export function upgradeBlocker(config: OperatorConfig): UpgradeBlocker | null {
   if (!isProvisionableBySetup(config.provider)) return "provider";

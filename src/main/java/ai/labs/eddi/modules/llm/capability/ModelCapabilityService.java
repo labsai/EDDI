@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.capability;
 
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
@@ -229,8 +230,12 @@ public class ModelCapabilityService {
                     LLM_TYPE_GEMINI, LLM_TYPE_GEMINI_VERTEX, LLM_TYPE_MISTRAL,
                     LLM_TYPE_OLLAMA, LLM_TYPE_BEDROCK, LLM_TYPE_ORACLE_GENAI ->
                 isKnownVisionModel(model) && !isKnownTextOnlyModel(model);
-            // No vision support.
-            default -> false;
+            // Named OpenAI-compatible providers: the catalog lists the model-id
+            // fragments that identify their image-capable models.
+            default -> OpenAiCompatibleProviders.find(provider)
+                    .map(p -> p.capabilities().visionModelTokens().stream().anyMatch(token -> model.contains(normalize(token)))
+                            && !isKnownTextOnlyModel(model))
+                    .orElse(false);
         };
     }
 
