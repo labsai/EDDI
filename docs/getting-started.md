@@ -161,6 +161,10 @@ kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
 ```
 
+Both need their Secrets first — the vault key (`bash k8s/create-secrets.sh`) and
+the database credentials, which are not shipped; the
+[Kubernetes Deployment Guide](kubernetes.md) has the commands.
+
 **Using Helm:**
 
 ```bash

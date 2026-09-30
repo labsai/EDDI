@@ -122,7 +122,8 @@ docker compose up
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
 docker compose -f docker-compose.postgres-only.yml up
 
-# With Keycloak authentication
+# With Keycloak authentication. No realm account ships a password (see the
+# header of docker-compose.auth.yml, or let install.sh --with-auth set one)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 
 # With Prometheus + Grafana monitoring
@@ -615,6 +616,8 @@ EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
 ```bash
 # Kustomize overlays — create the vault Secret first, then apply
 bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
+# ...plus the database credentials, which are no longer shipped: mongodb-secrets
+# (MongoDB runs authenticated) or postgres-secrets — commands in the Kubernetes Guide
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 

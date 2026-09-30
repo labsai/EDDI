@@ -13,6 +13,8 @@
 #
 # Usage:
 #   bash k8s/create-secrets.sh              # once, before the first apply
+#   # The database password is no longer committed: create postgres-secrets
+#   # with the command in k8s/overlays/postgres/postgres-secret.yaml.example.
 #   kubectl apply -k k8s/examples/postgres-ha/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

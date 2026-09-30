@@ -3,16 +3,23 @@
  * Derive the auth E2E tier's Keycloak realm from the canonical one.
  *
  * `helm/eddi/files/eddi-realm.json` is the realm EDDI actually ships — same
- * bytes as `k8s/overlays/auth/eddi-realm.json` — and it deliberately seeds the
- * `eddi` administrator with NO credential (see helm/eddi/templates/NOTES.txt:
- * it used to ship as eddi/eddi, which made every cluster's admin guessable).
- * The auth tier still needs one authenticated identity that is actually
+ * bytes as `k8s/overlays/auth/eddi-realm.json` — and it deliberately seeds
+ * every account with NO credential, and turns the password grant off on the
+ * public SPA client (see helm/eddi/templates/NOTES.txt). The administrator used
+ * to ship as eddi/eddi and the two unprivileged fixtures as viewer/viewer and
+ * user/user, all of which logged straight in — and because `eddi-frontend` is
+ * public with direct access grants on, one `curl` against a reachable Keycloak
+ * returned a token good enough to run LLM turns.
+ *
+ * The auth tier still needs authenticated identities that are actually
  * *allowed* somewhere, or it could only ever assert 401s and 403s and would
- * pass just as happily against a backend that rejects everybody.
+ * pass just as happily against a backend that rejects everybody. It also
+ * exchanges username/password for tokens rather than driving the login form.
  *
  * So the test realm is generated, never committed: this reads the canonical
- * file, gives `eddi` a throwaway password, and writes the result where the
- * compose file mounts it. Copying the realm into the repo instead is what
+ * file, gives each fixture a throwaway password, re-enables the password grant
+ * on the SPA client for this throwaway realm only, and writes the result where
+ * the compose file mounts it. Copying the realm into the repo instead is what
  * produced `ui/manager/keycloak/eddi-realm.json`, which drifted until its
  * client id (`eddi-manager`) and role names (`admin`/`editor`/`viewer`) matched
  * nothing the backend serves or enforces — a Keycloak setup that could not have
@@ -35,14 +42,18 @@ const OUT = resolve(HERE, "../.keycloak-test-realm/eddi-realm.json");
 export const ADMIN_USER = "eddi";
 export const ADMIN_PASSWORD = "e2e-admin-password";
 
-/** Fixtures the canonical realm already ships with passwords. */
+/**
+ * The accounts the tier logs in as. The canonical realm seeds all three users
+ * with their roles and NO password; the passwords below exist only in the
+ * generated realm.
+ */
 export const ROLE_FIXTURES = {
   // eddi-viewer is in there deliberately: EDDI has no role hierarchy, so an
   // account without it is refused every MCP read tool (McpToolUtils.requireRole
   // is a literal hasRole). The realm grants the administrator all three.
   admin: { username: ADMIN_USER, password: ADMIN_PASSWORD, roles: ["eddi-admin", "eddi-editor", "eddi-viewer"] },
-  user: { username: "user", password: "user", roles: ["eddi-user"] },
-  viewer: { username: "viewer", password: "viewer", roles: ["eddi-viewer"] },
+  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user"] },
+  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer"] },
 };
 
 /** The public client the backend's __auth_config__.js names. */
@@ -62,10 +73,17 @@ export function buildTestRealm(sourceJson) {
     fail(`no "${SPA_CLIENT_ID}" client — that is the id the backend hardcodes into`
       + " /manage/__auth_config__.js, so the SPA would ask for a client this realm does not have");
   }
-  if (!spa.publicClient || !spa.directAccessGrantsEnabled) {
-    fail(`"${SPA_CLIENT_ID}" must stay a public client with direct access grants — the tier`
-      + " exchanges username/password for a token against it rather than driving the login form");
+  if (!spa.publicClient) {
+    fail(`"${SPA_CLIENT_ID}" must stay a public client — it is a browser SPA and cannot keep a secret`);
   }
+  if (spa.directAccessGrantsEnabled) {
+    fail(`"${SPA_CLIENT_ID}" ships with direct access grants enabled. That is a security regression in`
+      + " the shipped realm: a public client with the password grant hands a token to anyone who can reach"
+      + " Keycloak and knows (or guesses) one password — fix the realm rather than this script");
+  }
+  // The tier exchanges username/password for a token rather than driving the
+  // login form, so the throwaway realm — and only it — turns the grant back on.
+  spa.directAccessGrantsEnabled = true;
 
   const realmRoles = new Set((realm.roles?.realm ?? []).map((r) => r.name));
   for (const [tier, fixture] of Object.entries(ROLE_FIXTURES)) {
@@ -82,17 +100,13 @@ export function buildTestRealm(sourceJson) {
       if (!realmRoles.has(role)) fail(`realm role "${role}" is gone`);
     }
 
-    // The two unprivileged fixtures must keep the passwords they ship with; the
-    // administrator is the one this script supplies.
-    if (fixture.username === ADMIN_USER) {
-      if ((user.credentials ?? []).length > 0) {
-        fail(`"${ADMIN_USER}" now ships a credential. That is a security regression in the`
-          + " shipped realm (NOTES.txt says it must ship without one) — fix that rather than this script");
-      }
-      user.credentials = [{ type: "password", value: ADMIN_PASSWORD, temporary: false }];
-    } else if (!(user.credentials ?? []).some((c) => c.type === "password" && c.value === fixture.password)) {
-      fail(`user "${fixture.username}" no longer has the password the ${tier} fixture expects`);
+    // No fixture may ship a password — privileged or not. This script supplies
+    // every one of them, for the throwaway realm only.
+    if ((user.credentials ?? []).length > 0) {
+      fail(`"${fixture.username}" now ships a credential. That is a security regression in the`
+        + " shipped realm (NOTES.txt says every account ships without one) — fix that rather than this script");
     }
+    user.credentials = [{ type: "password", value: fixture.password, temporary: false }];
   }
 
   return realm;
