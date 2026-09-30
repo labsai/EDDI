@@ -258,6 +258,11 @@ A agent is simply a **list of workflow references**:
 }
 ```
 
+Every agent version also carries a server-assigned `compatibilityGeneration`. Versions with the
+same generation are declared compatible, and a running conversation follows the newest deployed
+one from its next turn; every save is a breaking change unless the save says otherwise. See
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
 ### 2. Workflow Level
 
 **File**: `{workflowId}.workflow.json`
@@ -1002,7 +1007,7 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 Production response headers (configured via `application.properties`):
 - `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
+- `X-Frame-Options: DENY` (everywhere except the embeddable Chat UI at `/chat`, whose framing is `eddi.chat.frame-ancestors`, default `'none'`)
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-XSS-Protection: 0`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`

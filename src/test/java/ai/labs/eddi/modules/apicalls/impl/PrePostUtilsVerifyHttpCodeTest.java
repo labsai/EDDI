@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IDataFactory;
@@ -33,7 +35,7 @@ class PrePostUtilsVerifyHttpCodeTest {
                 mock(IJsonSerialization.class),
                 mock(IMemoryItemConverter.class),
                 mock(ITemplatingEngine.class),
-                mock(IDataFactory.class));
+                mock(IDataFactory.class), mock(SecretPropertyVault.class));
     }
 
     @Nested

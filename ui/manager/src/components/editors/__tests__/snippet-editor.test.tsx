@@ -110,3 +110,13 @@ describe("SnippetEditor", () => {
     expect(screen.getByText(/template resolution/)).toBeInTheDocument();
   });
 });
+
+describe("SnippetEditor usage hint", () => {
+  it("shows the Qute reference form, which is single-brace", () => {
+    // `{{snippets.name}}` is rendered literally by Qute; the working form is
+    // `{snippets.name}`.
+    renderWithProviders(<SnippetEditor data={populatedConfig} onChange={vi.fn()} />);
+    expect(screen.getByText("{snippets.cautious_mode}")).toBeInTheDocument();
+    expect(screen.queryByText("{{snippets.cautious_mode}}")).not.toBeInTheDocument();
+  });
+});

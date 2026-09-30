@@ -124,6 +124,67 @@ class PostgresUserConversationStoreUnitTest {
                 () -> store.createUserConversation(conv));
     }
 
+    /**
+     * The existence check and the insert are not atomic; a concurrent create lands
+     * in between and the primary key rejects this insert. It is reported as the
+     * check would have reported it, so callers can resolve the race.
+     */
+    @Test
+    void createUserConversation_uniqueViolation_throwsResourceAlreadyExistsException() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("duplicate key", "23505"));
+
+        assertThrows(IResourceStore.ResourceAlreadyExistsException.class,
+                () -> store.createUserConversation(createUserConversation()));
+        // The existence check's result set is closed even though the insert failed.
+        verify(resultSet).close();
+    }
+
+    @Test
+    void createUserConversation_otherSqlError_throwsResourceStoreException() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("connection reset", "08006"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.createUserConversation(createUserConversation()));
+        // The existence check's result set is closed even though the insert failed.
+        verify(resultSet).close();
+    }
+
+    // ─── deleteUserConversationIfMatches ───
+
+    @Test
+    void deleteUserConversationIfMatches_conditionsOnTheConversationId() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(store.deleteUserConversationIfMatches("greet", "user-1", "conv-ended"));
+
+        verify(connection).prepareStatement(
+                "DELETE FROM user_conversations WHERE intent = ? AND user_id = ? AND data->>'conversationId' = ?");
+        verify(preparedStatement).setString(1, "greet");
+        verify(preparedStatement).setString(2, "user-1");
+        verify(preparedStatement).setString(3, "conv-ended");
+    }
+
+    @Test
+    void deleteUserConversationIfMatches_noMatch_returnsFalse() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(store.deleteUserConversationIfMatches("greet", "user-1", "conv-ended"));
+    }
+
+    @Test
+    void deleteUserConversationIfMatches_sqlException_throwsResourceStoreException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.deleteUserConversationIfMatches("greet", "user-1", "conv-ended"));
+    }
+
     // ─── deleteUserConversation ───
 
     @Test

@@ -20,6 +20,8 @@ spec:
         app.kubernetes.io/component: messaging
         app.kubernetes.io/part-of: eddi
     spec:
+      # NATS never talks to the Kubernetes API.
+      automountServiceAccountToken: false
       containers:
         - name: nats
           image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}"

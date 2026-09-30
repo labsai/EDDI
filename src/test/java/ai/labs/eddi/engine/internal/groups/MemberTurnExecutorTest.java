@@ -367,6 +367,67 @@ class MemberTurnExecutorTest {
         assertEquals(0.07, gc.getTotalCost());
     }
 
+    /**
+     * An undeploy with endAllActiveConversations, or the idle sweep on a long
+     * discussion, can end a member's private conversation mid-discussion. Retrying
+     * it could never succeed and would fail the member for every remaining turn;
+     * the member continues in a fresh conversation instead.
+     */
+    @Test
+    void executeAgentTurn_endedPrivateConversation_continuesInAFreshOne() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+        doThrow(new IConversationService.ConversationEndedException("ended"))
+                .when(conversationService).say(any(), any(), eq("conv-old"), any(), any(), any(), any(), anyBoolean(), any());
+        var answered = new SimpleConversationMemorySnapshot();
+        answered.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(answered);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
+        var executor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.getMemberConversationIds().put(AGENT_A, "conv-old");
+
+        var entry = executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertNotEquals(TranscriptEntryType.SKIPPED, entry.type());
+        assertEquals("conv-new", gc.getMemberConversationIds().get(AGENT_A));
+        verify(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void executeAgentTurn_freshConversationEndingToo_isAFailureNotALoop() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+        doThrow(new IConversationService.ConversationEndedException("ended"))
+                .when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        var executor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 0);
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.getMemberConversationIds().put(AGENT_A, "conv-old");
+
+        var entry = executor.executeAgentTurn(member(), gc, "input", new ProtocolConfig(60, MemberFailurePolicy.SKIP, 0,
+                MemberUnavailablePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, entry.type());
+        verify(conversationService, times(1)).startConversation(any(), eq(AGENT_A), any(), any());
+    }
+
     @Test
     void executeGroupMemberTurn_rollsUpChildDiscussionCost() throws Exception {
         var groupConversationService = Mockito.mock(GroupConversationService.class);

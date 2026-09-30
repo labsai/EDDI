@@ -307,6 +307,79 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    // === Agent version following ===
+
+    /**
+     * The compatibility generation of the agent version this conversation runs on —
+     * see {@code AgentConfiguration#getCompatibilityGeneration()}. A turn may run
+     * on any deployed version of the agent with the same generation.
+     * <p>
+     * {@code null} for a conversation that started before generations existed, or
+     * on a version without one: such a conversation stays on
+     * {@link #getAgentVersion()}, as every conversation used to.
+     *
+     * @since 6.5.0
+     */
+    default Integer getCompatibilityGeneration() {
+        return null;
+    }
+
+    /**
+     * Records the compatibility generation of the version the conversation starts
+     * on. See {@link #getCompatibilityGeneration()}.
+     *
+     * @since 6.5.0
+     */
+    default void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        // no-op by default
+    }
+
+    /**
+     * The agent version the conversation's descriptor still names after updating it
+     * to a version the conversation moved to failed; {@code null} when the
+     * descriptor names {@link #getAgentVersion()}. Persisted, so a later turn — on
+     * any node — retries the update.
+     *
+     * @since 6.5.0
+     */
+    default Integer getStaleDescriptorAgentVersion() {
+        return null;
+    }
+
+    /**
+     * See {@link #getStaleDescriptorAgentVersion()}.
+     *
+     * @since 6.5.0
+     */
+    default void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        // no-op by default
+    }
+
+    /**
+     * Moves the conversation to {@code agentVersion}, another deployed version of
+     * its agent with the same compatibility generation, before a turn runs. The
+     * version it left is remembered until the turn records the change — see
+     * {@link #takePreviousAgentVersion()}.
+     *
+     * @since 6.5.0
+     */
+    default void switchAgentVersion(Integer agentVersion) {
+        throw new UnsupportedOperationException("This conversation memory cannot change its agent version");
+    }
+
+    /**
+     * The version this conversation was moved away from by
+     * {@link #switchAgentVersion(Integer)} since the last call, or {@code null};
+     * the call clears it, so the change is recorded on exactly one step. Not
+     * persisted — a turn that never runs records nothing, and the next one resolves
+     * the version afresh.
+     *
+     * @since 6.5.0
+     */
+    default Integer takePreviousAgentVersion() {
+        return null;
+    }
+
     // === Optimistic concurrency ===
 
     /**
@@ -386,10 +459,29 @@ public interface IConversationMemory extends Serializable {
 
         IConversationStep peek();
 
+        /**
+         * One entry per step, oldest first: that step's latest data whose key
+         * <em>starts with</em> {@code prefix}, or {@code null}. Prefix semantics —
+         * {@code "context:groupId"} also matches {@code context:groupIdSuffix}. For a
+         * key whose writer matters (an engine-reserved context key, see
+         * {@code ClientContextGuard}) use {@link #getExactDataPerStep(String)}.
+         */
         <T> List<IData<T>> getAllLatestData(String prefix);
+
+        /**
+         * One entry per step, oldest first: that step's data stored under exactly
+         * {@code key}, or {@code null} when the step has none. The exact-key
+         * counterpart of {@link #getAllLatestData(String)}, with the same shape, so two
+         * such lists can be paired by index.
+         */
+        <T> List<IData<T>> getExactDataPerStep(String key);
     }
 
     interface IConversationStep extends Serializable {
+        /**
+         * The data stored under exactly {@code key}, or {@code null}. Unlike
+         * {@link #getLatestData(String)} this is not a prefix match.
+         */
         <T> IData<T> getData(String key);
 
         /** Type-safe variant of {@link #getData(String)}. */
@@ -412,6 +504,15 @@ public interface IConversationMemory extends Serializable {
 
         boolean isEmpty();
 
+        /**
+         * The most recently stored data whose key <em>starts with</em> {@code prefix}.
+         * Prefix semantics: {@code getLatestData("context:groupId")} also returns a
+         * {@code context:groupIdSuffix} entry, and returns it first if it was stored
+         * later. Never use it to read a key whose writer matters — an engine-reserved
+         * context key ({@code ClientContextGuard}) in particular, since the client
+         * chooses its own context key names. Use {@link #getData(String)}, which is
+         * exact, for those.
+         */
         <T> IData<T> getLatestData(String prefix);
 
         /** Type-safe variant of {@link #getLatestData(String)}. */

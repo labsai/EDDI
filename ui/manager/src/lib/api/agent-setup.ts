@@ -117,7 +117,7 @@ export interface SetupResult {
 // ---------- Provider helpers ----------
 
 export const LLM_PROVIDERS = [
-  { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-5", needsKey: true, group: "frontier" },
+  { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-5-5", needsKey: true, group: "frontier" },
   { id: "openai", name: "OpenAI", defaultModel: "gpt-5.4", needsKey: true, group: "frontier" },
   { id: "gemini", name: "Google Gemini", defaultModel: "gemini-3.5-flash", needsKey: true, group: "frontier" },
   { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true, group: "frontier" },
@@ -133,7 +133,7 @@ export const LLM_PROVIDERS = [
   { id: "groq", name: "Groq", defaultModel: "openai/gpt-oss-120b", needsKey: true, group: "compatible" },
   { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-3.5-flash", needsKey: false, group: "cloud" },
   { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true, group: "cloud" },
-  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-5", needsKey: false, group: "cloud" },
+  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "global.anthropic.claude-sonnet-5-5", needsKey: false, group: "cloud" },
   { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false, group: "cloud" },
   { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true, group: "cloud" },
   { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false, group: "local" },

@@ -11,6 +11,7 @@ import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -189,5 +190,56 @@ class CspPolicyTest {
                 "the Swagger filter must send X-Frame-Options: DENY");
         assertNull(properties.getProperty(CHAT_XFO),
                 "/chat must send NO X-Frame-Options so its frame-ancestors allow-list governs framing");
+    }
+
+    /**
+     * Which filter owns which path. Two matching filters send two CSP headers and
+     * the browser enforces their intersection, so /chat must match the chat filter
+     * and NOT the default one, and the swagger split must survive the new
+     * exclusion. Vert.x matches a filter's regex against the whole path.
+     */
+    @Test
+    @DisplayName("each path is matched by exactly one CSP filter")
+    void everyPathHasExactlyOnePolicy() throws Exception {
+        var properties = applicationProperties();
+        var defaultFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-default.matches"));
+        var swaggerFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-swagger.matches"));
+        var chatFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-chat.matches"));
+
+        for (var path : new String[]{"/chat", "/chat/", "/chat/production/6630a1b2c3d4e5f6a7b8c9d0"}) {
+            assertTrue(chatFilter.matcher(path).matches(), path + " must get the chat policy");
+            assertFalse(defaultFilter.matcher(path).matches(), path + " must not ALSO get the default policy");
+            assertFalse(swaggerFilter.matcher(path).matches(), path);
+        }
+        for (var path : new String[]{"/manage", "/manage/agents", "/", "/q/health/ready", "/chatter", "/agents/x"}) {
+            assertTrue(defaultFilter.matcher(path).matches(), path + " must get the default policy");
+            assertFalse(chatFilter.matcher(path).matches(), path + " must not get the chat policy");
+        }
+        for (var path : new String[]{"/q/swagger-ui", "/q/swagger-ui/index.html"}) {
+            assertTrue(swaggerFilter.matcher(path).matches(), path);
+            assertFalse(defaultFilter.matcher(path).matches(), path);
+            assertFalse(chatFilter.matcher(path).matches(), path);
+        }
+    }
+
+    /**
+     * The Manager previews staged image attachments through
+     * {@code URL.createObjectURL}, and the agent wizard can fetch an OpenAPI spec
+     * from a URL. Under {@code img-src 'self' data:} every thumbnail was a broken
+     * image; the spec fetch has no host that could be named in advance, so it is an
+     * operator setting that stays empty (strict) unless set.
+     */
+    @Test
+    @DisplayName("the application policy renders blob: previews and takes extra connect sources from config")
+    void applicationPolicyAllowsBlobImagesAndConfiguredConnectSources() throws Exception {
+        var properties = applicationProperties();
+        var csp = properties.getProperty(DEFAULT_HEADER);
+        assertTrue(allows(directive(csp, "img-src"), "blob:"), "img-src must allow blob: previews: " + csp);
+        assertTrue(allows(directive(csp, "connect-src"), "${eddi.csp.extra-connect-sources:}"),
+                "connect-src must append eddi.csp.extra-connect-sources: " + csp);
+        assertEquals("", properties.getProperty("eddi.csp.extra-connect-sources"),
+                "extra connect sources must default to none — widening connect-src is an operator's call");
+        assertFalse(allows(directive(csp, "connect-src"), "https:"),
+                "connect-src must not allow every https host by default: " + csp);
     }
 }

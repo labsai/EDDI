@@ -11,6 +11,8 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.utils.RuntimeUtilities;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -101,6 +103,21 @@ public class UserConversationStore implements IUserConversationStore {
     }
 
     @Override
+    public boolean deleteUserConversationIfMatches(String intent, String userId, String conversationId)
+            throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
+        RuntimeUtilities.checkNotNull(userId, USER_ID_FIELD);
+        RuntimeUtilities.checkNotNull(conversationId, CONVERSATION_ID_FIELD);
+        try {
+            return collection.deleteOne(new Document(INTENT_FIELD, intent)
+                    .append(USER_ID_FIELD, userId)
+                    .append(CONVERSATION_ID_FIELD, conversationId)).getDeletedCount() > 0;
+        } catch (RuntimeException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
     public long deleteAllForUser(String userId) {
         return collection.deleteMany(new Document(USER_ID_FIELD, userId)).getDeletedCount();
     }
@@ -157,7 +174,20 @@ public class UserConversationStore implements IUserConversationStore {
 
             // no user conversation with the given intent has been found, so we create a new
             // one
-            collection.insertOne(createDocument(userConversation));
+            try {
+                collection.insertOne(createDocument(userConversation));
+            } catch (MongoWriteException e) {
+                // The read above and this insert are not atomic: a concurrent create
+                // for the same (intent, userId) lands in between and the unique index
+                // rejects ours. That is the same answer as the read finding it, so it
+                // is reported the same way — callers resolve a create race on
+                // ResourceAlreadyExistsException and would otherwise fail the turn.
+                if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                    throw new ResourceAlreadyExistsException(
+                            String.format("UserConversation with intent=%s does already exist", userConversation.getIntent()));
+                }
+                throw e;
+            }
         }
 
         void deleteUserConversation(String intent, String userId) {

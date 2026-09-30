@@ -96,6 +96,21 @@ public class SlackEventHandler {
      */
     private static final SimpleConversationMemorySnapshot SKIPPED_STILL_AWAITING = new SimpleConversationMemorySnapshot();
     private static final SimpleConversationMemorySnapshot SKIPPED_NOT_ACTIVE = new SimpleConversationMemorySnapshot();
+    /**
+     * The queued turn was dropped because the conversation had ENDED by the time it
+     * ran. Unlike {@link #SKIPPED_NOT_ACTIVE} this is not worth retrying on the
+     * same conversation, so it is recovered from like an ended conversation found
+     * up front: the thread gets a fresh one.
+     */
+    private static final SimpleConversationMemorySnapshot SKIPPED_ENDED = new SimpleConversationMemorySnapshot();
+
+    /**
+     * Posted in a thread before its first message goes to a fresh conversation,
+     * when the conversation it replaces was ended because the agent version it ran
+     * on was retired. Any other end is replaced silently — the thread's history is
+     * still on screen, so nothing is lost for the user.
+     */
+    static final String AGENT_UPDATED_NOTICE = "🔄 I've been updated, so I'm starting a fresh conversation in this thread.";
 
     private final ChannelTargetRouter channelTargetRouter;
     private final ObserveGate observeGate;
@@ -120,7 +135,7 @@ public class SlackEventHandler {
      * to prevent unbounded growth — follow-ups are only useful shortly after a
      * discussion finishes.
      */
-    private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
+    private final ICache<String, GroupFollowUp> activeGroupListeners;
 
     /**
      * Persisted record of every approval card posted, keyed by
@@ -222,9 +237,32 @@ public class SlackEventHandler {
      *            routed to that integration's default target rather than to an
      *            arbitrary one. {@code null} when routing goes by channel, or the
      *            signer was a legacy connector
+     * @param verifiedSigningSecret
+     *            the signing secret that verified the event (the channel owner's,
+     *            or for an unowned channel the signer's). Every route the event
+     *            takes — including a thread lock or a group follow-up, both found
+     *            by a timestamp the sender chooses — must belong to an integration
+     *            or legacy connector holding this secret. {@code null} only for an
+     *            event with no channel (which is dropped anyway); with no secret no
+     *            route matches. A resolved secret, so never logged
      */
-    public record EventOrigin(String teamId, String signingIntegrationName) {
-        public static final EventOrigin UNKNOWN = new EventOrigin(null, null);
+    public record EventOrigin(String teamId, String signingIntegrationName, String verifiedSigningSecret) {
+        /** Nothing verified: such an event routes nowhere. */
+        public static final EventOrigin UNKNOWN = new EventOrigin(null, null, null);
+
+        @Override
+        public String toString() {
+            return "EventOrigin[teamId=" + teamId + ", signingIntegrationName=" + signingIntegrationName + "]";
+        }
+    }
+
+    /**
+     * A group discussion's agent message, registered for follow-up routing: the
+     * listener that holds its context, the route that started the discussion (its
+     * credentials, and the app a follow-up must come from) and the channel it ran
+     * in.
+     */
+    record GroupFollowUp(SlackGroupDiscussionListener listener, ResolvedTarget route, String channelId) {
     }
 
     /**
@@ -277,6 +315,16 @@ public class SlackEventHandler {
      * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
      * between it and the handler, so a top-level {@code instanceof} would miss it.
      */
+    /**
+     * Whether {@code route} belongs to the app whose signing secret verified the
+     * event: its integration's (or legacy connector's) secret equals the verified
+     * one. Fails closed when nothing was verified.
+     */
+    static boolean routeMatchesSigner(ResolvedTarget route, EventOrigin origin) {
+        return route != null && origin != null
+                && ChannelTargetRouter.secretsEqual(route.signingSecret(), origin.verifiedSigningSecret());
+    }
+
     private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             if (type.isInstance(c)) {
@@ -361,11 +409,25 @@ public class SlackEventHandler {
 
         if (parentTs != null) {
             resolved = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+            if (resolved != null && resolved.integration() == null && resolved.legacySigningSecret() == null) {
+                // A channel no integration owns (a DM) gives the lock no credentials.
+                // Take those of an integration or legacy connector that holds the
+                // verifying secret AND has the locked target among its own targets;
+                // otherwise one app's secret could continue a thread locked to
+                // another app's agent.
+                resolved = channelTargetRouter.threadCredentialsForDm("slack", resolved.target(),
+                        origin.verifiedSigningSecret());
+                if (resolved == null) {
+                    LOGGER.warnf("[SLACK] Thread %s in channel %s is locked to a target the sending app does not "
+                            + "serve — ignoring", sanitize(parentTs), sanitize(channelId));
+                    return;
+                }
+            }
         }
 
         // 2. Check group follow-up (thread root was a group discussion)
         if (resolved == null && parentTs != null
-                && tryHandleAgentFollowUp(parentTs, channelId, user, text, threadTs)) {
+                && tryHandleAgentFollowUp(parentTs, channelId, user, text, threadTs, origin)) {
             return;
         }
 
@@ -379,12 +441,28 @@ public class SlackEventHandler {
         // target
         if (resolved == null && isDirectMessage) {
             // Route to the integration whose secret signed this DM (the webhook
-            // established it), not to whichever integration happens to be first.
-            resolved = channelTargetRouter.resolveDefaultForDm("slack", text, origin.signingIntegrationName());
+            // established it), not to whichever integration happens to be first. A
+            // DM signed by a legacy connector goes to a legacy connector with that
+            // secret — never to the first new-style integration.
+            if (origin.signingIntegrationName() == null && origin.verifiedSigningSecret() != null) {
+                resolved = channelTargetRouter.resolveLegacyDefaultForDm(text, origin.verifiedSigningSecret());
+            } else {
+                resolved = channelTargetRouter.resolveDefaultForDm("slack", text, origin.signingIntegrationName());
+            }
         }
 
         if (resolved == null) {
             postHelp(channelId, threadTs, null);
+            return;
+        }
+
+        // 5. The route must belong to the app that signed the event. The webhook
+        // bound the signature to the channel's owner, but a route can come from
+        // elsewhere — the DM fallback, a thread lock — so without this an event
+        // signed by one app could run another app's target with its bot token.
+        if (!routeMatchesSigner(resolved, origin)) {
+            LOGGER.warnf("[SLACK] Event for channel %s resolved to a route of a different app — ignoring",
+                    sanitize(channelId));
             return;
         }
 
@@ -523,10 +601,19 @@ public class SlackEventHandler {
             String conversationId = null;
             OptionalDouble costBefore = OptionalDouble.empty();
             try {
-                conversationId = observedConversationId(resolved, channelId, user, threadTs);
+                String intent = threadIntent(channelId, target.getTargetId(), threadTs);
+                ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
+                conversationId = thread.conversationId();
                 costBefore = conversationCost(conversationId);
-                sendAndDeliver(resolved, conversationId, target.getTargetId(), channelId, threadTs,
-                        message, botToken);
+                String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
+                        threadTs, message, botToken);
+                if (!deliveredTo.equals(conversationId)) {
+                    // The conversation ended between opening and sending and the
+                    // thread was given a fresh one. Its spend so far is this turn's,
+                    // so it is measured from zero.
+                    conversationId = deliveredTo;
+                    costBefore = OptionalDouble.of(0.0);
+                }
                 // Locked only now, once the observer has actually spoken. The
                 // lock exists so a human replying under the observer's answer
                 // reaches the observer rather than the channel's DEFAULT target.
@@ -649,34 +736,70 @@ public class SlackEventHandler {
                                          String botToken)
             throws Exception {
         String agentId = resolved.target().getTargetId();
-        String threadKey = threadTs != null ? threadTs : "main";
-
-        // Compose a stable intent key for conversation tracking.
-        // Uses channelId + targetId (agentId/groupId) — NOT mutable display names
-        // like integration name or target name, which would break
-        // IUserConversationStore lookups on rename.
-        String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
+        String intent = threadIntent(channelId, agentId, threadTs);
 
         // Use strippedMessage (trigger keyword removed) or fall back to original text
         // (thread replies from resolveThreadTarget have strippedMessage=null)
         String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
 
-        String conversationId = getOrCreateConversation(agentId, user, intent);
-        sendAndDeliver(resolved, conversationId, agentId, channelId, threadTs, message, botToken);
+        ThreadConversation thread = openThreadConversation(agentId, user, intent);
+        sendInThread(resolved, agentId, user, intent, thread, channelId, threadTs, message, botToken);
     }
 
     /**
-     * The conversation an observed turn will run on — the same intent key an
-     * addressed turn would use, so an observer and a mention in the same channel
-     * and thread share one conversation rather than talking past each other.
+     * The stable key a thread's conversation is tracked under. An observed turn
+     * uses the same key an addressed turn would, so an observer and a mention in
+     * the same channel and thread share one conversation rather than talking past
+     * each other.
+     * <p>
+     * Uses channelId + targetId (agentId/groupId) — NOT mutable display names like
+     * integration name or target name, which would break IUserConversationStore
+     * lookups on rename.
      */
-    private String observedConversationId(ResolvedTarget resolved, String channelId, SlackUser user,
-                                          String threadTs)
-            throws Exception {
-        String agentId = resolved.target().getTargetId();
+    private static String threadIntent(String channelId, String agentId, String threadTs) {
         String threadKey = threadTs != null ? threadTs : "main";
-        String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
-        return getOrCreateConversation(agentId, user, intent);
+        return "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
+    }
+
+    /**
+     * {@link #sendAndDeliver}, recovering once from a conversation that turns out
+     * to have ended between being opened and being sent to — an undeploy or the
+     * idle sweep can end it at any moment. The thread gets a fresh conversation and
+     * the message goes there; a second end in a row propagates.
+     *
+     * @return the conversation the message was delivered to
+     */
+    // Package-private for unit testing.
+    String sendInThread(ResolvedTarget resolved, String agentId, SlackUser user, String intent,
+                        ThreadConversation thread, String channelId, String threadTs, String message,
+                        String botToken)
+            throws Exception {
+        announceReplacement(thread, channelId, threadTs, botToken);
+        try {
+            sendAndDeliver(resolved, thread.conversationId(), agentId, channelId, threadTs, message, botToken);
+            return thread.conversationId();
+        } catch (IConversationService.ConversationEndedException e) {
+            ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, thread.conversationId(),
+                    endReasonOf(thread.conversationId()));
+            announceReplacement(fresh, channelId, threadTs, botToken);
+            sendAndDeliver(resolved, fresh.conversationId(), agentId, channelId, threadTs, message, botToken);
+            return fresh.conversationId();
+        }
+    }
+
+    /**
+     * Tell the thread that its conversation starts over, if the one it replaced
+     * ended because the agent was updated. Best-effort: a failed notice must not
+     * cost the user the answer that follows it.
+     */
+    private void announceReplacement(ThreadConversation thread, String channelId, String threadTs, String botToken) {
+        if (thread.replaced() && IConversationService.END_REASON_AGENT_VERSION_RETIRED.equals(thread.replacedEndReason())) {
+            try {
+                postMessage(channelId, threadTs, AGENT_UPDATED_NOTICE, botToken);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not post the agent-updated notice in channel %s: %s", sanitize(channelId), e.getMessage());
+            }
+        }
     }
 
     /**
@@ -717,8 +840,14 @@ public class SlackEventHandler {
             postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
             return;
         }
-        // A skip for a non-active conversation (busy/interrupted/ended) — the
-        // message was dropped; tell the user rather than replaying a stale turn.
+        // Ended while the turn was queued: the same situation as say() refusing an
+        // ended conversation, so it is reported the same way and the caller gives
+        // the thread a fresh conversation.
+        if (snapshot == SKIPPED_ENDED) {
+            throw new IConversationService.ConversationEndedException("Conversation has ended!");
+        }
+        // A skip for a non-active conversation (busy/interrupted) — the message was
+        // dropped; tell the user rather than replaying a stale turn.
         if (snapshot == SKIPPED_NOT_ACTIVE) {
             postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
             return;
@@ -836,8 +965,14 @@ public class SlackEventHandler {
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
-        if (integrationName == null || integrationName.isBlank()) {
-            includeButtons = false; // unbindable — a decision on it would be refused
+        if (!SlackHitlSupport.isBindableIntegrationName(integrationName)) {
+            // Unbindable — a decision on it would be refused. A name containing '|'
+            // (stored before the save-time rule) would split the button value.
+            if (integrationName != null && !integrationName.isBlank()) {
+                LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot carry "
+                        + "— posting the approval card without buttons; rename the integration", sanitize(integrationName));
+            }
+            includeButtons = false;
         } else {
             try {
                 if (!approvalRecords.tryRecord(integrationName, conversationId, pauseEpoch, cardId, approvalChannel)) {
@@ -969,7 +1104,7 @@ public class SlackEventHandler {
             // Only register for follow-up routing in expanded mode (compact has no
             // channel-level messages)
             if (listener.isExpandedMode()) {
-                executorService.submit(() -> registerAgentThreadMappings(listener));
+                executorService.submit(() -> registerAgentThreadMappings(listener, resolved, channelId));
             }
 
         } catch (Exception e) {
@@ -984,7 +1119,8 @@ public class SlackEventHandler {
      * Wait for the group discussion to complete, then register all agent message ts
      * mappings for follow-up routing.
      */
-    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
+    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener, ResolvedTarget route,
+                                             String channelId) {
         // Wait for the group discussion to complete via the listener's latch
         int groupTimeout = slackConfig.getGroupCompletionTimeoutSeconds();
         boolean completed = listener.awaitCompletion(groupTimeout, TimeUnit.SECONDS);
@@ -998,7 +1134,7 @@ public class SlackEventHandler {
 
         // Register all agent message ts → listener for follow-up detection
         for (String ts : listener.getAgentMessageTsMap().values()) {
-            activeGroupListeners.put(ts, listener);
+            activeGroupListeners.put(ts, new GroupFollowUp(listener, route, channelId));
             LOGGER.debugf("Registered agent thread ts=%s for follow-up routing", ts);
         }
     }
@@ -1012,12 +1148,24 @@ public class SlackEventHandler {
      * @return true if this was handled as a follow-up, false otherwise
      */
     private boolean tryHandleAgentFollowUp(String parentTs, String channelId,
-                                           SlackUser user, String text, String threadTs)
+                                           SlackUser user, String text, String threadTs,
+                                           EventOrigin origin)
             throws Exception {
-        SlackGroupDiscussionListener listener = activeGroupListeners.get(parentTs);
-        if (listener == null) {
+        GroupFollowUp followUp = activeGroupListeners.get(parentTs);
+        if (followUp == null) {
             return false; // Not a thread from a group discussion
         }
+        // The key is a bare Slack timestamp the sender chooses, so the reply must
+        // also be in the discussion's channel and come from the app whose route
+        // started it — otherwise another app could run the discussion's agent, with
+        // its context, in a channel of its own.
+        if (!channelId.equals(followUp.channelId()) || !routeMatchesSigner(followUp.route(), origin)) {
+            LOGGER.warnf("[SLACK] Follow-up for thread %s does not match the discussion's channel or app — ignoring",
+                    sanitize(parentTs));
+            return true;
+        }
+        SlackGroupDiscussionListener listener = followUp.listener();
+        String botToken = followUp.route().botToken();
 
         String agentId = listener.getAgentIdForMessageTs(parentTs);
         if (agentId == null) {
@@ -1039,37 +1187,60 @@ public class SlackEventHandler {
 
         // Route to the specific agent from the group discussion
         String intent = "channel:followup:" + channelId + ":" + parentTs;
-        String conversationId = getOrCreateConversation(agentId, user, intent);
+        ThreadConversation thread = openThreadConversation(agentId, user, intent);
+        announceReplacement(thread, channelId, threadTs, botToken);
+        try {
+            deliverFollowUp(thread.conversationId(), channelId, threadTs, enrichedInput, botToken);
+        } catch (IConversationService.ConversationEndedException e) {
+            // Ended between opening and sending — once, like sendInThread.
+            ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, thread.conversationId(),
+                    endReasonOf(thread.conversationId()));
+            announceReplacement(fresh, channelId, threadTs, botToken);
+            deliverFollowUp(fresh.conversationId(), channelId, threadTs, enrichedInput, botToken);
+        }
 
-        // Follow-ups have no ResolvedTarget/integration config, so no approver
-        // notification is sent — but the pause notice and "still awaiting" handling
-        // still apply so the user is never left with a generic error.
+        return true;
+    }
+
+    /**
+     * Send a follow-up and post its outcome, as the app that started the
+     * discussion. Follow-ups carry no approver configuration, so no approver
+     * notification is sent — but the pause notice and "still awaiting" handling
+     * still apply so the user is never left with a generic error.
+     *
+     * @throws IConversationService.ConversationEndedException
+     *             if the conversation has ended, so the caller can replace it
+     */
+    private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
+                                 String botToken)
+            throws Exception {
         try {
             SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
             if (snapshot == SKIPPED_STILL_AWAITING) {
-                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
-                return true;
+                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+                return;
+            }
+            if (snapshot == SKIPPED_ENDED) {
+                throw new IConversationService.ConversationEndedException("Conversation has ended!");
             }
             if (snapshot == SKIPPED_NOT_ACTIVE) {
-                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, null);
-                return true;
+                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
+                return;
             }
             boolean paused = snapshot != null
                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             String response = SlackHitlSupport.extractSlackResponseText(snapshot);
             if (paused) {
                 if (response != null && !response.startsWith("_")) {
-                    postMessageChunked(channelId, threadTs, response, null);
+                    postMessageChunked(channelId, threadTs, response, botToken);
                 }
-                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), null);
+                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
             } else {
-                postMessageChunked(channelId, threadTs, response, null);
+                postMessageChunked(channelId, threadTs, response, botToken);
             }
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
-            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
         }
-
-        return true;
     }
 
     /**
@@ -1128,12 +1299,44 @@ public class SlackEventHandler {
     // paths).
     String getOrCreateConversation(String agentId, SlackUser user, String intent)
             throws Exception {
+        return openThreadConversation(agentId, user, intent).conversationId();
+    }
+
+    /**
+     * A thread's conversation, and whether this call replaced an ended one — in
+     * which case {@code replacedEndReason} is that conversation's end reason, if it
+     * had one.
+     */
+    record ThreadConversation(String conversationId, boolean replaced, String replacedEndReason) {
+        static ThreadConversation existing(String conversationId) {
+            return new ThreadConversation(conversationId, false, null);
+        }
+    }
+
+    /**
+     * The conversation a thread's next message goes to.
+     * <p>
+     * A mapped conversation that has ENDED — or no longer exists at all — cannot
+     * take another turn, and used to strand the thread for good: every further
+     * message was refused. The idle sweep ends conversations, and so does an
+     * undeploy with {@code endAllActiveConversations}. Such a mapping is replaced
+     * by a fresh conversation. The user's long-term memories are keyed on the user,
+     * not the conversation, so what the agent knows about them carries over; only
+     * the conversation's own state starts over, which is what ended means.
+     */
+    // Package-private for unit testing.
+    ThreadConversation openThreadConversation(String agentId, SlackUser user, String intent)
+            throws Exception {
         String eddiUserId = user.eddiUserId();
         // Try existing — readUserConversation returns null when not found,
         // throws ResourceStoreException only on real DB errors (which should propagate)
         UserConversation existing = userConversationStore.readUserConversation(intent, eddiUserId);
         if (existing != null) {
-            return existing.getConversationId();
+            EndedConversation ended = endedConversation(existing.getConversationId());
+            if (ended == null) {
+                return ThreadConversation.existing(existing.getConversationId());
+            }
+            return replaceEndedThreadConversation(agentId, user, intent, existing.getConversationId(), ended.endReason());
         }
 
         String legacyUserId = user.slackUserId();
@@ -1149,11 +1352,48 @@ public class SlackEventHandler {
                 // would let a second integration's operator relocate a victim's
                 // legacy memories into their own namespace. Adoption is safe because
                 // it is scoped to a conversation MAPPING under this exact intent.
-                return rekeyLegacyMapping(legacy, eddiUserId);
+                return ThreadConversation.existing(rekeyLegacyMapping(legacy, eddiUserId));
             }
         }
 
-        // Create new conversation
+        return ThreadConversation.existing(createThreadConversation(agentId, eddiUserId, intent).conversationId());
+    }
+
+    /**
+     * Give a thread a fresh conversation in place of {@code endedConversationId}.
+     * <p>
+     * The mapping is removed only while it still names the ended conversation. Two
+     * messages that find the same ended conversation both get here; the second
+     * one's delete then matches nothing — the first has already replaced the
+     * mapping — and its create collides with the first one's, so both end up on one
+     * conversation instead of each starting its own. Only the caller whose
+     * conversation won reports {@code replaced}, so the thread is told about it
+     * once.
+     */
+    // Package-private for unit testing.
+    ThreadConversation replaceEndedThreadConversation(String agentId, SlackUser user, String intent,
+                                                      String endedConversationId, String endReason)
+            throws Exception {
+        String eddiUserId = user.eddiUserId();
+        userConversationStore.deleteUserConversationIfMatches(intent, eddiUserId, endedConversationId);
+        CreatedConversation created = createThreadConversation(agentId, eddiUserId, intent);
+        if (created.won()) {
+            LOGGER.infof("Replaced ended conversation %s in %s with %s (end reason: %s)",
+                    sanitize(endedConversationId), sanitize(intent), sanitize(created.conversationId()),
+                    endReason != null ? sanitize(endReason) : "none");
+        }
+        return new ThreadConversation(created.conversationId(), created.won(), created.won() ? endReason : null);
+    }
+
+    /**
+     * A conversation this thread may use, and whether it is the one this call
+     * started ({@code won}) rather than one a concurrent message stored first.
+     */
+    private record CreatedConversation(String conversationId, boolean won) {
+    }
+
+    private CreatedConversation createThreadConversation(String agentId, String eddiUserId, String intent)
+            throws Exception {
         var result = conversationService.startConversation(
                 Deployment.Environment.production, agentId, eddiUserId,
                 Map.of("channelIntent", new Context(Context.ContextType.string, intent)));
@@ -1175,7 +1415,7 @@ public class SlackEventHandler {
                 LOGGER.debugf("Lost the create race for %s/%s — using the stored conversation",
                         sanitize(intent), sanitize(eddiUserId));
                 endOrphanedConversation(result.conversationId());
-                return winner.getConversationId();
+                return new CreatedConversation(winner.getConversationId(), false);
             }
             // The mapping existed a moment ago and cannot be read now. Ours is
             // the only conversation we can name, so use it rather than fail.
@@ -1183,7 +1423,46 @@ public class SlackEventHandler {
                     sanitize(intent), sanitize(eddiUserId));
         }
 
-        return result.conversationId();
+        return new CreatedConversation(result.conversationId(), true);
+    }
+
+    /** A mapped conversation that can take no further turn, and why it ended. */
+    private record EndedConversation(String endReason) {
+    }
+
+    /**
+     * {@code null} while the conversation can still take a turn; otherwise why it
+     * cannot. A conversation that has vanished (retention, erasure) counts as
+     * ended. A state that cannot be read does NOT: a store hiccup must never cost a
+     * thread its conversation, so it is left to the turn to succeed or fail as
+     * before.
+     */
+    private EndedConversation endedConversation(String conversationId) {
+        ConversationState state;
+        try {
+            state = conversationService.getConversationState(conversationId);
+        } catch (IConversationService.ConversationNotFoundException e) {
+            return new EndedConversation(null);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read the state of conversation %s — keeping it: %s", sanitize(conversationId),
+                    e.getMessage());
+            return null;
+        }
+        return state == ConversationState.ENDED ? new EndedConversation(endReasonOf(conversationId)) : null;
+    }
+
+    /**
+     * The recorded end reason, or {@code null} when there is none or it cannot be
+     * read.
+     */
+    private String endReasonOf(String conversationId) {
+        try {
+            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            return snapshot != null ? snapshot.getEndReason() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the end reason of conversation %s: %s", sanitize(conversationId), e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -1274,11 +1553,13 @@ public class SlackEventHandler {
                     @Override
                     public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
                         // Dropped turn — do NOT deliver the (stale) snapshot as a
-                        // fresh outcome. AWAITING_HUMAN → still-awaiting; anything
-                        // else (IN_PROGRESS/ENDED/EXECUTION_INTERRUPTED) → not-active.
-                        boolean stillAwaiting = snapshot != null
-                                && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
-                        responseFuture.complete(stillAwaiting ? SKIPPED_STILL_AWAITING : SKIPPED_NOT_ACTIVE);
+                        // fresh outcome. AWAITING_HUMAN → still-awaiting; ENDED →
+                        // ended (the caller replaces the conversation); anything
+                        // else (IN_PROGRESS/EXECUTION_INTERRUPTED) → not-active.
+                        ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+                        responseFuture.complete(state == ConversationState.AWAITING_HUMAN
+                                ? SKIPPED_STILL_AWAITING
+                                : state == ConversationState.ENDED ? SKIPPED_ENDED : SKIPPED_NOT_ACTIVE);
                     }
                 });
 

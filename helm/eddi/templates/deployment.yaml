@@ -64,6 +64,8 @@ spec:
       # cloud IAM role bound to the named SA was never assumed and Helm printed
       # nothing. The helper returns the right name in both branches.
       serviceAccountName: {{ include "eddi.serviceAccountName" . }}
+      # EDDI never calls the Kubernetes API; see serviceAccount.automountToken.
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken | default false }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 185

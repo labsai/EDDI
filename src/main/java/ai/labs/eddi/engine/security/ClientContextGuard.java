@@ -59,8 +59,11 @@ public class ClientContextGuard {
     public static final String KEY_DELEGATION_DEPTH = "delegationDepth";
 
     /**
-     * Every context key only EDDI itself may set. Exact, case-sensitive names — the
-     * same way every consumer looks them up.
+     * Every context key only EDDI itself may set. Case-sensitive names; every
+     * consumer looks them up exactly ({@code IConversationStep#getData},
+     * {@code IConversationStepStack#getExactDataPerStep}). A client key that merely
+     * <em>starts with</em> one of them is removed as well — see
+     * {@link #shadowsReserved(String)}.
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
             KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH);
@@ -92,9 +95,33 @@ public class ClientContextGuard {
     }
 
     /**
-     * The client's context without the reserved keys. Returns the argument itself
-     * when there is nothing to remove (including {@code null}), otherwise a new
-     * mutable map in the original order.
+     * Whether {@code key} is a reserved key or starts with one — both are removed
+     * from client context unless the reserved key it extends is permitted.
+     * <p>
+     * Defence in depth for the prefix-matching step lookups.
+     * {@code IConversationStep#getLatestData} and
+     * {@code IConversationStepStack#getAllLatestData} match by <em>prefix</em>, so
+     * a reader that used them on {@code context:groupId} would also accept a
+     * client-sent {@code groupIdSuffix}, stored as {@code context:groupIdSuffix},
+     * which an exact-name check never sees as reserved. That was a live bypass
+     * (CWE-863, PR #831): every reserved-key reader now reads exactly, and this
+     * keeps the whole {@code <reserved>*} namespace out of client input so a future
+     * reader that slips back to a prefix lookup stays safe. The cost is that a
+     * client can no longer name its own key {@code groupIdLabel} or
+     * {@code delegationDepthMax}; none of EDDI's own clients do.
+     * <p>
+     * An operator-permitted reserved key permits its extensions too: they can only
+     * shadow the key the operator already trusts clients to set.
+     */
+    public static boolean shadowsReserved(String key) {
+        return key != null && RESERVED_KEYS.stream().anyMatch(key::startsWith);
+    }
+
+    /**
+     * The client's context without the reserved keys (and the keys that extend one,
+     * see {@link #shadowsReserved(String)}). Returns the argument itself when there
+     * is nothing to remove (including {@code null}), otherwise a new mutable map in
+     * the original order.
      */
     public Map<String, Context> strip(Map<String, Context> context) {
         if (context == null || context.isEmpty()) {
@@ -138,6 +165,14 @@ public class ClientContextGuard {
     }
 
     private boolean isRejected(String key) {
-        return key != null && RESERVED_KEYS.contains(key) && !permittedReservedKeys.contains(key);
+        if (key == null) {
+            return false;
+        }
+        for (String reserved : RESERVED_KEYS) {
+            if (key.startsWith(reserved) && !permittedReservedKeys.contains(reserved)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -134,6 +134,31 @@ class ConversationMemoryUtilitiesTest {
             assertEquals("user-42", restored.getUserId());
         }
 
+        @Test
+        @DisplayName("the compatibility generation and a moved agent version survive the round trip")
+        void preservesAgentVersionFollowing() {
+            var memory = new ConversationMemory("conv-id", "agent-1", 5, "user-42");
+            memory.setCompatibilityGeneration(3);
+            memory.switchAgentVersion(6);
+
+            var snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+            assertEquals(6, snapshot.getAgentVersion());
+            assertEquals(3, snapshot.getCompatibilityGeneration());
+
+            var restored = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
+            assertEquals(6, restored.getAgentVersion());
+            assertEquals(3, restored.getCompatibilityGeneration());
+            assertNull(restored.takePreviousAgentVersion(), "the pending change marker is not persisted");
+        }
+
+        @Test
+        @DisplayName("a stored conversation without a generation loads without one")
+        void legacyLoadsWithoutGeneration() {
+            var snapshot = ConversationMemoryUtilities.convertConversationMemory(new ConversationMemory("conv-id", "agent-1", 5, "user-42"));
+
+            assertNull(ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot).getCompatibilityGeneration());
+        }
+
         /**
          * F6/N3: the snapshot field initialiser is the LEGACY sentinel so key-less
          * stored documents read as legacy — a snapshot built from live memory is
@@ -171,6 +196,18 @@ class ConversationMemoryUtilitiesTest {
             assertTrue(output.containsKey("actions"));
             assertTrue(output.containsKey("output"));
             assertTrue(output.containsKey("internal:debug"));
+        }
+
+        @Test
+        @DisplayName("the end reason reaches the client-facing snapshot")
+        void endReasonIsCarried() {
+            var snapshot = buildSnapshotWithOutputs("input:initial");
+            snapshot.setConversationState(ConversationState.ENDED);
+            snapshot.setEndReason("agent-version-retired");
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, false);
+
+            assertEquals("agent-version-retired", simple.getEndReason());
         }
 
         @Test

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -18,7 +19,11 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.sse.OutboundSseEvent;
+import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.SseEventSink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -53,10 +58,12 @@ class RestGroupConversationHitlTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         jsonSerialization = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         // Use a real OwnershipValidator with auth enabled to test actual logic
@@ -72,7 +79,8 @@ class RestGroupConversationHitlTest {
                 mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
+                resourceAccessGuard);
     }
 
     /** Creates a GC owned by the given userId. */
@@ -585,6 +593,62 @@ class RestGroupConversationHitlTest {
     }
 
     // =================================================================
+    // A decision for a pause that is no longer current
+    // =================================================================
+
+    @Nested
+    @DisplayName("Approve with a stale pauseId")
+    class ApprovePauseChanged {
+
+        private GroupApprovalRequest staleDecision() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any()))
+                    .thenThrow(new IGroupConversationService.GroupPauseMismatchException("pause changed"));
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setPauseId("1");
+            request.setDecision(decision);
+            return request;
+        }
+
+        @Test
+        @DisplayName("approve → 409 telling the reviewer to re-read approval-status, not 'not awaiting approval'")
+        void approveReturnsPauseChanged409() throws Exception {
+            Response response = restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, staleDecision());
+
+            assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+            String body = String.valueOf(response.getEntity());
+            assertTrue(body.contains("re-read approval-status"), body);
+            assertFalse(body.contains("not awaiting approval"), body);
+        }
+
+        @Test
+        @DisplayName("approve (streaming) → group_error telling the reviewer to re-read approval-status")
+        void streamingApproveReportsPauseChanged() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), any())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(mock(OutboundSseEvent.class));
+
+            restGroupConversation.approveGroupPhaseStreaming(GROUP_ID, GC_ID, staleDecision(), eventSink, sse);
+
+            var errorEvent = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization, atLeastOnce()).serialize(errorEvent.capture());
+            var error = errorEvent.getAllValues().stream()
+                    .filter(GroupConversationEventSink.GroupErrorEvent.class::isInstance)
+                    .map(GroupConversationEventSink.GroupErrorEvent.class::cast)
+                    .findFirst().orElseThrow();
+            assertTrue(error.error().contains("re-read approval-status"), error.error());
+            verify(eventSink).close();
+        }
+    }
+
+    // =================================================================
     // groupId path-parameter validation (CodeQL: unused path param)
     // =================================================================
 
@@ -750,6 +814,41 @@ class RestGroupConversationHitlTest {
 
             assertNull(sent.getDecision().getDecidedBy(),
                     "a caller must never be able to name the decider, in any branch");
+        }
+    }
+
+    @Nested
+    @DisplayName("resume is USE-gated for the transcript owner")
+    class ResumeUseGate {
+
+        private GroupApprovalRequest approval() {
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+            return request;
+        }
+
+        @Test
+        @DisplayName("an owner who lost USE on the group cannot resume it")
+        void ownerWithoutUseIsRefused() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess(GROUP_ID, "group");
+
+            assertThrows(ForbiddenException.class, () -> restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, approval()));
+            verify(groupService, never()).resumeDiscussion(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an admin decides by role, whatever their group access")
+        void adminIsNotGroupGated() throws Exception {
+            asAdmin("root");
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess(GROUP_ID, "group");
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any())).thenReturn(makeGc(OWNER_ID));
+
+            assertEquals(200, restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, approval()).getStatus());
         }
     }
 }

@@ -31,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.net.URI;
@@ -231,7 +232,7 @@ class RestAgentStoreTest {
             var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
 
-            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID)));
+            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
             verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
         }
@@ -254,7 +255,7 @@ class RestAgentStoreTest {
             when(restWorkflowStore.readWorkflow(PKG2_ID, 1)).thenThrow(new NotFoundException());
 
             BadRequestException e = assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID)));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID), false));
 
             assertTrue(String.valueOf(e.getResponse().getEntity()).contains(PKG2_ID));
         }
@@ -903,7 +904,7 @@ class RestAgentStoreTest {
             config.setSecurity(security);
 
             assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
         }
 
         @Test
@@ -1128,6 +1129,99 @@ class RestAgentStoreTest {
             assertTrue(captured.stream().anyMatch(value -> value.contains("Failed to cascade-delete package")),
                     "the line under test did not fire; captured: " + captured);
             assertNoForgedRecordBoundary(captured, "RestAgentStore.deleteAgent's cascade-failed WARN");
+        }
+    }
+    /**
+     * {@code dynamicOrigin} is the provenance teardown_agent and group cleanup
+     * require before deleting an agent. Only AgentSetupService writes it; no edit
+     * may erase or replace it, and a copy is not a sub-agent.
+     */
+    @Nested
+    @DisplayName("dynamicOrigin is engine-owned")
+    class DynamicOriginIsEngineOwned {
+
+        private final AgentConfiguration.DynamicOrigin storedOrigin = new AgentConfiguration.DynamicOrigin("parent", "conv-1", "gc-1",
+                "user-1");
+
+        private AgentConfiguration stored() {
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            config.setDynamicOrigin(storedOrigin);
+            return config;
+        }
+
+        private AgentConfiguration persistedByUpdate() throws Exception {
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(false));
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("an update whose body omits the marker keeps the stored one")
+        void updateWithoutMarkerKeepsStoredOrigin() throws Exception {
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored());
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
+
+            assertSame(storedOrigin, persistedByUpdate().getDynamicOrigin());
+        }
+
+        @Test
+        @DisplayName("an update whose body carries a different marker keeps the stored one")
+        void updateCannotReplaceStoredOrigin() throws Exception {
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored());
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+            body.setDynamicOrigin(new AgentConfiguration.DynamicOrigin("attacker", "conv-evil", "gc-evil", "someone"));
+
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
+
+            assertSame(storedOrigin, persistedByUpdate().getDynamicOrigin());
+        }
+
+        @Test
+        @DisplayName("an update cannot plant a marker on an agent a person built")
+        void updateCannotPlantOrigin() throws Exception {
+            AgentConfiguration personBuilt = new AgentConfiguration();
+            personBuilt.setWorkflows(new ArrayList<>());
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(personBuilt);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+            body.setDynamicOrigin(new AgentConfiguration.DynamicOrigin("parent", "conv-1", null, "user-1"));
+
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
+
+            assertNull(persistedByUpdate().getDynamicOrigin());
+        }
+
+        @Test
+        @DisplayName("a store failure reading the stored marker fails the update instead of dropping the marker")
+        void unreadableStoredOriginFailsTheUpdate() throws Exception {
+            when(AgentStore.read(AGENT_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+
+            assertThrows(IResourceStore.ResourceStoreException.class, () -> restAgentStore.updateAgent(AGENT_ID, 1, body, false));
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a duplicate does not inherit the original's marker")
+        void duplicateDropsOrigin() throws Exception {
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored());
+            when(AgentStore.create(any())).thenReturn(resourceId("112233445566778899aa", 1));
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(dummyDescriptor());
+
+            restAgentStore.duplicateAgent(AGENT_ID, 1, false);
+
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).create(captor.capture());
+            assertNull(captor.getValue().getDynamicOrigin());
         }
     }
 }

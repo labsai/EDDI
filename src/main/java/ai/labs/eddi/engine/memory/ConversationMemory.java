@@ -51,7 +51,15 @@ public class ConversationMemory implements IConversationMemory {
     };
     private String conversationId;
     private final String agentId;
-    private final Integer agentVersion;
+    /**
+     * The version the next turn runs on. Not final: a conversation follows
+     * compatible versions of its agent — see {@link #switchAgentVersion(Integer)}.
+     */
+    private Integer agentVersion;
+    private Integer compatibilityGeneration;
+    private Integer staleDescriptorAgentVersion;
+    /** See {@link #takePreviousAgentVersion()}. Transient — never persisted. */
+    private transient Integer previousAgentVersion;
     private String userId;
     private IWritableConversationStep currentStep;
     private final Stack<IConversationStep> previousSteps;
@@ -360,6 +368,46 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    @Override
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    @Override
+    public Integer getStaleDescriptorAgentVersion() {
+        return staleDescriptorAgentVersion;
+    }
+
+    @Override
+    public void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        this.staleDescriptorAgentVersion = staleDescriptorAgentVersion;
+    }
+
+    @Override
+    public void switchAgentVersion(Integer agentVersion) {
+        if (Objects.equals(this.agentVersion, agentVersion)) {
+            return;
+        }
+        // Keep the version the turn STARTED from if it is switched twice before the
+        // step records it, so the recorded change says where the conversation was.
+        if (previousAgentVersion == null) {
+            previousAgentVersion = this.agentVersion;
+        }
+        this.agentVersion = agentVersion;
+    }
+
+    @Override
+    public Integer takePreviousAgentVersion() {
+        Integer previous = previousAgentVersion;
+        previousAgentVersion = null;
+        return previous;
+    }
+
+    @Override
     public long getRevision() {
         return revision;
     }
@@ -641,6 +689,11 @@ public class ConversationMemory implements IConversationMemory {
         @Override
         public <T> List<IData<T>> getAllLatestData(String prefix) {
             return conversationSteps.stream().map((IConversationStep conversationStep) -> conversationStep.<T>getLatestData(prefix)).toList();
+        }
+
+        @Override
+        public <T> List<IData<T>> getExactDataPerStep(String key) {
+            return conversationSteps.stream().map((IConversationStep conversationStep) -> conversationStep.<T>getData(key)).toList();
         }
 
         @Override

@@ -10,6 +10,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.util.concurrent.CountDownLatch;
@@ -45,10 +46,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * never interleave with a retry's output on the shared sink.
  * <p>
  * <strong>Known limitation (documented, accepted):</strong> the tool loop
- * retries whole attempts. If an attempt fails after some tokens were already
- * forwarded, the retry streams again from the start of the attempt, so the
- * client may see a repeated prefix during a provider flake. Memory is
- * unaffected — it stores only the final returned text.
+ * retries a failed model round. If a round fails after some tokens were already
+ * forwarded, the retry streams that round again from its start, so the client
+ * may see a repeated prefix of that one round during a provider flake. Earlier
+ * rounds are never re-streamed (the loop no longer replays whole attempts), and
+ * memory is unaffected — it stores only the final returned text.
  */
 class ToolLoopStreamingChatModel implements ChatModel {
     private static final Logger LOGGER = Logger.getLogger(ToolLoopStreamingChatModel.class);
@@ -161,6 +163,14 @@ class ToolLoopStreamingChatModel implements ChatModel {
         if (!completed) {
             synchronized (streamLock) {
                 abandoned.set(true);
+            }
+            // Counted here, when EDDI gives up (L3) — see StreamingLegacyChatExecutor.
+            // This class is not CDI-managed, hence the global registry (the idiom
+            // ToolContextBudget and LifecycleManager use).
+            try {
+                Metrics.globalRegistry.counter("eddi.llm.stream.timeouts", "path", "tool_loop").increment();
+            } catch (RuntimeException e) {
+                LOGGER.debugf("stream-timeout metric emit failed: %s", e.getMessage());
             }
             // Same shape as ObservableChatModel's timeout — including the typed
             // TimeoutException CAUSE, which is what RetryConfiguration

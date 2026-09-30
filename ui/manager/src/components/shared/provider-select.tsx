@@ -26,6 +26,10 @@ const REGION_FALLBACKS: Record<string, string> = {
  * `leadingOptions` slots extra `<option>`s (for instance a "None" or "inherit"
  * choice with `value=""`) ahead of the groups. Give the select an `ariaLabel`
  * wherever there is no visible `<label htmlFor={id}>`.
+ *
+ * `include` narrows the offered providers — the setup flows pass
+ * `isProvisionableBySetup`, since setup-api cannot configure every provider. A
+ * group left empty by it is not rendered.
  */
 export function ProviderSelect({
   value,
@@ -36,6 +40,7 @@ export function ProviderSelect({
   id,
   ariaLabel,
   leadingOptions,
+  include,
 }: {
   value: string;
   onChange: (providerId: string) => void;
@@ -45,9 +50,11 @@ export function ProviderSelect({
   id?: string;
   ariaLabel?: string;
   leadingOptions?: ReactNode;
+  include?: (providerId: string) => boolean;
 }) {
   const { t } = useTranslation();
-  const known = LLM_PROVIDERS.some((p) => p.id === value);
+  const offered = include ? LLM_PROVIDERS.filter((p) => include(p.id)) : LLM_PROVIDERS;
+  const known = offered.some((p) => p.id === value);
   return (
     <select
       value={value}
@@ -69,15 +76,19 @@ export function ProviderSelect({
           {t("llmEditor.unknownType", "{{type}} (custom)", { type: value })}
         </option>
       )}
-      {LLM_PROVIDER_GROUPS.map((group) => (
-        <optgroup key={group.id} label={t(group.labelKey, group.fallback)}>
-          {LLM_PROVIDERS.filter((p) => p.group === group.id).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
+      {LLM_PROVIDER_GROUPS.map((group) => {
+        const members = offered.filter((p) => p.group === group.id);
+        if (members.length === 0) return null;
+        return (
+          <optgroup key={group.id} label={t(group.labelKey, group.fallback)}>
+            {members.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
     </select>
   );
 }

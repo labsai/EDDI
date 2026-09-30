@@ -25,6 +25,12 @@ public class SimpleConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    /**
+     * Why an ENDED conversation ended, when known — see
+     * {@link ConversationMemorySnapshot#getEndReason()}. Lets a client tell "this
+     * assistant was updated" apart from any other end.
+     */
+    private String endReason;
     private Instant hitlPausedAt;
     /**
      * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
@@ -170,6 +176,14 @@ public class SimpleConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(String endReason) {
+        this.endReason = endReason;
     }
 
     public Instant getHitlPausedAt() {
