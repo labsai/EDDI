@@ -226,7 +226,7 @@ constraint is your internal DSAR process, not the technical execution.
 # Auto-delete ended conversations after N days (default: 365, -1 to disable)
 eddi.conversations.deleteEndedConversationsOnceOlderThanDays=365
 
-# Close idle conversations after N days (default: 90)
+# End idle conversations after N days (default: 90; -1 disables)
 eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 
 # User memories — delete entries older than N days (default: -1, disabled)
