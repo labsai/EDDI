@@ -216,7 +216,7 @@ class CascadingModelExecutorErrorPathTest {
                     orchestrator, Map.of(), false, false, false);
 
             assertEquals("legacy answer", result.response());
-            verify(orchestrator, never()).executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
+            verify(orchestrator, never()).executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any());
         }
     }
 

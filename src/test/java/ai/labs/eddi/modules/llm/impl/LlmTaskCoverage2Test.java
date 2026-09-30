@@ -666,7 +666,7 @@ class LlmTaskCoverage2Test {
         wireStandardMemory(List.of("action1"));
         // Agent mode cascade calls the orchestrator (8-arg overload) inside the cascade
         // step.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -693,7 +693,7 @@ class LlmTaskCoverage2Test {
     void cascadeEnabled_agentMode_threadsTranscriptCap() throws Exception {
         llmTask.toolTranscriptMaxBytes = 54321;
         wireStandardMemory(List.of("action1"));
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -713,7 +713,7 @@ class LlmTaskCoverage2Test {
 
         var capCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(agentOrchestrator).executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(),
-                capCaptor.capture(), any());
+                capCaptor.capture(), any(), any());
         assertEquals(54321, capCaptor.getValue());
     }
 
@@ -908,7 +908,7 @@ class LlmTaskCoverage2Test {
         AgentOrchestrator o = mock(AgentOrchestrator.class);
         try {
             lenient().doReturn(null).when(o)
-                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
+                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

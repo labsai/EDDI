@@ -132,14 +132,15 @@ class CascadingModelExecutorToolReplayTest {
     @SuppressWarnings("unchecked")
     private List<List<ChatMessage>> capturedStepMessages(int calls) throws Exception {
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
-        verify(orchestrator, times(calls)).executeIfToolsEnabled(any(), any(), captor.capture(), any(), any(), any(), anyInt(), anyInt(), any());
+        verify(orchestrator, times(calls)).executeIfToolsEnabled(any(), any(), captor.capture(), any(), any(), any(), anyInt(), anyInt(), any(),
+                any());
         return captor.getAllValues();
     }
 
     @Test
     @DisplayName("the next step receives the escalated step's tool calls and results, so they are not re-run")
     void escalationCarriesToolExchange() throws Exception {
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(stepResult("ok", placedOrderExchange(), 0.0))
                 .thenReturn(stepResult(LONG_ANSWER, List.of(), 0.0));
 
@@ -161,7 +162,7 @@ class CascadingModelExecutorToolReplayTest {
     void carryCanBeTurnedOff() throws Exception {
         var cascade = twoStepCascade();
         cascade.setCarryToolResultsOnEscalation(false);
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(stepResult("ok", placedOrderExchange(), 0.0))
                 .thenReturn(stepResult(LONG_ANSWER, List.of(), 0.0));
 
@@ -175,7 +176,7 @@ class CascadingModelExecutorToolReplayTest {
     void toolSpendCountsTowardCeiling() throws Exception {
         var cascade = twoStepCascade();
         cascade.setMaxCostPerRun(0.01);
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(stepResult("ok", placedOrderExchange(), 0.05))
                 .thenReturn(stepResult(LONG_ANSWER, List.of(), 0.0));
 
@@ -223,7 +224,7 @@ class CascadingModelExecutorToolReplayTest {
     void pauseRecordsStepIndex() throws Exception {
         var batch = new PendingToolCallBatch();
         batch.setTraceSoFar(new ArrayList<>(List.of(Map.of("type", "tool_call", "tool", "askApproval"))));
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(stepResult("ok", placedOrderExchange(), 0.0))
                 .thenThrow(new ToolApprovalRequiredException("needs approval", batch));
 
@@ -251,7 +252,7 @@ class CascadingModelExecutorToolReplayTest {
         cascade.getSteps().get(0).setType("ollama");
         List<List<ChatMessage>> seen = new ArrayList<>();
         int[] calls = {0};
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any())).thenAnswer(inv -> {
             List<ChatMessage> sent = inv.getArgument(2);
             seen.add(List.copyOf(sent));
             if (calls[0]++ == 0) {
@@ -320,7 +321,7 @@ class CascadingModelExecutorToolReplayTest {
 
         var cascade = twoStepCascade();
         int[] calls = {0};
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any())).thenAnswer(inv -> {
             if (calls[0]++ == 0) {
                 return stepResult("ok", placedOrderExchange(), 0.0);
             }
@@ -350,7 +351,7 @@ class CascadingModelExecutorToolReplayTest {
         cascade.getSteps().get(0).setTimeoutMs(200L);
         cascade.setMaxCostPerRun(0.01);
         when(orchestrator.conversationToolCost(any())).thenReturn(0.0, 0.05);
-        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any())).thenAnswer(inv -> {
             Thread.sleep(5_000);
             return stepResult("late", List.of(), 0.0);
         });

@@ -66,6 +66,23 @@ interface IAgentOrchestrator {
             throws LifecycleException;
 
     /**
+     * As above, additionally recording each completed tool call and its result into
+     * {@code exchangeRecorder} while the loop runs, so a caller that abandons the
+     * run — a cascade step that timed out or failed — still knows which tools
+     * already executed. The default ignores the recorder, which leaves such a
+     * caller exactly where it was before recording existed: nothing to carry.
+     */
+    default AgentOrchestrator.ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage,
+                                                                    List<ChatMessage> chatMessages, LlmConfiguration.Task task,
+                                                                    IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
+                                                                    int llmTaskIndex, int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy,
+                                                                    ToolExchangeRecorder exchangeRecorder)
+            throws LifecycleException {
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex,
+                transcriptMaxBytes, jsonPolicy);
+    }
+
+    /**
      * Resumes a turn that paused on a gated tool call, applying the human's
      * verdicts and continuing the same loop from the iteration that paused.
      *
