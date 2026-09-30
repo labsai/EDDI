@@ -336,19 +336,6 @@ public class VaultSecretProvider implements ISecretProvider {
         Timer.Sample sample = Timer.start(meterRegistry);
 
         try {
-            ActiveDek dek = activeDek(reference.tenantId());
-
-            // Encrypt the plaintext with the tenant's DEK, binding the row identity
-            // (tenant|key|dekId) as GCM AAD so the ciphertext cannot be swapped onto a
-            // different key by someone with DB write access.
-            EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key(),
-                    secretAad(reference.tenantId(), reference.keyName(), dek.dekId()));
-            // Keyed, tenant-bound checksum — never a plain SHA-256 an attacker with DB
-            // read access could brute-force offline or use to link equal values across
-            // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
-            // and migrate to this form the next time they are written.
-            String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
-
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
             Instant now = Instant.now();
@@ -359,9 +346,8 @@ public class VaultSecretProvider implements ISecretProvider {
             // narrowed grant to ["*"] and wiped the description on every value rotation
             // that did not restate them, and the whole-row write also reverted any grant
             // edit that landed between the read above and the write below.
-            EncryptedSecret secret = new EncryptedSecret(existingOpt.map(EncryptedSecret::getId).orElse(UUID.randomUUID().toString()),
-                    reference.tenantId(), reference.keyName(), result.ciphertext(), result.iv(), dek.dekId(), checksum, description,
-                    allowedAgents, existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now), null, existingOpt.isPresent() ? now : null);
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, existingOpt.map(EncryptedSecret::getId).orElse(null),
+                    existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now), existingOpt.isPresent() ? now : null);
 
             persistence.upsertSecret(secret);
             LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
@@ -374,6 +360,64 @@ public class VaultSecretProvider implements ISecretProvider {
         } finally {
             sample.stop(storeTimer);
         }
+    }
+
+    @Override
+    public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+            throws SecretProviderException {
+        ensureAvailable();
+        storeCounter.increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+
+        try {
+            // No findSecret first: the existence check IS the insert. A read here would
+            // reopen the window this method exists to close.
+            // An insert, so a missing grant takes the documented default here — the
+            // pass-through in store() exists to protect a row that already has one.
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents != null ? allowedAgents : List.of("*"), null,
+                    Instant.now(), null);
+
+            boolean created = persistence.insertSecretIfAbsent(secret);
+            if (created) {
+                LOGGER.infof("Secret created: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
+            } else {
+                LOGGER.debugf("Secret already exists, left untouched: %s", describe(reference));
+            }
+            return created;
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while storing " + describe(reference), e);
+        } catch (EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Encryption failure for " + describe(reference), e);
+        } finally {
+            sample.stop(storeTimer);
+        }
+    }
+
+    /**
+     * Seals {@code plaintext} under the tenant's active DEK into the row both write
+     * paths persist.
+     */
+    private EncryptedSecret seal(SecretReference reference, String plaintext, String description, List<String> allowedAgents, String existingId,
+                                 Instant createdAt, Instant lastRotatedAt)
+            throws SecretProviderException, EnvelopeCrypto.CryptoException {
+        ActiveDek dek = activeDek(reference.tenantId());
+
+        // Encrypt the plaintext with the tenant's DEK, binding the row identity
+        // (tenant|key|dekId) as GCM AAD so the ciphertext cannot be swapped onto a
+        // different key by someone with DB write access.
+        EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key(),
+                secretAad(reference.tenantId(), reference.keyName(), dek.dekId()));
+        // Keyed, tenant-bound checksum — never a plain SHA-256 an attacker with DB
+        // read access could brute-force offline or use to link equal values across
+        // rows/tenants. Legacy bare-SHA-256 rows keep verifying via matchesChecksum
+        // and migrate to this form the next time they are written.
+        String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
+
+        return new EncryptedSecret(existingId != null ? existingId : UUID.randomUUID().toString(), reference.tenantId(), reference.keyName(),
+                result.ciphertext(), result.iv(), dek.dekId(), checksum, description, allowedAgents,
+                createdAt, null, lastRotatedAt);
     }
 
     @Override

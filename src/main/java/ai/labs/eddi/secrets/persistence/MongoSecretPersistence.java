@@ -179,6 +179,30 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean insertSecretIfAbsent(EncryptedSecret secret) {
+        RuntimeUtilities.checkNotNull(secret, "secret");
+        try {
+            secretsCollection.insertOne(new Document(FIELD_TENANT_ID, secret.getTenantId()).append(FIELD_KEY_NAME, secret.getKeyName())
+                    .append(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()).append(FIELD_IV, secret.getIv())
+                    .append(FIELD_DEK_ID, secret.getDekId()).append(FIELD_CHECKSUM, secret.getChecksum())
+                    .append(FIELD_DESCRIPTION, secret.getDescription()).append(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
+                    .append(FIELD_CREATED_AT, instantToString(secret.getCreatedAt()))
+                    .append(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt()))
+                    .append(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())));
+            return true;
+        } catch (MongoWriteException e) {
+            // idx_secret_tenant_key is unique on (tenantId, keyName): losing the race
+            // for the key is the "already exists" answer, not a failure.
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return false;
+            }
+            throw new PersistenceException("Failed to insert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to insert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
+    @Override
     public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
         try {
             var doc = secretsCollection.find(and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName))).first();
