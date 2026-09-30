@@ -402,7 +402,7 @@ Candidates are sorted by edit distance first, so the closest matches survive the
 
 Once you've created both dictionary and parser, you can test it standalone.
 
-Make a `POST` request to `/parser/{PARSER_ID}?version={VERSION}` with plain text in the body:
+Make a `POST` request to `/parser/{PARSER_ID}?version={VERSION}` with plain text in the body. With authorization on, the endpoint takes the `eddi-admin` or `eddi-editor` role (the same as the parser store), and with workspaces enforced the caller also needs VIEW on the parser configuration:
 
 **Request:**
 

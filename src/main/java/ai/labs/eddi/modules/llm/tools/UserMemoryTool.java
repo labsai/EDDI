@@ -170,13 +170,17 @@ public class UserMemoryTool {
             // Guardrail: a 'global' write must not silently overwrite the value of a
             // global memory another agent owns. The store preserves the original owner
             // but still applies the new value, so refuse here unless configured to
-            // allow it.
-            if (vis == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite()) {
-                String otherOwner = globalKeyOwnedByAnotherAgent(key.trim());
+            // allow it. This early check only spares a doomed write the capacity
+            // eviction below; the decision that counts is the owner-conditional write,
+            // because two agents can both pass this check for a key neither holds yet.
+            boolean ownedGlobalWrite = vis == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite();
+            if (ownedGlobalWrite) {
+                if (agentId == null || agentId.isBlank()) {
+                    return globalKeyRefusal(trimmedKey);
+                }
+                String otherOwner = globalKeyOwnedByAnotherAgent(trimmedKey);
                 if (otherOwner != null) {
-                    return ("⚠️ A global memory with key '%s' is owned by another agent (or its owner is unknown) "
-                            + "and cannot be overwritten. Use a different key, or store it with 'self' visibility.")
-                            .formatted(key.trim());
+                    return globalKeyRefusal(trimmedKey);
                 }
             }
 
@@ -196,7 +200,15 @@ public class UserMemoryTool {
 
             UserMemoryEntry entry = UserMemoryEntry.fromToolCall(userId, agentId, conversationId, groupIds, trimmedKey, value, normalizedCategory,
                     vis);
-            store.upsert(entry);
+            if (ownedGlobalWrite) {
+                if (!store.upsertIfOwnedBy(entry, agentId)) {
+                    // Another agent claimed the key between the check above and this
+                    // write, or holds it with no recorded owner.
+                    return globalKeyRefusal(trimmedKey);
+                }
+            } else {
+                store.upsert(entry);
+            }
             writesThisTurn++;
 
             LOGGER.debugf("[MEMORY] Tool rememberFact: user='%s', key='%s', category='%s', visibility='%s'", userId, key, normalizedCategory, vis);
@@ -334,6 +346,11 @@ public class UserMemoryTool {
         // A configured default must always be writable.
         allowed.add(defaultVisibility());
         return allowed;
+    }
+
+    private static String globalKeyRefusal(String key) {
+        return ("⚠️ A global memory with key '%s' is owned by another agent (or its owner is unknown) "
+                + "and cannot be overwritten. Use a different key, or store it with 'self' visibility.").formatted(key);
     }
 
     /**

@@ -85,6 +85,10 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             ((Agent) agent).setToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
         }
 
+        // Read once here so the per-turn version resolution compares integers
+        // instead of loading configurations.
+        ((Agent) agent).setCompatibilityGeneration(agentConfig.getCompatibilityGeneration());
+
         return agent;
     }
 }

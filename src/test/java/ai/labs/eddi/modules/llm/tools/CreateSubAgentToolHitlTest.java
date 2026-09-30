@@ -58,7 +58,7 @@ class CreateSubAgentToolHitlTest {
         SetupResult setupResult = SetupResult.builder()
                 .action("setup_complete").agentId("sub-1").agentName("parent-1/helper")
                 .provider("openai").model("gpt-4o").deployed(true).deploymentStatus("READY").build();
-        when(agentSetupService.setupAgent(any())).thenReturn(setupResult);
+        when(agentSetupService.setupAgent(any(), any())).thenReturn(setupResult);
 
         // A fresh conversation is started for the initial message
         when(conversationService.startConversation(any(), eq("sub-1"), any(), any()))
@@ -98,7 +98,7 @@ class CreateSubAgentToolHitlTest {
         tool.createSubAgent("helper", prompt, null, null, null, false);
 
         ArgumentCaptor<SetupAgentRequest> request = ArgumentCaptor.forClass(SetupAgentRequest.class);
-        verify(agentSetupService).setupAgent(request.capture());
+        verify(agentSetupService).setupAgent(request.capture(), any());
         String rendered = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())
                 .processTemplate(request.getValue().systemPrompt(), Map.of("vars", Map.of("apiKey", "s3cret")));
         assertEquals(prompt, rendered, "the stored prompt must render to exactly what the model wrote");

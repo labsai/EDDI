@@ -128,6 +128,37 @@ class StructuralMatcherRealWorkflowTest {
         assertEquals("type", llmDiff.matchStrategy());
     }
 
+    /**
+     * Each instance numbers its own compatibility generations, and the import
+     * writes neither side's value. Compared as content it made an unchanged agent
+     * UPDATE on every sync — a new agent version each time, and an undeclared one
+     * is a breaking change, which cut the agent's running conversations off from
+     * every later compatible version.
+     */
+    @Test
+    @DisplayName("an agent that differs only in its compatibility generation SKIPs")
+    void compatibilityGenerationIsNotContent() throws Exception {
+        doReturn(llm("answer questions")).when(llmStore).readLlm(TARGET_LLM_ID, 1);
+        doReturn(agentWith("support agent", 4)).when(agentStore).readAgent(TARGET_AGENT_ID, 1);
+
+        ImportPreview preview = matcher.buildPreview(sourceWith(agentWith("support agent", 1), llmJson("answer questions")),
+                TARGET_AGENT_ID, true);
+
+        assertEquals(DiffAction.SKIP, diffOfType(preview, "agent").action());
+    }
+
+    @Test
+    @DisplayName("an agent that differs in content as well still UPDATEs")
+    void realAgentChangeStillUpdates() throws Exception {
+        doReturn(llm("answer questions")).when(llmStore).readLlm(TARGET_LLM_ID, 1);
+        doReturn(agentWith("support agent", 4)).when(agentStore).readAgent(TARGET_AGENT_ID, 1);
+
+        ImportPreview preview = matcher.buildPreview(sourceWith(agentWith("sales agent", 4), llmJson("answer questions")),
+                TARGET_AGENT_ID, true);
+
+        assertEquals(DiffAction.UPDATE, diffOfType(preview, "agent").action());
+    }
+
     @Test
     @DisplayName("differing content is UPDATE even when the diff view is not requested")
     void decidesActionWithoutIncludeContent() throws Exception {
@@ -272,6 +303,18 @@ class StructuralMatcherRealWorkflowTest {
     }
 
     private IResourceSource sourceWith(String llmContentJson) {
+        return sourceWith(new AgentConfiguration(), llmContentJson);
+    }
+
+    private static AgentConfiguration agentWith(String description, Integer compatibilityGeneration) {
+        var agent = new AgentConfiguration();
+        agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + TARGET_WF_ID + "?version=1")));
+        agent.setDescription(description);
+        agent.setCompatibilityGeneration(compatibilityGeneration);
+        return agent;
+    }
+
+    private IResourceSource sourceWith(AgentConfiguration sourceAgent, String llmContentJson) {
         var sourceWfConfig = realShapedWorkflow();
         String extensionKey = WorkflowExtensions.scan(sourceWfConfig).getFirst().key();
 
@@ -283,7 +326,7 @@ class StructuralMatcherRealWorkflowTest {
         return new IResourceSource() {
             @Override
             public AgentSourceData readAgent() {
-                return new AgentSourceData("src-agent", "Source Agent", new AgentConfiguration());
+                return new AgentSourceData("src-agent", "Source Agent", sourceAgent);
             }
 
             @Override

@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -83,6 +85,25 @@ class AgentTest {
 
         assertNotNull(conversation);
         assertSame(memory, conversation.getConversationMemory());
+    }
+
+    @Test
+    void startConversation_recordsTheVersionsCompatibilityGeneration() throws Exception {
+        agent.setCompatibilityGeneration(4);
+
+        IConversation conversation = agent.startConversation("user-1", new HashMap<>(), mock(IPropertiesHandler.class),
+                mock(IConversation.IConversationOutputRenderer.class));
+
+        assertEquals(4, conversation.getConversationMemory().getCompatibilityGeneration());
+        assertEquals(3, conversation.getConversationMemory().getAgentVersion());
+    }
+
+    @Test
+    void startConversation_onAVersionWithoutGeneration_isPinned() throws Exception {
+        IConversation conversation = agent.startConversation("user-1", new HashMap<>(), mock(IPropertiesHandler.class),
+                mock(IConversation.IConversationOutputRenderer.class));
+
+        assertNull(conversation.getConversationMemory().getCompatibilityGeneration());
     }
 
     @Test

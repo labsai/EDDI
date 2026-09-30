@@ -83,7 +83,7 @@ distinction to enforce).
 
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
-string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
+string `${vault:<agentId>.u<userHash>.<nonce>.apiKey}` is one anything that can write a property could produce — a
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
@@ -108,6 +108,12 @@ The slot shape is **reserved**: the GDPR sweep recognises a user's slots by name
 `PUT /secretstore/secrets/{tenant}/{key}` and agent setup's `vaultKeyName` reject a key name in the
 form `<agentId>.u<16 hex>.<12 hex>.<name>` with `400`.
 
+The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …) and of its
+cascade steps and judge model: they are resolved against the vault after templating, so a reference
+conversation data put into one fails the turn instead of being resolved. A data-supplied
+`${vars:…}` is refused there too, because the registry expands it later. The prompts
+(`systemMessage`, `prompt`) are never resolved and may carry reference-shaped text.
+
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing
 on disk, and accepting the pair would leave the case the marker exists to close open. Re-running the
@@ -118,6 +124,12 @@ A configured reference that **cannot** be resolved — no such secret, the provi
 vault is disabled — also refuses the call, naming the field and the reference. The literal
 `${vault:name}` is never sent as a credential: it would come back as the API's own "invalid key",
 with nothing naming the cause.
+
+The plaintext EDDI substitutes — a vault secret, a connection credential, the caller's token — is
+also removed by value from the response before it reaches conversation memory, template data, the
+LLM tool result or the log. Error bodies are redacted in full. A success body is data, so it is
+handled more carefully: a secret of 8 characters or more is removed from its text, a shorter one only
+where a JSON value is exactly the secret, and a number is never rewritten digit by digit.
 
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
 the request record in conversation memory, the HITL approval preview and the request log line. The
@@ -216,6 +228,7 @@ This exists because `PUT /{tenantId}/{keyName}` — the other way to write `allo
 Three properties are worth knowing:
 
 - **`allowedAgents` is required and must not be empty.** Unlike the store endpoint, an omitted list is a `400` rather than a silent default to `["*"]`, and so is `[]` — which every other layer reads as "unrestricted": on an edit, a field missing from a JSON body, or a list filtered down to nothing, must not be able to open a narrowed secret to every agent. Send `["*"]` to mean "all agents". A list that mixes the wildcard with agent IDs, such as `["*", "someAgent"]`, is stored as plain `["*"]`, because that is what it already means to the deploy-time check — so a grant never *reads* narrower than it behaves.
+- **Concurrent edits can be refused instead of lost.** Every edit replaces the whole list, so two operators editing from what they each loaded would otherwise overwrite each other without either finding out — the later write quietly reinstating an agent the earlier one removed. Send the list you loaded as `expectedAllowedAgents` and the write is applied only while the grant is still that list (compared as a set; every spelling of the wildcard is equal). Otherwise the answer is **409** with the grant as it now stands, and nothing is written. A dry run checks the precondition too. Omitting the field keeps the old unconditional behaviour.
 - **Absent means null.** Like every EDDI response, fields whose value is null are omitted — a secret that has never been rotated has no `lastRotatedAt` in the response, rather than `"lastRotatedAt": null`.
 - **It is not a rotation.** `createdAt` and `lastRotatedAt` keep their values and the checksum is unchanged; all three are echoed back so you can see that for yourself. The `SecretResolver` cache is deliberately *not* invalidated — the plaintext cannot have changed, and the grant check reads metadata from the store on every call, so the new grant is in force for the very next deployment either way.
 - **Narrowing a grant is reported, not silently applied.** The response lists every *deployed* agent that references the secret and is no longer granted it:
@@ -264,6 +277,21 @@ database row tells an operator exactly what it means. A tenant holds one DEK row
 generation because [rotation adds one rather than replacing the key](#dek-rotation-is-additive--it-adds-a-generation),
 and ciphertext therefore has to say which key sealed it. A value written before
 generations existed carries no generation and reads as generation 1.
+
+**Ciphertexts are bound to their rows.** A secret is sealed with AES-GCM associated
+data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
+with write access to the database fails authentication instead of decrypting as that
+row's value. Rows written before this keep decrypting through a no-AAD fallback, so
+nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
+form. System values (such as the pinned audit key) are bound to their name and have
+no unbound form. Wrapped DEKs and OAuth connection grants, sealed through `seal()`,
+are not bound.
+
+**The per-deployment salt is created once, by whichever replica gets there first.**
+It is written with an insert-if-absent and every other replica adopts the winner, so
+two replicas booting against an empty database cannot each derive their KEK from a
+different salt. A salt that cannot be read fails the start: falling back to the
+legacy salt on a deployment that has a random one derives the wrong KEK.
 
 ### Configuration
 
@@ -325,7 +353,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, `POST /secretstore/secrets/{tenantId}/reset` (see [REST API](#rest-api)) clears the unrecoverable entries so the tenant can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -335,10 +363,10 @@ Agents can request secret input from users (e.g., API keys during setup). The fl
 
 When a property has `scope: secret`:
 
-1. **PropertySetterTask** detects `scope == secret` on the property instruction
-2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
+1. **`SecretPropertyVault`** (used by `PropertySetterTask` and by the httpcall / MCP / LLM property instructions) detects `scope == secret`
+2. The raw value is immediately stored in the vault via `ISecretProvider.store()`, in a slot of its own (`<agentId>.u<userHash>.<nonce>.<name>`)
 3. A vault reference (`${vault:...}`) replaces the plaintext in memory
-4. The raw `input:initial` entry is scrubbed from the conversation step
+4. The raw `input:initial` entry, and any other copy in the conversation step, is scrubbed
 
 When the **client flags input as secret** (via the `secretInput` context key):
 
@@ -513,12 +541,13 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list (`allowedAgents` defaults to `["*"]` when omitted):
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list. On a **create**, an omitted `allowedAgents` defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {
@@ -667,9 +696,101 @@ generation for every future rotation as well.
   leaving one behind on the old KEK is exactly the orphaned-key failure generations
   exist to prevent.
 - Secret ciphertexts are NOT modified — only DEK wrappers change
-- Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
-- Verify-then-commit: every DEK is decrypted and re-encrypted in memory before any
-  write occurs, so a wrong old key fails before it can half-rewrite the set
+- Requires restarting **every** replica with the new `EDDI_VAULT_MASTER_KEY` after
+  rotation. Until then, the other replicas cannot open the re-wrapped DEKs and refuse
+  to create new ones (see below) rather than wrap them under the retired key.
+
+A new master key the production startup gate would reject is refused before anything
+is written (`eddi.vault.allow-weak-master-key` lets a deployment *boot* on a weak key
+to rotate off it, never rotate onto one). The rotation cannot be made atomic, so it
+rolls back what it can and is ordered so that whatever it cannot roll back, a
+**re-run with the same two keys** completes:
+
+1. **New salt first.** A deployment still on the legacy salt migrates to a random one
+   during the rotation, and that salt is persisted as *pending* before anything is
+   wrapped under it. It used to exist only in memory until the end, so a failure
+   half-way left DEKs wrapped under a KEK nobody could derive again.
+2. **Verify** — every DEK, and the keyed-checksum key, must open with the old KEK *or
+   the new one*; the second is what an interrupted run leaves behind. Anything that
+   opens with neither stops the rotation before anything is written.
+3. **Announce** — the vault's KEK check value is switched to the new KEK *before* any
+   DEK is re-wrapped. A replica still on the old master key checks it before wrapping
+   a new DEK and refuses, so no new tenant's key is wrapped under a KEK that is on its
+   way out.
+4. **Re-wrap** each DEK, guarded on the wrapping it was read with, then sweep again
+   for a DEK another replica created in the meantime, then re-wrap the checksum key
+   (so every stored keyed checksum keeps verifying).
+5. **Promote** the pending salt.
+
+A failure in step 3 or 4 rolls every DEK this run re-wrapped back to the old KEK and
+restores the check value, so the vault is still readable under the master key it is
+configured with, and the answer says the rotation can simply be retried. Only if that
+rollback cannot finish either (the store is down) does the announcement stay: every
+DEK then opens with one of the two keys, and the answer says re-running completes
+the rotation. A failure in step 5 leaves every DEK on the new key and the pending
+salt persisted; a re-run only promotes it. A replica restarted part-way
+through with the new master key opens DEKs under either KEK and wraps new ones under
+the new one. A DEK it cannot open — one the rotation did not reach, still under the
+previous key — fails with a message saying to re-run the rotation, and does **not**
+offer a tenant reset while a salt migration is pending: one re-run recovers it.
+
+If a legacy-salt migration was interrupted after step 3 and the nodes were restarted
+with the new key, everything keeps working and the unfinished rotation is easy to
+forget. A later rotation from that key to another still succeeds when every DEK was
+reached (DEKs under the pending salt are recognised). If some DEK was not reached, it
+is still under the key before that, and the rotation refuses with a message saying
+to finish the earlier rotation first — from the previous key to the current one.
+
+A node that is about to wrap a new DEK checks the KEK check value both before and
+after inserting it. A node that stalled across a rotation's announcement takes the
+DEK it just inserted back out, before anything is sealed with it, and fails the
+request. Otherwise a stale replica could leave a DEK — and, during a DEK rotation,
+every secret swept onto it — under a KEK nobody runs any more.
+
+#### Lost master key
+
+The KEK check value records which KEK the vault uses, and every node refuses to wrap
+a new DEK under any other. That is what protects a rotation from replicas still on
+the retired key. From a node's point of view, though, a replica that simply has not
+been restarted with a rotated key looks exactly like an operator who lost the old
+key and configured a new one. After a lost key, every new secret for every tenant is
+refused until the operator decides which case applies. That decision cannot be made
+automatically.
+
+When the previous master key is **gone for good**:
+
+1. Start EDDI with the new `EDDI_VAULT_MASTER_KEY`.
+2. `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`. This does the
+   following:
+   - re-announces the check value with the configured key;
+   - if the reserved `__eddi-system` tenant's DEKs no longer open, discards them and
+     every sealed system value (the audit ledger pins a new key — see
+     [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation)), and likewise the
+     keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
+     created on the next store);
+   - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
+3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+   secrets again.
+
+Never call it while a KEK rotation is merely unfinished, or because one replica was
+not restarted: in both cases the previous key still exists and `rotate-kek`
+recovers everything. Adopting the wrong key makes every other replica refuse new
+DEKs instead.
+
+One case needs no call. A vault that holds no DEKs at all — started once with one
+key, restarted with another before anything was stored — adopts the configured key
+at startup, because nothing can be stranded.
+
+#### Resetting a tenant
+
+`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+and — before the DEKs go — everything else sealed with them, such as the tenant's
+[OAuth connection grants](connections.md); their users reconnect. Left in place those
+values were not merely unreadable: the tenant's next DEK is generation 1 again, with
+the same `dekId`, so every later read opened them with the wrong key and failed
+authentication on every request. If discarding them fails, the reset stops with the
+DEKs still in place and can be re-run. The reserved tenant `__eddi-system`, which
+seals EDDI's own system values (the audit ledger's pinned key), cannot be reset.
 
 #### Schema
 

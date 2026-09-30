@@ -563,7 +563,10 @@
     "toolCount": "{{total}}개 중 {{selected}}개 선택",
     "specTooLarge": "이 사양은 너무 커서 여기에서 불러올 수 없습니다",
     "specUrlInvalid": "유효한 URL이 아닙니다",
-    "specUrlScheme": "http:// 및 https:// URL만 지원됩니다"
+    "specUrlScheme": "http:// 및 https:// URL만 지원됩니다",
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 기본 제공 도구를 끄세요.",
+    "hfToken": "Hugging Face 토큰",
+    "hfTokenHint": "제한되거나 비공개인 저장소에만 필요합니다. API 키처럼 보관소에 저장됩니다."
   },
   "packages": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 워크플로와 모든 데이터가 영구적으로 제거됩니다.",
@@ -669,7 +672,9 @@
     "endSuccess_other": "{{count}}개 대화를 종료했습니다",
     "endSuccess_one": "{{count}}개 대화를 종료했습니다",
     "purgeSuccess_other": "종료된 대화 {{count}}개를 정리했습니다",
-    "purgeSuccess_one": "종료된 대화 {{count}}개를 정리했습니다"
+    "purgeSuccess_one": "종료된 대화 {{count}}개를 정리했습니다",
+    "endStateUnavailable": "대화의 현재 상태를 다시 확인할 수 없어 아무것도 종료하지 않았습니다. 다시 시도하세요.",
+    "endStateChanged": "선택한 대화 중 하나가 이제 승인을 기다리고 있습니다. 선택을 검토하고 다시 확인하세요."
   },
   "conversationDetail": {
     "backToConversations": "대화로 돌아가기",
@@ -762,6 +767,8 @@
     "errorAgentMismatch": "이 대화는 에이전트의 다른 버전에 속해 있습니다.",
     "errorQuotaUnavailable": "지금은 사용 한도를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
     "reviewNoticeLabel": "대화 검토",
+    "sendRejected": "메시지가 전송되지 않았습니다: {{reason}}",
+    "sendWhileLoading": "메시지가 전송되지 않았습니다: 대화를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.",
     "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요."
   },
   "resources": {
@@ -906,7 +913,9 @@
     "removeCondition": "조건 제거",
     "noGroups": "동작 그룹이 정의되지 않았습니다",
     "noRules": "이 그룹에 규칙이 없습니다",
-    "noConditions": "조건 없음"
+    "noConditions": "조건 없음",
+    "sizeNoBound": "제한 없음",
+    "sizeBoundInvalid": "-2147483648에서 2147483647 사이의 정수여야 하며, 제한이 없으면 비워 두세요."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "사양에서 엔드포인트를 찾을 수 없습니다",
@@ -938,8 +947,6 @@
     "responseObjectName": "응답 객체 이름",
     "responseHeaderObjectName": "응답 Header 객체 이름",
     "fireAndForget": "비동기 전송",
-    "batchCalls": "배치 호출",
-    "iterationObjectName": "반복 객체 이름",
     "prePostInstructions": "전/후 지시",
     "preRequest": "요청 전",
     "postResponse": "응답 후",
@@ -1009,7 +1016,16 @@
     "authHeaderRefPlaceholder": "선택 사항 — 인증이 필요한 명세에는 ${vault:my-api-key}",
     "authHeaderRefHint": "호출 시점에 해석되는 볼트 참조입니다. 저장된 시크릿은 Bearer 접두사를 포함한 전체 헤더 값이어야 합니다.",
     "authHeaderRefInvalid": "${vault:…}, ${vars:…} 또는 ${caller:…} 로 시작해야 합니다. 키를 그대로 붙여넣으면 요청 URL과 경유하는 모든 로그에 남게 됩니다.",
-    "authRefLiteral": "키 자체가 아니라 ${vault:my-key} 같은 참조를 입력하세요. 키는 볼트를 벗어나지 않습니다."
+    "authRefLiteral": "키 자체가 아니라 ${vault:my-key} 같은 참조를 입력하세요. 키는 볼트를 벗어나지 않습니다.",
+    "runOnNoCodes": "비어 있는 \"실행할 코드\" 목록은 어떤 상태 코드와도 일치하지 않으므로 이 명령은 실행되지 않습니다.",
+    "useDefaultCodes": "기본값 사용",
+    "httpCodeFilterDefaults": "비어 있는 필드는 표시된 기본 코드를 사용합니다.",
+    "scopeSecretUnsupported": "(여기서는 볼트에 저장되지 않음)",
+    "scopeSecretWarning": "이 명령에서는 secret 범위가 볼트에 저장되지 않으며 값이 평문으로 저장됩니다. 다른 범위를 선택하고 자격 증명은 시크릿 볼트에 보관하세요.",
+    "skipNone": "없음 — 건너뛰는 코드 없음",
+    "runSkipConflict": "{{codes}}이(가) 건너뛰기 목록에도 있으므로 이 명령은 해당 코드에서 실행되지 않습니다.",
+    "httpCodeFilterSkipSet": "\"실행할 코드\"가 비어 있으면 200, 201을 사용하고, \"건너뛸 코드\"가 비어 있으면 아무것도 건너뛰지 않습니다.",
+    "useDefaultSkipCodes": "기본 건너뛰기 목록 사용"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "실패 시 파이프라인이 계속됩니다. 오류는 다음 위치에 노출됩니다: ",
@@ -1062,7 +1078,12 @@
     "whitelist": "허용 목록 (허용만)",
     "blacklist": "차단 목록 (제외)",
     "pipelineCalls": "파이프라인 호출",
-    "addCall": "MCP 호출 추가"
+    "addCall": "MCP 호출 추가",
+    "argumentName": "인수 이름",
+    "argumentType": "인수 유형",
+    "argumentText": "텍스트",
+    "argumentInvalidJson": "유효한 JSON이 아닙니다. 마지막 유효한 값이 유지됩니다",
+    "removeArgument": "인수 제거"
   },
   "llmEditor": {
     "addCustomInstruction": "지시 추가",
@@ -1101,7 +1122,6 @@
     "identityMaskingRulePlaceholder": "예: AI 언어 모델임을 절대 밝히지 마세요",
     "identityMaskingRules": "마스킹 규칙",
     "identityMaskingRulesHint": "마스킹이 적용되려면 활성화와 하나 이상의 규칙이 모두 필요합니다.",
-    "injectionStrategy": "주입",
     "kbNamePlaceholder": "예: product-docs",
     "knowledgeBases": "지식 베이스",
     "knowledgeBasesHint": "지식 베이스를 이름으로 명시적으로 참조합니다. 각 이름은 워크플로의 RagConfiguration과 일치해야 합니다.",
@@ -1203,7 +1223,7 @@
     "cascadeInAgent": "에이전트 모드(도구 사용)에서도 캐스케이드 적용",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "예: claude-sonnet-5",
+    "cascadeModelName": "예: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "비워두면 항상 수락",
     "cascadeTimeout": "타임아웃 (ms)",
@@ -1259,9 +1279,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "{{step}} 단계의 타임아웃은 0보다 커야 합니다.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "{{step}} 단계가 다른 제공자를 사용하지만 자체 API 키가 없습니다 — 작업 키를 상속하게 됩니다."
     },
-    "parallelExecution": "병렬 도구 실행",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "타임아웃 (ms)",
     "maxToolIterations": "최대 도구 반복 횟수",
     "maxToolIterationsHint": "(기본값 10)",
     "toolRateLimits": "도구별 속도 제한",
@@ -1330,7 +1347,9 @@
     "streamingTimeoutSeconds": "스트리밍 시간 초과(초)",
     "streamingTimeoutSecondsHint": "엔진 기본값(120초)을 재정의합니다. 스트리밍 중에만 적용됩니다. 비어 있음 = 기본값 사용.",
     "taskPricing": "일반 호출 요금",
-    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다."
+    "taskPricingDesc": "비용 추적 및 그룹 비용 상한을 위해 이 작업의 일반(비캐스케이드) 모델 호출 가격을 설정합니다. 가격이 없으면(비어 있으면) $0으로 계산됩니다.",
+    "paramName": "매개변수 이름",
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -1394,7 +1413,8 @@
     "openEditor": "편집기에서 편집",
     "visibilityTitle": "이 longTerm 속성을 볼 수 있는 Agent",
     "editValue": "값 편집",
-    "toggleGroup": "속성 그룹 토글"
+    "toggleGroup": "속성 그룹 토글",
+    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"에서 읽거나 다른 방식으로 지정하면 평문으로 저장되므로 값 필드에 입력하거나 다른 범위를 선택하세요."
   },
   "dictionaryEditor": {
     "language": "언어",
@@ -1564,7 +1584,8 @@
     "stateReady": "준비",
     "stateActive": "활성",
     "stateError": "오류",
-    "stateEnded": "종료"
+    "stateEnded": "종료",
+    "loadOlder": "이전 항목 불러오기"
   },
   "secrets": {
     "loadError": "시크릿을 불러올 수 없습니다",
@@ -1678,7 +1699,13 @@
     "grantAcknowledge": "이 에이전트들은 다시 추가되거나 설정에서 이 시크릿을 더 이상 사용하지 않을 때까지 배포할 수 없다는 사실을 이해합니다.",
     "grantSaved": "‘{{key}}’의 접속 권한을 업데이트했습니다",
     "grantImpactFailed": "이 시크릿을 사용하는 배포된 에이전트를 확인할 수 없어, 어느 에이전트든 접속 권한을 잃을 수 있습니다.",
-    "grantAcknowledgeUnchecked": "어떤 배포된 에이전트가 영향을 받는지 모르는 채로 저장합니다."
+    "grantAcknowledgeUnchecked": "어떤 배포된 에이전트가 영향을 받는지 모르는 채로 저장합니다.",
+    "rotateNotFound": "이 시크릿은 더 이상 존재하지 않아 교체할 대상이 없습니다. 대신 다시 추가하세요.",
+    "keyExists": "\"{{key}}\" 이름의 시크릿이 이미 있습니다. 다시 추가하면 값이 대체됩니다. 사용 권한을 유지한 채 값을 바꾸려면 교체를 사용하세요.",
+    "keyExistsRotate": "대신 이 시크릿 교체",
+    "keyExistsPicker": "\"{{key}}\" 이름의 시크릿이 이미 있습니다. 볼트 목록에서 선택하거나 다른 이름을 사용하세요.",
+    "rotateKeepsGrantAll": "모든 에이전트가 지금처럼 접근 권한을 유지합니다.",
+    "rotateKeepsGrant": "접근은 계속 다음으로 제한됩니다: {{agents}}"
   },
   "audit": {
     "title": "감사 로그",
@@ -1712,17 +1739,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "볼트 마스터 키를 구성하면 이후 모든 감사 항목에 HMAC-SHA256 서명이 자동으로 적용됩니다.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "처리자",
-    "automated": "자동화됨"
+    "automated": "자동화됨",
+    "verify": {
+      "entryInvalid": "서명이 일치하지 않음",
+      "entryUnproven": "검증되지 않음",
+      "signatureCount": "불러온 {{total}}개 항목 중 {{count}}개에 서명이 있습니다.",
+      "loading": "서명 검증 중…",
+      "errorTitle": "무결성이 검증되지 않음",
+      "errorDesc": "검증 요청이 실패하여 여기에서는 아무것도 확인되지 않았습니다.",
+      "checked": "최근 {{count}}개 항목을 확인했습니다.",
+      "verifiedTitle": "서명 검증됨",
+      "chainIntact": "순서에서 누락된 항목이 없습니다.",
+      "chainNotApplicable": "여러 대화에 걸쳐서는 순서가 아닌 서명만 확인합니다.",
+      "verifiedBadge": "검증됨",
+      "tamperedTitle": "무결성 검사 실패",
+      "tamperedInvalid": "{{count}}개 항목의 서명이 내용과 일치하지 않습니다. 기록된 후 항목이 변경되었습니다.",
+      "tamperedChain": "순서에서 항목이 누락되었습니다({{sequences}}). 기록이 줄어들었습니다.",
+      "disabledTitle": "서명을 검증할 수 없음",
+      "reasonUnsigned": "서명되지 않은 항목 {{count}}개",
+      "reasonUnknownKey": "이 배포에 더 이상 없는 키로 서명된 항목 {{count}}개",
+      "reasonSkipped": "확인하지 않은 이전 항목 {{count}}개",
+      "reasonChain": "순서를 완전히 확인할 수 없었습니다",
+      "reasonDuplicates": "중복된 순서 번호",
+      "reasonUncovered": "확인 범위보다 오래된 로드된 항목 {{count}}개",
+      "unverifiedTitle": "완전히 검증되지 않음",
+      "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
@@ -1849,7 +1895,11 @@
       "weeklyMonday": "매주 (월 00:00)",
       "monthly": "매월 (1일 00:00)"
     },
-    "totalCappedHint": "서버가 한 페이지를 가득 채워 반환했으므로 여기에 표시된 것보다 일정이 더 많을 수 있습니다."
+    "totalCappedHint": "서버가 한 페이지를 가득 채워 반환했으므로 여기에 표시된 것보다 일정이 더 많을 수 있습니다.",
+    "systemManaged": "시스템",
+    "systemManagedHint": "EDDI가 관리합니다(지식 베이스 수집, 메모리 통합 또는 팀 주기). 여기가 아니라 정의된 곳에서 변경하세요.",
+    "persistentConversationIdLocked": "일정을 만들 때 설정됩니다. 서버는 실행이 계속 추가되어 온 대화를 유지합니다.",
+    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다"
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -1910,7 +1960,8 @@
     "tokenDistribution": "토큰 분포",
     "totalCost": "총 비용",
     "totalTokens": "총 토큰 수",
-    "turns": "턴"
+    "turns": "턴",
+    "partial": "이 대화에는 디버거가 불러오는 것보다 많은 감사 항목이 있습니다. 합계는 최근 항목만 포함합니다."
   },
   "memoryInspector": {
     "error": "메모리 데이터를 불러오지 못했습니다",
@@ -2140,8 +2191,16 @@
       "maxTotalMb": "전체 최대 크기(MB)",
       "maxTotalMbHint": "이 소스의 모든 파일 합계",
       "removeTitle": "이 소스를 제거할까요?",
-      "removeDescription": "저장하면 업로드된 파일과 지식 베이스가 거기서 배운 내용이 모두 삭제되며 되돌릴 수 없습니다."
-    }
+      "removeDescription": "저장하면 업로드된 파일과 지식 베이스가 거기서 배운 내용이 모두 삭제되며 되돌릴 수 없습니다.",
+      "switchTypeTitle": "웹사이트 소스로 전환할까요?",
+      "switchTypeDescription": "저장하면 이 소스에 업로드된 파일과 지식 베이스가 그 파일에서 학습한 모든 내용이 삭제됩니다. 되돌릴 수 없습니다.",
+      "switchTypeConfirm": "웹사이트로 전환",
+      "filesLoadFailed": "파일을 불러올 수 없습니다: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (재귀로 저장됨)",
+    "saveBeforeIngest": "먼저 변경 사항을 저장하세요. 문서는 화면의 편집 내용이 아니라 저장된 지식 베이스의 저장소와 임베딩 모델로 수집됩니다.",
+    "chunkStrategyUnsupported": "{{value}} (지원되지 않음)",
+    "chunkStrategyUnsupportedHint": "저장할 때 서버가 이 전략을 거부합니다. 재귀를 선택하세요."
   },
   "onboarding": {
     "welcome": {
@@ -3110,7 +3169,8 @@
     "previewFirst": "동기화 전에 변경사항 미리보기",
     "syncPartial": "동기화 미완료 — 일부 리소스가 기록되지 않았습니다",
     "syncIdentical": "이미 최신 상태입니다 — 기록할 항목이 없습니다",
-    "previewFailed": "미리보기 실패"
+    "previewFailed": "미리보기 실패",
+    "noPreviewReturned": "소스가 이 에이전트의 미리보기를 반환하지 않았습니다."
   },
   "sync": {
     "actionCreate": "신규",
@@ -3320,7 +3380,6 @@
     "agentIdPlaceholder": "메시지를 처리할 에이전트 ID",
     "botToken": "봇 토큰",
     "botTokenHint": "봇 사용자 OAuth 토큰. 보안을 위해 볼트 참조를 사용하세요.",
-    "botTokenPlaceholder": "xoxb-… 또는 ${vault:slack-bot-token}",
     "channel": "채널",
     "channelId": "Slack 채널 ID",
     "channelIdCol": "채널 ID",
@@ -3341,7 +3400,6 @@
     "searchPlaceholder": "채널 검색…",
     "signingSecret": "서명 비밀",
     "signingSecretHint": "Slack 앱의 기본 정보 페이지에서 확인할 수 있습니다.",
-    "signingSecretPlaceholder": "16진수 문자열 또는 ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack 설정 가이드",
     "slackSetupSummary": "Slack 앱을 만들고, 봇 토큰 범위(app_mentions:read, chat:write, im:history, channels:history, groups:history)를 구성한 후 여기에 자격 증명을 붙여넣으세요.",
     "target": "대상",
@@ -3395,7 +3453,9 @@
     "typeAgent": "에이전트",
     "typeGroup": "그룹",
     "selectGroup": "그룹 선택…",
-    "unknownGroup": "{{id}} (찾을 수 없음)"
+    "unknownGroup": "{{id}} (찾을 수 없음)",
+    "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다.",
+    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요."
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",
@@ -3485,7 +3545,8 @@
     "decidedProgress": "{{total}}건 중 {{decided}}건 결정됨",
     "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
     "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
-    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요."
+    "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요.",
+    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
@@ -3572,16 +3633,14 @@
     "conversationsTruncated_other": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
     "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
-    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다."
+    "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
+    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요."
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."
   },
   "orphans": {
-    "confirmPurgeAll": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 서버는 모든 고아 항목을 삭제하며 선택은 적용되지 않습니다. 되돌릴 수 없습니다.",
-    "deleteSelected": "선택한 {{count}}개 삭제",
     "description": "어떤 에이전트나 패키지에서도 참조되지 않는 리소스를 찾아 정리합니다.",
-    "deselectAll": "전체 선택 해제",
     "includeDeleted": "소프트 삭제 포함",
     "lastScanned": "마지막 스캔",
     "noOrphans": "고아 항목을 찾을 수 없습니다",
@@ -3592,13 +3651,13 @@
     "scanPromptDesc": "어떤 워크플로나 에이전트에서도 참조되지 않는 확장 구성(규칙, API 호출, LLM, 출력)을 찾습니다. 사용하지 않는 리소스를 정리하여 플랫폼을 깔끔하게 유지하세요.",
     "scanPromptTitle": "플랫폼 스캔",
     "scanning": "리소스 스캔 중…",
-    "selectAll": "전체 선택",
     "softDeleted": "삭제됨",
     "title": "고아 항목 감지",
     "found_other": "{{count}}개의 고아 항목을 찾았습니다",
     "found_one": "{{count}}개의 고아 항목을 찾았습니다",
     "scanIncomplete": "이 스캔이 완료되지 않았습니다",
-    "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다."
+    "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다.",
+    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",
@@ -3666,7 +3725,7 @@
     "tagPlaceholder": "예: safety, production",
     "tags": "태그",
     "templateEnabled": "템플릿 해석 활성화",
-    "templateEnabledHint": "비활성화하면 콘텐츠의 {{}} 마커가 리터럴 텍스트로 처리됩니다(코드 예제에 유용함).",
+    "templateEnabledHint": "비활성화하면 콘텐츠의 { } 마커가 리터럴 텍스트로 처리됩니다(코드 예제에 유용함).",
     "usageHint": "사용법:"
   },
   "status": {
@@ -3719,7 +3778,8 @@
     "copyVars": "${vars:…} 참조 복사",
     "refCopied": "복사됨: {{ref}}",
     "infoLine1": "시스템 프롬프트에서는 {{vars.<key>}}를, 에이전트 구성의 어디에서든 ${vars:<key>}를 사용하세요.",
-    "infoLine2": "변경 사항은 2분 이내에 적용됩니다(캐시 TTL). 민감한 값에는 시크릿 저장소를 사용하세요."
+    "infoLine2": "변경 사항은 2분 이내에 적용됩니다(캐시 TTL). 민감한 값에는 시크릿 저장소를 사용하세요.",
+    "keyExists": "\"{{key}}\" 이름의 변수가 이미 있습니다. 대신 목록에서 편집하세요."
   },
   "workflowEditor": {
     "endpoints": "엔드포인트",
@@ -4237,7 +4297,7 @@
       "llmDefaultsDesc": "여기서 만드는 모든 자문에 적용됩니다(아래에서 자문이 직접 설정한 경우 제외).",
       "llmDefaultsKeyRequired": "여기에 키를 추가하면 자체 키를 설정하지 않은 모든 자문에 적용됩니다.",
       "model": "모델",
-      "modelPlaceholder": "예: claude-sonnet-5",
+      "modelPlaceholder": "예: claude-sonnet-5-5",
       "nameRequired": "이 자문에 이름을 지정하세요.",
       "new": "새로 만들기",
       "next": "다음",
@@ -4939,7 +4999,12 @@
       "published": "게시됨",
       "publishedHint": "이 배포에 접근할 수 있는 모든 사람이 읽을 수 있습니다 — 익명 채팅 방문자도 포함됩니다.",
       "internal": "로그인한 모든 사용자",
-      "internalHint": "로그인한 사람은 누구나 채팅할 수 있습니다. 구성은 비공개로 유지됩니다. 익명으로는 접근할 수 없습니다."
+      "internalHint": "로그인한 사람은 누구나 채팅할 수 있습니다. 구성은 비공개로 유지됩니다. 익명으로는 접근할 수 없습니다.",
+      "confirmTitle": "공개 범위를 {{visibility}}(으)로 변경하시겠습니까?",
+      "cascadeLabel": "참조하는 워크플로와 구성에도 적용",
+      "cascadeWarning": "소유한 참조 리소스마다 이 공개 범위가 적용되어 개별 설정을 대체합니다. 이전 설정은 보존되지 않습니다.",
+      "noCascadeWarning": "이 리소스만 변경됩니다. 이제 볼 수 있게 된 사람도 참조 대상을 열지 못할 수 있습니다.",
+      "apply": "공개 범위 변경"
     },
     "share": {
       "title": "공유",

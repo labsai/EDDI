@@ -791,10 +791,21 @@ public class RestConversationStore implements IRestConversationStore {
      * to the snapshot.
      * </p>
      */
+    /**
+     * The end reasons a caller may record. A closed list rather than free text: the
+     * reason is stored on the conversation and shown to its user by clients, so it
+     * must be a code they know, never caller-supplied prose.
+     */
+    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+
     @Override
-    public Response endActiveConversations(List<ConversationStatus> conversationStatuses) {
+    public Response endActiveConversations(List<ConversationStatus> conversationStatuses, String endReason) {
         if (conversationStatuses == null) {
             throw new BadRequestException("A list of conversations to end is required");
+        }
+        final String reason = isNullOrEmpty(endReason) ? null : endReason;
+        if (reason != null && !ACCEPTED_END_REASONS.contains(reason)) {
+            throw new BadRequestException("Unknown endReason; accepted: " + String.join(", ", ACCEPTED_END_REASONS));
         }
         String actor = conversationAccessGuard.callerActor(BULK_END_ACTOR);
         try {
@@ -828,7 +839,11 @@ public class RestConversationStore implements IRestConversationStore {
             List<String> failed = new LinkedList<>();
             for (String conversationId : toEnd) {
                 try {
-                    conversationService.endConversation(conversationId, actor);
+                    if (reason == null) {
+                        conversationService.endConversation(conversationId, actor);
+                    } else {
+                        conversationService.endConversation(conversationId, actor, reason);
+                    }
                 } catch (RuntimeException e) {
                     log.error(format("Could not end conversation %s in bulk end", sanitize(conversationId)), e);
                     failed.add(conversationId);

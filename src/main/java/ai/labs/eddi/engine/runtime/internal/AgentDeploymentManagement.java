@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -58,6 +59,7 @@ import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentSta
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.undeployed;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static java.lang.String.format;
 import static java.time.temporal.ChronoUnit.DAYS;
 
@@ -96,6 +98,26 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * happens exactly once.
      */
     private final AtomicBoolean readinessDeferred = new AtomicBoolean();
+    /**
+     * Set when startup parked the document-level migrations behind a pending rename
+     * migration, and taken by the first sweep that sees it complete — which runs
+     * them before it deploys anything or grants readiness. Without this, a
+     * migration-log read that failed transiently at boot skipped them until the
+     * next restart while the sweep went on to deploy agents and report ready.
+     * <p>
+     * Guarded by {@link #documentMigrationsLock}, and cleared only once the run has
+     * finished: the startup callback and the scheduled sweep can both be in
+     * {@link #checkDeployments()} at once (the scheduler's SKIP only keeps sweeps
+     * from overlapping each other), and a flag cleared when the run STARTED let the
+     * second caller deploy from documents the first was still migrating.
+     */
+    private boolean documentMigrationsDeferred;
+    /**
+     * Held while the deferred document migrations run, so every caller of
+     * {@link #checkDeployments()} waits for them before deploying anything or
+     * granting readiness. Never held across anything that re-enters this class.
+     */
+    private final Object documentMigrationsLock = new Object();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -142,22 +164,22 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("V6 rename migration failed — will retry on next startup", e);
         }
-        try {
-            v6QuteMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("V6 Qute migration failed — will retry on next startup", e);
-        }
-        try {
-            channelConnectorMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("Channel connector migration failed — will retry on next startup", e);
-        }
-        try {
-            // Last of the migrations: it re-derives the access index from whatever the
-            // earlier ones left behind, so running it before them would index stale state.
-            workspaceAccessIndexMigration.runIfNeeded();
-        } catch (Exception e) {
-            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
+        // E3: the document-level migrations read the v6 collections the rename
+        // migration creates. Running them while it is still pending (it failed above,
+        // or its log could not be read) let each one scan empty collections, find
+        // nothing to do and record itself as COMPLETE — so it never ran again, and
+        // the documents the rename later moved into place were never migrated. Park
+        // them instead; they are unflagged, and the first deployment sweep that sees
+        // the rename complete runs them before it deploys anything.
+        if (v6RenameMigration.isPending()) {
+            synchronized (documentMigrationsLock) {
+                documentMigrationsDeferred = true;
+            }
+            LOGGER.error("Deferring the V6 Qute, channel connector and workspace access-index migrations: the V6 rename "
+                    + "migration has not completed, and they would run against collections it has not populated yet. "
+                    + "They run as soon as the deployment sweep sees the rename migration complete.");
+        } else {
+            runDocumentMigrations();
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
@@ -185,6 +207,46 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         });
 
         LOGGER.info("Finished deployment of agents.");
+    }
+
+    private void runDocumentMigrations() {
+        try {
+            v6QuteMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("V6 Qute migration failed — will retry on next startup", e);
+        }
+        try {
+            channelConnectorMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Channel connector migration failed — will retry on next startup", e);
+        }
+        try {
+            // Last of the migrations: it re-derives the access index from whatever the
+            // earlier ones left behind, so running it before them would index stale state.
+            workspaceAccessIndexMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
+        }
+    }
+
+    /**
+     * Runs the document migrations startup parked, if it parked them — before the
+     * sweep deploys agents and before readiness is granted, the same order the
+     * startup path uses. A caller that arrives while another is running them blocks
+     * here until they have finished, then finds nothing left to do.
+     */
+    private void runDeferredDocumentMigrations() {
+        synchronized (documentMigrationsLock) {
+            if (!documentMigrationsDeferred) {
+                return;
+            }
+            LOGGER.info("The V6 rename migration has completed — running the deferred document-level migrations.");
+            try {
+                runDocumentMigrations();
+            } finally {
+                documentMigrationsDeferred = false;
+            }
+        }
     }
 
     /**
@@ -229,6 +291,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
             return;
         }
+        runDeferredDocumentMigrations();
         try {
             deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
@@ -441,6 +504,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                                     return (UndeploymentExecutor) () -> {
                                         try {
+                                            // Evaluated here, after every current version has been
+                                            // deployed above, so a newer compatible version is ready.
+                                            if (retireIfConversationsCanMove(environment, agentId, agentVersion)) {
+                                                return;
+                                            }
                                             // attempt to undeploy Agent if this Agent version is no longer in use
                                             endOldConversationsWithOldAgents(agentId, agentVersion);
 
@@ -469,6 +537,43 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Retires an old version at once when its conversations have somewhere to go: a
+     * newer version of the same compatibility generation that is ready on this
+     * node.
+     * <p>
+     * Without this the sweep treated such a version like any other old one — it
+     * ENDED its idle conversations and kept it deployed while any were left. Those
+     * conversations can simply continue on the newer version whenever they return,
+     * so ending them destroys exactly what version following exists to keep, and
+     * keeping the old version deployed for them serves no one. A version without a
+     * generation, or with no newer compatible version ready, takes the old path.
+     *
+     * @return {@code true} when the version was undeployed here
+     */
+    boolean retireIfConversationsCanMove(Environment environment, String agentId, Integer agentVersion)
+            throws ServiceException, IllegalAccessException {
+        Integer generation;
+        try {
+            var configuration = agentStore.read(agentId, agentVersion);
+            generation = configuration != null ? configuration.getCompatibilityGeneration() : null;
+        } catch (ResourceNotFoundException | ResourceStoreException | RuntimeException e) {
+            return false;
+        }
+        if (generation == null) {
+            return false;
+        }
+        IAgent successor = agentFactory.getLatestReadyAgentOfGeneration(environment, agentId, generation);
+        if (successor == null || successor.getAgentVersion() <= agentVersion) {
+            return false;
+        }
+        agentFactory.undeployAgent(environment, agentId, agentVersion);
+        deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+        LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", sanitize(agentId),
+                agentVersion, successor.getAgentVersion()));
+        return true;
     }
 
     private void manageDeploymentOfOldAgent(Environment environment, String agentId, Integer agentVersion)

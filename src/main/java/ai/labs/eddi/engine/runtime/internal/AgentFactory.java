@@ -106,6 +106,20 @@ public class AgentFactory implements IAgentFactory {
         return findLatestAgent(environment, agentId, Deployment.Status.READY);
     }
 
+    @Override
+    public IAgent getLatestReadyAgentOfGeneration(Deployment.Environment environment, String agentId, int compatibilityGeneration) {
+        IAgent latest = null;
+        for (IAgent agent : getAgentEnvironment(environment).values()) {
+            if (agent != null && agentId.equals(agent.getAgentId())
+                    && agent.getDeploymentStatus() == Deployment.Status.READY
+                    && Objects.equals(agent.getCompatibilityGeneration(), compatibilityGeneration)
+                    && (latest == null || agent.getAgentVersion() > latest.getAgentVersion())) {
+                latest = agent;
+            }
+        }
+        return latest;
+    }
+
     private IAgent findLatestAgent(Deployment.Environment environment, String agentId, Deployment.Status requiredStatus) {
         Map<AgentId, IAgent> agents = getAgentEnvironment(environment);
         List<AgentId> agentVersions = agents.keySet().stream().filter(id -> id.getId().equals(agentId))

@@ -2,39 +2,38 @@
 
 > **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Manager` repository until 2026-09-15; its full history was imported here (`git log -- ui/manager`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
 
-> **This file is automatically loaded by AI coding assistants. Follow ALL rules below.**
+> **This file is automatically loaded by AI coding assistants. Follow ALL rules below.** The [root `AGENTS.md`](../../AGENTS.md) applies here too — branching, push approval, commit attribution and the changelog rule are defined there once and not repeated below.
 
 ## 1. Project Context
 
-**EDDI Manager** is the admin dashboard for the [EDDI](https://github.com/labsai/EDDI) conversational AI platform. It is a **React/TypeScript SPA** served from the EDDI backend.
+**EDDI Manager** is the admin dashboard for the [EDDI](https://github.com/labsai/EDDI) conversational AI platform. It is a **React/TypeScript SPA** served from the EDDI backend at `/manage`.
 
 ### Ecosystem
 
 The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 
-| Location                   | Tech                      | Purpose                                              |
-| -------------------------- | ------------------------- | ---------------------------------------------------- |
-| **repo root**              | Java 25, Quarkus, MongoDB | Backend engine, REST API, lifecycle pipeline         |
-| **`ui/manager`** (this)    | React 19, Vite, Tailwind  | Admin dashboard — agents, workflows, extensions, chat |
-| **`ui/chat`**              | React, TypeScript         | Standalone chat widget                               |
-| **eddi-website**           | Astro                     | Marketing site at eddi.labs.ai                       |
-| **EDDI-integration-tests** | Java                      | End-to-end API tests                                 |
+| Location | Tech | Purpose |
+| --- | --- | --- |
+| **repo root** | Java 25, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline, integration tests (`src/test/java/**/*IT.java`) |
+| **`ui/manager`** (this) | React 19, Vite, Tailwind | Admin dashboard — agents, workflows, extensions, chat |
+| **`ui/chat`** | React, TypeScript | Standalone chat widget |
+| **eddi-website** | Astro | Marketing site at eddi.labs.ai |
 
 ### Tech Stack
 
-| Layer              | Technology                                                             |
-| ------------------ | ---------------------------------------------------------------------- |
-| **Build**          | Vite 6                                                                 |
-| **UI**             | React 19 + TypeScript 5 (strict)                                       |
-| **Styling**        | Tailwind CSS v4 + CSS variables (black/gold)                           |
-| **State (server)** | TanStack Query v5                                                      |
-| **State (UI)**     | Zustand (chat/debug), `useState` / `useCallback` elsewhere             |
-| **Routing**        | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
-| **i18n**           | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
-| **Test (unit)**    | Vitest + React Testing Library + MSW                                   |
-| **Test (e2e)**     | Playwright                                                             |
-| **Editor**         | Monaco (@monaco-editor/react)                                          |
-| **DnD**            | @dnd-kit (workflow pipeline builder)                                   |
+| Layer | Technology |
+| --- | --- |
+| **Build** | Vite 6 |
+| **UI** | React 19 + TypeScript 5 (strict) |
+| **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
+| **State (server)** | TanStack Query v5 |
+| **State (UI)** | Zustand (chat/debug), `useState` / `useCallback` elsewhere |
+| **Routing** | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
+| **i18n** | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
+| **Test (unit)** | Vitest + React Testing Library + MSW |
+| **Test (e2e)** | Playwright |
+| **Editor** | Monaco (@monaco-editor/react) |
+| **DnD** | @dnd-kit (workflow pipeline builder) |
 
 ---
 
@@ -42,15 +41,16 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 
 ### Before Starting Any Work
 
-1. **Read [`HANDOFF.md`](HANDOFF.md)** — current status, completed phases, test counts
-2. **Check git logs**: `git log -5 --oneline`
-3. **Check for uncommitted work**: `git status`
-4. **Backend context**: [`AGENTS.md` at the repo root](../../AGENTS.md) when touching API contracts — the backend lives in the same repository (this directory is `ui/manager/` of `labsai/EDDI`)
+1. **Check state**: `git status`, `git log -5 --oneline`, `git branch --show-current`
+2. **Recent context**: the top entries of the root [`docs/changelog.md`](../../docs/changelog.md) and anything pending in [`docs/changelog.d/`](../../docs/changelog.d/README.md) — that is where Manager work is recorded (root rule 8)
+3. **Backend context**: the [root `AGENTS.md`](../../AGENTS.md) when touching API contracts
+4. **[`HANDOFF.md`](HANDOFF.md)** is the Manager's running log from before the monorepo move — about 180 KB. **Do not read it end to end.** Search it for the screen or feature you are touching; its deep dives (the operator, secrets grants, the Workforce decisions) are worth finding when you need them
 
 ### During Work
 
-- **Branch**: **NEVER commit directly to `main`.** Always create a feature branch (e.g. `feat/…`, `fix/…`) before making changes. If you find yourself on `main`, create and switch to a new branch first.
-- **Commit often** with conventional commits: `feat: description`
+- **Branch** per root rule 3 — never commit to `main`, branch from `origin/main`, name it `feat/…`/`fix/…` (never a tool-generated `claude/…` name).
+- **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
+- **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
 ### ⚠️ Dependency changes on Windows break CI's `npm ci`
 
@@ -79,37 +79,33 @@ restore them from the last lockfile CI accepted rather than regenerating.
 
 ### Quality Gates
 
-There is no pre-commit hook any more (the husky + lint-staged hook did not survive the move into the
-EDDI monorepo). CI's `UI Manager Checks` job runs both of these on every PR that touches `ui/`, so run
-them yourself before pushing:
-
-1. **ESLint** — `npm run lint` (`--max-warnings 0`)
-2. **TypeScript** — `npm run typecheck` (`tsc -b`, full project type-check)
-
-> ⚠️ **`npx tsc --noEmit` checks nothing in this repo.** `tsconfig.json` is a
-> solution file — `"files": []` plus references to `tsconfig.app.json` and
-> `tsconfig.node.json` — so `--noEmit` resolves zero input files and exits 0.
-> Always use `npm run typecheck` (what CI runs). The pre-commit hook ran the
-> no-op form until it let a syntax error through to CI.
-
-Before pushing or completing a phase, also verify:
+There is no pre-commit hook (the husky + lint-staged hook did not survive the move into the
+EDDI monorepo). CI's `UI Manager Checks` job runs these on every PR into `main` that touches `ui/`
+(`ci.yml` runs on no other base branch), in this order — run them yourself before pushing:
 
 ```bash
-npm run test         # All Vitest tests pass
-npm run i18n:check   # No locale/code drift
-npm run build        # Production build succeeds (includes tsc -b)
+npm run audit:prod   # no known-vulnerable production dependency
+npm run lint         # ESLint over src/ and e2e/, --max-warnings 0
+npm run i18n:check   # no locale/code drift (see i18n below)
+npm run typecheck    # tsc -b — the full project, including tsconfig.e2e.json
+npm run test         # Vitest (CI adds --coverage)
 ```
 
-`npm run lint` covers `src/` **and** `e2e/` at `--max-warnings 0`, and
-`npm run typecheck` (`tsc -b`) now includes `tsconfig.e2e.json`, so a type error
-in a Playwright spec fails the build instead of surfacing at run time.
+`npm run build` (which includes `tsc -b`) should also pass. `UI Manager E2E (MSW)` runs the
+Playwright suite against the mock backend.
 
-One gate is deliberately **not** in that list: mutation testing. It asks the
+> ⚠️ **`npx tsc --noEmit` checks nothing in this repo.** `tsconfig.json` is a
+> solution file — `"files": []` plus project references (`tsconfig.app.json`,
+> `tsconfig.node.json`, `tsconfig.e2e.json`, `tsconfig.design-sync.json`) — so `--noEmit` resolves zero input files and exits 0.
+> Always use `npm run typecheck` (what CI runs). The old pre-commit hook ran the
+> no-op form until it let a syntax error through to CI.
+
+One gate is deliberately **not** in that list: mutation testing (Stryker). It asks the
 question the others cannot — whether the suite would have *complained* — but a
-full run is 20-odd minutes on CI and longer on a busy laptop, so it is not
-to run before every push. It is not in CI
-at the moment: the Stryker workflow did not survive the move into labsai/EDDI, and
-porting it into the root `ci.yml` is a follow-up. Run it locally.
+full run is 20-odd minutes, and it is **not in CI**: the Stryker workflow did not survive
+the move into labsai/EDDI, and porting it into the root `ci.yml` is a follow-up. So if you
+change a file in its scope, run it locally and read its survivors — a survivor is a line
+that was broken while every test still passed. See CONTRIBUTING.md.
 
 The scope is `src/lib/operator/**`, `src/lib/api/updates.ts` and
 `src/lib/hitl-tool-approvals.ts`. Two exclusions are argued in
@@ -119,19 +115,17 @@ importers, so each of its mutants replays most of the suite) and static mutants
 need guarded needs a unit test asserting its contents; this gate will not do it.
 (Tests themselves are excluded too, for the obvious reason.)
 
-If you change a file in scope, expect the job and read its survivors: a survivor
-is a line that was broken while every test still passed. See CONTRIBUTING.md.
-
 ### i18n — MANDATORY
 
-> **⚠️ Every time you add or modify keys in `en.json`, you MUST propagate those changes to ALL 10 other locale files before committing.**
+> **⚠️ Every time you add or modify keys in `en.json`, you MUST propagate those changes to ALL 10 other locale files in the same commit.**
 
 The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`.
 
-1. Add new keys to `src/i18n/locales/en.json` first
-2. **Immediately** propagate translated versions to all other 10 locale files
-3. Verify with `npm run i18n:check` — it fails on a key the code uses that `en.json` lacks, a key `en.json` has that a locale lacks, a leftover key in a locale, and a key called with two different English defaults
-4. Do NOT leave this as a follow-up step — it must be done in the **same commit**
+1. Every user-visible string goes through `t("namespace.key", "English fallback")`. Each editor has its own namespace: `llmEditor.*`, `apiCallsEditor.*`, `rulesEditor.*`, etc.
+2. Add new keys to `src/i18n/locales/en.json` first
+3. **Immediately** propagate translated versions to all other 10 locale files
+4. Verify with `npm run i18n:check` — it fails on a key the code uses that `en.json` lacks, a key `en.json` has that a locale lacks, a leftover key in a locale, and a key called with two different English defaults. Plural categories and a translation-debt baseline are checked only by the full Vitest run, so run that too
+5. Do NOT leave this as a follow-up step — it must be done in the **same commit**
 
 > An inline fallback (`t("key", "Fallback")`) keeps the UI readable while you
 > work, but it is **not** a translation: it renders the same English in all
@@ -139,47 +133,43 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 > code. 349 keys accumulated that way before the gate existed — the whole
 > Workforce namespace and the Analytics screen shipped in English everywhere.
 
-### After Completing Work
-
-1. **Update [`HANDOFF.md`](HANDOFF.md)**: new phase row, test counts, last commit
-2. **Suggest a new conversation** if a phase is complete or context is long
-
 ---
 
 ## 3. Architecture & Patterns
 
-### File Structure
+### Where things live
 
 ```
 src/
+├── app.tsx                   # Routes (pages load through lazyPage — Key Patterns 5)
 ├── components/
-│   ├── agents/               # Agent-specific components (import dialog, sync, etc.)
+│   ├── ui/                   # Low-level primitives (button, badge, dialog, …)
+│   ├── shared/               # App-level shared components (empty/error state, pickers, …)
+│   ├── layout/               # AppLayout, Sidebar, TopBar, theme provider
 │   ├── editors/              # Extension editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
-│   │   ├── editor-registry.tsx        # Shared EDITOR_MAP (single source of truth)
-│   │   └── *.tsx                      # rules, apicalls, llm, output, dictionary, etc.
-│   ├── groups/               # Group conversation components
+│   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
 │   ├── studio/               # Agent Studio workspace
-│   │   ├── pipeline-railroad.tsx      # Visual pipeline step list
-│   │   └── studio-editor-panel.tsx    # In-place editor for selected stage
-│   ├── layout/               # Sidebar, top-bar, theme-provider
 │   ├── operator/             # Platform Operator (activation, chat, status)
-│   ├── shared/               # Reusable shared components (command palette, view toggle, etc.)
-│   └── ui/                   # Low-level UI primitives (button, badge, dialog, etc.)
-├── hooks/                    # TanStack Query hooks
+│   ├── workforce/            # Group-conversation workspace (/workforce)
+│   └── …                     # one directory per feature area — agents, chat, hitl,
+│                             # secrets, connections, groups, workflows, …
+├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, etc.)
+│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …)
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
-│   └── constants.ts          # Shared constants (ENVIRONMENTS, etc.)
-├── i18n/locales/             # 11 locale JSON files
-├── pages/
-│   ├── __tests__/            # Vitest component tests
-│   └── *.tsx                 # Route pages
-└── test/mocks/
-    ├── handlers.ts           # MSW request handlers
-    └── server.ts             # MSW server setup
+│   └── query-keys.ts         # Shared TanStack Query keys
+├── i18n/                     # config.ts + locales/ (11 locale JSON files)
+├── pages/                    # Route pages; pages/workforce/ for the Workforce app
+└── test/
+    ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
+    ├── test-utils.tsx        # Shared render helpers (renderPage, …)
+    └── mocks/                # MSW handlers.ts + server.ts
 ```
+
+Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
+`src/components/` rather than trusting any enumeration here — it grows with every feature.
 
 ### Key Patterns
 
@@ -202,25 +192,25 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
 
 All 10 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
-| Slug             | Store                  | Plural           |
-| ---------------- | ---------------------- | ---------------- |
-| `rules`          | `rulestore`            | `rulesets`        |
-| `apicalls`       | `apicallstore`         | `apicalls`        |
-| `output`         | `outputstore`          | `outputsets`      |
-| `dictionary`     | `dictionarystore`      | `dictionaries`    |
-| `llm`            | `llmstore`             | `llms`            |
-| `propertysetter` | `propertysetterstore`  | `propertysetters` |
-| `mcpcalls`       | `mcpcallsstore`        | `mcpcalls`        |
-| `rag`            | `ragstore`             | `rags`            |
-| `snippets`       | `snippetstore`         | `snippets`        |
-| `parser`         | `parserstore`          | `parsers`         |
+| Slug | Store | Plural |
+| --- | --- | --- |
+| `rules` | `rulestore` | `rulesets` |
+| `apicalls` | `apicallstore` | `apicalls` |
+| `output` | `outputstore` | `outputsets` |
+| `dictionary` | `dictionarystore` | `dictionaries` |
+| `llm` | `llmstore` | `llms` |
+| `propertysetter` | `propertysetterstore` | `propertysetters` |
+| `mcpcalls` | `mcpcallsstore` | `mcpcalls` |
+| `rag` | `ragstore` | `rags` |
+| `snippets` | `snippetstore` | `snippets` |
+| `parser` | `parserstore` | `parsers` |
 
 > **⚠️ Parser vs Dictionary — separate stores!**
 >
-> | Store               | Path                           | Extension            | Purpose                                        |
-> | ------------------- | ------------------------------ | -------------------- | ---------------------------------------------- |
-> | **DictionaryStore** | `dictionarystore/dictionaries` | `ai.labs.dictionary` | Word→expression mappings, phrases, regex       |
-> | **ParserStore**     | `parserstore/parsers`          | `ai.labs.parser`     | Parser pipeline config that *references* dicts |
+> | Store | Path | Extension | Purpose |
+> | --- | --- | --- | --- |
+> | **DictionaryStore** | `dictionarystore/dictionaries` | `ai.labs.dictionary` | Word→expression mappings, phrases, regex |
+> | **ParserStore** | `parserstore/parsers` | `ai.labs.parser` | Parser pipeline config that *references* dicts |
 >
 > - Workflows reference a **parser** → parsers reference **dictionaries**
 > - The Manager's `dictionary` slug maps to `dictionarystore` (what users edit)
@@ -230,15 +220,9 @@ All 10 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYP
 
 - All handlers are in `src/test/mocks/handlers.ts`
 - Specific GET handlers go **before** the generic `createResourceHandlers` block
-- Include realistic mock data matching the backend Java model
+- Include realistic mock data matching the backend Java model — a fixture written to match the page rather than the server hides the very bugs the test exists for
 
-#### 4. i18n
-
-- Each editor has its own namespace: `llmEditor.*`, `apiCallsEditor.*`, `rulesEditor.*`, etc.
-- **Always add to `en.json` first**, then propagate to all 10 other locale files
-- Use inline fallbacks: `t("key", "Fallback")`
-
-#### 5. Platform Operator
+#### 4. Platform Operator
 
 An opt-in, admin-activated agent that inspects this EDDI deployment and explains
 what it finds. Off by default. Worth knowing before touching it:
@@ -296,13 +280,13 @@ what it finds. Off by default. Worth knowing before touching it:
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
 
-#### 6. Route-level code splitting
+#### 5. Route-level code splitting
 
 Route pages in `app.tsx` load through `lazyPage()` (`src/lib/lazy-page.ts`) —
 with three deliberate exceptions that stay eager: the two layouts, the landing
 page (where `/` redirects, so it is on the critical path) and the command palette
 (it binds a global hotkey and must exist before the user presses it).
-Two consequences worth knowing:
+Consequences worth knowing:
 
 - **Add a route → use `lazyPage`.** A static page import puts that page back in
   the entry chunk, which is how it reached 8.5 MB before the split.
@@ -325,12 +309,12 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 `./mvnw clean package`, so a stale hashed asset cannot ship; `lazyPage` reloads once if a chunk 404s
 (a tab held open across a deploy).
 
-#### 7. Tests
+#### 6. Tests
 
-- Unit tests in `src/pages/__tests__/` — naming: `resource-detail-{type}.test.tsx`
-- Use `renderPage(type)` helper with `MemoryRouter` + `QueryClient` + `ThemeProvider`
-- Assert on `data-testid` attributes
-- E2E tests via Playwright in `e2e/`
+- Vitest + RTL in `__tests__/` directories beside the code — page tests in `src/pages/__tests__/` (naming: `resource-detail-{type}.test.tsx`), component and lib tests beside their sources
+- Render pages through `renderPage(path, element, routePattern?, client?)` from `src/test/test-utils.tsx` (`MemoryRouter` + `QueryClient` + `ThemeProvider`). Some older files still define a local `renderPage` of their own — don't copy that pattern into new files
+- **Assert on `data-testid` attributes**, never on translated copy — every row, button, input and state a test checks gets one
+- E2E tests via Playwright in `e2e/`, including `rtl.spec.ts` and `theme.spec.ts`
 
 ### API Communication
 
@@ -341,28 +325,15 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
 - `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`
-- Server state via TanStack Query hooks in `src/hooks/`
-
-### RTL Support
-
-- Use **logical properties**: `ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*`
-- **Never** use `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*`
+- Server state via TanStack Query hooks in `src/hooks/`, with keys from `src/lib/query-keys.ts`
 
 ---
 
 ## 4. Handoff Protocol
 
-**Picking up from a previous session:**
-
-1. Read `HANDOFF.md`
-2. `git log -5 --oneline`
-3. `git status` for uncommitted changes
-
-**Ending a session:**
-
-1. Commit all working code (`wip:` prefix if incomplete)
-2. Update `HANDOFF.md` with completed work + test counts
-3. Suggest new conversation if context is long
+**Ending a session:** commit all working code (`wip:` prefix if incomplete), write the
+changelog fragment (root rule 8) with what was done, the test count you actually observed
+and what is next, and suggest a new conversation if the context is long.
 
 ---
 
@@ -370,6 +341,6 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 
 - Do NOT use MUI, Redux, recompose, or legacy patterns
 - Do NOT use `moment.js` — use native `Intl` or `date-fns`
-- Do NOT hardcode the API URL — always go through `ApiClient`
-- Do NOT use `left`/`right` CSS — use logical properties for RTL
+- Do NOT hardcode the API URL, and do NOT add raw `fetch` for ordinary JSON — use `ApiClient` (the justified exceptions are listed under API Communication)
+- Do NOT use physical-direction utilities — `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*` / `text-left` / `text-right`. Use the logical ones (`ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*` / `text-start` / `text-end`): the app ships Arabic, and `e2e/rtl.spec.ts` checks it
 - Do NOT mix component exports with utility function exports in the same file (`react-refresh/only-export-components`)

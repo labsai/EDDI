@@ -24,10 +24,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>
  * <b>Concurrency.</b> Cadence fires are cluster-wide (any pod's poller may
  * claim one), so "is a cadence discussion already running?" is decided by a
- * conditional store write on {@link #runningDiscussionId} — see
- * {@code IGroupWorkspaceStore#claimRun} — never by in-JVM locks. The idle value
- * is the empty string, not {@code null}, because the conditional write compares
- * a stored field against a concrete value.
+ * conditional store write that sets {@link #runningDiscussionId} — guarded by
+ * {@link #revision}, see {@code IGroupWorkspaceStore#casRunningDiscussion} —
+ * never by in-JVM locks. The idle value is the empty string, not {@code null}.
  * <p>
  * <b>Per-member stats are reliability RECORDING only</b> (research-adopted
  * substrate): nothing routes or weights on them in v1, and that is a deliberate
@@ -104,8 +103,10 @@ public class GroupWorkspace {
      * two concurrent backlog adds could both pass the cap/duplicate checks against
      * their own snapshots and the later whole-document write dropped the earlier
      * task). Bumped by {@code IGroupWorkspaceStore.casRevision}; stored as a string
-     * because the conditional-store primitive compares string field equality.
-     * {@code null} on documents created before this field existed.
+     * because the conditional-store primitive compares string field equality. A
+     * stored document without the field deserializes to this {@code "0"} default;
+     * the store's first write then also matches the missing field and stamps it
+     * (see {@code GroupWorkspaceStore#conditionalWrite}).
      */
     private String revision = "0";
 

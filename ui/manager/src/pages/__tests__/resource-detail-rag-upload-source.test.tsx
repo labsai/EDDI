@@ -43,6 +43,30 @@ function renderRagPage(id = "res1") {
   );
 }
 
+/**
+ * The headers of the first part of a multipart upload.
+ *
+ * Only the headers, and read from the raw body rather than through
+ * `request.formData()`. Node 24's fetch (undici 7) brand-checks `Blob` and
+ * `File` where Node 22's accepted anything shaped like one, and the jsdom
+ * environment replaces the global `File` with its own. So in this environment a
+ * dropped file reaches the handler without its bytes, and `formData()` fails
+ * its own check on the `File` it builds (an ERR_ASSERTION inside undici). What
+ * survives on every Node is the part's field name and content type — and in a
+ * browser, where there is only one `File`, none of this applies.
+ */
+async function firstUploadedPart(request: Request): Promise<{ field?: string; type?: string }> {
+  const contentType = request.headers.get("content-type") ?? "";
+  const boundary = /boundary="?([^";]+)"?/.exec(contentType)?.[1];
+  if (!boundary) throw new Error(`not a multipart upload: ${contentType}`);
+  const part = (await request.text()).split(`--${boundary}`)[1] ?? "";
+  const headers = part.slice(0, part.indexOf("\r\n\r\n"));
+  return {
+    field: /content-disposition:[^\r\n]*\bname="([^"]*)"/i.exec(headers)?.[1],
+    type: /content-type:\s*([^\r\n;]+)/i.exec(headers)?.[1]?.trim(),
+  };
+}
+
 async function openTheSource(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(screen.getByTestId("rag-editor")).toBeInTheDocument());
   await user.click(screen.getByRole("button", { name: /ingestion sources/i }));
@@ -85,22 +109,21 @@ describe("RAG upload source", () => {
   });
 
   it("uploads a dropped file and refreshes the list", async () => {
-    const uploaded: string[] = [];
+    const uploaded: { field?: string; type?: string }[] = [];
     server.use(
       http.post("*/ragstore/rags/:id/sources/:sourceId/files", async ({ request }) => {
-        const form = await request.formData();
-        const file = form.get("files") as File;
-        // The body, not the name: jsdom's XMLHttpRequest drops a multipart
-        // part's filename, so asserting on it here would be asserting on the
-        // test environment rather than on the upload.
-        uploaded.push(await file.text());
+        // Not the file name: jsdom's XMLHttpRequest drops a multipart part's
+        // filename, so asserting on it would be asserting on the test
+        // environment rather than on the upload. Not the bytes either - see
+        // firstUploadedPart.
+        uploaded.push(await firstUploadedPart(request));
         return HttpResponse.json({
           stored: [
             {
               fileId: "aa11bb22cc33dd44ee55ff6677889900",
               fileName: "notes.md",
               mimeType: "text/markdown",
-              sizeBytes: file.size,
+              sizeBytes: 7,
               contentHash: "d4e5f6",
               uploadedAt: "2026-09-18T09:20:00Z",
             },
@@ -118,17 +141,15 @@ describe("RAG upload source", () => {
     const file = new File(["# notes"], "notes.md", { type: "text/markdown" });
     fireEvent.drop(dropzone, { dataTransfer: { files: [file] } });
 
-    await waitFor(() => expect(uploaded).toEqual(["# notes"]));
+    await waitFor(() => expect(uploaded).toEqual([{ field: "files", type: "text/markdown" }]));
     expect(await screen.findByTestId("ingestion-source-0-upload-done")).toBeInTheDocument();
   });
 
   it("shows the server's reason when a file is refused, and keeps the others", async () => {
     server.use(
       http.post("*/ragstore/rags/:id/sources/:sourceId/files", async ({ request }) => {
-        const form = await request.formData();
-        const file = form.get("files") as File;
-        // Matched on the content for the same reason as above.
-        if ((await file.text()).startsWith("%PDF")) {
+        // Matched on the part's content type, for the same reasons as above.
+        if ((await firstUploadedPart(request)).type === "application/pdf") {
           return HttpResponse.json(
             {
               stored: [],
@@ -143,7 +164,7 @@ describe("RAG upload source", () => {
               fileId: "bb22",
               fileName: "readme.txt",
               mimeType: "text/plain",
-              sizeBytes: file.size,
+              sizeBytes: 5,
               contentHash: "c3",
               uploadedAt: "2026-09-18T09:20:00Z",
             },
@@ -195,17 +216,214 @@ describe("RAG upload source", () => {
     await waitFor(() => expect(deletedId).toBe("3f2a91c4e5b6d7089a1b2c3d4e5f6071"));
   });
 
-  it("switches a source between crawling and files", async () => {
+  it("switches a source between crawling and files, once the loss is confirmed", async () => {
     const user = userEvent.setup();
     renderRagPage();
     await openTheSource(user);
 
     await user.click(screen.getByTestId("ingestion-source-0-type-web"));
 
+    // A saved file source that stops being one loses its files and vectors on
+    // save (discardRemovedSources) — the same loss removing it asks about.
+    expect(await screen.findByText("Turn this into a website source?")).toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-source-0-dropzone")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch to website" }));
+
     // The crawl fields come back, and the drop zone goes — one source is one
     // kind of source at a time.
     expect(await screen.findByTestId("ingestion-source-0-start-url")).toBeInTheDocument();
     expect(screen.queryByTestId("ingestion-source-0-dropzone")).not.toBeInTheDocument();
+  });
+
+  it("keeps a file source when the switch to website is cancelled, by mouse or by arrow key", async () => {
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    await user.click(screen.getByTestId("ingestion-source-0-type-web"));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(screen.getByTestId("ingestion-source-0-dropzone")).toBeInTheDocument();
+
+    // The radiogroup's arrow keys took the same unguarded path.
+    fireEvent.keyDown(screen.getByRole("radiogroup", { name: "Source" }), { key: "ArrowRight" });
+    expect(await screen.findByText("Turn this into a website source?")).toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-source-0-dropzone")).toBeInTheDocument();
+  });
+
+  it("says the file list failed to load instead of claiming there are no files", async () => {
+    let calls = 0;
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+        calls++;
+        return HttpResponse.json({ message: "store unavailable" }, { status: 500 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    expect(await screen.findByTestId("ingestion-source-0-files-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("ingestion-source-0-files-empty")).not.toBeInTheDocument();
+
+    const before = calls;
+    await user.click(screen.getByTestId("ingestion-source-0-files-reload"));
+    await waitFor(() => expect(calls).toBeGreaterThan(before));
+  });
+
+  it("reloads the file list when a run is started and when it finishes", async () => {
+    let fileListCalls = 0;
+    let running = false;
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+        fileListCalls++;
+        return HttpResponse.json([
+          {
+            fileId: "bbbb",
+            fileName: "fresh.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 2048,
+            contentHash: "b2",
+            uploadedAt: "2026-09-18T09:13:00Z",
+            indexState: running ? "NOT_INDEXED" : fileListCalls > 1 ? "INDEXED" : "NOT_INDEXED",
+          },
+        ]);
+      }),
+      http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () =>
+        HttpResponse.json(
+          running
+            ? [{ runId: "r1", sourceId: "src-files", status: "RUNNING", startedAt: "2026-09-18T09:14:00Z" }]
+            : [],
+        ),
+      ),
+      http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+        running = true;
+        return HttpResponse.json({ status: "started" }, { status: 202 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    await user.click(await screen.findByTestId("ingestion-source-0-run-from-files"));
+    // Starting a run invalidates the list…
+    await waitFor(() => expect(fileListCalls).toBeGreaterThanOrEqual(2));
+    await screen.findByTestId("ingestion-source-0-running");
+
+    // …and so does the run finishing, which happens long after the request
+    // that started it returned. The runs query polls every 3 s.
+    const beforeFinish = fileListCalls;
+    running = false;
+    await waitFor(() => expect(fileListCalls).toBeGreaterThan(beforeFinish), { timeout: 6000 });
+  }, 15000);
+
+  it("reloads the file list after a purge", async () => {
+    let fileListCalls = 0;
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+        fileListCalls++;
+        return HttpResponse.json([]);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+    await screen.findByTestId("ingestion-source-0-files-empty");
+    const before = fileListCalls;
+
+    await user.click(screen.getByTestId("ingestion-source-0-purge"));
+    await user.click(await screen.findByRole("button", { name: "Purge" }));
+
+    await waitFor(() => expect(fileListCalls).toBeGreaterThan(before));
+  });
+
+  it("does not offer a run from the file banner when the source is disabled", async () => {
+    server.use(
+      http.get("*/ragstore/rags/:id", ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get("includePreviousVersions")) return;
+        return HttpResponse.json({
+          ...UPLOAD_SOURCE_CONFIG,
+          sources: [{ ...UPLOAD_SOURCE_CONFIG.sources[0], enabled: false }],
+        });
+      }),
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () =>
+        HttpResponse.json([
+          {
+            fileId: "bbbb",
+            fileName: "fresh.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 2048,
+            contentHash: "b2",
+            uploadedAt: "2026-09-18T09:13:00Z",
+            indexState: "NOT_INDEXED",
+          },
+        ]),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    expect(await screen.findByTestId("ingestion-source-0-awaiting-run")).toBeInTheDocument();
+    // The card's own Run button is disabled for a disabled source; the banner
+    // offered the same run, enabled, and the backend refused it.
+    expect(screen.queryByTestId("ingestion-source-0-run-from-files")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ingestion-source-0-run")).toBeDisabled();
+  });
+
+  it("reloads the file list after a failed upload is retried", async () => {
+    let attempts = 0;
+    let fileListCalls = 0;
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+        fileListCalls++;
+        return HttpResponse.json([]);
+      }),
+      http.post("*/ragstore/rags/:id/sources/:sourceId/files", async ({ request }) => {
+        attempts++;
+        const form = await request.formData();
+        const file = form.get("files") as File;
+        if (attempts === 1) return HttpResponse.json({ message: "busy" }, { status: 503 });
+        return HttpResponse.json({
+          stored: [
+            {
+              fileId: "cc33",
+              fileName: "notes.md",
+              mimeType: "text/markdown",
+              sizeBytes: file.size,
+              contentHash: "e1",
+              uploadedAt: "2026-09-18T09:20:00Z",
+            },
+          ],
+          rejected: [],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderRagPage();
+    await openTheSource(user);
+
+    const dropzone = await screen.findByTestId("ingestion-source-0-dropzone");
+    fireEvent.drop(dropzone, {
+      dataTransfer: { files: [new File(["# notes"], "notes.md", { type: "text/markdown" })] },
+    });
+    const retry = await screen.findByTestId("ingestion-source-0-upload-retry");
+    // The first load and the refetch that ends the dropped batch can land after
+    // the retry button appears; count from after both, so only the retry's own
+    // refetch can satisfy the assertion below.
+    await waitFor(() => expect(fileListCalls).toBeGreaterThanOrEqual(2));
+    const before = fileListCalls;
+
+    await user.click(retry);
+
+    await waitFor(() => expect(attempts).toBe(2));
+    // The retried file is stored; the list must be asked again to show it.
+    await waitFor(() => expect(fileListCalls).toBeGreaterThan(before));
   });
 
   it("says which files the knowledge base actually answers from", async () => {

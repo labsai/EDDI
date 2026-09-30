@@ -65,7 +65,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `update_resource`      | Update any resource config by type and ID. Returns the new version URI              |
 | `create_resource`      | Create a new resource. Returns the new resource ID and URI                          |
 | `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete)        |
-| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy  |
+| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change  |
 | `list_agent_resources` | Walk agent → packages → extensions to get a complete resource inventory in one call |
 
 ### Diagnostic Tools (2)
@@ -131,7 +131,7 @@ Read EDDI's own documentation over MCP **tools** — the counterpart to the `edd
 
 ### HITL Tools (10)
 
-Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | PAUSE_CHANGED | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`; `PAUSE_CHANGED` when a `pauseId` names a pause that is no longer current).
 
 | Tool                              | Description                                                                                                                    |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -142,7 +142,7 @@ Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the RES
 | `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
-| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; returns the resumed discussion |
 | `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 
@@ -636,7 +636,7 @@ The [Quick Start](#quick-start) configurations above assume an instance with aut
 
 #### The client signs itself in (preferred)
 
-EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm, or grant `eddi-mcp` the `offline_access` scope, if you want it to survive longer.
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. Raise `ssoSessionIdleTimeout` on the realm if you want it to survive longer — or issue offline tokens, which outlive the SSO session (`offlineSessionIdleTimeout`, 30 days by default). The realm already has what that needs: Keycloak creates the `offline_access` client scope and realm role on import, and every user holds the role through `default-roles-eddi`. What it lacks is a client that asks for it. `eddi-mcp` does not carry the scope, and assigning it as *optional* changes nothing, because a client requests exactly the scopes the protected-resource document lists in `scopes_supported` — `openid`, from `quarkus.oidc.resource-metadata.scopes`. Either add `offline_access` to `eddi-mcp`'s **Default** client scopes (admin console → *Clients* → `eddi-mcp` → *Client scopes* → *Add client scope* → `offline_access`, type *Default*), which grants it without the client asking, or keep it *Optional* and set `quarkus.oidc.resource-metadata.scopes=openid,offline_access` so clients request it. An offline token is a long-lived credential on the client's disk; revoke one under *Users* → the user → *Sessions*.
 
 A client that supports the MCP authorization flow needs only the URL:
 
@@ -649,6 +649,7 @@ Behind that, the client: reads `WWW-Authenticate: Bearer resource_metadata="…"
 Two deployment notes:
 
 - **The advertised identifier is forced to `https`** (`quarkus.oidc.resource-metadata.force-https-scheme`, default `true` here), because the scheme is otherwise read from the request and a TLS-terminating proxy has already downgraded it. The case that needs action is the opposite one: a deployment serving **plain http with authentication on** must set it to `false`, or it advertises a URL nothing is listening on. Every shipped stack that serves plain http with authentication on does exactly that: both compose auth stacks and the k8s auth overlay set it to `false` outright. The chart does not read the Keycloak URL — it defaults `eddi.oidc.resourceMetadata.forceHttpsScheme` from whether `ingress.tls` is configured, which is right for the documented `kubectl port-forward` flow (no ingress, so no TLS, so `false`) but wrong wherever something outside the chart terminates TLS. Set the value explicitly there.
+- **Advertise an absolute resource identifier in production.** `quarkus.oidc.resource-metadata.resource` defaults to the relative MCP root path, so the origin in the identifier comes from each request's `Host` header. The client binds its token to that identifier; behind anything that does not pin `Host` (a shared proxy, a cache that does not key on it) a crafted header makes EDDI advertise a resource on someone else's origin. Set `QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE=https://eddi.example.com/mcp` (Helm: `eddi.oidc.resourceMetadata.resource`); the relative default is there so localhost and `kubectl port-forward` work without configuration.
 - **The authorization server that is advertised** is `quarkus.oidc.token.issuer` when set, falling back to `quarkus.oidc.auth-server-url`. In the shipped compose and helm deployments the latter is the cluster-internal Keycloak address, so leave `QUARKUS_OIDC_TOKEN_ISSUER` pointing at the public URL.
 
 **The realm ships the client this uses: `eddi-mcp`.** Public, authorization code + PKCE (`S256` required), no direct access grant, and carrying the same protocol mappers as `eddi-frontend`. That last part is not a detail — the realm defines no `roles` client scope, so **a client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because EDDI reads roles from `realm_access/roles`. If you provision your realm by hand, copy those mappers.
@@ -681,7 +682,7 @@ Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified ag
 
 For a client with no OAuth support, or for a quick test, the token can be pasted in.
 
-**1. Get a token.** The shipped realm's `eddi-frontend` client is public and permits the direct access grant:
+**1. Get a token.** No client in the shipped realm permits the direct access (password) grant any more — a public client with it enabled hands a token to anyone who can reach Keycloak and knows one password. For a quick test, turn it on temporarily for `eddi-frontend` (admin console → *Clients* → `eddi-frontend` → *Capability config* → *Direct access grants*), run the command below, and **turn it off again**:
 
 ```bash
 read -rsp "Password for eddi: " KC_PASSWORD && echo

@@ -20,6 +20,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -150,6 +151,51 @@ public class ResourceAccessGuard {
     }
 
     /**
+     * What the caller holds on a resource addressed by id, decided against its
+     * <em>current</em> descriptor — the non-throwing twin of
+     * {@link #requireAccess}, for listings that hold only ids (deployment statuses,
+     * schedules, triggers) and must drop what the caller could not address
+     * directly.
+     * <p>
+     * A resource with no descriptor answers exactly what {@link #requireAccess}'s
+     * legacy fallback would admit: under the legacy-visibility policy it admits
+     * every level below EDIT, so the answer is {@link AccessLevel#VIEW}, which
+     * {@link AccessLevel#includes includes} USE as well. {@code hasAccess(id, USE)}
+     * and {@code hasAccess(id, VIEW)} are therefore true exactly when
+     * {@code requireUseAccess} / {@code requireAccess(VIEW)} would pass, and EDIT
+     * or OWN stays refused. A descriptor that cannot be read answers {@code null}:
+     * a listing omits what it cannot verify rather than failing wholesale.
+     *
+     * @return the caller's level, or {@code null} for none
+     */
+    public AccessLevel currentLevel(String resourceId) {
+        if (seesEverything()) {
+            return AccessLevel.OWN;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+            return DescriptorAccess.effectiveLevel(descriptor, spaceContext.current(), settings.admitsLegacy());
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy() ? AccessLevel.VIEW : null;
+        } catch (ResourceStoreException e) {
+            LOGGER.debugf("Could not load descriptor for access lookup on %s: %s", sanitize(resourceId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Non-throwing {@link #requireAccess}: whether the caller holds at least
+     * {@code required} on the resource. See {@link #currentLevel(String)}.
+     */
+    public boolean hasAccess(String resourceId, AccessLevel required) {
+        AccessLevel granted = currentLevel(resourceId);
+        return granted != null && granted.includes(required);
+    }
+
+    /**
      * Asserts that the caller holds at least {@code required} on the resource.
      *
      * @param resourceId
@@ -254,6 +300,72 @@ public class ResourceAccessGuard {
             throw new ForbiddenException("Access denied: you do not have access to this " + resourceTypeLabel
                     + ". Ask its owner to share it with you, or have them publish it if it is meant to be public.");
         }
+    }
+
+    /**
+     * {@link #requireUseAccess} for every id in a caller-supplied list; blank
+     * entries are skipped. For inputs that <em>scope</em> a read by naming
+     * resources, such as the group ids of a memory recall, where naming one the
+     * caller may not use must not widen what they see.
+     */
+    public void requireUseAccessToEach(Collection<String> resourceIds, String resourceTypeLabel) {
+        if (resourceIds == null || seesEverything()) {
+            return;
+        }
+        for (String resourceId : resourceIds) {
+            if (resourceId != null && !resourceId.isBlank()) {
+                requireUseAccess(resourceId.trim(), resourceTypeLabel);
+            }
+        }
+    }
+
+    /**
+     * Whether the named principal — <em>not</em> the current request's caller — may
+     * use a resource. For engine code that acts on behalf of a user with no request
+     * around it: a group member's tool running on a coordinator thread holds no
+     * {@link SecurityIdentity}, so {@link #requireUseAccess} cannot answer there.
+     * <p>
+     * Deliberately narrower than the request-scoped check. The principal's team
+     * memberships are claims on a token nobody is presenting, so only the
+     * principal's own resources, direct grants to them and published resources
+     * count; a resource shared with one of their teams is refused. Never throws: an
+     * unreadable descriptor is {@code false}, the same fail-closed answer
+     * {@link #requireUseAccess} gives, and with enforcement off everything is
+     * admitted, as everywhere else.
+     * <p>
+     * An administrator is admitted only through
+     * {@link #principalMayUse(String, String, boolean)}: whether a principal holds
+     * {@code eddi-admin} is a claim on their token, which this method cannot see.
+     */
+    public boolean principalMayUse(String resourceId, String principal) {
+        return principalMayUse(resourceId, principal, false);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String)}, with the caller's word on whether
+     * {@code principal} is an administrator — which admits everything, exactly as
+     * {@link #seesEverything()} does on the request path. The flag must come from
+     * the principal's own captured identity
+     * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
+     */
+    public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        if (!settings.isEnforcing() || principalIsAdmin) {
+            return true;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return false;
+        }
+        DocumentDescriptor descriptor;
+        try {
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy();
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load descriptor for use check on %s: %s", sanitize(resourceId), e.getMessage());
+            return false;
+        }
+        AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
+        return granted != null && granted.includes(AccessLevel.USE);
     }
 
     /**

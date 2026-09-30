@@ -184,6 +184,12 @@ data:
   EDDI_NATS_URL: "nats://{{ include "eddi.fullname" . }}-nats:4222"
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
+  {{- with (.Values.eddi.metrics | default dict).httpPolicy }}
+  EDDI_METRICS_HTTP_POLICY: {{ . | quote }}
+  {{- end }}
+  {{- with (.Values.eddi.chat | default dict).frameAncestors }}
+  EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
+  {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
   {{- /*
     With OIDC off, AuthStartupGuard refuses a production boot unless the escape
@@ -317,6 +323,9 @@ data:
   {{- $metadata := .Values.eddi.oidc.resourceMetadata | default dict }}
   {{- with $metadata.authorizationServer }}
   QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER: {{ . | quote }}
+  {{- end }}
+  {{- with $metadata.resource }}
+  QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: {{ . | quote }}
   {{- end }}
   {{- $forceHttps := $metadata.forceHttpsScheme }}
   {{- if kindIs "invalid" $forceHttps }}

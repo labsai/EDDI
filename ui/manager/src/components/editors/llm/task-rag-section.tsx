@@ -116,24 +116,6 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
                     className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("llmEditor.injectionStrategy", "Injection")}
-                  </label>
-                  <select
-                    value={kb.injectionStrategy ?? "system_message"}
-                    onChange={(e) => {
-                      const updated = [...(task.knowledgeBases ?? [])];
-                      updated[kbIdx] = { ...kb, injectionStrategy: e.target.value };
-                      onChange({ ...task, knowledgeBases: updated });
-                    }}
-                    disabled={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                  >
-                    <option value="system_message">System Message</option>
-                    <option value="user_message">User Message</option>
-                  </select>
-                </div>
               </div>
             </div>
           ))}
@@ -200,22 +182,6 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
                     placeholder="0.6"
                     className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("llmEditor.injectionStrategy", "Injection")}
-                  </label>
-                  <select
-                    value={task.ragDefaults?.injectionStrategy ?? "system_message"}
-                    onChange={(e) =>
-                      onChange({ ...task, ragDefaults: { ...task.ragDefaults, injectionStrategy: e.target.value } })
-                    }
-                    disabled={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                  >
-                    <option value="system_message">System Message</option>
-                    <option value="user_message">User Message</option>
-                  </select>
                 </div>
               </div>
             </div>

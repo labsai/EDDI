@@ -31,6 +31,22 @@ public interface IUserConversationStore {
 
     void deleteUserConversation(String intent, String userId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Delete the mapping only if it still points at {@code conversationId}, as one
+     * atomic operation.
+     * <p>
+     * For replacing a mapping whose conversation has ended. Two messages that find
+     * the same ended conversation both try to replace it; with a plain delete the
+     * second one deletes the fresh mapping the first has just written, and the two
+     * go on talking to two different new conversations. Conditioned on the ended
+     * conversation's id, the second delete matches nothing, its create then
+     * collides with the first one's mapping, and both converge on that one.
+     *
+     * @return {@code true} if a mapping was deleted
+     */
+    boolean deleteUserConversationIfMatches(String intent, String userId, String conversationId)
+            throws IResourceStore.ResourceStoreException;
+
     // === GDPR ===
 
     /**

@@ -110,7 +110,8 @@ class RestRagStoreScheduleSyncTest {
         renamed.setName("new-name");
         restRagStore.updateRag(KB_ID, 1, renamed);
 
-        verify(sourceIngestionService).purge(eq(KB_ID), any(IngestionSource.class));
+        // Not the run-claimed purge: a rename cannot wait for a run to finish.
+        verify(sourceIngestionService).forgetStateAfterRename(eq(KB_ID), any(IngestionSource.class));
     }
 
     @Test
@@ -122,7 +123,7 @@ class RestRagStoreScheduleSyncTest {
 
         restRagStore.updateRag(KB_ID, 1, knowledgeBaseWithScheduledSource());
 
-        verify(sourceIngestionService, never()).purge(any(), any());
+        verify(sourceIngestionService, never()).forgetStateAfterRename(any(), any());
     }
 
     private static IResourceStore.IResourceId resourceId(String id, int version) {

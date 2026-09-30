@@ -71,13 +71,39 @@ public interface IResourceFilter<T> {
     record NotMatching(String pattern) {
     }
 
+    /**
+     * One condition on one field. A {@code String} filter is a regular expression
+     * on both backends; any other value is compared for equality. Use
+     * {@link #exact(String, String)} to compare a string for equality instead.
+     */
     class QueryFilter {
         private String field;
         private Object filter;
+        private boolean exact;
 
         public QueryFilter(String field, Object filter) {
             this.field = field;
             this.filter = filter;
+        }
+
+        /**
+         * The field equals {@code value}, character for character - not a pattern.
+         * <p>
+         * An escaped, anchored regex is not the same thing: MongoDB's {@code $} also
+         * matches before a final newline, so {@code ^name$} selects {@code "name\n"}
+         * too. Nor is there one strict end anchor for both backends - MongoDB's is
+         * {@code \z}, which PostgreSQL rejects, and PostgreSQL's is {@code \Z}, which
+         * MongoDB treats like {@code $}. Equality is exact on both, and can use an
+         * index.
+         */
+        public static QueryFilter exact(String field, String value) {
+            QueryFilter queryFilter = new QueryFilter(field, value);
+            queryFilter.exact = true;
+            return queryFilter;
+        }
+
+        public boolean isExact() {
+            return exact;
         }
 
         public String getField() {

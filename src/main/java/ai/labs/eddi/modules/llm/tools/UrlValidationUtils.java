@@ -248,7 +248,30 @@ public final class UrlValidationUtils {
                 return true;
             }
         }
+        // The private-address policy blocks 64:ff9b:1::/48 whole, but this refusal
+        // also runs where SSRF protection is off, so it must not. Decode every RFC
+        // 6052 layout a translator inside the /48 may use instead.
+        if (isNat64LocalUse(bytes)) {
+            for (byte[] embedded : nat64LocalUseCandidates(bytes)) {
+                if (isMetadataIPv4(embedded)) {
+                    return true;
+                }
+            }
+        }
         return false;
+    }
+
+    /**
+     * The IPv4 address a {@code 64:ff9b:1::/48} address carries under each RFC 6052
+     * prefix length a network can use inside the /48 — /48, /56, /64 and /96. Bits
+     * 64-71 (byte 8) are the reserved {@code u} octet and never carry IPv4 bits.
+     */
+    static List<byte[]> nat64LocalUseCandidates(byte[] bytes) {
+        return List.of(
+                new byte[]{bytes[6], bytes[7], bytes[9], bytes[10]},
+                new byte[]{bytes[7], bytes[9], bytes[10], bytes[11]},
+                new byte[]{bytes[9], bytes[10], bytes[11], bytes[12]},
+                Arrays.copyOfRange(bytes, 12, 16));
     }
 
     /**
@@ -292,8 +315,9 @@ public final class UrlValidationUtils {
      * <li>RFC 6598 CGNAT (100.64.0.0/10)</li>
      * <li>Link-local (169.254/16, fe80::/10)</li>
      * <li>Embedded IPv4 in IPv6 (mapped ::ffff:, compatible ::/96, NAT64
-     * 64:ff9b::/96 and 64:ff9b:1::/48, 6to4 2002::/16, Teredo 2001::/32) — extracts
-     * and re-checks the IPv4</li>
+     * 64:ff9b::/96, 6to4 2002::/16, Teredo 2001::/32) — extracts and re-checks the
+     * IPv4</li>
+     * <li>NAT64 local-use prefix 64:ff9b:1::/48 — blocked whole</li>
      * <li>IPv4 multicast (224.0.0.0/4)</li>
      * <li>Limited broadcast 255.255.255.255, IETF 192.0.0.0/24, benchmarking
      * 198.18.0.0/15 (the rest of 240.0.0.0/4 is left reachable)</li>
@@ -394,8 +418,10 @@ public final class UrlValidationUtils {
      * <li>IPv4-mapped {@code ::ffff:0:0/96}</li>
      * <li>IPv4-compatible {@code ::/96} (deprecated, but still routed by some
      * stacks)</li>
-     * <li>NAT64 well-known {@code 64:ff9b::/96} and local-use
-     * {@code 64:ff9b:1::/48} (RFC 6052 / RFC 8215) — the trailing 32 bits</li>
+     * <li>NAT64 well-known {@code 64:ff9b::/96} (RFC 6052) — the trailing 32 bits.
+     * The local-use {@code 64:ff9b:1::/48} (RFC 8215) is blocked whole, since the
+     * prefix length a network uses inside it decides where the IPv4 address
+     * sits</li>
      * <li>6to4 {@code 2002::/16} (RFC 3056) — the IPv4 in bytes 2-5</li>
      * <li>Teredo {@code 2001::/32} (RFC 4380) — the server IPv4 in bytes 4-7 and
      * the client IPv4 (last 32 bits, bit-inverted)</li>
@@ -404,6 +430,15 @@ public final class UrlValidationUtils {
     private static boolean isPrivateIPv6(byte[] bytes) {
         // IPv6 ULA (fc00::/7) — RFC 4193
         if ((bytes[0] & 0xFE) == 0xFC) {
+            return true;
+        }
+
+        // NAT64 local-use prefix (64:ff9b:1::/48) — RFC 8215. Blocked whole: a
+        // network may use any RFC 6052 prefix length inside it, so the IPv4 address
+        // need not sit in the trailing 32 bits that embeddedIPv4Addresses reads.
+        // 64:ff9b:1:7f00:0:100:808:808 is 127.0.0.1 behind a /48 translator and
+        // would pass as 8.8.8.8.
+        if (isNat64LocalUse(bytes)) {
             return true;
         }
 
@@ -465,6 +500,12 @@ public final class UrlValidationUtils {
         }
 
         return result;
+    }
+
+    /** {@code 64:ff9b:1::/48}. */
+    private static boolean isNat64LocalUse(byte[] bytes) {
+        return (bytes[0] & 0xFF) == 0x00 && (bytes[1] & 0xFF) == 0x64 && (bytes[2] & 0xFF) == 0xff && (bytes[3] & 0xFF) == 0x9b
+                && (bytes[4] & 0xFF) == 0x00 && (bytes[5] & 0xFF) == 0x01;
     }
 
     private static boolean allZero(byte[] bytes, int fromInclusive, int toExclusive) {

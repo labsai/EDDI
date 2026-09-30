@@ -21,13 +21,13 @@
        cosign verify \
          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
          --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$' \
-         {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+         {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
 {{- if not .Values.eddi.image.digest }}
 
      Then pin the digest, so the kubelet can never pull different bits under
      the same tag:
 
-       crane digest {{ .Values.eddi.image.repository }}:{{ .Values.eddi.image.tag }}
+       crane digest {{ .Values.eddi.image.repository }}:{{ include "eddi.imageTag" . }}
        helm upgrade {{ .Release.Name }} ./helm/eddi \
          --set eddi.image.digest="sha256:..." \
          --namespace {{ .Release.Namespace }}
@@ -56,7 +56,7 @@
               echoed here, since install output lands in shell history, CI logs
               and terminal scrollback.
 
-  👤 Give the EDDI administrator a password — it ships without one:
+  👤 Give the EDDI administrator a password — no account ships with one:
 
     The realm seeds `eddi` with the eddi-admin, eddi-editor and eddi-viewer
     roles and NO credential, so nobody can log in to /manage until you set one. It used to
@@ -69,15 +69,11 @@
     included, because EDDI has no role hierarchy and an administrator without
     it is refused every read tool over MCP.
 
-  ⚠️  Disable the seeded demo logins before production.
-
-    The shipped realm seeds two accounts with known passwords — viewer/viewer
-    (eddi-viewer) and user/user (eddi-user) — so anyone who can reach Keycloak can
-    log in as them. They exist for local demos and the test suite. On any real
-    deployment, disable or re-password them:
-
-      Keycloak admin console → Users → viewer / user → Details (toggle Enabled off)
-      or → Credentials → Reset password
+    The unprivileged fixtures `viewer` (eddi-viewer) and `user` (eddi-user)
+    are opt-in the same way: they ship with their roles and no password, and
+    stay unusable until you set one. They used to ship as viewer/viewer and
+    user/user, and the SPA client allowed the password grant, so one curl
+    against a reachable Keycloak returned a token that could run LLM turns.
 
 {{- end }}
 

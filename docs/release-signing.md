@@ -9,7 +9,7 @@ EDDI's primary release artifacts are **Docker images** published to [Docker Hub:
 This includes all images pushed after signing was enabled:
 - Every build pushed from `main` (e.g., `labsai/eddi:6.0.0-b42`)
 - Every release candidate (e.g., `labsai/eddi:6.0.0-RC2`)
-- Every general availability release (e.g., `labsai/eddi:6.0.0`)
+- Every general availability release (e.g., `labsai/eddi:6.4.0`)
 - The `latest` tag (updated on release tag pushes)
 
 > **Note:** Images published before v6.0.0 are not signed. Signature verification only applies to images built after this feature was enabled.
@@ -83,15 +83,15 @@ sudo mv cosign-linux-amd64 /usr/local/bin/cosign
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp "^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$" \
-  labsai/eddi:6.0.0
+  labsai/eddi:6.4.0
 ```
 
-Replace `6.0.0` with any tag you want to verify (`latest`, `6.0.0-RC2`, `6.0.0-b42`, etc.).
+Replace the tag with any tag you want to verify (`latest`, a release candidate such as `6.0.0-RC2`, a build such as `6.0.0-b42`, etc.).
 
 **Successful output** will show the verified certificate chain and Rekor log entry:
 
 ```
-Verification for docker.io/labsai/eddi:6.0.0 --
+Verification for docker.io/labsai/eddi:6.4.0 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -104,8 +104,8 @@ For maximum security, verify by image digest instead of tag:
 
 ```bash
 # Get the digest
-docker pull labsai/eddi:6.0.0
-DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' labsai/eddi:6.0.0)
+docker pull labsai/eddi:6.4.0
+DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' labsai/eddi:6.4.0)
 
 # Verify the digest
 cosign verify \
@@ -123,7 +123,7 @@ cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp "^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$" \
   --output-text \
-  labsai/eddi:6.0.0
+  labsai/eddi:6.4.0
 ```
 
 This outputs the full certificate chain and Rekor log entry as JSON.

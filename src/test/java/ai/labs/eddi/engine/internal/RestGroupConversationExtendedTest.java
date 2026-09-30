@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -44,12 +45,14 @@ class RestGroupConversationExtendedTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
+    private ResourceAccessGuard resourceAccessGuard;
     private SseEventSink eventSink;
     private Sse sse;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         jsonSerialization = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
@@ -60,7 +63,8 @@ class RestGroupConversationExtendedTest {
                 mock(IConversationService.class),
                 groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
+                resourceAccessGuard);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
 

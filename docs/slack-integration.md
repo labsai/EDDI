@@ -203,6 +203,12 @@ with HTTP 403 — so the holder of one integration's secret cannot drive another
 integration's agents. An owned channel whose owner has no signing secret is
 rejected rather than re-admitted through the pool. An event in a channel nobody
 owns (a DM) is attributed to the integration whose secret actually signed it.
+Every route the event then takes must belong to an integration (or legacy
+connector) holding the verifying secret, including the two that are found by a
+timestamp the sender chooses: a **thread lock** in a DM takes its credentials
+only from the app that signed the reply *and* serves the locked target, and a
+**group-discussion follow-up** must be posted in the discussion's own channel by
+the app that started it. Anything else is dropped and logged.
 
 ---
 
@@ -218,6 +224,17 @@ owns (a DM) is attributed to the integration whose secret actually signed it.
 
 The bot responds in a thread under the user's message.
 
+Each thread keeps one EDDI conversation. When that conversation has **ended** — the idle sweep
+ends inactive conversations, and so does undeploying its agent version with
+`endAllActiveConversations` — or no longer exists, the next message in the thread starts a fresh
+conversation instead of being refused, and is answered there. If the old conversation ended because
+its agent version was retired, the bot first says so in the thread ("I've been updated, so I'm
+starting a fresh conversation in this thread"); any other end is replaced silently, since the
+thread's history is still on screen. What the agent remembers about the user (long-term memory)
+carries over; only the conversation's own state starts again. Two messages arriving at once on an
+ended thread end up in the same new conversation. See
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
 ### Direct Messages (DMs)
 
 Send a message directly to the bot — no @mention needed:
@@ -226,7 +243,7 @@ Send a message directly to the bot — no @mention needed:
 Hello, what can you do?
 ```
 
-DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. (Only when a legacy per-agent connector signed the DM does EDDI fall back to the first available integration's default target.)
+DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. A DM signed by a legacy per-agent connector goes to the legacy connector holding that secret, never to a new-style integration. Replies in a DM thread keep the thread's agent and are answered with the credentials of the app that signed them, provided that app serves the agent.
 
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
@@ -495,7 +512,10 @@ card's buttons carry a random card id that is recorded with the card, and a
 click is accepted only from the card recorded for the conversation's (or
 group's) current pause. An older card of the same conversation cannot approve a
 newer pause, and a button without a card id — a card posted before this
-binding — is refused. See [HITL → Slack Integration](hitl.md#slack-integration).
+binding — is refused. The button value is `<integration>|<subject>|<cardId>`, so an
+integration name may not contain `|` (refused on save; an integration stored
+earlier with one gets approval cards without buttons until it is renamed). See
+[HITL → Slack Integration](hitl.md#slack-integration).
 
 ### Retry Logic
 

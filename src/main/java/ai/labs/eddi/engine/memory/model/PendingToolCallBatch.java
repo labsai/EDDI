@@ -347,6 +347,13 @@ public class PendingToolCallBatch {
      * the bare reconstruction.
      */
     private String gatingAssistantMessageJson;
+    /**
+     * The model-cascade step whose tool loop paused, or null when the task ran
+     * without a cascade (and on every batch persisted before this field existed).
+     * The resume rebuilds THAT step's model: an escalated step used to continue on
+     * the task's base model, the one it had escalated away from.
+     */
+    private Integer cascadeStepIndex;
 
     public String getPauseEpoch() {
         return pauseEpoch;
@@ -466,6 +473,14 @@ public class PendingToolCallBatch {
 
     public void setPauseCountThisTurn(int pauseCountThisTurn) {
         this.pauseCountThisTurn = pauseCountThisTurn;
+    }
+
+    public Integer getCascadeStepIndex() {
+        return cascadeStepIndex;
+    }
+
+    public void setCascadeStepIndex(Integer cascadeStepIndex) {
+        this.cascadeStepIndex = cascadeStepIndex;
     }
 
     public String getInterimText() {
