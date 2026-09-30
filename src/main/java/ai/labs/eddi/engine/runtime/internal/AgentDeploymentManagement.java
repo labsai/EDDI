@@ -897,7 +897,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 }
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
-                                + "because it is %d days older than the maximum idle time of %d days",
+                                + "because it has been idle for %d days, longer than the maximum idle time of %d days",
                         conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
                         DAYS.between(lastInteractionDate, today), maximumLifeTimeOfIdleConversationsInDays);
 

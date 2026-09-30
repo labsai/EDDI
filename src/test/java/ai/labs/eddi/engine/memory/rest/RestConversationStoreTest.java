@@ -1659,26 +1659,48 @@ class RestConversationStoreTest {
     @DisplayName("populateDataToDescriptor — memorySnapshot is null")
     class PopulateDataSnapshotNull {
 
+        /**
+         * A 5.x database carries descriptors whose conversation memory was deleted long
+         * ago. The v6 rename gives them an {@code agentResource}, so without the orphan
+         * check a by-agent listing returned them as conversations that cannot be opened
+         * — 852 entries instead of 189 in a rehearsal on real 5.5.1 data.
+         */
         @Test
-        @DisplayName("should handle null memorySnapshot gracefully (orphaned descriptor)")
-        void handlesNullSnapshot() throws Exception {
-            var descriptor = new ConversationDescriptor();
-            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/cccccccccccccccccccccccc?version=1"));
-            descriptor.setLastModifiedOn(new Date());
+        @DisplayName("leaves an orphaned descriptor out of a by-agent listing and keeps the live one")
+        void skipsOrphanedDescriptor() throws Exception {
+            var agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/212121212121212121212121?version=1");
+
+            var orphan = new ConversationDescriptor();
+            orphan.setResource(URI.create("eddi://conv/conversationstore/conversations/cccccccccccccccccccccccc?version=1"));
+            orphan.setAgentResource(agentResource);
+            orphan.setLastModifiedOn(new Date());
+
+            var live = new ConversationDescriptor();
+            live.setResource(URI.create("eddi://conv/conversationstore/conversations/aaaaaaaaaaaaaaaaaaaaaaaa?version=1"));
+            live.setAgentResource(agentResource);
+            live.setAgentName("Agent");
+            live.setLastModifiedOn(new Date());
 
             when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
-                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of(orphan, live))
                     .thenReturn(List.of());
 
             when(conversationMemoryStore.loadConversationMemorySnapshot("cccccccccccccccccccccccc"))
                     .thenReturn(null);
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("aaaaaaaaaaaaaaaaaaaaaaaa"))
+                    .thenReturn(snapshot);
 
             List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
-                    0, 20, null, null, null, null, null, null);
+                    0, 20, null, null, "212121212121212121212121", null, null, null);
 
-            // Descriptor with null snapshot should still be added (populateDataToDescriptor
-            // returns early)
-            assertEquals(1, result.size());
+            assertEquals(List.of(live), result);
+            assertEquals(1.0, restConversationStore.meterRegistry
+                    .counter("eddi.conversations.listing.orphaned_descriptors").count());
         }
     }
 

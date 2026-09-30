@@ -129,7 +129,10 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
     checked too. Once no deployed agent uses that version, remove that history row by hand.
   - Fix any `could not be migrated` or `aborted` line and restart.
 - **Conversations by agent.** `GET /conversationstore/conversations?agentId=<id>` lists the
-  conversations that agent had on 5.x.
+  conversations that agent had on 5.x. A 5.x database often holds descriptors whose conversation
+  was deleted long ago; the listing leaves those out, so compare the result with
+  `conversationmemories`, not with `descriptors`. The metric
+  `eddi.conversations.listing.orphaned_descriptors` counts how many it skipped.
 - **Agents.** `GET /administration/production/deploymentstatus` lists every agent READY.
   Readiness reports failed deployments as data: `agentsInErrorCount` should be `0`. A deployment
   that failed is retried on its own with a growing delay.
