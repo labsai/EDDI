@@ -19,7 +19,12 @@ export default tseslint.config(
       "react-hooks": reactHooks,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // The two classic hook rules, pinned by name as in ui/manager.
+      // eslint-plugin-react-hooks 7 folded the React Compiler rules
+      // (set-state-in-effect, refs, purity, ...) into `recommended`; adopting
+      // those is a separate decision, not part of a dependency bump.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       // A leading underscore marks a parameter kept for its position.
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },

@@ -69,7 +69,7 @@ The EDDI root URL (`http://localhost:7070`) redirects to the `/welcome` chooser 
 | Layer | Technology |
 |---|---|
 | **Framework** | React 19 + TypeScript 5 |
-| **Build** | Vite 6 |
+| **Build** | Vite 8 |
 | **Styling** | Tailwind CSS v4 with CSS variables |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand (chat/debug), `useState` elsewhere |

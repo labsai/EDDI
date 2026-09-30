@@ -51,6 +51,7 @@ function setStoredSort(field: SortField, dir: SortDir) {
   } catch { /* ignore */ }
 }
 
+/** The group conversations list page: search, sort, card/table view, create and delete. */
 export function GroupsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -120,7 +121,7 @@ export function GroupsPage() {
   const groupedGroups = useMemo(() => {
     const list = enrichedGroups ?? [];
     return [...list].sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
       else if (sortField === "style") cmp = (a.style ?? "").localeCompare(b.style ?? "");
       else if (sortField === "members") cmp = (a.members?.length ?? a.memberCount) - (b.members?.length ?? b.memberCount);

@@ -6,15 +6,15 @@
 
 > **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Chat-UI` repository until 2026-09-15; its full history was imported here (`git log -- ui/chat`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
 
-**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
+**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.9, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
 
 ### Tech Stack
 
 | Technology     | Version | Purpose                        |
 | -------------- | ------- | ------------------------------ |
 | React          | 19      | UI framework                   |
-| TypeScript     | 5.7     | Type safety                    |
-| Vite           | 6       | Build tool + dev server        |
+| TypeScript     | 5.9     | Type safety (7 waits on typescript-eslint support) |
+| Vite           | 8       | Build tool + dev server        |
 | Vitest         | 5.x     | Unit testing (jsdom)           |
 | react-markdown | 10.x    | Markdown rendering in messages |
 
