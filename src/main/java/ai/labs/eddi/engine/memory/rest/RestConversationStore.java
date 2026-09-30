@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -55,6 +56,7 @@ import java.util.Set;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -341,6 +343,16 @@ public class RestConversationStore implements IRestConversationStore {
             conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
+            if (conversationDescriptor.getAgentResource() == null && !isNullOrEmpty(memorySnapshot.getAgentId())) {
+                // A descriptor an earlier 6.x rewrote without its v5 botResource (see
+                // V6RenameMigration's backfill) names no agent; the conversation does.
+                // Without this it is missing from every per-agent listing.
+                Integer agentVersion = memorySnapshot.getAgentVersion();
+                conversationDescriptor.setAgentResource(agentVersion == null
+                        ? createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId())
+                        : createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId(), IRestAgentStore.versionQueryParam,
+                                agentVersion));
+            }
             if (isNullOrEmpty(conversationDescriptor.getAgentName())) {
                 var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(), memorySnapshot.getAgentVersion());
 

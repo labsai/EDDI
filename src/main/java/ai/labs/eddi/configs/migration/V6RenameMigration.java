@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
@@ -50,6 +51,20 @@ public class V6RenameMigration {
 
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
+
+    /**
+     * Written once the conversation descriptors hold their v6 field names — by the
+     * full migration, or by {@link #catchUp} on a database an earlier 6.x migrated
+     * without renaming them.
+     */
+    static final String DESCRIPTOR_FIELDS_KEY = "v6-rename-descriptor-fields-complete";
+
+    /**
+     * Written once the stored conversation steps hold the v6 shape — by the full
+     * migration, or by the catch-up on a database an earlier 6.x migrated before
+     * the step rename existed.
+     */
+    static final String STEP_SHAPE_KEY = "v6-rename-step-shape-complete";
 
     /**
      * Written when this migration completes, and read by {@link #holdsRetention()}:
@@ -266,6 +281,8 @@ public class V6RenameMigration {
         if (migrationLogStore.readMigrationLog(MIGRATION_KEY) != null) {
             LOGGER.info("V6 rename migration already applied — skipping");
             catchUpManagedConversationMappings();
+            catchUp(STEP_SHAPE_KEY, "the v5 step shape of stored conversations", this::migrateConversationStepShape);
+            catchUp(DESCRIPTOR_FIELDS_KEY, "the v5 field names of conversation descriptors", this::migrateConversationDescriptors);
             return;
         }
 
@@ -322,6 +339,10 @@ public class V6RenameMigration {
         total = total.plus(migrateConversationFields());
         total = total.plus(migrateEnvironments(COLLECTION_DEPLOYMENTS));
 
+        // 7. Rename the v5 field names of conversation descriptors. After step 6,
+        // because the backfill it includes reads the conversations' v6 agentId.
+        total = total.plus(migrateConversationDescriptors());
+
         // Every pass, not only the environment one: a collection that could not be
         // read and a document that could not be written both land here, and either
         // means this migration has not done what the completion log would claim.
@@ -335,6 +356,8 @@ public class V6RenameMigration {
         LOGGER.infof("V6 rename migration complete: %d documents migrated", total.migrated());
 
         migrationLogStore.createMigrationLog(new MigrationLog(RETENTION_HOLD_KEY));
+        migrationLogStore.createMigrationLog(new MigrationLog(STEP_SHAPE_KEY));
+        migrationLogStore.createMigrationLog(new MigrationLog(DESCRIPTOR_FIELDS_KEY));
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
@@ -739,9 +762,13 @@ public class V6RenameMigration {
      * {@code workflows}, the stored key was {@code packages}, and an unknown key is
      * ignored on read — so the load answered 200 with the whole history silently
      * gone, the LLM saw none of it, and the next save wrote the empty steps back
-     * over the stored ones. The snapshot now also accepts {@code packages} on read;
-     * this pass is what makes the stored data v6-shaped, so that nothing depends on
-     * that alias being kept.
+     * over the stored ones. This pass makes the stored data v6-shaped; the snapshot
+     * also accepts {@code packages} on read, and has to keep doing so. The pass
+     * runs once — on the first migration, or as a catch-up on a database an earlier
+     * 6.x migrated without it (see {@link #catchUp}) — so a v5 step written after
+     * that, by a 5.x instance still running during the upgrade or a restore from a
+     * 5.x backup, loads only through the alias; so does every conversation of such
+     * a database until its catch-up succeeds. Do not remove the alias.
      * </p>
      *
      * <p>
@@ -1023,6 +1050,239 @@ public class V6RenameMigration {
         } catch (Exception e) {
             LOGGER.errorf("  Could not bring triggers and user-conversation mappings to the v6 shape: %s", e.toString());
         }
+    }
+
+    /**
+     * Runs a pass the rename migration gained after an earlier 6.x recorded it
+     * complete, on a database that migration left behind.
+     *
+     * <p>
+     * Two passes need this. The step rename ({@code packages} → {@code workflows})
+     * came in 6.5, so a database 6.4 migrated still holds every EDDI 5 conversation
+     * in the v5 step shape, loadable only through the alias on
+     * {@code ConversationStepSnapshot}. And before 6.5 the conversation descriptors
+     * kept {@code botResource} and {@code botName}, so every per-agent listing of
+     * conversations was empty for the conversations EDDI 5 created.
+     * </p>
+     *
+     * <p>
+     * Each runs until it succeeds once, then records {@code key}. Unlike the
+     * trigger catch-up, neither can tell from a count whether there is anything to
+     * do, and scanning every conversation or descriptor on every start is a cost
+     * that only buys something once. A pass that fails is logged and tried again on
+     * the next start; it never keeps the rest of the startup from running.
+     * </p>
+     */
+    private void catchUp(String key, String what, Supplier<MigrationResult> pass) {
+        try {
+            if (migrationLogStore.readMigrationLog(key) != null) {
+                return;
+            }
+            LOGGER.infof("  Migrating %s, which an earlier 6.x left in place", what);
+            MigrationResult result = pass.get();
+            if (result.failed() > 0) {
+                LOGGER.errorf("  Migrating %s: %d document(s) migrated, but %d pass(es) failed (logged above); tried again on "
+                        + "the next start", what, result.migrated(), result.failed());
+                return;
+            }
+            migrationLogStore.createMigrationLog(new MigrationLog(key));
+        } catch (Exception e) {
+            LOGGER.errorf("  Could not migrate %s; tried again on the next start: %s", what, e.toString());
+        }
+    }
+
+    private static final String COLLECTION_DESCRIPTORS = "descriptors";
+    private static final String FIELD_DESCRIPTOR_RESOURCE = "resource";
+    private static final String FIELD_AGENT_RESOURCE_V5 = "botResource";
+    private static final String FIELD_AGENT_RESOURCE_V6 = "agentResource";
+    private static final String FIELD_AGENT_NAME_V5 = "botName";
+    private static final String FIELD_AGENT_NAME_V6 = "agentName";
+
+    /** What every conversation descriptor's {@code resource} starts with. */
+    private static final String CONVERSATION_RESOURCE_PREFIX = "eddi://ai.labs.conversation/";
+
+    /** What an agent resource URI starts with; the id and version follow. */
+    private static final String AGENT_RESOURCE_PREFIX = "eddi://ai.labs.agent/agentstore/agents/";
+
+    /** How many descriptors {@link #backfillAgentResources} looks up at once. */
+    private static final int BACKFILL_BATCH_SIZE = 500;
+
+    /**
+     * Both descriptor passes: the renames, current and history, then the backfill.
+     */
+    private MigrationResult migrateConversationDescriptors() {
+        return migrateConversationDescriptorFields(COLLECTION_DESCRIPTORS)
+                .plus(migrateConversationDescriptorFields(COLLECTION_DESCRIPTORS + ".history")).plus(backfillAgentResources());
+    }
+
+    /**
+     * Renames the v5 field names of conversation descriptors — {@code botResource}
+     * to {@code agentResource}, {@code botName} to {@code agentName} — in one
+     * server-side {@code updateMany}. Config descriptors kept their field names in
+     * v6 and hold neither key, so matching on the keys selects exactly the
+     * conversation descriptors EDDI 5 wrote.
+     *
+     * <p>
+     * A document that holds both names of either pair is not matched — which one is
+     * right cannot be told — and is counted and reported, as for conversations.
+     * Only documents holding a v5 key are matched, so a second run changes nothing.
+     * </p>
+     *
+     * <p>
+     * No revision is bumped, unlike the conversation passes. A descriptor has no
+     * {@code _rev}: its only version field is {@code _version}, which is part of
+     * the conversation's resource URI ({@code ?version=}) and must not move. It
+     * would protect nothing either, since descriptors are written by unconditional
+     * whole-document replaces. A replace racing this pass is still safe from 6.5
+     * on: {@code ConversationDescriptor} reads the v5 names, so what it writes back
+     * carries the v6 ones.
+     * </p>
+     */
+    private MigrationResult migrateConversationDescriptorFields(String collectionName) {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(collectionName);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(collectionName, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        Bson v5Shaped = or(exists(FIELD_AGENT_RESOURCE_V5), exists(FIELD_AGENT_NAME_V5));
+        Bson ambiguous = or(and(exists(FIELD_AGENT_RESOURCE_V5), exists(FIELD_AGENT_RESOURCE_V6)),
+                and(exists(FIELD_AGENT_NAME_V5), exists(FIELD_AGENT_NAME_V6)));
+        Document set = new Document(FIELD_AGENT_RESOURCE_V6, firstPresent(FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_RESOURCE_V5))
+                .append(FIELD_AGENT_NAME_V6, firstPresent(FIELD_AGENT_NAME_V6, FIELD_AGENT_NAME_V5));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
+                    new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the v5 field names of the conversation descriptors could not be renamed — counted as a "
+                    + "failure, so this runs again on the next start: %s", collectionName, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: renamed %s → %s and %s → %s in %d conversation descriptors", collectionName,
+                    FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_NAME_V5, FIELD_AGENT_NAME_V6, migrated);
+        }
+        try {
+            long left = collection.countDocuments(ambiguous);
+            if (left > 0) {
+                LOGGER.warnf("  %s: %d conversation descriptor(s) hold both a v5 and a v6 name (%s/%s or %s/%s) and were "
+                        + "left unchanged; they read as the v6 one. Remove the v5 field by hand once checked.", collectionName,
+                        left, FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_NAME_V5, FIELD_AGENT_NAME_V6);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the descriptors left unrenamed: %s", collectionName, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * {@code field}'s value if the document has it, else {@code fallback}'s, else
+     * the field is left out — never written as an explicit null.
+     */
+    private static Document firstPresent(String field, String fallback) {
+        return cond(isPresent("$" + field), "$" + field, cond(isPresent("$" + fallback), "$" + fallback, "$$REMOVE"));
+    }
+
+    private static Document isPresent(String value) {
+        return new Document("$ne", List.of(new Document("$type", value), "missing"));
+    }
+
+    /**
+     * Gives back an {@code agentResource} to the conversation descriptors that lost
+     * it, taken from the conversation itself.
+     *
+     * <p>
+     * An earlier 6.x read a v5 descriptor without its {@code botResource} — the
+     * model had no such field — and every write of a descriptor is a whole replace,
+     * so the next write stored it with neither name. A turn does that (it updates
+     * the descriptor's timestamp), and so does ending the conversation, which the
+     * idle sweep does five minutes after the first boot. Those descriptors have
+     * nothing left to rename; the agent is still recorded on the conversation,
+     * under the same id.
+     * </p>
+     *
+     * <p>
+     * Current descriptors only: a history row belongs to a deleted conversation,
+     * and no listing reads it. A descriptor whose conversation is gone, or names no
+     * agent, is counted and reported, not failed — there is nothing to give back,
+     * and failing would retry it on every start for ever. Each write is conditioned
+     * on the field still being absent, so a descriptor rewritten meanwhile is left
+     * alone.
+     * </p>
+     */
+    private MigrationResult backfillAgentResources() {
+        MongoCollection<Document> descriptors;
+        try {
+            descriptors = collectionToScan(COLLECTION_DESCRIPTORS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_DESCRIPTORS, e);
+        }
+        if (descriptors == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        Bson noAgentResource = and(exists(FIELD_AGENT_RESOURCE_V6, false), exists(FIELD_AGENT_RESOURCE_V5, false));
+        List<Object> ids = new ArrayList<>();
+        try {
+            for (Document descriptor : descriptors
+                    .find(and(regex(FIELD_DESCRIPTOR_RESOURCE, "^" + Pattern.quote(CONVERSATION_RESOURCE_PREFIX)), noAgentResource))
+                    .projection(new Document(ID_FIELD, 1))) {
+                ids.add(descriptor.get(ID_FIELD));
+            }
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: could not look for conversation descriptors without an agent — counted as a failure, so "
+                    + "this runs again on the next start: %s", COLLECTION_DESCRIPTORS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (ids.isEmpty()) {
+            return MigrationResult.NOTHING;
+        }
+
+        MongoCollection<Document> conversations = database.getCollection(COLLECTION_CONVERSATIONS);
+        int migrated = 0;
+        int failed = 0;
+        int noAgent = 0;
+        for (int from = 0; from < ids.size(); from += BACKFILL_BATCH_SIZE) {
+            List<Object> batch = ids.subList(from, Math.min(from + BACKFILL_BATCH_SIZE, ids.size()));
+            try {
+                Map<Object, Document> agents = new HashMap<>();
+                for (Document conversation : conversations.find(new Document(ID_FIELD, new Document("$in", batch)))
+                        .projection(new Document(FIELD_AGENT_ID, 1).append(FIELD_AGENT_VERSION, 1))) {
+                    agents.put(conversation.get(ID_FIELD), conversation);
+                }
+                for (Object id : batch) {
+                    Document conversation = agents.get(id);
+                    if (conversation == null || !(conversation.get(FIELD_AGENT_ID) instanceof String agentId) || agentId.isBlank()) {
+                        noAgent++;
+                        continue;
+                    }
+                    Object agentVersion = conversation.get(FIELD_AGENT_VERSION);
+                    String agentResource = AGENT_RESOURCE_PREFIX + agentId
+                            + (agentVersion instanceof Number version ? "?version=" + version.intValue() : "");
+                    migrated += (int) descriptors.updateOne(and(eq(ID_FIELD, id), noAgentResource),
+                            new Document("$set", new Document(FIELD_AGENT_RESOURCE_V6, agentResource))).getModifiedCount();
+                }
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s: could not give %d conversation descriptor(s) back their agent — counted as a failure, "
+                        + "so this runs again on the next start: %s", COLLECTION_DESCRIPTORS, batch.size(), e.toString());
+            }
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: gave %d conversation descriptor(s) back the agent an earlier 6.x dropped from them",
+                    COLLECTION_DESCRIPTORS, migrated);
+        }
+        if (noAgent > 0) {
+            LOGGER.warnf("  %s: %d conversation descriptor(s) name no agent, and their conversation is gone or names none "
+                    + "either; they are left as they are and are not listed under any agent", COLLECTION_DESCRIPTORS, noAgent);
+        }
+        return new MigrationResult(migrated, failed);
     }
 
     private static final String COLLECTION_AGENT_TRIGGERS = "agenttriggers";

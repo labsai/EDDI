@@ -155,7 +155,8 @@ class V6RenameMigrationTest {
         @Test
         @DisplayName("should skip when already applied")
         void skipsWhenAlreadyApplied() {
-            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            // Applied, and so are the catch-ups that record their own completion.
+            when(migrationLogStore.readMigrationLog(anyString())).thenAnswer(i -> new MigrationLog(i.getArgument(0)));
             // An applied migration only checks whether an earlier 6.x left triggers
             // or mappings in the v5 shape; with nothing there, it writes nothing.
             @SuppressWarnings("unchecked")
@@ -179,7 +180,8 @@ class V6RenameMigrationTest {
         @DisplayName("an already-applied migration does not take a failed trigger count for none")
         @SuppressWarnings("unchecked")
         void failedTriggerCountIsNotEmpty() {
-            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            // Applied, and so are the catch-ups that record their own completion.
+            when(migrationLogStore.readMigrationLog(anyString())).thenAnswer(i -> new MigrationLog(i.getArgument(0)));
             MongoCollection<Document> unreadable = mock(MongoCollection.class);
             when(unreadable.countDocuments()).thenThrow(new IllegalStateException("not authorized"));
             MongoCollection<Document> agentTriggers = mock(MongoCollection.class);
@@ -207,7 +209,9 @@ class V6RenameMigrationTest {
 
             // Should record the migration as complete
             ArgumentCaptor<MigrationLog> captor = ArgumentCaptor.forClass(MigrationLog.class);
-            verify(migrationLogStore, times(2)).createMigrationLog(captor.capture());
+            // The retention hold, the step shape, the descriptor field names, then
+            // completion.
+            verify(migrationLogStore, times(4)).createMigrationLog(captor.capture());
             assertEquals("v6-rename-migration-complete", captor.getValue().getName());
         }
     }

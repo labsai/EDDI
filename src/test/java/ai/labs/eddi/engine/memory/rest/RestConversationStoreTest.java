@@ -1870,8 +1870,8 @@ class RestConversationStoreTest {
     class NullAgentResourceWithFilter {
 
         @Test
-        @DisplayName("should skip descriptor with null agentResource when agentId filter is set")
-        void skipsNullAgentResource() throws Exception {
+        @DisplayName("a descriptor with no agentResource is listed by the agent its conversation names")
+        void nullAgentResourceFallsBackToTheConversation() throws Exception {
             var descriptor = new ConversationDescriptor();
             descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
             descriptor.setAgentResource(null); // no agentResource
@@ -1893,7 +1893,34 @@ class RestConversationStoreTest {
             docDesc.setName("Agent");
             when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
 
-            // Filter by agentId — descriptor has null agentResource, should be skipped
+            // An earlier 6.x rewrote v5 descriptors without their agent; the
+            // conversation still names it, so the listing asks the conversation.
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, "212121212121212121212121", null, null, null);
+
+            assertEquals(1, result.size());
+            assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/212121212121212121212121?version=1"),
+                    result.getFirst().getAgentResource());
+        }
+
+        @Test
+        @DisplayName("a descriptor with no agentResource whose conversation names no agent is skipped")
+        void skipsNullAgentResourceWithoutAnAgentAnywhere() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
+            descriptor.setAgentName("Agent");
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("111111111111111111111111"))
+                    .thenReturn(snapshot);
+
             List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
                     0, 20, null, null, "212121212121212121212121", null, null, null);
 

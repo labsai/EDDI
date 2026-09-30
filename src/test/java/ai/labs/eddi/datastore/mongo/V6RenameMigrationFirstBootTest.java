@@ -55,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -226,6 +227,61 @@ class V6RenameMigrationFirstBootTest {
         store.storeConversationMemorySnapshot(load());
 
         assertLoadsWithEveryItem(load());
+    }
+
+    /**
+     * A conversation as a database 6.4 migrated holds it: the field names and the
+     * environment are v6, the steps still v5, and the rename migration is recorded
+     * complete — so only the catch-up can reach them.
+     */
+    private static Document conversationLeftByAnEarlier6x() {
+        Document conversation = v5Conversation();
+        conversation.remove("botId");
+        conversation.remove("botVersion");
+        return conversation.append("agentId", "0000000000000000000000d3").append("agentVersion", 1).append("environment", "production");
+    }
+
+    private void migratedByAnEarlier6x() {
+        when(migrationLog.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+    }
+
+    @Test
+    @DisplayName("on a database an earlier 6.x migrated, the catch-up renames the step shape and bumps the revision")
+    void stepShapeCaughtUpAfterAnEarlierMigration() {
+        migratedByAnEarlier6x();
+        conversations().insertOne(conversationLeftByAnEarlier6x());
+
+        runMigration();
+
+        Document stored = conversations().find().first();
+        for (String array : List.of("conversationSteps", "redoCache")) {
+            for (Document step : stored.getList(array, Document.class)) {
+                assertFalse(step.containsKey("packages"), array + " still holds 'packages'");
+                assertTrue(step.containsKey("workflows"), array + " has no 'workflows'");
+            }
+        }
+        assertEquals(1L, ((Number) stored.get("_rev")).longValue(), "the catch-up write counts as a revision");
+        assertEquals(1L, ((Number) stored.get("_histRev")).longValue());
+        assertLoadsWithEveryItem(load());
+        verify(migrationLog).createMigrationLog(argThat(log -> "v6-rename-step-shape-complete".equals(log.getName())));
+        verify(migrationLog, never()).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
+
+        runMigration();
+
+        assertEquals(stored, conversations().find().first(), "a second run changes nothing");
+    }
+
+    @Test
+    @DisplayName("once the step-shape catch-up is recorded it does not run again")
+    void stepShapeCatchUpRunsOnce() {
+        when(migrationLog.readMigrationLog(any())).thenAnswer(invocation -> new MigrationLog(invocation.getArgument(0)));
+        Document leftBehind = conversationLeftByAnEarlier6x();
+        conversations().insertOne(leftBehind);
+
+        runMigration();
+
+        assertEquals(leftBehind, conversations().find().first());
+        verify(migrationLog, never()).createMigrationLog(any());
     }
 
     @Test
