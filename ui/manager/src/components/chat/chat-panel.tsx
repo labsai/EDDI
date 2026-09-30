@@ -1,4 +1,5 @@
 import { ReviewNotice } from "@/components/chat/review-notice";
+import { useAgentReviewProfile } from "@/hooks/use-agent-review-profile";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -134,6 +135,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   );
 
   const chatEnvironment = environmentFor(selectedAgentId ?? "");
+  // Every send waits while the review lookup is out, so nobody commits a turn an
+  // opted-in agent's maintainers may read before being told so. A failed lookup
+  // settles it: the chat waits for the request, never blocks on it.
+  const { pending: reviewPending } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
 
   useEffect(() => {
     const agentIdParam = searchParams.get("agentId");
@@ -258,6 +263,8 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
       // must not reach the conversation being left (useSendMessage refuses it
       // too, but only after the attachments below were already drained).
       if (useChatStore.getState().loadingConversationId) return false;
+      // Nothing is sent before the review notice has had its chance to appear.
+      if (reviewPending) return false;
       // Secret turns never carry attachments — a masked bubble must not leak a
       // filename or thumbnail. Discard anything staged (freeing previews and
       // best-effort deleting the blob) instead of forwarding or displaying it.
@@ -289,15 +296,15 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
       });
       return true;
     },
-    [sendMessage, takeForSend, discardAll, hasReadyAttachment]
+    [sendMessage, takeForSend, discardAll, hasReadyAttachment, reviewPending]
   );
 
   const handleQuickReply = useCallback(
     (reply: string) => {
-      if (useChatStore.getState().loadingConversationId) return;
+      if (useChatStore.getState().loadingConversationId || reviewPending) return;
       sendMessage.mutate({ message: reply });
     },
-    [sendMessage]
+    [sendMessage, reviewPending]
   );
 
   // Pasted files (screenshots via Ctrl/Cmd+V) go through the same staging as
@@ -655,7 +662,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && (
+        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && !reviewPending && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -706,12 +713,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             // The send clears the field itself, and hands it back if the
             // backend refuses the message without consuming it.
             onSend={(val) => handleSend(val, true)}
-            disabled={isProcessing || isPaused || isLoadingConversation || conversationBusy}
+            disabled={isProcessing || isPaused || isLoadingConversation || conversationBusy || reviewPending}
           />
         ) : (
           <ChatInputWithSecretToggle
             onSend={handleSend}
-            disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy}
+            disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy || reviewPending}
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}

@@ -164,6 +164,10 @@ From CodeRabbit's review of the PR:
   field included, not only the composer. A managed route
   (`/chat/managed/:intent/:userId`) names no agent, so it now takes the agent
   from the loaded conversation and shows that agent's notice.
+- The Manager's chat waits the same way: the composer, the requested input
+  field and quick replies stay closed while the agent's profile lookup is out.
+  The notice and the chat read one query (`useAgentReviewProfile`), and a
+  failed lookup settles it, so the chat never blocks on the notice.
 
 Deliberately not changed, and documented instead:
 
