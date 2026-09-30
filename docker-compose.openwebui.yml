@@ -5,9 +5,9 @@
 #
 # Then open http://localhost:3000 and pick "eddi-demo-agent-…" from the model list.
 #
-# EDDI is BUILT FROM THIS WORKING TREE, not pulled from Docker Hub: the adapter
-# is not in any published image yet, so `labsai/eddi:latest` would start fine
-# and then 404 on /v1. Dockerfile.demo compiles inside the container, so no
+# EDDI is BUILT FROM THIS WORKING TREE, not pulled from Docker Hub, so the demo
+# runs the /v1 adapter exactly as it is in your checkout, including changes not
+# yet in a published image (the adapter has shipped since 6.4.0). Dockerfile.demo compiles inside the container, so no
 # local JDK or Maven is needed — the first build is slow, later ones are cached.
 #
 # Self-contained rather than an overlay on docker-compose.yml, so it is one

@@ -70,8 +70,11 @@ As the arbitrator, decide the outcome. Weigh the stated interests, the open prop
  * Restores the arbitration prompt on a NEGOTIATION group saved before the
  * Manager materialized it.
  *
- * Those groups store Arbitration with `inputTemplate: null`, and the backend
- * then runs the generic synthesis prompt in its place. Only the exact phase the
+ * Those groups store Arbitration with `inputTemplate: null`. Before 6.5 the
+ * backend then ran the generic synthesis prompt in its place; since 6.5 it
+ * restores the same prompt itself, at run time and on save
+ * (`DiscussionStylePresets.withNegotiationArbitrationRepaired`), with the same
+ * matching rule, so this repair and the backend's agree. Only the exact phase the
  * preset produces is touched — NEGOTIATION style, named "Arbitration", a
  * MODERATOR SYNTHESIS skipped on AGREEMENT_REACHED, with no prompt of its own —
  * so an author's own phase is never rewritten. Applied when a group is read, so

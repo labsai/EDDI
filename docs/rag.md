@@ -324,7 +324,7 @@ preview, purge, and the deletion rules below.
 ```
 
 **Three fields have no default and are rejected when missing:** `name`, the `web` block, and its
-`startUrl`. Everything else may be omitted — `type` defaults to `web` (the only type implemented),
+`startUrl`. Everything else may be omitted — `type` defaults to `web` (the other type is [`upload`](#uploaded-files-type-upload)),
 `id` is generated and then never changes, and omitting `settings` entirely means "all defaults". Two
 optional fields are simply absent rather than defaulted: without `cron` the source runs only when
 somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.

@@ -383,7 +383,7 @@ Besides the MongoDB change in [section 2.4](#24-helm-with-the-in-chart-mongodb-t
   - Raise a proxy's body limit only if you want large RAG uploads.
 - **Chat UI framing.** `/chat` has its own Content-Security-Policy, with
   `frame-ancestors` set from `eddi.chat.frame-ancestors` (default `'none'`). It couldn't be
-  framed under 6.4 either. To embed it, set `eddi.chat.frame-ancestors` (Helm
+  framed under 6.4 either. To embed it, set `eddi.chat.frame-ancestors` (`EDDI_CHAT_FRAME_ANCESTORS`; Helm
   `eddi.chat.frameAncestors`) to the embedding origins.
 - **Metrics.** `/q/metrics` still needs authentication, now through its own setting,
   `eddi.metrics.http-policy` (Helm `eddi.metrics.httpPolicy`). Set it to `permit` only where
@@ -457,6 +457,12 @@ No REST path was removed between 6.4.0 and 6.5.
   [Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
 - **Failed deployments are retried** with a growing delay. Readiness stays UP and reports
   `agentsInErrorCount`.
+- **NEGOTIATION groups get their arbitration prompt back.** A stored NEGOTIATION group whose
+  Arbitration phase had no prompt used the generic synthesis prompt in the backend. The moderator then
+  summarised the deadlock instead of deciding it, and that summary was recorded as the verdict. Only
+  the Manager repaired such a group, and only on its next save. 6.5 restores the arbitration prompt at
+  run time and on save, so the outcome of those negotiations changes: a real verdict instead of a
+  summary.
 - **Soft delete ends the conversation.** Ended, soft-deleted conversations are purged by the
   retention sweep (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`, 365)
   counted from their last interaction.
@@ -556,6 +562,30 @@ already records it. Check before you upgrade:
 With `EDDI_MIGRATION_V6_RENAME_ENABLED=true` still set, every 6.5 boot also moves triggers an
 earlier 6.x left in `bottriggers` to `agenttriggers`, and brings triggers and
 user-conversation mappings to the v6 shape. With the flag off, that catch-up doesn't run.
+
+The same flag enables two one-time catch-ups on the first 6.5 boot:
+- **The step shape of stored conversations.** `packages` becomes `workflows` in every conversation
+  that an earlier 6.x left with v5 steps. Those conversations loaded only through a read-time alias,
+  which stays as a safety net.
+- **The field names of conversation descriptors.** `botResource` / `botName` become `agentResource` /
+  `agentName`. 6.4 read a v5 descriptor without its agent and wrote it back that way on every turn and
+  every idle end. So many descriptors have no agent at all; they get it back from their conversation.
+  Until then, `GET /conversationstore/conversations?agentId=<id>` doesn't list those conversations.
+
+Each logs `Migrating … which an earlier 6.x left in place` and, once it has succeeded, records
+`v6-rename-step-shape-complete` or `v6-rename-descriptor-fields-complete` in `migrationlog`. A catch-up
+that fails logs an ERROR and runs again on the next boot. Afterwards, both of these should be 0:
+
+```javascript
+db.descriptors.countDocuments({ botResource: { $exists: true } })
+db.conversationmemories.countDocuments({ "conversationSteps.packages": { $exists: true } })
+```
+
+**The idle limit's `-1` now means "never".** In 6.4, setting
+`eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` to `-1` made every conversation count as
+idle, so the daily sweep ended all of them. From 6.5, any value below 1 disables idle-ending, the same
+way `-1` works for retention. If you set a very large number to work around that, you can switch to
+`-1`.
 
 The retention hold described in
 [Upgrading from 5.x](upgrading-from-5x.md#3-retention-decide-before-the-first-boot) applies
