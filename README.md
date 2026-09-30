@@ -144,7 +144,7 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
 
 Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](docs/mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](docs/open-webui-integration.md) demo of the OpenAI-compatible API.
 
-The compose files publish EDDI (and Keycloak) on `127.0.0.1` only. To reach them from another host, set the bind-address variable named above the `ports:` entry in `docker-compose.yml` (and `KEYCLOAK_BIND` for Keycloak) in `.env` — with authentication on.
+The compose files publish EDDI (and Keycloak) on `127.0.0.1` only. To reach them from another host, set `EDDI_BIND=0.0.0.0` (and `KEYCLOAK_BIND` for Keycloak) in `.env` — with authentication on.
 
 The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
 
