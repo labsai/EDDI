@@ -20,11 +20,14 @@ import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 /**
  * One-time startup migration: moves all legacy {@code properties} documents
@@ -50,11 +53,20 @@ import java.util.TreeSet;
  * token in 159 of 277 documents;</li>
  * <li>any key whose value, at any depth, {@link SecretScrubber} would redact on
  * export — the same rules, so an API key stored as a property is caught
- * too.</li>
+ * too;</li>
+ * <li>any key whose value, at any depth, has the shape of a known credential
+ * format — a JWT, a pasted {@code Bearer}/{@code Basic} header, or a provider
+ * key prefix — which the scrubber's whole-value rules do not all see.</li>
  * </ul>
- * A skipped key is logged by name and count, never by value, and is not a
- * failure: its value stays in {@code properties_migrated_v6}, readable by an
- * operator, and nothing is loaded from there.
+ * One scrubber rule is narrowed for this migration only: the entropy heuristic
+ * is not applied to an identifier-shaped value under an identifier-named field
+ * ({@code courseId}, {@code course_id}, {@code id}). A random-looking id scores
+ * like a key, so the rule held back ordinary memories such as
+ * <code>{courseId: "…"}</code> as credentials. The name rules and the
+ * known-format rules still apply to those values. A skipped key is logged by
+ * name and count, never by value, and is not a failure: its value stays in
+ * {@code properties_migrated_v6}, readable by an operator, and nothing is
+ * loaded from there.
  *
  * @since 6.0.0
  */
@@ -85,23 +97,127 @@ public class PropertiesMigrationService {
         this.skipKeys = new TreeSet<>(skipKeys == null ? List.of() : skipKeys.stream().map(String::trim).filter(k -> !k.isEmpty()).toList());
     }
 
+    /** Stands in for an identifier during the credential check only. */
+    static final String IDENTIFIER_PLACEHOLDER = "identifier";
+
     /**
-     * {@code value} with every BSON {@code ObjectId} replaced by a fixed
-     * placeholder, for the credential check only. An ObjectId is an identifier by
-     * type; serialised as extended JSON it becomes <code>{"$oid": "65a1…"}</code>,
-     * a random-looking hex string the scrubber's entropy rule would take for a key.
+     * The shape of an identifier: letters, digits, {@code _} and {@code -}, and
+     * nothing else. No dot, so a JWT never qualifies; no space, so a pasted
+     * {@code Bearer …} header never does.
      */
-    static Object withoutObjectIds(Object value) {
+    private static final Pattern IDENTIFIER_SHAPE = Pattern.compile("[A-Za-z0-9_-]{1,128}");
+
+    /**
+     * Words that make an {@code …Id} name a credential rather than an identifier. A
+     * session id is a bearer credential, and {@code accessKeyId} or {@code tokenId}
+     * name the credential's own half.
+     */
+    private static final Set<String> CREDENTIAL_QUALIFIERS = Set.of("session", "auth", "token", "secret", "password", "passwd", "api",
+            "key", "access", "refresh", "credential", "credentials", "private");
+
+    /**
+     * Known credential formats, found anywhere inside a string: a JWT, a pasted
+     * {@code Authorization} value, and the key prefixes of common providers
+     * ({@code sk-} keys, Stripe, Slack, GitHub, GitLab, AWS, Google, Hugging Face).
+     * Each has a minimum body length, so an ordinary word that happens to start the
+     * same way ({@code "sk-learn"}) is not one. Every quantifier is a single
+     * character class, so the scan stays linear.
+     */
+    private static final Pattern KNOWN_CREDENTIAL_FORMAT = Pattern.compile("(?<![A-Za-z0-9])(?:"
+            + "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*" // JWT
+            + "|(?i:bearer|basic)\\s+[A-Za-z0-9._~+/=-]{8,}" // an Authorization header value
+            + "|sk-[A-Za-z0-9_-]{16,}" // sk- provider keys
+            + "|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}" // Stripe
+            + "|xox[abpsre]-[A-Za-z0-9-]{10,}" // Slack
+            + "|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}" // GitHub
+            + "|glpat-[A-Za-z0-9_-]{20,}" // GitLab
+            + "|(?:AKIA|ASIA)[A-Z0-9]{16}" // AWS access key id
+            + "|AIza[A-Za-z0-9_-]{30,}" // Google API key
+            + "|hf_[A-Za-z0-9]{30,}" // Hugging Face
+            + ")");
+
+    /**
+     * Whether a field of this name holds an identifier: {@code id}, or a name whose
+     * last word is {@code id} or {@code ids} ({@code courseId}, {@code course_id},
+     * {@code courseID}, {@code courseIds}) and none of whose other words mark a
+     * credential ({@code sessionId}, {@code accessKeyId}).
+     */
+    static boolean isIdentifierFieldName(String fieldName) {
+        if (fieldName == null || fieldName.isBlank()) {
+            return false;
+        }
+        List<String> words = splitWords(fieldName);
+        if (words.isEmpty()) {
+            return false;
+        }
+        String last = words.getLast();
+        if (!"id".equals(last) && !"ids".equals(last)) {
+            return false;
+        }
+        return words.subList(0, words.size() - 1).stream().noneMatch(CREDENTIAL_QUALIFIERS::contains);
+    }
+
+    /**
+     * Splits {@code courseId}, {@code course_id} and {@code courseID} alike into
+     * lower-case words.
+     */
+    private static List<String> splitWords(String name) {
+        return Arrays.stream(name.split("(?<=[a-z0-9])(?=[A-Z])|[^A-Za-z0-9]+")).filter(w -> !w.isEmpty())
+                .map(w -> w.toLowerCase(Locale.ROOT)).toList();
+    }
+
+    /**
+     * Whether any string in {@code value}, at any depth, is a known credential
+     * format.
+     */
+    static boolean hasKnownCredentialFormat(Object value) {
+        if (value instanceof String text) {
+            return KNOWN_CREDENTIAL_FORMAT.matcher(text).find();
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map.values().stream().anyMatch(PropertiesMigrationService::hasKnownCredentialFormat);
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().anyMatch(PropertiesMigrationService::hasKnownCredentialFormat);
+        }
+        return false;
+    }
+
+    /**
+     * {@code value} with every identifier replaced by a fixed placeholder, for the
+     * scrubber's credential check only. Two kinds count:
+     * <ul>
+     * <li>a BSON {@code ObjectId} — an identifier by type. Serialised as extended
+     * JSON it becomes <code>{"$oid": "65a1…"}</code>, a random-looking hex string
+     * the scrubber's entropy rule would take for a key;</li>
+     * <li>an identifier-shaped string under an identifier-named field (see
+     * {@link #isIdentifierFieldName}). A 17-character alphanumeric {@code courseId}
+     * scores about 4 bits per character, over the scrubber's 3.5-bit entropy
+     * threshold, so it was held back as a credential.</li>
+     * </ul>
+     * A string in a known credential format is never replaced, whatever its field
+     * is called, and {@link #hasKnownCredentialFormat} holds it back regardless.
+     * List items are judged by the list's own field name, as the scrubber judges
+     * them.
+     *
+     * @param fieldName
+     *            the name {@code value} sits under
+     */
+    static Object withoutIdentifiers(String fieldName, Object value) {
         if (value instanceof ObjectId) {
             return "objectid";
         }
+        if (value instanceof String text && isIdentifierFieldName(fieldName) && IDENTIFIER_SHAPE.matcher(text).matches()
+                && !KNOWN_CREDENTIAL_FORMAT.matcher(text).find()) {
+            return IDENTIFIER_PLACEHOLDER;
+        }
         if (value instanceof Map<?, ?> map) {
             Document copy = new Document();
-            map.forEach((k, v) -> copy.put(String.valueOf(k), withoutObjectIds(v)));
+            map.forEach((k, v) -> copy.put(String.valueOf(k), withoutIdentifiers(String.valueOf(k), v)));
             return copy;
         }
         if (value instanceof List<?> list) {
-            return list.stream().map(PropertiesMigrationService::withoutObjectIds).toList();
+            return list.stream().map(item -> withoutIdentifiers(fieldName, item)).toList();
         }
         return value;
     }
@@ -208,7 +324,8 @@ public class PropertiesMigrationService {
                     continue;
                 }
                 Object value = doc.get(key);
-                if (hasCredentialName(key, value) || secretScrubber.containsCredential(new Document(key, withoutObjectIds(value)).toJson())) {
+                if (hasCredentialName(key, value) || hasKnownCredentialFormat(value)
+                        || secretScrubber.containsCredential(new Document(key, withoutIdentifiers(key, value)).toJson())) {
                     skippedAsCredential.merge(key, 1, Integer::sum);
                     continue;
                 }
