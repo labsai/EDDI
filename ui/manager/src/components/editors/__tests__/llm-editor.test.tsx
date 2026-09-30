@@ -1065,6 +1065,70 @@ describe("LlmEditor", () => {
     );
     expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
   });
+
+  // ── Provider select ──────────────────────────────────────────────────────
+
+  it("labels named compatible providers by display name", () => {
+    renderWithProviders(
+      <LlmEditor
+        data={{ tasks: [{ type: "xai", actions: [], parameters: {} }] }}
+        onChange={onChange}
+      />
+    );
+    const select = screen.getByTestId("model-type-select") as HTMLSelectElement;
+    expect(select.value).toBe("xai");
+    expect(select.selectedOptions[0]?.text).toBe("xAI Grok");
+    expect(screen.getByTestId("compatible-endpoint-hint")).toHaveTextContent(
+      "https://api.x.ai/v1",
+    );
+  });
+
+  it("shows the endpoint in the backend's precedence order: baseUrl, then region, then default", () => {
+    const hint = (parameters: Record<string, string>) => {
+      const view = renderWithProviders(
+        <LlmEditor
+          data={{ tasks: [{ type: "qwen", actions: [], parameters }] }}
+          onChange={onChange}
+        />
+      );
+      const text = screen.getByTestId("compatible-endpoint-hint").textContent ?? "";
+      view.unmount();
+      return text;
+    };
+    const CN = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    expect(hint({})).toContain("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+    expect(hint({ region: "cn" })).toContain(CN);
+    expect(hint({ region: "CN" })).toContain(CN);
+    // an explicit baseUrl beats the region
+    expect(hint({ region: "cn", baseUrl: "https://proxy.example/v1" })).toContain(
+      "https://proxy.example/v1",
+    );
+    // an unknown region falls back to the default (the backend rejects it at build time)
+    expect(hint({ region: "mars" })).toContain("https://dashscope-intl.aliyuncs.com");
+  });
+
+  it("keeps an unknown type as a custom option instead of rewriting it", () => {
+    renderWithProviders(
+      <LlmEditor
+        data={{ tasks: [{ type: "acme-llm", actions: [], parameters: {} }] }}
+        onChange={onChange}
+      />
+    );
+    const select = screen.getByTestId("model-type-select") as HTMLSelectElement;
+    expect(select.value).toBe("acme-llm");
+    expect(select.selectedOptions[0]?.text).toContain("acme-llm");
+    expect(screen.queryByTestId("compatible-endpoint-hint")).not.toBeInTheDocument();
+  });
+
+  it("changing the type does not rewrite the task parameters", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={populatedConfig} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("model-type-select"), "deepseek");
+    const calls = onChange.mock.calls;
+    const updated = calls[calls.length - 1]?.[0] as LlmConfig;
+    expect(updated.tasks[0]?.type).toBe("deepseek");
+    expect(updated.tasks[0]?.parameters).toEqual(populatedConfig.tasks[0]?.parameters);
+  });
 });
 
 // ─── Model parameter names (editors review) ──────────────────────────────────

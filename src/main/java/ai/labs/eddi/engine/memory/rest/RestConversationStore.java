@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -130,6 +131,20 @@ public class RestConversationStore implements IRestConversationStore {
      */
     @Inject
     Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
+
+    /**
+     * Optional for the same reason; absent means no EDDI 5 migration is in play.
+     */
+    @Inject
+    Instance<V6RenameMigration> v6RenameMigrationInstance;
+
+    /**
+     * The operator's confirmation that 6.x's retention may delete ended
+     * conversations of a database that came from EDDI 5; see
+     * {@link #retentionHeldForV5Migration()}.
+     */
+    @ConfigProperty(name = "eddi.migration.v6-rename.retention-confirmed", defaultValue = "false")
+    boolean retentionConfirmed;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -577,6 +592,24 @@ public class RestConversationStore implements IRestConversationStore {
             return;
         }
 
+        if (retentionHeldForV5Migration()) {
+            runtime.submitCallable(() -> {
+                try {
+                    long eligible = countEndedConversationsOlderThan(deleteEndedConversationsOnceOlderThanDays);
+                    log.warnf("Ended-conversation retention sweep held: this database comes from EDDI 5, which kept ended "
+                            + "conversations for ever. With deleteEndedConversationsOnceOlderThanDays=%d the sweep would "
+                            + "permanently delete %d ended conversation(s). It deletes nothing until you decide: keep them with "
+                            + "EDDI_CONVERSATIONS_DELETEENDEDCONVERSATIONSONCEOLDERTHANDAYS=-1, or let the retention apply with "
+                            + "EDDI_MIGRATION_V6_RENAME_RETENTION_CONFIRMED=true.", deleteEndedConversationsOnceOlderThanDays, eligible);
+                } catch (Exception e) {
+                    log.warnf("Ended-conversation retention sweep held for a database from EDDI 5; could not count what it would "
+                            + "delete: %s", e.toString());
+                }
+                return null;
+            }, ThreadContext.getResources());
+            return;
+        }
+
         runtime.submitCallable(() -> {
             try {
                 var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
@@ -590,6 +623,50 @@ public class RestConversationStore implements IRestConversationStore {
             }
             return null;
         }, ThreadContext.getResources());
+    }
+
+    /**
+     * Whether the retention sweep must delete nothing because the database comes
+     * from EDDI 5 and the operator has not confirmed 6.x's retention.
+     *
+     * <p>
+     * EDDI 5 shipped {@code deleteEndedConversationsOnceOlderThanDays=-1}; 6.x
+     * ships 365, and this sweep has no initial delay. So the first boot on 6.x
+     * permanently deleted every ended conversation older than a year, before anyone
+     * had a chance to notice the default had changed. A hold that lasted only for
+     * the process that migrated was not enough: a second replica, or the same pod
+     * rescheduled minutes later, is a boot nobody decided on. The hold therefore
+     * lasts until {@code eddi.migration.v6-rename.retention-confirmed=true} (or the
+     * retention is switched off with -1); see
+     * {@link V6RenameMigration#holdsRetention()}.
+     * </p>
+     */
+    boolean retentionHeldForV5Migration() {
+        if (retentionConfirmed || v6RenameMigrationInstance == null || !v6RenameMigrationInstance.isResolvable()) {
+            return false;
+        }
+        return v6RenameMigrationInstance.get().holdsRetention();
+    }
+
+    /**
+     * How many ended conversations with a live descriptor were last modified before
+     * the retention cut-off — what the sweep would delete, give or take the
+     * soft-deleted ones it ages on their archived descriptor.
+     */
+    long countEndedConversationsOlderThan(int days) throws ResourceStoreException {
+        var cutOff = Date.from(Instant.now().minus(Duration.ofDays(days)));
+        long eligible = 0;
+        for (var conversationId : conversationMemoryStore.getEndedConversationIds()) {
+            try {
+                var descriptor = documentDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+                if (descriptor != null && descriptor.getLastModifiedOn() != null && descriptor.getLastModifiedOn().before(cutOff)) {
+                    eligible++;
+                }
+            } catch (ResourceNotFoundException e) {
+                // no live descriptor: not counted
+            }
+        }
+        return eligible;
     }
 
     @Scheduled(every = "24h", delayed = "2m")

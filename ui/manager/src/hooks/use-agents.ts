@@ -17,6 +17,7 @@ import {
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
+  getDeploymentImpact,
   listDeploymentStatuses,
   type AgentDeploymentSummary,
   type Agent,
@@ -118,6 +119,22 @@ export function useDeploymentStatus(agentId: string, version: number, environmen
   });
 }
 
+/**
+ * What deploying `version` in `environment` would do to the conversations on
+ * the agent's other deployed versions — FOLLOW (they move to it on their next
+ * turn) or STAY. Informational only: nothing should wait on it, so it does not
+ * retry and callers render nothing while it loads or when it fails.
+ */
+export function useDeploymentImpact(agentId: string, version: number, environment = "production") {
+  return useQuery({
+    queryKey: agentKeys.deploymentImpact(environment, agentId, version),
+    queryFn: () => getDeploymentImpact(environment, agentId, version),
+    enabled: !!agentId && version > 0,
+    retry: false,
+    staleTime: 10_000,
+  });
+}
+
 export function useAgentVersions(agentId: string) {
   return useQuery({
     queryKey: [...agentKeys.all, "versions", agentId],
@@ -170,11 +187,14 @@ export function useUpdateAgent() {
       id,
       version,
       agent,
+      compatible,
     }: {
       id: string;
       version: number;
       agent: Agent;
-    }) => updateAgent(id, version, agent),
+      /** See `UpdateAgentOptions.compatible` — omitted means breaking. */
+      compatible?: boolean;
+    }) => updateAgent(id, version, agent, compatible ? { compatible } : undefined),
     onSuccess: (result, { id, agent }) => {
       // Seed the version the save created with the document just written, so
       // a page that moves onto it renders the edit at once rather than the

@@ -44,6 +44,7 @@ import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import {
   ParserEditor,
 } from "@/components/editors/parser-editor";
@@ -68,6 +69,9 @@ export function WorkflowDetailPage() {
     agentVer ? parseInt(agentVer, 10) : undefined
   );
   const [showAddDialog, setShowAddDialog] = useState(false);
+  // Save & Test writes a new agent version: breaking unless the user ticks
+  // this. Reset after each such save — every save is its own decision.
+  const [agentCompatible, setAgentCompatible] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
@@ -149,6 +153,15 @@ export function WorkflowDetailPage() {
   useEffect(() => {
     setLocalExtensions(null);
   }, [workflow?.workflowSteps]);
+
+  // The page stays mounted when only the query string changes, so the agent
+  // context can switch underneath it. A compatibility tick is about ONE agent's
+  // next version and must not carry over to another agent's; the version the
+  // next Save & Test replaces comes from the new context too.
+  useEffect(() => {
+    setAgentCompatible(false);
+    setCurrentAgentVer(agentVer ? parseInt(agentVer, 10) : undefined);
+  }, [agentId, agentVer]);
 
   // Clear save message after 3s
   useEffect(() => {
@@ -266,7 +279,10 @@ export function WorkflowDetailPage() {
             u === oldWfUri ? newWfUri : u
           ),
         };
-        const agentResult = await updateAgent(agentId, currentAgentVer, updatedAgent);
+        const agentResult = agentCompatible
+          ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
+          : await updateAgent(agentId, currentAgentVer, updatedAgent);
+        setAgentCompatible(false);
         const agentUrl = new URL(agentResult.location, "http://dummy");
         const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
         setCurrentAgentVer(newAgentVersion);
@@ -274,7 +290,7 @@ export function WorkflowDetailPage() {
         return { newAgentVersion };
       },
     });
-  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, saveAndDeploy]);
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, agentCompatible, saveAndDeploy]);
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
@@ -490,6 +506,17 @@ export function WorkflowDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Save & Test also writes a new version of the agent */}
+      {agentId && agentVer && (
+        <CompatibleVersionCheckbox
+          checked={agentCompatible}
+          onChange={setAgentCompatible}
+          disabled={updateMutation.isPending || isSaveAndDeploying}
+          className="max-w-2xl"
+          data-testid="save-test-compatible-checkbox"
+        />
+      )}
 
       {/* Pipeline section */}
       <section className="rounded-xl border bg-card shadow-sm">

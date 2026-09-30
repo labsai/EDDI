@@ -42,6 +42,22 @@ class JsonResponseFormatPolicyTest {
         }
 
         @ParameterizedTest
+        @ValueSource(strings = {"xai", "deepseek", "moonshot", "qwen", "zhipu", "groq"})
+        @DisplayName("named OpenAI-compatible providers accept JSON alone, but not alongside tools")
+        void compatibleProvidersOnlyWithoutTools(String provider) {
+            assertTrue(JsonResponseFormatPolicy.supportsRequestLevelJson(provider));
+            assertFalse(JsonResponseFormatPolicy.supportsRequestLevelJsonWithTools(provider));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"minimax", "openrouter"})
+        @DisplayName("compatible providers without a JSON mode never get one")
+        void compatibleProvidersWithoutJson(String provider) {
+            assertFalse(JsonResponseFormatPolicy.supportsRequestLevelJson(provider));
+            assertFalse(JsonResponseFormatPolicy.supportsRequestLevelJsonWithTools(provider));
+        }
+
+        @ParameterizedTest
         @ValueSource(strings = {"gemini", "gemini-vertex"})
         @DisplayName("Gemini maps JSON to responseMimeType — accepted alone, rejected alongside tools")
         void geminiOnlyWithoutTools(String provider) {

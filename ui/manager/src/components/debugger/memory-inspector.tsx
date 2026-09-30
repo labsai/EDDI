@@ -4,8 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
   getDetailedConversation,
+  extractAgentSwitch,
+  extractAgentVersion,
   type DetailedConversationStep,
 } from "@/lib/api/conversations";
+import { AgentSwitchNotice } from "@/components/conversations/agent-switch-notice";
 import {
   Database,
   RefreshCw,
@@ -193,6 +196,8 @@ function StepTable({
   expandAll: boolean;
 }) {
   const { t } = useTranslation();
+  const agentVersion = extractAgentVersion(step);
+  const agentSwitch = extractAgentSwitch(step);
 
   const items = useMemo(() => {
     let filtered = step.conversationStep ?? [];
@@ -209,19 +214,37 @@ function StepTable({
     return filtered;
   }, [step.conversationStep, searchQuery]);
 
+  const switchNotice = agentSwitch ? (
+    <AgentSwitchNotice from={agentSwitch.from} to={agentSwitch.to} className="self-start" />
+  ) : null;
+
   if (items.length === 0) {
     return (
-      <div className="py-6 text-center text-xs text-muted-foreground">
-        {t("memoryInspector.noMatches", "No matching data found")}
-      </div>
+      <>
+        {switchNotice}
+        <div className="py-6 text-center text-xs text-muted-foreground">
+          {t("memoryInspector.noMatches", "No matching data found")}
+        </div>
+      </>
     );
   }
 
   return (
+    <>
+    {switchNotice}
     <div className="rounded-lg border border-border bg-card overflow-hidden shadow-xs">
       <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2">
         <span className="text-xs font-semibold text-foreground">
           {t("memoryInspector.stepData", "Step Data")}
+          {agentVersion !== null && (
+            <span
+              className="ms-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={t("conversationDetail.stepAgentVersion", "Answered by agent version {{version}}", { version: agentVersion })}
+              data-testid="memory-step-agent-version"
+            >
+              v{agentVersion}
+            </span>
+          )}
         </span>
         <span className="text-[10px] font-medium text-muted-foreground rounded-full bg-muted px-2 py-0.5 border border-border/50">
           {items.length} {t("memoryInspector.keys", "keys")}
@@ -238,6 +261,7 @@ function StepTable({
         ))}
       </div>
     </div>
+    </>
   );
 }
 

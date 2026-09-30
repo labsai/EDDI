@@ -78,6 +78,7 @@
 ## Deployment & Infrastructure
 
 - [Configuration Reference](configuration-reference.md)
+- [Upgrading from EDDI 5.x](upgrading-from-5x.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)

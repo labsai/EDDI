@@ -274,14 +274,15 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
 - 🧙 **Platform Operator** — Meta-agent that reads and operates the deployment — including creating other agents — with every write behind a human approval gate
 
-### 🧠 LLM Provider Support (12 Providers)
+### 🧠 LLM Provider Support (19 Providers)
 
 | Category             | Providers                                                             |
 | -------------------- | --------------------------------------------------------------------- |
 | **Cloud APIs**       | OpenAI · Anthropic Claude · Google Gemini · Mistral AI                |
 | **Enterprise Cloud** | Azure OpenAI · Amazon Bedrock · Oracle GenAI · Google Vertex AI       |
 | **Self-Hosted**      | Ollama · Jlama · Hugging Face                                         |
-| **Compatible**       | Any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via `baseUrl` |
+| **OpenAI-compatible** | xAI Grok · DeepSeek · Moonshot Kimi · Alibaba Qwen · Z.ai GLM · MiniMax · OpenRouter · Groq |
+| **Any endpoint**     | Anything else OpenAI-compatible (Cohere, gateways, etc.) via `baseUrl` |
 
 - 🔀 **Multi-Model Cascading** — Start with cheap/fast models, escalate to powerful ones based on confidence ([details](#-smart-model-cascading))
 - 📋 **JSON Response Mode** — `jsonResponseFormat` policy (`auto` | `on` | `off`) negotiates structured JSON output across all execution paths with provider-aware rules
@@ -449,7 +450,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[Getting Started](docs/getting-started.md)**               | Setup and first steps                              |
 | **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes                |
 | **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline          |
-| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 12 LLM providers                     |
+| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 19 LLM providers                     |
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic                    |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
@@ -472,6 +473,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption and auto-vaulting              |
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
+| **[Upgrading from 5.x](docs/upgrading-from-5x.md)**          | First boot of an EDDI 5 database on 6.x            |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |

@@ -457,6 +457,34 @@ describe("GroupWizardPage", () => {
     });
   });
 
+  it("changing a member's or the moderator's provider clears the API key typed for the old one", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<GroupWizardPage />, {
+      initialRoute: "/manage/groups/wizard",
+    });
+
+    await user.click(screen.getByTestId("template-advisory-board"));
+    await user.click(screen.getByTestId("group-wizard-next"));
+    await waitFor(() => {
+      expect(screen.getByTestId("member-card-0")).toBeInTheDocument();
+    });
+
+    // Member slot
+    const card = screen.getByTestId("member-card-0");
+    await user.selectOptions(within(card).getByRole("combobox", { name: "LLM Provider" }), "openai");
+    await user.type(within(card).getByTestId("gw-apikey-0-input"), "sk-openai-key");
+    await user.selectOptions(within(card).getByRole("combobox", { name: "LLM Provider" }), "deepseek");
+    expect(within(card).getByTestId("gw-apikey-0-input")).toHaveValue("");
+
+    // Moderator slot
+    const modKey = () => screen.getByTestId("gw-moderator-apikey-input");
+    const modSection = screen.getByTestId("gw-moderator-apikey").closest(".space-y-2") as HTMLElement;
+    await user.selectOptions(within(modSection).getByRole("combobox", { name: "LLM Provider" }), "openai");
+    await user.type(modKey(), "sk-openai-key");
+    await user.selectOptions(within(modSection).getByRole("combobox", { name: "LLM Provider" }), "xai");
+    expect(modKey()).toHaveValue("");
+  });
+
   it("review step shows Moderator badge when template includes moderator", async () => {
     const user = userEvent.setup();
     renderWithProviders(<GroupWizardPage />, {

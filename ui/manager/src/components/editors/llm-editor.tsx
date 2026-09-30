@@ -74,9 +74,11 @@ import {
   type LlmConfig as LangchainConfig,
   type LlmPostResponse,
   HIDDEN_PARAM_KEYS,
-  MODEL_TYPES,
   BUILT_IN_TOOLS,
 } from "./llm/types";
+
+import { ProviderSelect } from "@/components/shared/provider-select";
+import { getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalog";
 
 /** Parameter keys whose values should use SecretKeyPicker (case-insensitive match) */
 const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token"]);
@@ -248,6 +250,16 @@ function TaskEditor({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
+  // The endpoint the backend will use, in its own order of precedence: an explicit
+  // `baseUrl` parameter, then the `region` parameter's URL, then the provider default.
+  const compatibleDefault = getDefaultBaseUrl(task.type ?? "");
+  const baseUrlParam = task.parameters?.baseUrl?.trim();
+  const regionParam = task.parameters?.region?.trim().toLowerCase();
+  const regionUrl = regionParam
+    ? getProviderRegions(task.type ?? "").find((r) => r.id === regionParam)?.baseUrl
+    : undefined;
+  const compatibleEndpoint = compatibleDefault ? baseUrlParam || regionUrl || compatibleDefault : undefined;
+  const endpointOverridden = Boolean(compatibleEndpoint && compatibleEndpoint !== compatibleDefault);
 
   const isAgent =
     (task.tools && task.tools.length > 0) ||
@@ -298,20 +310,33 @@ function TaskEditor({
             </>
           )}
         </span>
-        {/* Model type dropdown */}
-        <select
+        {/* Model type dropdown. Changing the type deliberately keeps the parameters:
+            they are visible and editable in the grid below, so the user sees what
+            carries over (apiKey, modelName, baseUrl, ...) and can adjust it. */}
+        <ProviderSelect
           value={task.type ?? "openai"}
-          onChange={(e) => onChange({ ...task, type: e.target.value })}
+          onChange={(type) => onChange({ ...task, type })}
+          ariaLabel={t("llmEditor.modelType", "Model type")}
           disabled={readOnly}
           className="h-8 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-          data-testid="model-type-select"
-        >
-          {MODEL_TYPES.map((mt) => (
-            <option key={mt} value={mt}>
-              {mt}
-            </option>
-          ))}
-        </select>
+          testId="model-type-select"
+        />
+        {compatibleEndpoint && (
+          <span
+            className="text-[10px] text-muted-foreground"
+            data-testid="compatible-endpoint-hint"
+          >
+            {endpointOverridden
+              ? t("llmEditor.compatibleEndpointOverridden", "Endpoint: {{url}}", {
+                  url: compatibleEndpoint,
+                })
+              : t(
+                  "llmEditor.compatibleEndpoint",
+                  "Endpoint: {{url}} — add a baseUrl or region parameter to override",
+                  { url: compatibleEndpoint },
+                )}
+          </span>
+        )}
         <input
           type="text"
           value={task.id ?? ""}

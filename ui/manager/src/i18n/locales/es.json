@@ -267,7 +267,8 @@
     "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
     "deployToProduction": "Desplegar en producción",
     "undeployFromProduction": "Retirar de producción",
-    "deployFailedIn": "El despliegue falló en {{environment}}"
+    "deployFailedIn": "El despliegue falló en {{environment}}",
+    "undeployCompatibleHint": "Las conversaciones que una versión compatible desplegada puede continuar no se terminan: pasan a ella en su siguiente turno."
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -698,7 +699,9 @@
     "exportMd": "Exportar como Markdown",
     "toolSummary": "Uso de herramientas",
     "totalCost": "Coste total",
-    "cacheHitRate": "Tasa de acierto de caché"
+    "cacheHitRate": "Tasa de acierto de caché",
+    "endReasonRetired": "Finalizada: la versión del agente fue retirada",
+    "stepAgentVersion": "Respondido por la versión {{version}} del agente"
   },
   "chat": {
     "hide": "Ocultar",
@@ -1362,6 +1365,10 @@
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
     "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo",
+    "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
+    "modelType": "Tipo de modelo",
     "paramName": "Nombre del parámetro",
     "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
   },
@@ -4451,7 +4458,8 @@
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
-      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección.",
+      "llmEndpoint": "Endpoint del modelo"
     },
     "authMode": {
       "none": {
@@ -5232,5 +5240,42 @@
     "workflowMissingResource": "El flujo de trabajo {{workflowId}} (versión {{version}}) no hace referencia a {{resource}}, por lo que guardarlo aquí no cambiaría el agente. No se guardó nada.",
     "agentWorkflowMismatch": "El agente {{agentId}} (versión {{version}}) hace referencia al flujo de trabajo {{workflowId}} en la versión {{found}}, no en la versión {{expected}}. El agente cambió desde que se abrió esta página. Recárgala. No se guardó nada.",
     "agentMissingWorkflow": "El agente {{agentId}} (versión {{version}}) no hace referencia al flujo de trabajo {{workflowId}}. No se guardó nada."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratorios de modelos",
+      "compatible": "Proveedores compatibles con OpenAI",
+      "cloud": "Plataformas en la nube",
+      "local": "Local / autoalojado"
+    },
+    "region": {
+      "label": "Región",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abajo)"
+    },
+    "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
+    "keyHint": "Obtén una clave de API en {{url}}",
+    "select": "Selecciona un proveedor"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatible con la versión anterior — las conversaciones en curso pueden cambiar a ella",
+    "compatibleHint": "Solo para cambios que no pueden romper una conversación en curso, p. ej. la redacción del prompt o un modelo distinto. Déjalo sin marcar si se renombraron o eliminaron propiedades, acciones o pasos del workflow.",
+    "compatibleLegacyNote": "La versión actual es anterior al seguimiento de versiones, así que las conversaciones que ya la usan se quedan en ella. El próximo guardado compatible enlaza la cadena.",
+    "compatibleUnknownNote": "Las conversaciones en una versión anterior al seguimiento de versiones se quedan en ella.",
+    "generationBadge": "gen. compat. {{generation}}",
+    "generationTooltip": "Generación de compatibilidad {{generation}}: las versiones de este agente con la misma generación son compatibles, por lo que una conversación en curso pasa a la más reciente desplegada en su siguiente turno. Un guardado incompatible inicia una nueva generación.",
+    "impactTitle": "Desplegar v{{version}} en {{environment}} — conversaciones en curso",
+    "impactFollow_one": "{{count}} conversación activa en v{{from}} continuará en v{{to}}",
+    "impactFollow_many": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactFollow_other": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactStay_one": "{{count}} conversación activa en v{{from}} se quedará en v{{from}}",
+    "impactStay_many": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactStay_other": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactReasonNewer": "versión más reciente",
+    "impactReasonLegacy": "anterior al seguimiento de versiones",
+    "impactReasonBreaking": "cambio incompatible",
+    "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
   }
 }

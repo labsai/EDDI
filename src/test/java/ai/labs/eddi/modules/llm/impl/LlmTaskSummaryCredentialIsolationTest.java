@@ -184,6 +184,8 @@ class LlmTaskSummaryCredentialIsolationTest {
                 "the OpenAI key must never be handed to a summarizer running on Anthropic");
         assertNull(params.get("baseUrl"),
                 "the OpenAI endpoint must not redirect the Anthropic summarization request");
+        assertNull(params.get("modelName"),
+                "gpt-4o means nothing to Anthropic and would override the summary provider's own model");
         assertEquals("0.3", params.get("temperature"),
                 "vendor-neutral tuning parameters still carry over");
     }
@@ -252,6 +254,21 @@ class LlmTaskSummaryCredentialIsolationTest {
         assertEquals("512", resolved.get("maxTokens"));
         assertEquals(2, resolved.size());
         assertTrue(parentParams.containsKey("apiKey"), "the parent task's own parameter map must not be mutated");
+    }
+
+    @Test
+    @DisplayName("mismatched providers → every model key is dropped; matching providers keep it")
+    void mismatchedProviders_stripModelKeys() {
+        Map<String, String> parentParams = new HashMap<>();
+        for (String modelKey : List.of("modelName", "model", "modelId", "modelID", "deploymentName")) {
+            parentParams.put(modelKey, "grok-4.7");
+        }
+        parentParams.put("temperature", "0.2");
+
+        var resolved = LlmTask.resolveInheritedSummaryParameters(parentParams, "xai", "anthropic");
+
+        assertEquals(Map.of("temperature", "0.2"), resolved, "a model id never crosses a provider boundary");
+        assertSame(parentParams, LlmTask.resolveInheritedSummaryParameters(parentParams, "xai", "xai"));
     }
 
     @Test

@@ -2,14 +2,19 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Bot, RefreshCw, Check, X } from "lucide-react";
 import type { ResourceUsage } from "@/lib/api/resource-usage";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 
 export interface UpdateUsageDialogProps {
   /** List of workflows/agents using this resource */
   usages: ResourceUsage[];
   /** Whether cascade update is in progress */
   isUpdating: boolean;
-  /** Called when user confirms which items to cascade */
-  onConfirm: (selected: ResourceUsage[]) => void;
+  /**
+   * Called when user confirms which items to cascade. `compatible` is the
+   * user's answer for the agent versions the cascade writes — false unless
+   * they ticked it.
+   */
+  onConfirm: (selected: ResourceUsage[], options: { compatible: boolean }) => void;
   /** Called when user dismisses the dialog */
   onDismiss: () => void;
 }
@@ -28,6 +33,9 @@ export function UpdateUsageDialog({
   const [selected, setSelected] = useState<Set<number>>(
     new Set(usages.map((_, i) => i))
   );
+  // Unticked by default: a new agent version is breaking unless the user says
+  // otherwise.
+  const [compatible, setCompatible] = useState(false);
 
   function toggleItem(index: number) {
     const next = new Set(selected);
@@ -38,7 +46,7 @@ export function UpdateUsageDialog({
 
   function handleConfirm() {
     const items = usages.filter((_, i) => selected.has(i));
-    onConfirm(items);
+    onConfirm(items, { compatible });
   }
 
   if (usages.length === 0) return null;
@@ -91,6 +99,14 @@ export function UpdateUsageDialog({
           </li>
         ))}
       </ul>
+      <CompatibleVersionCheckbox
+        checked={compatible}
+        onChange={setCompatible}
+        disabled={isUpdating}
+        tone="amber"
+        className="mb-3"
+        data-testid="cascade-compatible-checkbox"
+      />
       <div className="flex gap-2">
         <button
           onClick={handleConfirm}

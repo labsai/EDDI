@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -337,6 +338,14 @@ public class ConversationMemorySnapshot {
             return packages;
         }
 
+        /**
+         * Also accepts {@code packages}, the key EDDI 5 stored a step's runs under.
+         * Without the alias that key was silently ignored, so every conversation
+         * created on 5.x loaded with no data in any step — and the next save wrote the
+         * empty steps back. {@code V6RenameMigration} renames the stored key; this
+         * keeps a document the migration has not reached loadable.
+         */
+        @JsonAlias("packages")
         public void setWorkflows(List<WorkflowRunSnapshot> packages) {
             this.packages = packages;
         }
@@ -475,6 +484,8 @@ public class ConversationMemorySnapshot {
             return originWorkflowId;
         }
 
+        /** Also accepts {@code originPackageId}, the key EDDI 5 stored it under. */
+        @JsonAlias("originPackageId")
         public void setOriginWorkflowId(String originWorkflowId) {
             this.originWorkflowId = originWorkflowId;
         }

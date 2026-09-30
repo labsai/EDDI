@@ -2985,8 +2985,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Normalize legacy ${eddivault:...} → ${vault:...}
             resourceContent = normalizeVaultReferences(resourceContent);
 
-            // Final pass: migrate any remaining Thymeleaf template syntax to Qute
-            resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+            // Final pass: migrate any remaining Thymeleaf template syntax to Qute. A
+            // template the converter cannot convert safely is imported unchanged
+            // rather than rewritten wrongly; say so, since it renders as literal text.
+            // Judged on the decoded values, not the JSON text: escaped quotes hide where
+            // a double-quoted literal ends.
+            String unconvertible = templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)
+                    ? templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class))
+                    : null;
+            if (unconvertible != null) {
+                LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
+                        resourcePath.getFileName(), unconvertible);
+            } else {
+                resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+            }
 
             return jsonSerialization.deserialize(resourceContent, clazz);
         } catch (Exception e) {
