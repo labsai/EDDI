@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
+import ai.labs.eddi.modules.ingestion.extract.ExtractionLimits;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -19,11 +20,14 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Accepting, listing and removing the files of an upload source.
@@ -45,6 +49,22 @@ public class IngestedFileService {
      * covered.
      */
     private static final int MAX_DOCUMENT_STATES = 10_000;
+
+    /**
+     * Locks that serialise the check-and-store step of uploads to one source, on
+     * this instance. Striped rather than one per source, so the set cannot grow
+     * with the number of sources ever uploaded to.
+     */
+    private static final int LOCK_STRIPES = 64;
+
+    /**
+     * How long the upload-time probe may spend finding text in one file. It runs on
+     * the request thread, and a genuine document shows text on its first pages well
+     * within this; the full extraction budget belongs to the run.
+     */
+    static final Duration UPLOAD_PROBE_DURATION = Duration.ofSeconds(10);
+
+    private final Object[] sourceLocks = Stream.generate(Object::new).limit(LOCK_STRIPES).toArray();
 
     private final IIngestedFileStore fileStore;
     private final DocumentExtractors extractors;
@@ -71,24 +91,22 @@ public class IngestedFileService {
      * scanned-image PDF, should end up with twenty-nine stored files and one line
      * saying which failed — not with nothing and a single error about a file they
      * would then have to find.
+     *
+     * <h2>Limits under concurrency</h2>
+     * <p>
+     * The source's file count and total size used to be read once, when the request
+     * arrived, and then measured against: two uploads arriving together both saw
+     * the same headroom and both filled it, so a source limited to 500 files held
+     * 998. Each file is now measured against a fresh listing, taken under a lock
+     * that serialises the check and the store for that source on this instance.
+     * Across instances the lock cannot reach, a new file that turns out to have
+     * overshot once it is stored is taken back out again — a replacement cannot be,
+     * since the file it replaced is already gone, so there the limit can be passed
+     * by what the replaced file used to take.
      */
     public UploadOutcome upload(String ragConfigId, IngestionSource source, List<IncomingFile> incoming) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         IngestionSource.UploadSource limits = source.upload();
-
-        // What each name already occupies, so replacing a 10 MB file with a 1 MB one
-        // frees space rather than counting both against the source's total. Kept up
-        // to date as the batch proceeds: twenty files have to be measured against
-        // each other, not only against what was there when the request arrived.
-        //
-        // One listing, not a listing plus a usage query: the totals are the listing
-        // summed, and two reads can disagree with each other.
-        Map<String, Long> sizeByFileId = new HashMap<>();
-        for (IIngestedFileStore.StoredFile stored : fileStore.list(sourceKey)) {
-            sizeByFileId.put(stored.fileId(), stored.sizeBytes());
-        }
-        long usedBytes = sizeByFileId.values().stream().mapToLong(Long::longValue).sum();
-        int usedFiles = sizeByFileId.size();
 
         List<IIngestedFileStore.StoredFile> accepted = new ArrayList<>();
         List<RejectedFile> rejected = new ArrayList<>();
@@ -96,6 +114,14 @@ public class IngestedFileService {
         for (IncomingFile file : incoming) {
             String fileName = IngestedFileIds.sanitize(file.fileName());
             String fileId = IngestedFileIds.forFileName(fileName);
+
+            if (file.declaredSize() > limits.maxFileBytesOrDefault()) {
+                // Refused on the size the request declared, before the bytes are read:
+                // reading a 60 MB part into memory in order to say it is too big is
+                // the cost the limit exists to avoid.
+                rejected.add(new RejectedFile(fileName, tooLarge(file.declaredSize(), limits)));
+                continue;
+            }
 
             byte[] content;
             try {
@@ -111,13 +137,9 @@ public class IngestedFileService {
                 continue;
             }
 
-            Long replacedBytes = sizeByFileId.get(fileId);
-            boolean isReplacement = replacedBytes != null;
-            long otherBytes = usedBytes - (isReplacement ? replacedBytes : 0L);
-
-            String refusal = refuse(content, limits, usedFiles, isReplacement, otherBytes);
-            if (refusal != null) {
-                rejected.add(new RejectedFile(fileName, refusal));
+            String sizeRefusal = refuseSize(content, limits);
+            if (sizeRefusal != null) {
+                rejected.add(new RejectedFile(fileName, sizeRefusal));
                 continue;
             }
 
@@ -129,25 +151,31 @@ public class IngestedFileService {
                 if (extractors.extractorFor(mimeType).isEmpty()) {
                     throw new UnreadableDocumentException("Files of type " + mimeType + " cannot be ingested.");
                 }
+                // Read now, as a run would read it, and refused if it yields nothing.
+                // A scanned PDF used to be stored, listed as waiting to be indexed, and
+                // skipped as blank by every run, with nothing anywhere saying why.
+                //
+                // On the request thread, so on a short leash: the probe stops at the
+                // first characters of text, and a file that cannot show any within
+                // UPLOAD_PROBE_DURATION is refused rather than holding the worker.
+                extractors.requireText(content, mimeType,
+                        ExtractionLimits.defaults().withMaxDuration(UPLOAD_PROBE_DURATION));
             } catch (UnreadableDocumentException e) {
                 rejected.add(new RejectedFile(fileName, e.getMessage()));
                 continue;
             }
 
             try {
-                accepted.add(fileStore.store(sourceKey, fileName, mimeType, content));
+                RejectedFile refused = storeWithinLimits(sourceKey, source, fileName, fileId, mimeType, content,
+                        accepted);
+                if (refused != null) {
+                    rejected.add(refused);
+                }
             } catch (IIngestedFileStore.IngestedFileStoreException e) {
                 LOGGER.errorf(e, "Could not store an uploaded file for source '%s'",
                         LogSanitizer.sanitize(source.getName()));
                 rejected.add(new RejectedFile(fileName, "This file could not be stored. Try again."));
-                continue;
             }
-
-            usedBytes = otherBytes + content.length;
-            if (!isReplacement) {
-                usedFiles++;
-            }
-            sizeByFileId.put(fileId, (long) content.length);
         }
 
         // Tagged by source: a global counter says something is being refused but
@@ -158,16 +186,109 @@ public class IngestedFileService {
         return new UploadOutcome(accepted, rejected);
     }
 
-    /** The refusal for this file, or null when it may be stored. */
-    private static String refuse(byte[] content, IngestionSource.UploadSource limits,
-                                 int usedFiles, boolean isReplacement, long otherBytes) {
+    /**
+     * Measures one file against what the source holds right now, and stores it if
+     * it fits — the two as one step for this source on this instance.
+     *
+     * @return the refusal, or null when the file was stored and added to
+     *         {@code accepted}
+     */
+    private RejectedFile storeWithinLimits(String sourceKey, IngestionSource source, String fileName, String fileId,
+                                           String mimeType, byte[] content,
+                                           List<IIngestedFileStore.StoredFile> accepted) {
+        IngestionSource.UploadSource limits = source.upload();
+        synchronized (sourceLocks[Math.floorMod(sourceKey.hashCode(), LOCK_STRIPES)]) {
+            // What each name already occupies, so replacing a 10 MB file with a 1 MB
+            // one frees space rather than counting both against the source's total.
+            // One listing, not a listing plus a usage query: the totals are the
+            // listing summed, and two reads can disagree with each other.
+            Map<String, Long> sizeByFileId = sizesOf(sourceKey);
+            Long replacedBytes = sizeByFileId.get(fileId);
+            boolean isReplacement = replacedBytes != null;
+            long usedBytes = sizeByFileId.values().stream().mapToLong(Long::longValue).sum();
+            long otherBytes = usedBytes - (isReplacement ? replacedBytes : 0L);
 
+            String refusal = refuse(content, limits, sizeByFileId.size(), isReplacement, otherBytes);
+            if (refusal != null) {
+                return new RejectedFile(fileName, refusal);
+            }
+            IIngestedFileStore.StoredFile stored = fileStore.store(sourceKey, fileName, mimeType, content);
+
+            if (!isReplacement) {
+                // Another instance may have stored in the same window. A new file that
+                // took the source past a limit is taken back out; nothing was replaced,
+                // so nothing is lost by it.
+                //
+                // Only if the stored file is still the one written here: another
+                // instance uploading the same name in the same window saw a
+                // replacement, skipped this check and told its caller "stored" — its
+                // file must not be deleted by this one. (Two instances adding
+                // different files to a source with one slot left can both see it full
+                // and both take theirs back; the uploader then retries. Liveness, not
+                // safety, and only across instances.)
+                Map<String, Long> after = sizesOf(sourceKey);
+                long total = after.values().stream().mapToLong(Long::longValue).sum();
+                if ((after.size() > limits.maxFilesOrDefault() || total > limits.maxTotalBytesOrDefault())
+                        && stillOurs(sourceKey, stored)) {
+                    fileStore.delete(sourceKey, fileId);
+                    return new RejectedFile(fileName, "Other files were uploaded to this source at the same "
+                            + "time and it is now full. Delete some files, or raise the limit in the source's "
+                            + "settings.");
+                }
+            }
+            accepted.add(stored);
+            return null;
+        }
+    }
+
+    /**
+     * Whether the file under this name still holds the bytes stored here. By
+     * content hash: the stores do not hand back the upload time they persisted, so
+     * the hash is the one field both sides can compare. Two instances storing
+     * identical bytes under one name, into a full source, in the same instant, are
+     * indistinguishable — there the delete can still take the file the other
+     * reported stored.
+     */
+    private boolean stillOurs(String sourceKey, IIngestedFileStore.StoredFile stored) {
+        return fileStore.find(sourceKey, stored.fileId())
+                .map(current -> Objects.equals(current.contentHash(), stored.contentHash()))
+                .orElse(false);
+    }
+
+    private Map<String, Long> sizesOf(String sourceKey) {
+        Map<String, Long> sizeByFileId = new HashMap<>();
+        for (IIngestedFileStore.StoredFile stored : fileStore.list(sourceKey)) {
+            sizeByFileId.put(stored.fileId(), stored.sizeBytes());
+        }
+        return sizeByFileId;
+    }
+
+    /** The refusal for a file's own size, or null when it may go on. */
+    private static String refuseSize(byte[] content, IngestionSource.UploadSource limits) {
         if (content == null || content.length == 0) {
             return "This file is empty.";
         }
         if (content.length > limits.maxFileBytesOrDefault()) {
-            return "This file is " + megabytes(content.length) + " MB. The limit for one file is "
-                    + megabytes(limits.maxFileBytesOrDefault()) + " MB.";
+            return tooLarge(content.length, limits);
+        }
+        return null;
+    }
+
+    private static String tooLarge(long bytes, IngestionSource.UploadSource limits) {
+        return "This file is " + megabytes(bytes) + " MB. The limit for one file is "
+                + megabytes(limits.maxFileBytesOrDefault()) + " MB.";
+    }
+
+    /**
+     * The refusal for this file against what the source holds, or null when it
+     * fits.
+     */
+    private static String refuse(byte[] content, IngestionSource.UploadSource limits,
+                                 int usedFiles, boolean isReplacement, long otherBytes) {
+
+        String sizeRefusal = refuseSize(content, limits);
+        if (sizeRefusal != null) {
+            return sizeRefusal;
         }
         if (!isReplacement && usedFiles >= limits.maxFilesOrDefault()) {
             return "This source already holds its maximum of " + limits.maxFilesOrDefault()
@@ -223,16 +344,25 @@ public class IngestedFileService {
             // The vectors go first. Deleting the file first and then failing to
             // remove its chunks would leave content in the knowledge base that the
             // operator can no longer see, let alone delete.
-            boolean vectorsRemoved = pipeline.forgetDocument(ragConfigId, knowledgeBase, source, fileId);
+            var vectors = pipeline.forgetDocument(ragConfigId, knowledgeBase, source, fileId);
+            if (vectors == IngestionPipeline.ForgetOutcome.FAILED) {
+                // Kept, so there is still something to delete once the store recovers.
+                // Deleting it anyway stranded the chunks for good: the document is
+                // tombstoned, reconciliation passes tombstoned documents over, and no
+                // file was left for the operator to try again with.
+                return DeleteOutcome.REMOVAL_FAILED;
+            }
             fileStore.delete(sourceKey, fileId);
             meterRegistry.counter("eddi.ingestion.files.deleted",
                     Tags.of("source", String.valueOf(source.getName()))).increment();
-            return vectorsRemoved ? DeleteOutcome.DELETED : DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN;
+            return vectors == IngestionPipeline.ForgetOutcome.REMOVED
+                    ? DeleteOutcome.DELETED
+                    : DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN;
         } finally {
             // Always, including after a failure: a claim that is never released
             // blocks the source until it is reaped, which is a quarter of an hour of
             // 409s for every run and every delete.
-            pipeline.releaseClaim(ragConfigId, source, claim.get(), 1);
+            pipeline.releaseClaim(ragConfigId, source, claim.get());
         }
     }
 
@@ -294,11 +424,16 @@ public class IngestedFileService {
      * already spooled each part to disk, so reading them one at a time costs
      * nothing but the read.
      */
-    public record IncomingFile(String fileName, FileContent content) {
+    public record IncomingFile(String fileName, long declaredSize, FileContent content) {
+
+        /** A file whose size is only known once it is read. */
+        public IncomingFile(String fileName, FileContent content) {
+            this(fileName, -1, content);
+        }
 
         /** For a caller that already holds the bytes, such as a test. */
         public static IncomingFile of(String fileName, byte[] content) {
-            return new IncomingFile(fileName, () -> content);
+            return new IncomingFile(fileName, content.length, () -> content);
         }
 
         @FunctionalInterface
@@ -315,6 +450,11 @@ public class IngestedFileService {
 
     public enum DeleteOutcome {
         DELETED, DELETED_BUT_CHUNKS_REMAIN, NOT_FOUND,
+        /**
+         * The vector store failed to remove the file's chunks, so the file was kept and
+         * the delete can be tried again.
+         */
+        REMOVAL_FAILED,
         /** A run holds the source's claim; deleting under it would race with it. */
         BUSY
     }

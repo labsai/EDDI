@@ -26,7 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * completes its handshake and then trickles — or never finishes — its response
  * body therefore hung forever, because control never returned to the check.
  * Redirect hops already carried a fallback; the initial request had whatever
- * the caller set, which for a caller that set nothing was no bound at all.
+ * the caller set, which for a caller that set nothing was no bound at all. (The
+ * per-request timeout itself stops counting once the headers arrive; the body
+ * is covered by the whole-exchange deadline, pinned in
+ * {@code SafeHttpClientBodyBoundsTest}.)
  * <p>
  * Deliberately separate from {@code SafeHttpClientTest}: that one binds a
  * loopback HTTP server in {@code @BeforeEach}, so it cannot run in environments

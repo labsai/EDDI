@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.secrets.VaultGrantChecker.ReferenceCheck;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer.AffectedAgent;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,7 +69,7 @@ class VaultGrantImpactAnalyzerTest {
     @DisplayName("an agent that uses the secret and is not on the new list is reported")
     void reportsAnAgentLosingAccess() throws Exception {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
-        when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
 
         List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess();
 
@@ -84,14 +85,14 @@ class VaultGrantImpactAnalyzerTest {
 
         // Reading an agent's whole workflow tree to answer a question the grant
         // list already answers is wasted work on a page-load-blocking call.
-        verify(checker, never()).references(any(), any(), any());
+        verify(checker, never()).checkReferences(any(), any(), any());
     }
 
     @Test
     @DisplayName("an agent that does not reference the secret is not reported")
     void skipsAgentsThatDoNotUseTheSecret() throws Exception {
         deployedInProduction(agent("agentThree", 2, Deployment.Status.READY));
-        when(checker.references(eq("agentThree"), anyInt(), eq(SECRET))).thenReturn(false);
+        when(checker.checkReferences(eq("agentThree"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.DOES_NOT_REFERENCE);
 
         assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
     }
@@ -122,7 +123,7 @@ class VaultGrantImpactAnalyzerTest {
     void skipsAgentsThatAreNotReady() throws Exception {
         // A deployment that never came up is not a deployment this change breaks.
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.ERROR));
-        when(checker.references(any(), any(), any())).thenReturn(true);
+        when(checker.checkReferences(any(), any(), any())).thenReturn(ReferenceCheck.REFERENCES);
 
         assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
     }
@@ -136,7 +137,7 @@ class VaultGrantImpactAnalyzerTest {
         IAgent inTest = agent("agentFour", 1, Deployment.Status.READY);
         when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(List.of(inProduction));
         when(agentFactory.getAllDeployedAgents(Deployment.Environment.test)).thenReturn(List.of(inTest));
-        when(checker.references(any(), any(), eq(SECRET))).thenReturn(true);
+        when(checker.checkReferences(any(), any(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
 
         List<AffectedAgent> affected = analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess();
 
@@ -150,7 +151,7 @@ class VaultGrantImpactAnalyzerTest {
         // v3 failed to come up; v2 is what users are talking to. Looking only at the
         // latest version per id would skip v3 as not READY and never see v2.
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.ERROR), agent("agentTwo", 2, Deployment.Status.READY));
-        when(checker.references(eq("agentTwo"), eq(2), eq(SECRET))).thenReturn(true);
+        when(checker.checkReferences(eq("agentTwo"), eq(2), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
 
         assertEquals(List.of(new AffectedAgent("agentTwo", 2, "production")),
                 analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
@@ -162,7 +163,7 @@ class VaultGrantImpactAnalyzerTest {
         IAgent v1 = agent("agentTwo", 1, Deployment.Status.READY);
         IAgent v2 = agent("agentTwo", 2, Deployment.Status.READY);
         deployedInProduction(v1, v2, v2);
-        when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
 
         assertEquals(List.of(new AffectedAgent("agentTwo", 1, "production"), new AffectedAgent("agentTwo", 2, "production")),
                 analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
@@ -189,7 +190,7 @@ class VaultGrantImpactAnalyzerTest {
         IAgent inProduction = agent("agentTwo", 3, Deployment.Status.READY);
         when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(List.of(inProduction));
         when(agentFactory.getAllDeployedAgents(Deployment.Environment.test)).thenThrow(new RuntimeException("registry unavailable"));
-        when(checker.references(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(true);
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
 
         var impact = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
 
@@ -201,7 +202,7 @@ class VaultGrantImpactAnalyzerTest {
     @DisplayName("a scan that reached every environment is complete, including the wildcard short-circuit")
     void successfulScansAreComplete() throws Exception {
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
-        when(checker.references(any(), any(), any())).thenReturn(false);
+        when(checker.checkReferences(any(), any(), any())).thenReturn(ReferenceCheck.DOES_NOT_REFERENCE);
 
         assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).complete());
         assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("*")).complete());
@@ -219,8 +220,28 @@ class VaultGrantImpactAnalyzerTest {
     @DisplayName("an agent with no id is skipped rather than reported as a blank one")
     void skipsAgentsWithoutAnId() throws Exception {
         deployedInProduction(agent(null, 1, Deployment.Status.READY));
-        when(checker.references(any(), any(), any())).thenReturn(true);
+        when(checker.checkReferences(any(), any(), any())).thenReturn(ReferenceCheck.REFERENCES);
 
         assertTrue(analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess().isEmpty());
+    }
+
+    /**
+     * S7: an agent whose configuration could not be read used to count as "does not
+     * reference the secret", and the scan still reported {@code complete=true} —
+     * telling an operator that narrowing the grant breaks nothing, on the strength
+     * of a config nobody had read.
+     */
+    @Test
+    @DisplayName("an agent whose configuration cannot be read makes the answer incomplete")
+    void unreadableAgentMakesTheScanIncomplete() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY), agent("agentThree", 1, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.UNKNOWN);
+        when(checker.checkReferences(eq("agentThree"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        var impact = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+
+        assertFalse(impact.complete());
+        // The readable agent is still reported; the unreadable one is not guessed at.
+        assertEquals(List.of(new AffectedAgent("agentThree", 1, "production")), impact.agentsLosingAccess());
     }
 }

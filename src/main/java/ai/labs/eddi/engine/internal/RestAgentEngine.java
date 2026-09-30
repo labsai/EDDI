@@ -246,10 +246,25 @@ public class RestAgentEngine implements IRestAgentEngine {
 
             @Override
             public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                String reason = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN
-                        ? "Conversation is awaiting human approval — your message was not processed;"
-                                + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)"
-                        : "Conversation is processing another turn — your message was not processed; retry shortly";
+                ConversationState state = snapshot.getConversationState();
+                if (state == ConversationState.ENDED) {
+                    // Ended while the message was queued — the same answer as ending first.
+                    response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+                    return;
+                }
+                String reason;
+                if (state == ConversationState.AWAITING_HUMAN) {
+                    reason = "Conversation is awaiting human approval — your message was not processed;"
+                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
+                } else if (state == ConversationState.IN_PROGRESS) {
+                    reason = "Conversation is processing another turn — your message was not processed; retry shortly";
+                } else {
+                    // Idle, yet skipped: the conversation changed while the message was
+                    // queued (a superseded rerun, or a turn that could not be rebuilt over
+                    // the current conversation). Retrying blindly is not necessarily right.
+                    reason = "The conversation changed while your message was queued — it was not processed;"
+                            + " reload the conversation before sending it again";
+                }
                 response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason).build());
             }
         };
@@ -468,6 +483,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (IConversationService.PauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer the current one.
+            // Fixed text: the current pause is untouched and awaits a fresh decision.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The pending approval changed since this decision was made (pauseId no longer current) — "
+                            + "re-read approval-status and decide again.")
+                    .build();
         } catch (IllegalStateException e) {
             // wrong state (already resumed/cancelled/timed out, agent not deployed).
             // Contract (docs/hitl.md): the 409 body names the CURRENT state so the
@@ -528,6 +550,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             summary.put("conversationId", conversationId);
             summary.put("state", snapshot.getConversationState().name());
             summary.put("pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");

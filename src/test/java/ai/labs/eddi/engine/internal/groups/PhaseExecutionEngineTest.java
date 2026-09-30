@@ -703,4 +703,22 @@ class PhaseExecutionEngineTest {
         assertEquals(1, decision.dissents().size(), "the losing side's statement must survive the tiebreak");
         assertEquals("migration risk is real", decision.dissents().get(0).position());
     }
+
+    @Test
+    void setDecisionCarryingDissents_mergesEarlierAndNewDissents() {
+        // M-G3: a vote carrying its own minority report used to REPLACE the dissents
+        // an earlier dissent round recorded, instead of adding to them.
+        var gc = new GroupConversation();
+        var earlier = new Dissent("a", "A", "The timeline is unrealistic");
+        gc.setDecision(new DecisionRecord(DecisionType.NONE, null, null, null, List.of(earlier), "dissent-round",
+                "Dissent", null));
+        var fromVote = new Dissent("b", "B", "Hold it");
+
+        PhaseExecutionEngine.setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.VOTE, "Ship it wins",
+                "Ship it", Map.of(), List.of(fromVote, earlier), "vote", "Ballot", null));
+
+        assertEquals(DecisionType.VOTE, gc.getDecision().type());
+        assertEquals(List.of(earlier, fromVote), gc.getDecision().dissents(),
+                "earlier dissents first, the vote's added, an identical one kept once");
+    }
 }

@@ -56,7 +56,7 @@ class ObservableStreamingChatModel implements StreamingChatModel {
 
         // EDDI's listener only, for the same reason as ObservableChatModel: doChat
         // forwards to delegate.chat(), so the delegate dispatches its own listeners.
-        this.listeners = telemetryListener == null ? List.of() : List.of(telemetryListener);
+        this.listeners = telemetryListener == null ? List.of() : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType));
     }
 
     /**

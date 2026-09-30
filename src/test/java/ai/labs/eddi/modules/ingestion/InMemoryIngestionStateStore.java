@@ -137,6 +137,17 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public synchronized void recordSeen(String sourceId, String documentId, String runId, String etag,
+                                        String lastModified) {
+        DocumentState existing = documents.get(key(sourceId, documentId));
+        if (existing == null || !owns(key(sourceId, documentId), runId)) {
+            return;
+        }
+        documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
+                etag, lastModified, existing.firstIngestedAt(), existing.lastIngestedAt(), runId, 0, false));
+    }
+
+    @Override
     public synchronized void recordUnreachable(String sourceId, String documentId, String runId) {
         DocumentState existing = documents.get(key(sourceId, documentId));
         if (existing == null || !owns(key(sourceId, documentId), runId)) {
@@ -189,6 +200,18 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             documents.put(key(sourceId, documentId), new DocumentState(state.sourceId(), state.documentId(),
                     state.contentHash(), state.etag(), state.lastModified(), state.firstIngestedAt(),
                     state.lastIngestedAt(), state.lastRunId(), state.missedRuns(), true));
+        }
+    }
+
+    @Override
+    public synchronized void invalidateContent(String sourceId) {
+        for (Map.Entry<String, DocumentState> entry : documents.entrySet()) {
+            DocumentState state = entry.getValue();
+            if (state.sourceId().equals(sourceId)) {
+                entry.setValue(new DocumentState(state.sourceId(), state.documentId(), null, null, null,
+                        state.firstIngestedAt(), state.lastIngestedAt(), state.lastRunId(), state.missedRuns(),
+                        state.tombstoned()));
+            }
         }
     }
 
@@ -252,6 +275,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     public synchronized List<IngestionRun> listRuns(String sourceId, int limit) {
         return runs.values().stream()
                 .filter(run -> run.sourceId().equals(sourceId))
+                .filter(run -> run.status() != IngestionRun.Status.MAINTENANCE)
                 .sorted(Comparator.comparing(IngestionRun::startedAt).reversed())
                 .limit(Math.max(1, limit))
                 .toList();

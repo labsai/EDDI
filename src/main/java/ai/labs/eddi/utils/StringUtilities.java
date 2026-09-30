@@ -40,7 +40,7 @@ public final class StringUtilities {
      * with Java, MongoDB, and PostgreSQL POSIX regex engines (unlike
      * {@code Pattern.quote} which uses {@code \Q...\E}).
      */
-    static String escapeRegexChars(String input) {
+    public static String escapeRegexChars(String input) {
         StringBuilder sb = new StringBuilder(input.length() * 2);
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
