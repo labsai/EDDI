@@ -12,7 +12,7 @@ packages, within the same minor). Majors are deliberately left to follow-up bran
 | Artifact | From → To | Note |
 |---|---|---|
 | Quarkus platform BOM | 3.39.4 → **3.39.5** | `3.40.0` exists only as `CR1` for the platform BOM; the `io.quarkus:*` `3.40.0` the versions report lists are core artifacts the BOM manages, not a platform release |
-| `reactor-netty-http` | 1.2.8 → **1.3.7** | The CVE pin moves to the 1.3 line: its pom depends on `reactor-core` 3.8.7, which is exactly what the Quarkus 3.39.5 BOM manages, whereas 1.2.x is built against 3.7.x |
+| `reactor-netty-http` | 1.2.8 → **1.2.18** | Latest patch on the 1.2 line. An earlier revision of this branch took 1.3.7, whose pom matches Quarkus's `reactor-core` 3.8.7, but 1.3.x is built against Netty 4.2 while Quarkus 3.39.5 manages Netty 4.1.138: its default event loop needs `io.netty.channel.MultiThreadIoEventLoopGroup`, so the Azure OpenAI client's first request threw `NoClassDefFoundError` (reproduced; flagged by CodeRabbit). `ReactorNettyNettyCompatibilityTest` now creates that event loop, so the mismatch fails a unit test instead of a production request |
 | bcprov-lts8on | 2.73.12.1 → **2.73.13** | |
 | classgraph | 4.8.194 → **4.8.196** | |
 | swagger-annotations | 2.2.54 → **2.2.55** | `BuildQualityGatesTest` pins it; its constant and Javadoc moved with it |
@@ -22,7 +22,7 @@ packages, within the same minor). Majors are deliberately left to follow-up bran
 | Maven (wrapper + `mise.toml`) | 3.9.12 → **3.9.16** | New `distributionSha256Sum`, computed from the zip after checking it against Maven Central's published SHA-512 |
 | Node (`node.version`, `mise.toml`, `ci.yml` `NODE_VERSION` + `NODE_SHA256_LINUX_X64`) | 22.23.2 → **22.23.3** | The checksum is the linux-x64 `.tar.gz` line of nodejs.org's `SHASUMS256.txt` for v22.23.3 |
 
-**Rule for anything Quarkus manages or integrates with: take the version Quarkus has, not a newer one.** The versions report offered Jackson 2.22.3, but the Quarkus 3.39.5 BOM manages the Jackson family at 2.22.2, so Jackson stays at 2.22.2. Everything else above is either not in the Quarkus BOM (bcprov-lts8on, classgraph, swagger, jnats, the Maven plugins and wrapper) or matches it (`reactor-core` 3.8.7). Mockito and Caffeine are Quarkus-BOM-managed and move with the platform.
+**Rule for anything Quarkus manages or integrates with: take the version Quarkus has, not a newer one.** The versions report offered Jackson 2.22.3, but the Quarkus 3.39.5 BOM manages the Jackson family at 2.22.2, so Jackson stays at 2.22.2. Everything else above is either not in the Quarkus BOM (bcprov-lts8on, classgraph, swagger, jnats, the Maven plugins and wrapper) or matches it. `reactor-netty-http` is the counter-example: matching Quarkus's `reactor-core` is not enough when the library also needs a Netty Quarkus does not ship. Mockito and Caffeine are Quarkus-BOM-managed and move with the platform.
 
 **Held back on purpose:** langchain4j `1.20.0` → `1.20.2`, for two reasons.
 
@@ -60,7 +60,7 @@ present. The Manager's `npm update` hit an npm bug with its `overrides` block
     create a child event loop". That is this machine's environmental baseline for tests that bind
     loopback sockets.
   - Plus the swagger-annotations constant, since fixed.
-  - The Azure / `reactor-netty` path cannot be exercised here, so CI is the real check.
+  - The Azure / `reactor-netty` transport is exercised by `ReactorNettyNettyCompatibilityTest`, which builds Reactor Netty's client event loop on the resolved Netty.
 - **Guard tests** (`BuildQualityGatesTest`, `ReleaseVersionSourceTest`, `DeploymentManifestsTest`,
   `ImportStyleTest`, `ComposeStackTest`): pass, apart from the three `DeploymentManifestsTest`
   PowerShell tests that fail identically on `origin/main` here.

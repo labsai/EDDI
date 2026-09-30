@@ -118,13 +118,15 @@
                 <version>2.22.2</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
-                 The 1.3 line, because it is the one built against reactor-core 3.8, which is
-                 what the Quarkus BOM manages (3.8.7 in 3.39.5); 1.2.x is built against
-                 reactor-core 3.7. Keep it on the line that matches Quarkus's reactor-core. -->
+                 Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
+                 1.3.x is built against Netty 4.2 (Import-Package io.netty [4.2,5)) and its default
+                 event loop needs io.netty.channel.MultiThreadIoEventLoopGroup, so the Azure client's
+                 first request fails with NoClassDefFoundError. ReactorNettyNettyCompatibilityTest
+                 creates that event loop. Move to 1.3 only together with a Quarkus on Netty 4.2. -->
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>
-                <version>1.3.7</version>
+                <version>1.2.18</version>
             </dependency>
             <!-- Override postgresql to fix CVE-2026-42198 (SCRAM iteration count DoS, ≤42.7.10)
                  and CVE-2026-54291 (auth downgrade, ≤42.7.11).
