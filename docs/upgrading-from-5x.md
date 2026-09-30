@@ -119,8 +119,55 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
   back too. Its value is still there to restore by hand.
 - **Templates the converter cannot convert safely** (a template that generates template syntax)
   are left in Thymeleaf and reported, as above.
+- **Credentials recorded in stored conversations.** EDDI 5 stored whatever a turn carried, and no
+  migration rewrites stored conversations. So every conversation can still hold:
+  - context values the client sent, such as a user token under `userInfo`;
+  - properties set from plaintext configs (an API key a property setter copied into the conversation);
+  - the request headers of every HTTP call the agent made, `Authorization` included.
+- **Old plaintext in the config history.** Moving a credential into the vault writes a new config
+  version. The `.history` collections keep every earlier version, plaintext included.
 - **Old `eddi://` URIs inside stored conversation step data** are left as they were. No 6.x code
   reads them.
+
+**Rotate every credential that was ever in a 5.x config, or sent to it by a client.** Copies of them
+exist in stored conversations, in the config history and in the backups the migration keeps. Rotating
+is the only step that makes all of them worthless at once. Removing the copies afterwards is hygiene
+on top of it.
+
+To see where credential-named fields remain, run this in `mongosh` against the EDDI database. It
+prints collection names, counts and field names, **never values**. A hit means a field with a
+credential-like name exists: check whether it holds plaintext or a `${vault:…}` reference. Add the
+property names your own configs used for credentials to `NAMES`.
+
+```javascript
+const NAMES = ["token", "apikey", "api_key", "authorization", "password", "secret"];
+function walk(v, hits) {
+  if (v === null || typeof v !== "object" || v._bsontype) return;
+  if (Array.isArray(v)) { for (const x of v) walk(x, hits); return; }
+  // Property instructions name the credential in a value: {name: "…", valueString: …}
+  if (typeof v.name === "string" && NAMES.includes(v.name.toLowerCase()) && ("valueString" in v || "value" in v))
+    hits.add("name=" + v.name);
+  for (const k of Object.keys(v)) {
+    if (NAMES.includes(k.toLowerCase())) hits.add(k);
+    walk(v[k], hits);
+  }
+}
+const report = {};
+for (const c of db.getCollectionNames().sort()) {
+  let docs = 0; const byKey = {};
+  db.getCollection(c).find().forEach(d => {
+    const h = new Set(); walk(d, h);
+    if (h.size) { docs++; for (const k of h) byKey[k] = (byKey[k] || 0) + 1; }
+  });
+  if (docs) report[c] = { documents: docs, byKey };
+}
+printjson(report);
+```
+
+It reads every document, so run it against a restored copy or off-peak. To remove what it finds,
+prefer targeted server-side updates on the exact paths (`updateMany` with array filters or an update
+pipeline). Don't read and rewrite whole conversations from a client: that races live turns. Rehearse
+on a copy and take a backup first.
 - **REST clients.** The store paths were renamed (the bot, package, behavior, httpcalls, langchain and
   dictionary stores are now the agent, workflow, rules, API-call, LLM and dictionary stores).
   `LegacyPathRewriteFilter` still rewrites the v5 paths and the `unrestricted` / `restricted`
@@ -132,6 +179,8 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
 - The migration flags can stay on. Every migration is a no-op once recorded.
 - Once you have checked the result, drop the backups: `*.premigrationbackup` and
   `properties_migrated_v6`, which still hold the legacy values, credentials included.
+- Rotate the credentials the 5.x deployment used, and clear their stored copies ([section
+  7](#7-what-is-not-migrated-automatically)).
 - If this database was already migrated by an earlier 6.x, which copied `userInfo` into memory,
   remove those entries:
 
