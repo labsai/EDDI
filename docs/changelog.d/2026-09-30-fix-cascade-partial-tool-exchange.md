@@ -39,6 +39,11 @@ conversation alone and could execute the same side-effecting tools again.
 - **A tool still executing when the step is cancelled is not carried.** Its outcome is unknown.
   `cancel(true)` does not wait for the virtual thread, and waiting for it would defeat the step
   timeout. This is the one replay the change cannot prevent, and `docs/model-cascade.md` says so.
+- **A failed step's tool trace entries are still not kept.** The next step receives its completed
+  calls, but the returned tool trace lists only the calls of steps that returned;
+  `completedToolMessages` on the failed step's cascade trace entry is the record that they ran.
+  `docs/model-cascade.md` now says so rather than claiming the trace covers every step (review of
+  #916). Merging them is a follow-up.
 - **A recorder passed in, not state on the runner.** `ToolLoopRunner` is shared by every
   conversation and stays stateless; the recorder lives exactly as long as one step attempt.
 
