@@ -151,6 +151,15 @@ export function WorkflowDetailPage() {
     setLocalExtensions(null);
   }, [workflow?.workflowSteps]);
 
+  // The page stays mounted when only the query string changes, so the agent
+  // context can switch underneath it. A compatibility tick is about ONE agent's
+  // next version and must not carry over to another agent's; the version the
+  // next Save & Test replaces comes from the new context too.
+  useEffect(() => {
+    setAgentCompatible(false);
+    setCurrentAgentVer(agentVer ? parseInt(agentVer, 10) : undefined);
+  }, [agentId, agentVer]);
+
   // Clear save message after 3s
   useEffect(() => {
     if (saveMessage) {

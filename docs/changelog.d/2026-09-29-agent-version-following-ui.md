@@ -10,6 +10,10 @@ hides itself when its request fails.
   the post-save cascade dialog, the resource editor in cascade mode, the Studio editor panel, the
   workflow editor's Save & Test, and the Workforce agent editor sheet. Ticked on top of a version
   that predates generations, it says that conversations already on that version stay on it.
+  The tick also resets when the page's agent context changes underneath it: the resource editor
+  and the workflow editor stay mounted when only their query string changes, so a tick given for
+  one agent could otherwise have written another agent's version as compatible. The workflow
+  editor now also takes the agent version its next Save & Test replaces from the new context.
   `updateAgent` sends `compatible=true` only for an explicit `true`. Silent inline saves (agent
   section toggles, adding or removing workflows on the agent page) stay breaking.
 - **Manager — deploying**: the agent page's Environments card shows, per environment, what the

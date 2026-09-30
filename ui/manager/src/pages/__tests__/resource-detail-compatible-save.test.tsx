@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { renderPage } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
+import { useNavigate } from "react-router-dom";
 
 /**
  * A save in cascade mode writes a new AGENT version. Whether that version is
@@ -116,5 +117,38 @@ describe("ResourceDetailPage — compatible agent version on a cascade save", ()
     // Give the agent read time to land, so the absence is not "not loaded yet".
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId("compatible-version-checkbox-note")).not.toBeInTheDocument();
+  });
+});
+
+describe("ResourceDetailPage — cascade context switch", () => {
+  function SwitchAgent() {
+    const navigate = useNavigate();
+    return (
+      <button onClick={() => navigate("/manage/resources/llm/res1?wfId=wf1&wfVer=1&agentId=agent2&agentVer=3")}>
+        switch agent
+      </button>
+    );
+  }
+
+  // A tick given for one agent's next version must not write another agent's
+  // version as compatible: the page stays mounted when only the query changes.
+  it("drops the compatibility tick when the cascade's agent changes", async () => {
+    stubCascade();
+    renderPage(
+      PATH,
+      <>
+        <SwitchAgent />
+        <ResourceDetailPage />
+      </>,
+      ROUTE,
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId("compatible-version-checkbox"));
+    expect(checkbox().checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "switch agent" }));
+
+    await waitFor(() => expect(checkbox().checked).toBe(false));
   });
 });

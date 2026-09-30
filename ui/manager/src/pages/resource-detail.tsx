@@ -86,9 +86,11 @@ export function ResourceDetailPage() {
 
   const [cascadeContext, setCascadeContext] = useState<CascadeContext | undefined>(initialCascade);
 
-  // Sync when URL params change (user navigates to a different resource)
+  // Sync when URL params change (user navigates to a different resource).
+  // The compatibility tick (below) belongs to the cascade it was given for.
   useEffect(() => {
     setCascadeContext(initialCascade);
+    setCascadeCompatible(false);
   }, [initialCascade]);
 
   /*
