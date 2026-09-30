@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import {
   StudioEditorPanel,
@@ -118,6 +118,26 @@ describe("StudioEditorPanel", () => {
       expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     });
     expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+
+  // agent1 and agent6 share wf1, so switching between them keeps the panel
+  // mounted; a tick given for one agent's next version must not carry over.
+  it("drops the compatibility tick when the agent changes", async () => {
+    const step = {
+      type: "eddi://ai.labs.rules",
+      extensions: {},
+      config: { uri: "eddi://ai.labs.behavior/rulestore/rulesets/rules-1?version=1" },
+    };
+    const { rerender } = renderWithProviders(<StudioEditorPanel {...defaultProps} workflowStep={step} />);
+    const box = (await screen.findByTestId("compatible-version-checkbox")) as HTMLInputElement;
+    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+
+    rerender(<StudioEditorPanel {...defaultProps} agentId="agent6" workflowStep={step} />);
+
+    await waitFor(() =>
+      expect((screen.getByTestId("compatible-version-checkbox") as HTMLInputElement).checked).toBe(false),
+    );
   });
 
   it("renders editor panel when data loads successfully", async () => {

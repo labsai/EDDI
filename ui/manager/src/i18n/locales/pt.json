@@ -266,7 +266,8 @@
     "openExternalChatIn": "Abrir o chat de {{environment}} numa nova aba",
     "deployToProduction": "Implantar em produção",
     "undeployFromProduction": "Remover da produção",
-    "deployFailedIn": "A implantação falhou em {{environment}}"
+    "deployFailedIn": "A implantação falhou em {{environment}}",
+    "undeployCompatibleHint": "Conversas que uma versão compatível implantada pode continuar não são encerradas: elas passam para ela no próximo turno."
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -686,7 +687,9 @@
     "exportMd": "Exportar como Markdown",
     "toolSummary": "Resumo de utilização de ferramentas",
     "totalCost": "Custo total",
-    "cacheHitRate": "Taxa de acerto de cache"
+    "cacheHitRate": "Taxa de acerto de cache",
+    "endReasonRetired": "Encerrada: a versão do agente foi desativada",
+    "stepAgentVersion": "Respondido pela versão {{version}} do agente"
   },
   "chat": {
     "hide": "Ocultar",
@@ -5138,5 +5141,24 @@
     "workflowMissingResource": "O fluxo de trabalho {{workflowId}} (versão {{version}}) não referencia {{resource}}, pelo que guardá-lo aqui não alteraria o agente. Nada foi guardado.",
     "agentWorkflowMismatch": "O agente {{agentId}} (versão {{version}}) referencia o fluxo de trabalho {{workflowId}} na versão {{found}}, não na versão {{expected}}. O agente mudou desde que esta página foi aberta. Recarregue-a. Nada foi guardado.",
     "agentMissingWorkflow": "O agente {{agentId}} (versão {{version}}) não referencia o fluxo de trabalho {{workflowId}}. Nada foi guardado."
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatível com a versão anterior — conversas em andamento podem mudar para ela",
+    "compatibleHint": "Apenas para alterações que não podem quebrar uma conversa em andamento, p. ex. a redação do prompt ou outro modelo. Deixe desmarcado se propriedades, ações ou etapas do workflow foram renomeadas ou removidas.",
+    "compatibleLegacyNote": "A versão atual é anterior ao acompanhamento de versões, então as conversas que já a usam permanecem nela. O próximo salvamento compatível liga a cadeia.",
+    "compatibleUnknownNote": "Conversas em uma versão anterior ao acompanhamento de versões permanecem nela.",
+    "generationBadge": "ger. compat. {{generation}}",
+    "generationTooltip": "Geração de compatibilidade {{generation}}: versões deste agente com a mesma geração são compatíveis, então uma conversa em andamento passa para a mais recente implantada no próximo turno. Um salvamento incompatível inicia uma nova geração.",
+    "impactTitle": "Implantar v{{version}} em {{environment}} — conversas em andamento",
+    "impactFollow_one": "{{count}} conversa ativa na v{{from}} continuará na v{{to}}",
+    "impactFollow_many": "{{count}} conversas ativas na v{{from}} continuarão na v{{to}}",
+    "impactFollow_other": "{{count}} conversas ativas na v{{from}} continuarão na v{{to}}",
+    "impactStay_one": "{{count}} conversa ativa na v{{from}} permanecerá na v{{from}}",
+    "impactStay_many": "{{count}} conversas ativas na v{{from}} permanecerão na v{{from}}",
+    "impactStay_other": "{{count}} conversas ativas na v{{from}} permanecerão na v{{from}}",
+    "impactReasonNewer": "versão mais recente",
+    "impactReasonLegacy": "anterior ao acompanhamento de versões",
+    "impactReasonBreaking": "alteração incompatível",
+    "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
   }
 }

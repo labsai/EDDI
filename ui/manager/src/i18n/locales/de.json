@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}}-Chat in neuem Tab öffnen",
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
-    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen"
+    "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
+    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr."
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -678,7 +679,9 @@
     "exportMd": "Als Markdown exportieren",
     "toolSummary": "Werkzeugnutzung",
     "totalCost": "Gesamtkosten",
-    "cacheHitRate": "Cache-Trefferquote"
+    "cacheHitRate": "Cache-Trefferquote",
+    "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
+    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
   },
   "chat": {
     "hide": "Ausblenden",
@@ -5084,5 +5087,22 @@
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
     "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Kompatibel mit der vorherigen Version — laufende Unterhaltungen dürfen zu ihr wechseln",
+    "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
+    "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
+    "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
+    "generationBadge": "Kompat.-Gen. {{generation}}",
+    "generationTooltip": "Kompatibilitätsgeneration {{generation}}: Versionen dieses Agents mit derselben Generation sind kompatibel, sodass eine laufende Unterhaltung bei ihrem nächsten Zug zur neuesten bereitgestellten wechselt. Ein inkompatibles Speichern beginnt eine neue Generation.",
+    "impactTitle": "Bereitstellung von v{{version}} in {{environment}} — laufende Unterhaltungen",
+    "impactFollow_one": "{{count}} aktive Unterhaltung auf v{{from}} wird auf v{{to}} fortgesetzt",
+    "impactFollow_other": "{{count}} aktive Unterhaltungen auf v{{from}} werden auf v{{to}} fortgesetzt",
+    "impactStay_one": "{{count}} aktive Unterhaltung auf v{{from}} bleibt auf v{{from}}",
+    "impactStay_other": "{{count}} aktive Unterhaltungen auf v{{from}} bleiben auf v{{from}}",
+    "impactReasonNewer": "neuere Version",
+    "impactReasonLegacy": "älter als die Versionsfolge",
+    "impactReasonBreaking": "inkompatible Änderung",
+    "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
   }
 }

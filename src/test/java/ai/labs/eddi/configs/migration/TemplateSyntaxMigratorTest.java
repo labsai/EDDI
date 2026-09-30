@@ -4,7 +4,13 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -218,14 +224,17 @@ class TemplateSyntaxMigratorTest {
     /**
      * The shape of a template found in a real configuration: three literals
      * concatenated so that the rendered output is itself a template expression, for
-     * a generated agent configuration. Malformed, never used, and it stopped the
-     * whole migration. Whatever it converts to, it must not throw.
+     * a generated agent configuration. It once stopped the whole migration by
+     * throwing, and after that was fixed it was rewritten to {@code [['+'…'+']]} —
+     * silently wrong, and counted as migrated. It must neither throw nor be
+     * rewritten: it is refused, so the migration reports it for a human.
      */
     @Test
-    void migrateStringConcat_nestedTemplateLiterals_doesNotThrow() {
+    void migrateStringConcat_nestedTemplateLiterals_isRefusedNotRewritten() {
         String input = "{\"targetServerUrl\":\"[['[[${'+'properties.apiBaseUrl'+'}]]']]\"}";
         String migrated = assertDoesNotThrow(() -> migrator.migrate(input));
-        assertFalse(migrated.contains("[[${"), "the crashing expression survived: " + migrated);
+        assertEquals(input, migrated);
+        assertNotNull(migrator.unconvertibleReason(input));
     }
 
     // --- an escaped quote inside the literal (Copilot review, PR #781) ---
@@ -335,9 +344,16 @@ class TemplateSyntaxMigratorTest {
         assertEquals("{a}}{b}", migrator.migrate("[[${a + '}' + b}]]"));
     }
 
+    /**
+     * The literal '{' is output text. Inlined bare it would sit in front of
+     * <code>{b}</code> and Qute would read <code>{{b}</code> as an expression, so
+     * it goes into an unparsed block.
+     */
     @Test
     void migrateConcat_withOpeningBraceInsideALiteral() {
-        assertEquals("{a}{{b}", migrator.migrate("[(${a + '{' + b})]"));
+        String migrated = migrator.migrate("[(${a + '{' + b})]");
+        assertEquals("{a}{|{|}{b}", migrated);
+        assertEquals("A{B", Engine.builder().addDefaults().build().parse(migrated).data("a", "A").data("b", "B").render());
     }
 
     /**
@@ -366,6 +382,93 @@ class TemplateSyntaxMigratorTest {
     void migrateConcat_twoExpressionsOnOneLineBothConvert() {
         assertEquals("{a}/{b} and {c}-{d}",
                 migrator.migrate("[[${a + '/' + b}]] and [[${c + '-' + d}]]"));
+    }
+
+    // --- templates that generate template syntax ---------------------------
+
+    /**
+     * An expression whose string literal is itself Thymeleaf: its output is
+     * template text. The converter used to find the inner <code>[[${</code> first
+     * and produce {@code [['+'x.x'+']]} — no Thymeleaf delimiter left, so it was
+     * counted as migrated and rendered literal text. It must be refused and left
+     * exactly as it was.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[['[[${'+'x.x'+'}]]']]",
+            "[[\"[[${\"+\"x.x\"+\"}]]\"]]",
+            "[['it\\'s [[${' + 'x.x' + '}]] here']]",
+            "[['[['+'[[${'+'x.x'+'}]]'+']]']]",
+            "[(${'[[${' + x.x + '}]]'})]",
+            "prefix [[${a}]] then [['[(${' + 'x' + '})]']] suffix"})
+    void templateThatGeneratesTemplateSyntaxIsRefusedAndLeftUnchanged(String input) {
+        assertNotNull(migrator.unconvertibleReason(input), input);
+        assertEquals(input, migrator.migrate(input), "a refused template is never rewritten");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[[${a + '/' + b}]]",
+            "[[${a + '}' + b}]]",
+            "{\"matrix\": [[\"a\", \"b\"]], \"text\": \"[[${x}]]\"}",
+            "[# th:each=\"i : ${items}\"][[${i}]][/]",
+            "plain text"})
+    void ordinaryTemplatesAreNotRefused(String input) {
+        assertNull(migrator.unconvertibleReason(input), input);
+    }
+
+    /**
+     * A lone closing delimiter in a literal is only text: the delimiter scan is
+     * quote-aware, so the expression's own end is found and the concat converts.
+     */
+    @Test
+    void literalClosingDelimiterIsNotRefused() {
+        assertNull(migrator.unconvertibleReason("[[${a + ']]' + b}]]"));
+        assertEquals("{a}]]{b}", migrator.migrate("[[${a + ']]' + b}]]"));
+    }
+
+    /**
+     * Braces assembled from literals are output text in Thymeleaf. Inlined as-is
+     * they would form a Qute expression — {@code '{' + 'name' + '}'} became
+     * <code>{name}</code>, which Qute evaluates. Rendered through Qute, the
+     * converted template must print the same text Thymeleaf did.
+     */
+    @Test
+    void bracesAssembledFromLiteralsStayText() {
+        Engine qute = Engine.builder().addDefaults().build();
+
+        String assembled = migrator.migrate("[[${'{' + 'name' + '}'}]]");
+        assertEquals("{name}", qute.parse(assembled).data("name", "EVALUATED").render());
+
+        String jsonBody = migrator.migrate("[[${'{\"id\": ' + id + '}'}]]");
+        assertEquals("{\"id\": 42}", qute.parse(jsonBody).data("id", 42).render());
+    }
+
+    @Test
+    void directiveOpenerWithAnyWhitespaceCountsAsLeftBehind() {
+        assertTrue(migrator.containsThymeleafDelimiters("[#  th:if=\"${a} and ${b}\"]x[/]"));
+        assertTrue(migrator.containsThymeleafDelimiters("[#	th:each=\"i : ${items}\"]"));
+        assertFalse(migrator.containsThymeleafDelimiters("Explain what th:if does, and #strings.trim"));
+    }
+
+    /**
+     * The import converts a resource as one JSON string. There, the escaped quotes
+     * of a double-quoted literal hide where it ends, so the refusal has to look at
+     * the decoded values.
+     */
+    @Test
+    void refusalLooksAtDecodedJsonValues() throws Exception {
+        String json = "{\"httpCalls\":[{\"request\":{\"body\":\"[[\\\"[[${\\\"+\\\"x.x\\\"+\\\"}]]\\\"]]\"}}]}";
+        Object decoded = new ObjectMapper().readValue(json, Map.class);
+
+        assertNotNull(migrator.unconvertibleReasonIn(decoded));
+        assertNull(migrator.unconvertibleReasonIn(new ObjectMapper().readValue("{\"body\":\"[[${x}]]\"}", Map.class)));
+    }
+
+    @Test
+    void jsonArrayOfStringsBesideATemplateStillConverts() {
+        assertEquals("{\"matrix\": [[\"a\", \"b\"]], \"text\": \"{x}\"}",
+                migrator.migrate("{\"matrix\": [[\"a\", \"b\"]], \"text\": \"[[${x}]]\"}"));
     }
 
     @Test

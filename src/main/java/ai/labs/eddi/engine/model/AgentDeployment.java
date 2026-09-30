@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 
 import java.util.HashMap;
@@ -26,6 +27,8 @@ public class AgentDeployment {
         return agentId;
     }
 
+    /** Also accepts {@code botId}, what EDDI 5 stored in a trigger. */
+    @JsonAlias("botId")
     public void setAgentId(String agentId) {
         this.agentId = agentId;
     }

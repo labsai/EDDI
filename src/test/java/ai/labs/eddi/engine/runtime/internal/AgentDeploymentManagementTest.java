@@ -28,6 +28,8 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -87,6 +89,15 @@ class AgentDeploymentManagementTest {
                 migrationManager, v6RenameMigration, v6QuteMigration,
                 channelConnectorMigration, mock(WorkspaceAccessIndexMigration.class),
                 runtime, workflowStore, ruleSetStore, 30);
+        // What the real factory answers once deployAgent has succeeded; the sweep
+        // records a deployment as done only on READY.
+        IAgent readyAgent = mock(IAgent.class);
+        when(readyAgent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        try {
+            when(agentFactory.getAgent(any(), any(), any())).thenReturn(readyAgent);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Nested

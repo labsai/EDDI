@@ -152,7 +152,19 @@ public class V6QuteMigration {
         int failed = 0;
         for (Document doc : col.find()) {
             try {
-                if (migrateDocument(doc)) {
+                List<String> unconvertible = new ArrayList<>();
+                boolean changed = migrateDocument(doc, "", unconvertible);
+                if (!unconvertible.isEmpty()) {
+                    // Nothing of this document is written, not even the fields that did
+                    // convert: a half-migrated document mixes two template languages,
+                    // and the one that stays behind still renders as literal text.
+                    failed++;
+                    LOGGER.warnf("V6 Qute migration left %s/%s unchanged: %d field(s) cannot be converted safely — %s. "
+                            + "Convert them by hand; until then the migration is not marked complete.", colName,
+                            doc.get(ID_FIELD), unconvertible.size(), String.join("; ", unconvertible));
+                    continue;
+                }
+                if (changed) {
                     col.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
                     migrated++;
                 }
@@ -171,42 +183,82 @@ public class V6QuteMigration {
         return new CollectionResult(migrated, failed);
     }
 
-    /** Recursively walk a Document, rewrite all string values. */
+    /**
+     * Recursively walk a Document, rewrite all string values.
+     *
+     * @param unconvertible
+     *            collects a "field path: reason" entry for every string that cannot
+     *            be converted, or that still holds Thymeleaf syntax after
+     *            conversion; the caller then writes nothing
+     */
     @SuppressWarnings("unchecked")
-    private boolean migrateDocument(Document doc) {
+    private boolean migrateDocument(Document doc, String path, List<String> unconvertible) {
         boolean changed = false;
         for (String key : new ArrayList<>(doc.keySet())) {
             Object val = doc.get(key);
+            String fieldPath = path.isEmpty() ? key : path + "." + key;
             if (val instanceof String strVal) {
-                if (migrator.containsThymeleafSyntax(strVal)) {
-                    doc.put(key, migrator.migrate(strVal));
+                String migrated = migrateString(strVal, fieldPath, unconvertible);
+                if (migrated != null) {
+                    doc.put(key, migrated);
                     changed = true;
                 }
             } else if (val instanceof Document nested) {
-                changed = migrateDocument(nested) || changed;
+                changed = migrateDocument(nested, fieldPath, unconvertible) || changed;
             } else if (val instanceof List<?> list) {
-                changed = migrateList((List<Object>) list) || changed;
+                changed = migrateList((List<Object>) list, fieldPath, unconvertible) || changed;
             }
         }
         return changed;
     }
 
     @SuppressWarnings("unchecked")
-    private boolean migrateList(List<Object> list) {
+    private boolean migrateList(List<Object> list, String path, List<String> unconvertible) {
         boolean changed = false;
         for (int i = 0; i < list.size(); i++) {
             Object item = list.get(i);
+            String itemPath = path + "[" + i + "]";
             if (item instanceof String strVal) {
-                if (migrator.containsThymeleafSyntax(strVal)) {
-                    list.set(i, migrator.migrate(strVal));
+                String migrated = migrateString(strVal, itemPath, unconvertible);
+                if (migrated != null) {
+                    list.set(i, migrated);
                     changed = true;
                 }
             } else if (item instanceof Document nested) {
-                changed = migrateDocument(nested) || changed;
+                changed = migrateDocument(nested, itemPath, unconvertible) || changed;
             } else if (item instanceof List<?> nested) {
-                changed = migrateList((List<Object>) nested) || changed;
+                changed = migrateList((List<Object>) nested, itemPath, unconvertible) || changed;
             }
         }
         return changed;
+    }
+
+    /**
+     * The converted string, or {@code null} when it is left as it is — because it
+     * holds no Thymeleaf syntax, or because it cannot be converted safely, in which
+     * case {@code unconvertible} records why.
+     *
+     * <p>
+     * Two checks, because neither covers the other. The migrator refuses the shapes
+     * it knows it would mangle. And a result that still holds Thymeleaf syntax was
+     * not converted, whatever the reason; counting it as migrated records the
+     * migration complete over a template that renders as literal text.
+     * </p>
+     */
+    private String migrateString(String value, String fieldPath, List<String> unconvertible) {
+        if (!migrator.containsThymeleafSyntax(value)) {
+            return null;
+        }
+        String reason = migrator.unconvertibleReason(value);
+        if (reason != null) {
+            unconvertible.add(fieldPath + ": " + reason);
+            return null;
+        }
+        String migrated = migrator.migrate(value);
+        if (migrator.containsThymeleafDelimiters(migrated)) {
+            unconvertible.add(fieldPath + ": a Thymeleaf expression is left after conversion");
+            return null;
+        }
+        return migrated;
     }
 }

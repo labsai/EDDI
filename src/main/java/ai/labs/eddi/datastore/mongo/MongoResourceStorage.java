@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.WriteConcern;
@@ -18,6 +19,8 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Updates;
+import org.bson.BsonDocument;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -28,9 +31,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -40,6 +45,12 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  */
 public class MongoResourceStorage<T> implements IResourceStorage<T> {
     private static final Logger LOGGER = Logger.getLogger(MongoResourceStorage.class);
+
+    /** MongoDB {@code IndexOptionsConflict}. */
+    static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
+    /** MongoDB {@code IndexKeySpecsConflict}. */
+    static final int INDEX_KEY_SPECS_CONFLICT_ERROR_CODE = 86;
+
     public static final String VERSION_FIELD = "_version";
     public static final String ID_FIELD = "_id";
     private static final String DELETED_FIELD = "_deleted";
@@ -73,7 +84,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         this.historyCollection = database.getCollection(collectionName + HISTORY_POSTFIX);
         this.documentBuilder = documentBuilder;
 
-        ensureIndex(currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
+        ensureIndex(database, currentCollection, Indexes.ascending(ID_FIELD, VERSION_FIELD), true);
         // History rows are addressed by the NESTED id, not by a range over the
         // composite _id (see historyRowsOf). MongoDB's built-in _id index covers the
         // whole embedded subdocument and cannot serve a dotted path into it, so
@@ -81,16 +92,260 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // COLLSCAN of the history collection. That is not academic: descriptors.history
         // holds one row per conversation, and GdprComplianceService's erasure loop
         // calls deleteAllDescriptor once per conversation.
-        ensureIndex(historyCollection, Indexes.ascending(HISTORY_NESTED_ID_FIELD, HISTORY_NESTED_VERSION_FIELD), false);
+        ensureIndex(database, historyCollection, Indexes.ascending(HISTORY_NESTED_ID_FIELD, HISTORY_NESTED_VERSION_FIELD), false);
 
         Arrays.stream(indexes).forEach(index -> {
-            ensureIndex(currentCollection, Indexes.ascending(index), false);
-            ensureIndex(historyCollection, Indexes.ascending(index), false);
+            ensureIndex(database, currentCollection, Indexes.ascending(index), false);
+            ensureIndex(database, historyCollection, Indexes.ascending(index), false);
         });
     }
 
-    private void ensureIndex(MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
-        mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
+    /**
+     * Creates an index, and brings any index an earlier EDDI left on the same key
+     * into line with the specification asked for here.
+     *
+     * <p>
+     * The case that made this necessary: databases created before 6.3 hold
+     * {@code descriptors.resource_1} with {@code unique: true}, and this store asks
+     * for it non-unique. MongoDB refuses that with {@code IndexKeySpecsConflict}
+     * (86) — same name, different options — and the exception used to escape this
+     * constructor. The descriptor store could then never be built, so every
+     * deployed agent ended in ERROR and every descriptor listing answered 500.
+     * </p>
+     *
+     * <p>
+     * The index asked for here wins. For {@code resource_1} that is deliberate:
+     * since 6.3 neither backend enforces uniqueness on the field (PostgreSQL's
+     * expression index is not unique, and a MongoDB created by 6.3 or later never
+     * had it), so no 6.x write path relies on it, and keeping it would make one
+     * class of installation refuse writes the others accept. For the same reason a
+     * unique index on the same key under <em>another</em> name is replaced too: the
+     * server accepts a second, non-unique index beside it without complaint, and
+     * the stricter one would go on refusing writes.
+     * </p>
+     *
+     * <p>
+     * As in {@code MongoDeploymentStorage}, the error code alone decides nothing:
+     * both 85 (an equivalent index under another name) and 86 (same name, other
+     * options — or the same name on a <em>different</em> key) are answered by
+     * reading the collection's own indexes. An index that holds the generated name
+     * on another key is someone else's and is never dropped. A conflict that cannot
+     * be resolved is logged at ERROR and the store is built anyway: it works
+     * without the index, only more slowly, whereas a store that cannot be
+     * constructed takes the application down with it.
+     * </p>
+     */
+    private static void ensureIndex(MongoDatabase database, MongoCollection<Document> mongoCollection, Bson indexKey, boolean unique) {
+        MongoCommandException conflict = null;
+        try {
+            mongoCollection.createIndex(indexKey, new IndexOptions().unique(unique));
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() != INDEX_OPTIONS_CONFLICT_ERROR_CODE && e.getErrorCode() != INDEX_KEY_SPECS_CONFLICT_ERROR_CODE) {
+                throw e;
+            }
+            conflict = e;
+        }
+        try {
+            reconcileIndexesOnKey(database, mongoCollection, indexKey.toBsonDocument(), unique, conflict);
+        } catch (RuntimeException e) {
+            if (conflict != null) {
+                LOGGER.errorf("Cannot create index %s on '%s' (%s), and the conflicting index could not be reconciled: %s. "
+                        + "Queries on this field scan.", indexKey.toBsonDocument().toJson(),
+                        String.valueOf(mongoCollection.getNamespace()), conflict.getErrorMessage(), e.toString());
+            } else {
+                LOGGER.warnf("Could not check '%s' for indexes an earlier EDDI left on %s: %s",
+                        String.valueOf(mongoCollection.getNamespace()), indexKey.toBsonDocument().toJson(), e.toString());
+            }
+        }
+    }
+
+    /**
+     * Replaces every index on {@code keyPattern} that does not have the
+     * specification asked for (see {@link #hasSpecification}), and builds the
+     * requested one if nothing equivalent is left.
+     *
+     * @param conflict
+     *            the error {@code createIndex} raised, or {@code null} when it
+     *            succeeded
+     */
+    private static void reconcileIndexesOnKey(MongoDatabase database, MongoCollection<Document> mongoCollection, BsonDocument keyPattern,
+                                              boolean unique,
+                                              MongoCommandException conflict) {
+        String collectionName = mongoCollection.getNamespace().getCollectionName();
+        Map<String, Document> indexes = new LinkedHashMap<>();
+        for (Document index : mongoCollection.listIndexes()) {
+            indexes.put(index.getString("name"), index);
+        }
+
+        String generatedName = generatedIndexName(keyPattern);
+        Document nameHolder = indexes.get(generatedName);
+        boolean nameHeldByForeignIndex = nameHolder != null && !sameKeyPattern(nameHolder, keyPattern);
+
+        List<Document> onKey = indexes.values().stream().filter(index -> sameKeyPattern(index, keyPattern)).toList();
+        // Read only when an index on the key carries a collation, which is rare.
+        Document defaultCollation = onKey.stream().anyMatch(index -> index.containsKey(COLLATION))
+                ? defaultCollation(database, collectionName)
+                : null;
+        List<Document> mismatched = onKey.stream().filter(index -> !hasSpecification(index, unique, defaultCollation)).toList();
+        if (conflict == null && mismatched.isEmpty()) {
+            return;
+        }
+
+        Document equivalent = onKey.stream().filter(index -> !mismatched.contains(index)).findFirst().orElse(null);
+        if (equivalent == null) {
+            // A hidden index that is otherwise right is made visible in place: the
+            // server refuses a second index identical to it but for the name.
+            Document hiddenButRight = mismatched.stream()
+                    .filter(index -> index.getBoolean("hidden", false) && hasSpecification(visible(index), unique, defaultCollation))
+                    .findFirst().orElse(null);
+            if (hiddenButRight != null && unhide(database, collectionName, hiddenButRight)) {
+                equivalent = hiddenButRight;
+            }
+        }
+        if (equivalent == null) {
+            // The replacement is built BEFORE anything is dropped, so the key is never
+            // without an index — not if the build fails, and not while another instance
+            // starting at the same moment is doing the same. The server accepts a
+            // second index on one key when the specifications differ; it takes the
+            // generated name if that is free, the alternate one otherwise.
+            // The generated name is free only if nothing holds it: a stale index of ours
+            // still exists at this point, and a foreign one is never dropped.
+            IndexOptions options = new IndexOptions().unique(unique);
+            if (nameHolder != null) {
+                options.name(generatedName + ALTERNATE_INDEX_NAME_SUFFIX);
+            }
+            if (nameHeldByForeignIndex) {
+                LOGGER.errorf("The index name '%s' on '%s' is held by an index on a different key (%s); it was left alone, and "
+                        + "%s is built as '%s' instead. Rename or remove that index by hand.", generatedName, collectionName,
+                        nameHolder.get("key"), keyPattern.toJson(), generatedName + ALTERNATE_INDEX_NAME_SUFFIX);
+            }
+            try {
+                mongoCollection.createIndex(keyPattern, options);
+            } catch (RuntimeException e) {
+                LOGGER.errorf("Could not build %s on '%s': %s. Any existing index on that key is kept as it is.",
+                        keyPattern.toJson(), collectionName, e.getMessage());
+                return;
+            }
+        } else if (conflict != null && mismatched.isEmpty()) {
+            LOGGER.infof("Index %s on '%s' already exists as '%s' with the same specification; kept.", keyPattern.toJson(),
+                    collectionName, equivalent.getString("name"));
+        }
+
+        for (Document index : mismatched) {
+            if (index == equivalent) {
+                continue;
+            }
+            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with another specification (%s); replaced by one "
+                    + "with the current specification (unique=%s).", index.getString("name"), collectionName, index.toJson(), unique);
+            try {
+                mongoCollection.dropIndex(index.getString("name"));
+            } catch (MongoCommandException e) {
+                if (e.getErrorCode() != INDEX_NOT_FOUND_ERROR_CODE) {
+                    throw e;
+                }
+                // Another instance starting at the same time dropped it first.
+            }
+        }
+    }
+
+    /** MongoDB {@code IndexNotFound}. */
+    static final int INDEX_NOT_FOUND_ERROR_CODE = 27;
+
+    /**
+     * {@code index} without its {@code hidden} flag, for comparing the rest of it.
+     */
+    private static Document visible(Document index) {
+        Document copy = new Document(index);
+        copy.remove("hidden");
+        return copy;
+    }
+
+    /** Makes a hidden index visible; whether that worked. */
+    private static boolean unhide(MongoDatabase database, String collectionName, Document index) {
+        try {
+            database.runCommand(new Document("collMod", collectionName).append("index",
+                    new Document("name", index.getString("name")).append("hidden", false)));
+            LOGGER.warnf("Index '%s' on '%s' was hidden, so no query used it; made it visible.", index.getString("name"),
+                    collectionName);
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not make the hidden index '%s' on '%s' visible (%s); building a replacement.",
+                    index.getString("name"), collectionName, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Appended to the generated name when an index on another key already holds it.
+     */
+    static final String ALTERNATE_INDEX_NAME_SUFFIX = "_eddi";
+
+    private static final String COLLATION = "collation";
+
+    /**
+     * Whether an index on the right key also has the specification asked for: the
+     * same uniqueness, and nothing that keeps it from serving this store's queries.
+     * A partial or sparse index serves only queries that carry its filter, and a
+     * hidden one serves none; this store's queries carry no filter. A collation
+     * other than the collection's default is not used by those queries either — but
+     * the collection's default is, since MongoDB applies it to an index created
+     * without one, and rejecting that would rebuild a correct index on every start.
+     *
+     * @param defaultCollation
+     *            the collection's default collation, or {@code null} when it has
+     *            none
+     */
+    static boolean hasSpecification(Document index, boolean unique, Document defaultCollation) {
+        return index.getBoolean("unique", false) == unique && !index.containsKey("partialFilterExpression")
+                && !index.getBoolean("sparse", false) && !index.getBoolean("hidden", false)
+                && Objects.equals(index.get(COLLATION), defaultCollation);
+    }
+
+    /** The collection's default collation, or {@code null} when it has none. */
+    private static Document defaultCollation(MongoDatabase database, String collectionName) {
+        for (Document collection : database.listCollections().filter(Filters.eq("name", collectionName))) {
+            if (collection.get("options") instanceof Document options && options.get(COLLATION) instanceof Document collation) {
+                return collation;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The name MongoDB gives an index when none is supplied: each field and its
+     * direction, joined by underscores.
+     */
+    static String generatedIndexName(BsonDocument keyPattern) {
+        var name = new StringBuilder();
+        keyPattern.forEach((field, direction) -> {
+            if (!name.isEmpty()) {
+                name.append('_');
+            }
+            name.append(field).append('_').append(direction.isNumber() ? String.valueOf(direction.asNumber().intValue()) : direction);
+        });
+        return name.toString();
+    }
+
+    /**
+     * Whether an index sits on exactly this key: the same fields in the same order
+     * with the same directions. Compared numerically, since the server may report
+     * {@code 1} as an int, a long or a double.
+     */
+    static boolean sameKeyPattern(Document index, BsonDocument keyPattern) {
+        if (!(index.get("key") instanceof Document actual)) {
+            return false;
+        }
+        if (!new ArrayList<>(actual.keySet()).equals(new ArrayList<>(keyPattern.keySet()))) {
+            return false;
+        }
+        for (String field : keyPattern.keySet()) {
+            BsonValue expected = keyPattern.get(field);
+            if (!expected.isNumber() || !(actual.get(field) instanceof Number direction)
+                    || direction.doubleValue() != expected.asNumber().doubleValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

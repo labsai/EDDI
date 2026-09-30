@@ -40,6 +40,11 @@ export interface CascadeOptions {
    * parent workflow and agent.
    */
   skipResourceSave?: boolean;
+  /**
+   * The agent version the cascade writes is compatible with the one it
+   * replaces — see `UpdateAgentOptions.compatible`. Absent means breaking.
+   */
+  compatible?: boolean;
 }
 
 /**
@@ -171,6 +176,7 @@ export async function cascadeSaveResource(
     context,
     parents,
     partial,
+    options?.compatible === true,
   );
   return { newResourceVersion, newWorkflowVersion, newAgentVersion };
 }
@@ -192,10 +198,11 @@ export async function cascadeVersionUpdate(
   resourceId: string,
   _previousVersion: number,
   newVersion: number,
-  context: CascadeContext
+  context: CascadeContext,
+  options?: Pick<CascadeOptions, "compatible">
 ): Promise<CascadeVersionResult> {
   const parents = await loadParents(rt, resourceId, context);
-  return writeParents(rt, resourceId, newVersion, context, parents, {});
+  return writeParents(rt, resourceId, newVersion, context, parents, {}, options?.compatible === true);
 }
 
 interface LoadedParents {
@@ -285,6 +292,7 @@ async function writeParents(
   context: CascadeContext,
   { workflow, agent }: LoadedParents,
   partial: CascadePartialResult,
+  compatible: boolean,
 ): Promise<CascadeVersionResult> {
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
@@ -314,7 +322,10 @@ async function writeParents(
   };
 
   try {
-    const agentResult = await updateAgent(context.agentId, context.agentVersion, updatedAgent);
+    // Only an explicit choice is sent; without it the new version is breaking.
+    const agentResult = compatible
+      ? await updateAgent(context.agentId, context.agentVersion, updatedAgent, { compatible: true })
+      : await updateAgent(context.agentId, context.agentVersion, updatedAgent);
     const newAgentVersion = requireVersionFromLocation(agentResult.location, "agent");
     return { newWorkflowVersion, newAgentVersion };
   } catch (err) {

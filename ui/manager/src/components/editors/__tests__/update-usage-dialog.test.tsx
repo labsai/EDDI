@@ -75,7 +75,7 @@ describe("UpdateUsageDialog", () => {
     const user = userEvent.setup();
     renderWithProviders(<UpdateUsageDialog {...defaultProps} />);
     await user.click(screen.getByTestId("confirm-cascade-btn"));
-    expect(defaultProps.onConfirm).toHaveBeenCalledWith(mockUsages);
+    expect(defaultProps.onConfirm).toHaveBeenCalledWith(mockUsages, { compatible: false });
   });
 
   it("calls onDismiss when skip is clicked", async () => {
@@ -100,7 +100,7 @@ describe("UpdateUsageDialog", () => {
     // Deselect first usage
     await user.click(screen.getByTestId("usage-checkbox-0"));
     await user.click(screen.getByTestId("confirm-cascade-btn"));
-    expect(defaultProps.onConfirm).toHaveBeenCalledWith([mockUsages[1]]);
+    expect(defaultProps.onConfirm).toHaveBeenCalledWith([mockUsages[1]], { compatible: false });
   });
 
   it("disables confirm button when no items selected", async () => {
@@ -109,6 +109,37 @@ describe("UpdateUsageDialog", () => {
     await user.click(screen.getByTestId("usage-checkbox-0"));
     await user.click(screen.getByTestId("usage-checkbox-1"));
     expect(screen.getByTestId("confirm-cascade-btn")).toBeDisabled();
+  });
+
+  describe("compatible-version choice", () => {
+    it("is offered unticked by default", () => {
+      renderWithProviders(<UpdateUsageDialog {...defaultProps} />);
+      const box = screen.getByTestId("cascade-compatible-checkbox") as HTMLInputElement;
+      expect(box.checked).toBe(false);
+      // Its label is attached, so it is announced and clickable as one control.
+      expect(box.closest("label")).not.toBeNull();
+    });
+
+    it("reports compatible: true once ticked", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<UpdateUsageDialog {...defaultProps} />);
+      await user.click(screen.getByTestId("cascade-compatible-checkbox"));
+      await user.click(screen.getByTestId("confirm-cascade-btn"));
+      expect(defaultProps.onConfirm).toHaveBeenCalledWith(mockUsages, { compatible: true });
+    });
+
+    it("warns, once ticked, that conversations on a legacy version stay", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<UpdateUsageDialog {...defaultProps} />);
+      expect(screen.queryByTestId("cascade-compatible-checkbox-note")).not.toBeInTheDocument();
+      await user.click(screen.getByTestId("cascade-compatible-checkbox"));
+      expect(screen.getByTestId("cascade-compatible-checkbox-note")).toBeInTheDocument();
+    });
+
+    it("is disabled while the cascade runs", () => {
+      renderWithProviders(<UpdateUsageDialog {...defaultProps} isUpdating={true} />);
+      expect(screen.getByTestId("cascade-compatible-checkbox")).toBeDisabled();
+    });
   });
 
   it("shows updating state", () => {

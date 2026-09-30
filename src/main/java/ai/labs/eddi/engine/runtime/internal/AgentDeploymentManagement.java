@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
@@ -45,6 +46,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -52,6 +55,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -119,6 +124,61 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      */
     private final Object documentMigrationsLock = new Object();
 
+    /** The wait before the first retry of a deployment that failed. */
+    static final Duration FIRST_RETRY_DELAY = Duration.ofSeconds(10);
+    /** The longest wait between two retries of a deployment that keeps failing. */
+    static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(5);
+
+    /**
+     * Deployments that failed, and when each may be tried again.
+     *
+     * <p>
+     * A deployment used to be recorded as handled whatever its outcome:
+     * {@code deployAgent} reports some failures by leaving the agent in ERROR and
+     * returning normally, so the record went into {@link #deploymentInfos} and no
+     * later sweep looked at it again. The agent stayed in ERROR until a restart,
+     * even after its cause — a missing index, a vault secret — had been fixed under
+     * the running instance. It is now recorded only once it is READY, and a failure
+     * is retried with a doubling delay, capped at {@link #MAX_RETRY_DELAY}, for as
+     * long as its deployment record says it should be deployed. The ERROR is logged
+     * once when the deployment starts failing and once more when it recovers, not
+     * on every retry.
+     * </p>
+     */
+    private final Map<DeploymentInfo, RetryState> failingDeployments = new ConcurrentHashMap<>();
+
+    /** What is known about one failing deployment. */
+    record RetryState(int failures, Instant nextAttempt) {
+    }
+
+    /** Replaced in tests, so that the backoff can be stepped through. */
+    Clock clock = Clock.systemUTC();
+
+    /**
+     * True while {@link #autoDeployAgents()} runs the startup migrations.
+     *
+     * <p>
+     * The sweep used to wait for the rename migration only. The scheduled tick that
+     * followed its completion then deployed agents while the startup thread was
+     * still converting their Thymeleaf templates to Qute; such an agent kept the
+     * templates it had loaded, was READY, and so was never redeployed — it rendered
+     * its templates as literal text until a restart. The sweep now waits for all of
+     * them.
+     * </p>
+     */
+    private final AtomicBoolean startupMigrationsRunning = new AtomicBoolean();
+
+    /** Whether the startup path reached the point where it grants readiness. */
+    private final AtomicBoolean startupCallbackRan = new AtomicBoolean();
+
+    /**
+     * Serializes {@link #checkDeployments()}. {@code SKIP} only stops one scheduled
+     * tick overlapping the next; the startup path calls the sweep itself, and two
+     * passes deploying the same agents at once shared an unsynchronized list and
+     * could record a deployment the other pass then failed.
+     */
+    private final Object sweepLock = new Object();
+
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -154,6 +214,27 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Override
     public void autoDeployAgents() {
         LOGGER.info("Starting deployment of agents...");
+        startupMigrationsRunning.set(true);
+        try {
+            runStartupMigrationsAndDeploy();
+        } finally {
+            // Also when a migration threw past its own guard: a sweep parked for good
+            // would never deploy anything, which is worse than deploying on configs
+            // a failed migration left as they were.
+            startupMigrationsRunning.set(false);
+            if (!startupCallbackRan.get()) {
+                // The startup path never got to grant readiness. Hand it to the first
+                // sweep that completes, as for a pending rename migration, rather than
+                // leave the instance DOWN while the sweep deploys and serves its agents.
+                LOGGER.error("The startup deployment did not complete (logged above); readiness is granted by the first "
+                        + "scheduled deployment sweep that does.");
+                readinessDeferred.set(true);
+            }
+        }
+        LOGGER.info("Finished deployment of agents.");
+    }
+
+    private void runStartupMigrationsAndDeploy() {
 
         // V6 rename migration must run before document-level migrations.
         // Each migration is independently guarded: a failure logs the error
@@ -183,6 +264,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
+            startupCallbackRan.set(true);
+            startupMigrationsRunning.set(false);
             checkDeployments();
             if (v6RenameMigration.isPending()) {
                 // The sweep above was parked, so nothing has been deployed yet.
@@ -205,8 +288,6 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
             reportReady();
         });
-
-        LOGGER.info("Finished deployment of agents.");
     }
 
     private void runDocumentMigrations() {
@@ -270,6 +351,16 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     // SKIP because a slow pass must not overlap the next tick and double-deploy.
     @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
+        synchronized (sweepLock) {
+            sweep();
+        }
+    }
+
+    private void sweep() {
+        if (startupMigrationsRunning.get()) {
+            LOGGER.debug("Deployment sweep parked: the startup migrations are still running.");
+            return;
+        }
         // This sweep retires — deletes — the deployment row of any agent whose config
         // it cannot read, and it runs on its own schedule rather than after the
         // startup migrations. While the 6.x rename migration is outstanding the agent
@@ -293,9 +384,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
         runDeferredDocumentMigrations();
         try {
-            deploymentStore.readDeploymentInfos(deployed).stream()
-                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
+            List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
+            // A deployment that is no longer meant to be deployed is no longer failing.
+            failingDeployments.keySet().retainAll(meantToBeDeployed);
+            Instant now = clock.instant();
+            meantToBeDeployed.stream()
+                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
+                    .filter(deploymentInfo -> isRetryDue(deploymentInfo, now)).forEach(deploymentInfo -> {
                         try {
                             // A deployment record can outlive its Agent. deployAgent reports that by
                             // logging an ERROR and returning normally, so the catch blocks below never
@@ -317,19 +413,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
+                            Deployment.Status outcome = deployedStatus(deploymentInfo);
+                            if (outcome == Deployment.Status.ERROR) {
+                                recordFailure(deploymentInfo, "the deployment ended in ERROR — its cause is logged above", null);
+                                return;
+                            }
+                            if (outcome != Deployment.Status.READY) {
+                                // Still in progress elsewhere (a REST deploy), or not registered:
+                                // not done, and not a failure either — the next sweep looks again.
+                                LOGGER.debugf("Deployment of agent %s version %d not confirmed yet (%s); checked again on the next sweep",
+                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), outcome);
+                                return;
+                            }
+                            recordSuccess(deploymentInfo);
                             this.deploymentInfos.add(deploymentInfo);
 
                             lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
                         } catch (ServiceException | IllegalAccessException e) {
-                            LOGGER.error(e.getLocalizedMessage(), e);
+                            recordFailure(deploymentInfo, e.getLocalizedMessage(), e);
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
-                                    deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
-
                             // If the root cause is a missing resource, auto-clean the stale record
-                            if (isCausedByResourceNotFound(e)) {
+                            if (!isCausedByResourceNotFound(e)) {
+                                recordFailure(deploymentInfo, e.getMessage(), null);
+                            } else {
                                 LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
                                 deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
@@ -346,9 +454,69 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             if (readinessDeferred.compareAndSet(true, false)) {
                 reportReady();
             }
+            agentsReadiness.setAgentsInError(failingDeployments.keySet().stream()
+                    .map(info -> info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion()).sorted().toList());
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    private boolean isRetryDue(DeploymentInfo deploymentInfo, Instant now) {
+        RetryState state = failingDeployments.get(deploymentInfo);
+        return state == null || !now.isBefore(state.nextAttempt());
+    }
+
+    /**
+     * The status the registry reports after {@code deployAgent} returned, or
+     * {@code null} when it has none. {@code deployAgent} reports a workflow that
+     * cannot be built by leaving the agent in ERROR and returning normally, and it
+     * returns at once when another caller holds the deployment IN_PROGRESS — so
+     * only READY means this deployment is done.
+     */
+    private Deployment.Status deployedStatus(DeploymentInfo deploymentInfo) {
+        try {
+            var agent = agentFactory.getAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
+            return agent == null ? null : agent.getDeploymentStatus();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordFailure(DeploymentInfo deploymentInfo, String cause, Throwable error) {
+        RetryState previous = failingDeployments.get(deploymentInfo);
+        int failures = previous == null ? 1 : previous.failures() + 1;
+        Duration delay = retryDelay(failures);
+        failingDeployments.put(deploymentInfo, new RetryState(failures, clock.instant().plus(delay)));
+        String message = format("Agent %s version %d (%s) failed to deploy: %s. Retrying with a growing delay (next in %ds, at most "
+                + "every %d min) while its deployment record says it is deployed.", deploymentInfo.getAgentId(),
+                deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), cause, delay.toSeconds(), MAX_RETRY_DELAY.toMinutes());
+        if (previous == null) {
+            // Once per state change: the retries below would otherwise repeat this
+            // every few seconds for as long as the agent stays broken.
+            LOGGER.error(message, error);
+        } else {
+            LOGGER.debugf("%s (failure %d)", message, failures);
+        }
+    }
+
+    private void recordSuccess(DeploymentInfo deploymentInfo) {
+        RetryState previous = failingDeployments.remove(deploymentInfo);
+        if (previous != null) {
+            LOGGER.infof("Agent %s version %d (%s) deployed after %d failed attempt(s)", deploymentInfo.getAgentId(),
+                    deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), previous.failures());
+        }
+    }
+
+    /**
+     * {@link #FIRST_RETRY_DELAY}, doubled per further failure, capped at
+     * {@link #MAX_RETRY_DELAY}.
+     */
+    static Duration retryDelay(int failures) {
+        Duration delay = FIRST_RETRY_DELAY;
+        for (int i = 1; i < failures && delay.compareTo(MAX_RETRY_DELAY) < 0; i++) {
+            delay = delay.multipliedBy(2);
+        }
+        return delay.compareTo(MAX_RETRY_DELAY) > 0 ? MAX_RETRY_DELAY : delay;
     }
 
     /**

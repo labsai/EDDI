@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.properties.mongo;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -16,9 +17,14 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * One-time startup migration: moves all legacy {@code properties} documents
@@ -31,6 +37,24 @@ import java.util.List;
  * Only active in MongoDB mode (not Postgres — Postgres was added in v6
  * alongside the usermemories table, so there is no legacy properties table to
  * migrate).
+ * <p>
+ * <b>Credentials are not migrated.</b> Long-term memories are loaded into every
+ * future conversation as {@code properties}, so anything copied here reaches
+ * template data, and from there prompts and outbound API calls. Two kinds of
+ * key are therefore left behind:
+ * <ul>
+ * <li>the keys in {@code eddi.migration.properties.skip-keys} — by default
+ * {@code userInfo}, which EDDI 5 clients sent with every request as the
+ * caller's identity (a platform bearer token beside names and ids). It was
+ * never a user's memory; on one production 5.x database it held a learner's
+ * token in 159 of 277 documents;</li>
+ * <li>any key whose value, at any depth, {@link SecretScrubber} would redact on
+ * export — the same rules, so an API key stored as a property is caught
+ * too.</li>
+ * </ul>
+ * A skipped key is logged by name and count, never by value, and is not a
+ * failure: its value stays in {@code properties_migrated_v6}, readable by an
+ * operator, and nothing is loaded from there.
  *
  * @since 6.0.0
  */
@@ -41,16 +65,73 @@ public class PropertiesMigrationService {
     private static final String LEGACY_COLLECTION = "properties";
     private static final String BACKUP_COLLECTION = "properties_migrated_v6";
 
+    /** The default of {@code eddi.migration.properties.skip-keys}. */
+    static final String DEFAULT_SKIP_KEYS = "userInfo";
+
     private final MongoDatabase database;
     private final IUserMemoryStore userMemoryStore;
     private final String datastoreType;
+    private final SecretScrubber secretScrubber;
+    private final Set<String> skipKeys;
 
     @Inject
     public PropertiesMigrationService(MongoDatabase database, IUserMemoryStore userMemoryStore,
-            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
+            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType, SecretScrubber secretScrubber,
+            @ConfigProperty(name = "eddi.migration.properties.skip-keys", defaultValue = DEFAULT_SKIP_KEYS) List<String> skipKeys) {
         this.database = database;
         this.userMemoryStore = userMemoryStore;
         this.datastoreType = datastoreType;
+        this.secretScrubber = secretScrubber;
+        this.skipKeys = new TreeSet<>(skipKeys == null ? List.of() : skipKeys.stream().map(String::trim).filter(k -> !k.isEmpty()).toList());
+    }
+
+    /**
+     * {@code value} with every BSON {@code ObjectId} replaced by a fixed
+     * placeholder, for the credential check only. An ObjectId is an identifier by
+     * type; serialised as extended JSON it becomes <code>{"$oid": "65a1…"}</code>,
+     * a random-looking hex string the scrubber's entropy rule would take for a key.
+     */
+    static Object withoutObjectIds(Object value) {
+        if (value instanceof ObjectId) {
+            return "objectid";
+        }
+        if (value instanceof Map<?, ?> map) {
+            Document copy = new Document();
+            map.forEach((k, v) -> copy.put(String.valueOf(k), withoutObjectIds(v)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(PropertiesMigrationService::withoutObjectIds).toList();
+        }
+        return value;
+    }
+
+    /**
+     * Whether {@code key}, or the name of any field nested in {@code value}, is a
+     * credential name. The scrubber alone misses {@code apiKey: {value: "…"}}: it
+     * judges {@code value} by its own name, not by the credential-named field that
+     * encloses it.
+     */
+    static boolean hasCredentialName(String key, Object value) {
+        if (SecretScrubber.isCredentialFieldName(key)) {
+            return true;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (var entry : map.entrySet()) {
+                if (hasCredentialName(String.valueOf(entry.getKey()), entry.getValue())) {
+                    return true;
+                }
+            }
+        } else if (value instanceof List<?> list) {
+            for (Object item : list) {
+                // Every item, lists inside lists included: a name check that stops at
+                // an inner list leaves the scrubber judging the credential by an inner name.
+                if (hasCredentialName("", item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void onStartup(@Observes StartupEvent event) {
@@ -94,6 +175,8 @@ public class PropertiesMigrationService {
         int failedCount = 0;
         int unownedDocuments = 0;
         int keptNewerEntries = 0;
+        Map<String, Integer> skippedByConfig = new TreeMap<>();
+        Map<String, Integer> skippedAsCredential = new TreeMap<>();
 
         for (Document doc : legacyCollection.find()) {
             String userId = doc.getString("userId");
@@ -120,7 +203,15 @@ public class PropertiesMigrationService {
                     continue;
                 }
 
+                if (skipKeys.contains(key)) {
+                    skippedByConfig.merge(key, 1, Integer::sum);
+                    continue;
+                }
                 Object value = doc.get(key);
+                if (hasCredentialName(key, value) || secretScrubber.containsCredential(new Document(key, withoutObjectIds(value)).toJson())) {
+                    skippedAsCredential.merge(key, 1, Integer::sum);
+                    continue;
+                }
                 UserMemoryEntry entry = new UserMemoryEntry(null, // id — generated on insert
                         userId, key, value, "legacy", // category — easy to identify migrated entries
                         Visibility.global, // matches old unscoped behavior
@@ -152,6 +243,16 @@ public class PropertiesMigrationService {
                 }
             }
             userCount++;
+        }
+
+        if (!skippedByConfig.isEmpty()) {
+            LOGGER.infof("[MIGRATION] Not migrated (eddi.migration.properties.skip-keys) — key: documents %s. These values stay "
+                    + "in '%s' and are never loaded into a conversation.", skippedByConfig, BACKUP_COLLECTION);
+        }
+        if (!skippedAsCredential.isEmpty()) {
+            LOGGER.warnf("[MIGRATION] Not migrated because the value holds a credential by the export scrubber's rules — "
+                    + "key: documents %s. These values stay in '%s' and are never loaded into a conversation; move any that "
+                    + "are needed into the secrets vault by hand.", skippedAsCredential, BACKUP_COLLECTION);
         }
 
         // Only retire the source once every key made it across. The loop is idempotent
