@@ -130,6 +130,11 @@ export function StudioEditorPanel({
   // after each save that wrote one — a stale tick would let running
   // conversations follow a change nobody judged.
   const [compatible, setCompatible] = useState(false);
+  // Agents that share a workflow keep this panel mounted when the Studio switches
+  // between them: a tick given for one agent's next version must not carry over.
+  useEffect(() => {
+    setCompatible(false);
+  }, [agentId, agentVersion]);
   // Only for its generation: whether ticking has to warn about a legacy version.
   const { data: currentAgent } = useAgent(agentId, agentVersion);
 
