@@ -113,6 +113,13 @@ export interface ConversationStep {
 export interface ConversationSnapshot {
   agentId: string;
   agentVersion: number;
+  /**
+   * The agent's display name. The backend sets it on a conversation read, for
+   * a caller who may use the agent — including one holding only `eddi-user`,
+   * who cannot read the descriptor store. Absent when it cannot be resolved,
+   * and on every other snapshot (say, stream `done`, undo/redo).
+   */
+  agentName?: string;
   conversationId: string;
   conversationState: ConversationState;
   environment: string;

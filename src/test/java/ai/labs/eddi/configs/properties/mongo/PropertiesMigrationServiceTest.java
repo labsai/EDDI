@@ -23,10 +23,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import com.mongodb.client.ListCollectionNamesIterable;
@@ -540,6 +545,150 @@ class PropertiesMigrationServiceTest {
             var entries = migrate(service, legacy);
 
             assertEquals(List.of("favoriteTopic"), entries.stream().map(UserMemoryEntry::key).toList());
+        }
+    }
+
+    /**
+     * A random-looking identifier scores like a key under the scrubber's entropy
+     * rule. The migration exempts identifier-shaped values under identifier-named
+     * fields from that one rule, and nothing else.
+     * <p>
+     * Value choice matters here: {@link #RANDOM_ID} is deliberately high-entropy,
+     * because entropy is what is being tested. Every value that must be caught by a
+     * NAME or a FORMAT rule is zero-entropy, so the entropy rule cannot catch it
+     * for the wrong reason.
+     */
+    @Nested
+    @DisplayName("identifiers are not taken for credentials")
+    class IdentifiersAreNotCredentials {
+
+        /** 17 distinct alphanumeric characters: about 4.1 bits per character. */
+        private static final String RANDOM_ID = "Xq7Lm2Pz9Rt4Vb8Nk";
+        private static final String ZERO_ENTROPY = "aaaaaaaaaaaaaaaaaaaa";
+
+        /**
+         * Built at run time so the source carries no JWT-shaped literal. Low entropy:
+         * only the format rule can see it.
+         */
+        private static final String FAKE_JWT = "ey" + "J" + ZERO_ENTROPY + "." + ZERO_ENTROPY + "." + ZERO_ENTROPY;
+
+        @SuppressWarnings("unchecked")
+        private List<UserMemoryEntry> migrate(Document legacy) throws Exception {
+            var withLegacy = mockIterableOf("properties");
+            var afterRename = mockIterableOf();
+            when(database.listCollectionNames()).thenReturn(withLegacy, afterRename);
+            MongoCollection<Document> legacyCollection = mock(MongoCollection.class);
+            when(database.getCollection("properties")).thenReturn(legacyCollection);
+            when(legacyCollection.countDocuments()).thenReturn(1L);
+            when(database.getName()).thenReturn("testdb");
+            FindIterable<Document> findIterable = mock(FindIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            when(legacyCollection.find()).thenReturn(findIterable);
+            when(findIterable.iterator()).thenReturn(cursor);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(legacy);
+            when(userMemoryStore.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
+
+            service().onStartup(startupEvent);
+
+            var captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
+            verify(userMemoryStore, atLeast(0)).insertIfAbsent(captor.capture());
+            verify(legacyCollection).renameCollection(any(MongoNamespace.class));
+            return captor.getAllValues();
+        }
+
+        @Test
+        @DisplayName("precondition: the scrubber on its own takes the random id for a credential")
+        void scrubberAloneFlagsTheId() {
+            assertTrue(scrubber().containsCredential(new Document("createdProgram", new Document("courseId", RANDOM_ID)).toJson()),
+                    "the id no longer trips the entropy rule, so the tests below prove nothing");
+        }
+
+        @Test
+        @DisplayName("{courseId: <17-char random id>} under createdProgram is migrated unchanged")
+        void courseIdIsMigrated() throws Exception {
+            var createdProgram = new Document("courseId", RANDOM_ID);
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("createdProgram", createdProgram);
+
+            var entries = migrate(legacy);
+
+            assertEquals(1, entries.size());
+            assertEquals("createdProgram", entries.getFirst().key());
+            assertEquals(createdProgram, entries.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("snake_case, upper-case and list-of-id names are identifiers too")
+        void identifierNameVariants() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user")
+                    .append("lastCourse", new Document("course_id", RANDOM_ID).append("courseID", RANDOM_ID))
+                    .append("courseIds", List.of(RANDOM_ID, RANDOM_ID)).append("id", RANDOM_ID);
+
+            var entries = migrate(legacy);
+
+            assertEquals(Set.of("lastCourse", "courseIds", "id"), entries.stream().map(UserMemoryEntry::key).collect(Collectors.toSet()));
+        }
+
+        @Test
+        @DisplayName("real credentials are still held back — by name, by format, and by entropy under a non-identifier key — "
+                + "and logged by key name only")
+        void credentialsAreStillHeldBack() throws Exception {
+            var legacy = new Document("_id", new ObjectId()).append("userId", "synthetic-user").append("lang", "de")
+                    .append("createdProgram", new Document("courseId", RANDOM_ID))
+                    // by name
+                    .append("login", new Document("token", ZERO_ENTROPY)).append("integration", new Document("apiKey", ZERO_ENTROPY))
+                    // by format, zero entropy so the scrubber cannot see them
+                    .append("lastHeader", "Bearer " + ZERO_ENTROPY).append("handoff", new Document("note", FAKE_JWT))
+                    .append("llm", new Document("provider", "sk-" + ZERO_ENTROPY))
+                    // a JWT under an identifier name gets no exemption
+                    .append("enrolment", new Document("courseId", FAKE_JWT))
+                    // by entropy, under a non-identifier key and a credential-qualified id
+                    .append("voucher", new Document("code", RANDOM_ID)).append("sso", new Document("sessionId", RANDOM_ID))
+                    // still skipped by configuration
+                    .append("userInfo", new Document("courseId", "course-1"));
+
+            List<String> logged = new ArrayList<>();
+            Handler handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    logged.add(String.valueOf(record.getMessage()));
+                    if (record.getParameters() != null) {
+                        for (Object parameter : record.getParameters()) {
+                            logged.add(String.valueOf(parameter));
+                        }
+                    }
+                }
+
+                @Override
+                public void flush() {
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+            // logging.properties turns ai.labs.eddi OFF for unit tests; open this logger.
+            Logger julLogger = Logger.getLogger(PropertiesMigrationService.class.getName());
+            Level previousLevel = julLogger.getLevel();
+            julLogger.setLevel(Level.ALL);
+            julLogger.addHandler(handler);
+            List<UserMemoryEntry> entries;
+            try {
+                entries = migrate(legacy);
+            } finally {
+                julLogger.removeHandler(handler);
+                julLogger.setLevel(previousLevel);
+            }
+
+            assertEquals(Set.of("lang", "createdProgram"), entries.stream().map(UserMemoryEntry::key).collect(Collectors.toSet()));
+
+            String log = String.join("\n", logged);
+            for (String heldBack : List.of("login", "integration", "lastHeader", "handoff", "llm", "enrolment", "voucher", "sso")) {
+                assertTrue(log.contains(heldBack), "the held-back key '" + heldBack + "' is not named in the log: " + log);
+            }
+            assertTrue(log.contains("userInfo"), "the skipped userInfo key is not named in the log: " + log);
+            assertFalse(log.contains(ZERO_ENTROPY), "a held-back value reached the log");
+            assertFalse(log.contains(RANDOM_ID), "a held-back value reached the log");
         }
     }
 

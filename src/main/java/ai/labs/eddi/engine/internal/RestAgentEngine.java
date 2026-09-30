@@ -83,6 +83,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     private final ResourceAccessGuard resourceAccessGuard;
     private final HitlAccessGuard hitlAccessGuard;
     private final IHitlToolJournalStore hitlToolJournalStore;
+    private final AgentDisplayNameResolver agentDisplayNameResolver;
     private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
@@ -107,6 +108,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             ResourceAccessGuard resourceAccessGuard,
             HitlAccessGuard hitlAccessGuard,
             IHitlToolJournalStore hitlToolJournalStore,
+            AgentDisplayNameResolver agentDisplayNameResolver,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -116,6 +118,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         this.resourceAccessGuard = resourceAccessGuard;
         this.hitlAccessGuard = hitlAccessGuard;
         this.hitlToolJournalStore = hitlToolJournalStore;
+        this.agentDisplayNameResolver = agentDisplayNameResolver;
         this.agentTimeout = agentTimeout;
     }
 
@@ -162,7 +165,15 @@ public class RestAgentEngine implements IRestAgentEngine {
                                                              List<String> returningFields) {
         validateConversationOwnership(conversationId);
         try {
-            return conversationService.readConversation(conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
+            var snapshot = conversationService.readConversation(conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
+            // The agent's display name, so a chat user holding only eddi-user can see
+            // whom they are talking to without read access to the descriptor store.
+            // Resolved here, after the ownership check and against the caller's own
+            // access to the agent — see AgentDisplayNameResolver.
+            if (snapshot != null) {
+                snapshot.setAgentName(agentDisplayNameResolver.resolve(snapshot.getAgentId(), snapshot.getAgentVersion()));
+            }
+            return snapshot;
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to read conversation");

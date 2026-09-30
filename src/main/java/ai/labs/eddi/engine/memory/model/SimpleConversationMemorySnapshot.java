@@ -22,6 +22,13 @@ public class SimpleConversationMemorySnapshot {
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
+    /**
+     * The agent's display name, for the people in the conversation. Set only on a
+     * REST conversation read, and only for a caller who may use the agent;
+     * {@code null} everywhere else. See
+     * {@code ai.labs.eddi.engine.internal.AgentDisplayNameResolver}.
+     */
+    private String agentName;
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
@@ -144,6 +151,14 @@ public class SimpleConversationMemorySnapshot {
 
     public void setAgentId(String agentId) {
         this.agentId = agentId;
+    }
+
+    public String getAgentName() {
+        return agentName;
+    }
+
+    public void setAgentName(String agentName) {
+        this.agentName = agentName;
     }
 
     public Integer getAgentVersion() {

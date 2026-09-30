@@ -71,7 +71,8 @@ class RestAgentEngineClientContextTest {
                 mock(IGroupConversationService.class));
         var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
         restAgentEngine = new RestAgentEngine(conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
-                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, mock(IHitlToolJournalStore.class), 30);
+                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, mock(IHitlToolJournalStore.class),
+                mock(AgentDisplayNameResolver.class), 30);
     }
 
     private static Map<String, Context> clientContextWithReservedKeys() {

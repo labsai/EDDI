@@ -358,37 +358,3 @@ export async function redoConversation(
     "Failed to redo",
   );
 }
-
-/* ─── Agent descriptor ─────────────────────────── */
-
-/**
- * Fetch the agent's display name from its descriptor.
- *
- * The name lives on the DESCRIPTOR (`/descriptorstore/descriptors/{id}/simple`),
- * which requires a version — `/agentstore/agents/{id}` returns the
- * configuration, which carries no name at all, and was called without the
- * bearer token and without a version, so it could never succeed.
- *
- * The descriptor store is an editor endpoint: an end user holding only
- * `eddi-user` is refused, and the header then shows the configured `title`.
- * Any failure resolves to `{}` — a name is decoration, never a reason to fail.
- */
-export async function fetchAgentDescriptor(
-  agentId: string,
-  version: number,
-): Promise<{ name?: string; description?: string }> {
-  try {
-    const params = new URLSearchParams({ version: String(version) });
-    const data = await requestJson<{ name?: unknown; description?: unknown }>(
-      `/descriptorstore/descriptors/${encodeSegment(agentId)}/simple?${params}`,
-      undefined,
-      "Failed to read agent descriptor",
-    );
-    return {
-      name: typeof data?.name === "string" && data.name.trim() ? data.name : undefined,
-      description: typeof data?.description === "string" ? data.description : undefined,
-    };
-  } catch {
-    return {};
-  }
-}

@@ -89,7 +89,8 @@ class RestAgentEngineHitlTest {
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
                 conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
-                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, mock(AgentDisplayNameResolver.class),
+                AGENT_TIMEOUT);
     }
 
     // =========================================================================
