@@ -522,7 +522,7 @@ describe("OperatorActivation — stored provider the setup flow no longer offers
 
     const select = screen.getByTestId("operator-provider") as HTMLSelectElement;
     expect(select.value).toBe("anthropic");
-    expect(screen.getByTestId("operator-model")).toHaveValue("claude-sonnet-5");
+    expect(screen.getByTestId("operator-model")).toHaveValue("claude-sonnet-5-5");
     expect(screen.getByTestId("operator-api-key-input")).toHaveValue("");
   });
 });

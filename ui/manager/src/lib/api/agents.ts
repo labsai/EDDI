@@ -61,6 +61,19 @@ export interface Agent {
   sessionManagement?: SessionManagement;
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
+  /**
+   * The version's compatibility generation — SERVER-OWNED. Two versions of an
+   * agent with the same generation are compatible: a running conversation moves
+   * between them on its next turn once the newer one is deployed. `null` or
+   * absent on versions stored before version following existed, which are
+   * compatible only with themselves.
+   *
+   * Read-only: the store assigns it on every save and ignores whatever a PUT
+   * body carries, so sending the value back is harmless but changes nothing.
+   * Whether a save continues the chain is the `compatible` option of
+   * {@link updateAgent}.
+   */
+  compatibilityGeneration?: number | null;
 }
 
 export interface ChannelConnector {
@@ -241,12 +254,26 @@ export function createAgent(agent: Agent): Promise<{ location: string }> {
   return api.post<{ location: string }>("/agentstore/agents", agent);
 }
 
+export interface UpdateAgentOptions {
+  /**
+   * The new version is compatible with the one it replaces: conversations
+   * running on the previous version switch to it on their next turn once it is
+   * deployed. Absent or `false` is a breaking change — running conversations
+   * stay on the version they are on. The safe default, so only an explicit
+   * `true` is sent.
+   */
+  compatible?: boolean;
+}
+
 export function updateAgent(
   id: string,
   version: number,
-  agent: Agent
+  agent: Agent,
+  options?: UpdateAgentOptions
 ): Promise<{ location: string }> {
-  return api.put(`/agentstore/agents/${id}?version=${version}`, agent);
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.compatible === true) params.set("compatible", "true");
+  return api.put(`/agentstore/agents/${id}?${params.toString()}`, agent);
 }
 
 export function deleteAgent(
@@ -309,6 +336,44 @@ export function undeployAgent(
   }
   return api.post(
     `/administration/${environment}/undeploy/${agentId}?${params.toString()}`
+  );
+}
+
+/** What deploying a version does to one OTHER deployed version's conversations. */
+export type DeploymentImpactOutcome = "FOLLOW" | "STAY";
+
+export interface DeployedVersionImpact {
+  version: number;
+  compatibilityGeneration: number | null;
+  /** Active conversations currently on this version in the environment. */
+  activeConversations: number;
+  /**
+   * `FOLLOW` — they move to the deployed version on their next turn.
+   * `STAY` — they stay: a breaking change, a legacy version, or a newer version.
+   */
+  outcome: DeploymentImpactOutcome;
+}
+
+/** `GET /administration/{environment}/deploymentimpact/{agentId}?version=N` */
+export interface DeploymentImpact {
+  agentId: string;
+  version: number;
+  compatibilityGeneration: number | null;
+  /** Every OTHER deployed version of the agent in the environment, highest first. */
+  deployedVersions: DeployedVersionImpact[];
+}
+
+/**
+ * Preview of what deploying `version` would do to the conversations running on
+ * the agent's other deployed versions in `environment`. Read-only.
+ */
+export function getDeploymentImpact(
+  environment: string,
+  agentId: string,
+  version: number
+): Promise<DeploymentImpact> {
+  return api.get<DeploymentImpact>(
+    `/administration/${environment}/deploymentimpact/${encodeURIComponent(agentId)}?version=${version}`
   );
 }
 

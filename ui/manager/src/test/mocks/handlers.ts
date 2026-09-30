@@ -1078,7 +1078,29 @@ export const handlers = [
       description: "AI agent configured for EDDI platform",
       a2aSkills: [],
     };
-    return HttpResponse.json({ ...config, _version: version });
+    // Server-owned compatibility generation (AgentConfiguration). agent1's
+    // v2 and v3 share one; every other mock agent predates version following.
+    const compatibilityGeneration = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    return HttpResponse.json({ ...config, compatibilityGeneration, _version: version });
+  }),
+
+  // Deployment impact — what deploying `version` does to the conversations on
+  // the agent's OTHER deployed versions (IRestAgentAdministration
+  // .getDeploymentImpact). Highest version first; agent1 has a compatible v2
+  // (FOLLOW) and a legacy v1 (STAY), every other agent has nothing else live.
+  http.get("*/administration/:env/deploymentimpact/:agentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
+    const agentId = params.agentId as string;
+    const generation = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    const deployedVersions =
+      agentId === "agent1" && version === 3
+        ? [
+            { version: 2, compatibilityGeneration: 2, activeConversations: 12, outcome: "FOLLOW" },
+            { version: 1, compatibilityGeneration: null, activeConversations: 4, outcome: "STAY" },
+          ]
+        : [];
+    return HttpResponse.json({ agentId, version, compatibilityGeneration: generation, deployedVersions });
   }),
 
   // Deployment status
@@ -1127,7 +1149,9 @@ export const handlers = [
     });
   }),
 
-  // Update agent
+  // Update agent. `?compatible=true` (absent = breaking) only decides the new
+  // version's server-owned compatibilityGeneration, which this mock derives
+  // in the GET above, so the answer is the same either way.
   http.put("*/agentstore/agents/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const currentVersion = parseInt(
@@ -1269,7 +1293,9 @@ export const handlers = [
     return HttpResponse.json(result.slice(index * limit, index * limit + limit));
   }),
 
-  // Simple conversation log
+  // Simple conversation log. Detailed (non-public) keys included: every step
+  // records `agent:version`, and step 4 is where the conversation moved from
+  // v2 to a compatible v3 (`agent:switch`).
   http.get("*/conversationstore/conversations/simple/:id", () => {
     const now = new Date();
     const stepTime = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
@@ -1285,6 +1311,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(299900), originWorkflowId: null },
             { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "wf1" },
             { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "wf1" },
           ],
@@ -1293,6 +1320,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(239900), originWorkflowId: null },
             { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "wf1" },
             { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "wf1" },
           ],
@@ -1301,6 +1329,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(179900), originWorkflowId: null },
             { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "wf1" },
             { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "wf1" },
             { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "wf1" },
@@ -1310,6 +1339,8 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(119900), originWorkflowId: null },
+            { key: "agent:switch", value: { from: 2, to: 3 }, timestamp: stepTime(119900), originWorkflowId: null },
             { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "wf1" },
             { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "wf1" },
           ],
@@ -1318,6 +1349,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(59900), originWorkflowId: null },
             { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "wf1" },
             { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "wf1" },
             { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "wf1" },

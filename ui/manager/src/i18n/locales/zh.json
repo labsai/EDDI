@@ -265,7 +265,8 @@
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
-    "deployFailedIn": "在 {{environment}} 中部署失败"
+    "deployFailedIn": "在 {{environment}} 中部署失败",
+    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -678,7 +679,9 @@
     "exportMd": "导出为 Markdown",
     "toolSummary": "工具使用概览",
     "totalCost": "总成本",
-    "cacheHitRate": "缓存命中率"
+    "cacheHitRate": "缓存命中率",
+    "endReasonRetired": "已结束：该智能体版本已被停用",
+    "stepAgentVersion": "由智能体版本 {{version}} 回答"
   },
   "chat": {
     "hide": "隐藏",
@@ -5060,5 +5063,22 @@
     "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
     "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
     "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "与上一版本兼容 — 进行中的会话可以切换到此版本",
+    "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
+    "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
+    "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
+    "generationBadge": "兼容代 {{generation}}",
+    "generationTooltip": "兼容代 {{generation}}：此智能体中兼容代相同的版本彼此兼容，因此进行中的会话会在下一轮切换到最新部署的版本。不兼容的保存会开始新的兼容代。",
+    "impactTitle": "将 v{{version}} 部署到{{environment}} — 进行中的会话",
+    "impactFollow_other": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_other": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}",
+    "impactReasonNewer": "更新的版本",
+    "impactReasonLegacy": "早于版本跟随功能",
+    "impactReasonBreaking": "不兼容的更改",
+    "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
+    "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
   }
 }

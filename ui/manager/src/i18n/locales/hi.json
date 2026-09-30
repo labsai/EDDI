@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
     "deployToProduction": "प्रोडक्शन में तैनात करें",
     "undeployFromProduction": "प्रोडक्शन से हटाएँ",
-    "deployFailedIn": "{{environment}} में तैनाती विफल"
+    "deployFailedIn": "{{environment}} में तैनाती विफल",
+    "undeployCompatibleHint": "जिन बातचीत को कोई संगत डिप्लॉय किया गया संस्करण जारी रख सकता है, वे समाप्त नहीं होतीं: वे अपनी अगली बारी में उस पर चली जाती हैं।"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",
@@ -678,7 +679,9 @@
     "exportMd": "Markdown में निर्यात करें",
     "toolSummary": "उपकरण उपयोग सारांश",
     "totalCost": "कुल लागत",
-    "cacheHitRate": "कैश हिट दर"
+    "cacheHitRate": "कैश हिट दर",
+    "endReasonRetired": "समाप्त: एजेंट संस्करण को सेवानिवृत्त कर दिया गया",
+    "stepAgentVersion": "एजेंट संस्करण {{version}} द्वारा उत्तर दिया गया"
   },
   "chat": {
     "hide": "छुपाएं",
@@ -5060,5 +5063,22 @@
     "workflowMissingResource": "वर्कफ़्लो {{workflowId}} (संस्करण {{version}}) {{resource}} का संदर्भ नहीं देता, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा। कुछ भी सहेजा नहीं गया।",
     "agentWorkflowMismatch": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} के संस्करण {{found}} का संदर्भ देता है, संस्करण {{expected}} का नहीं। यह पृष्ठ खुलने के बाद एजेंट बदल गया। इसे पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
     "agentMissingWorkflow": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} का संदर्भ नहीं देता। कुछ भी सहेजा नहीं गया।"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "पिछले संस्करण के साथ संगत — चल रही बातचीत इस पर स्विच कर सकती है",
+    "compatibleHint": "केवल उन बदलावों के लिए जो चल रही बातचीत को नहीं तोड़ सकते, जैसे प्रॉम्प्ट का शब्दांकन या कोई दूसरा मॉडल। यदि प्रॉपर्टी, एक्शन या वर्कफ़्लो चरणों का नाम बदला गया या उन्हें हटाया गया है, तो इसे न चुनें।",
+    "compatibleLegacyNote": "वर्तमान संस्करण संस्करण-अनुसरण सुविधा से पहले का है, इसलिए उस पर पहले से चल रही बातचीत उसी पर रहती है। अगली संगत सेव से शृंखला जुड़ जाती है।",
+    "compatibleUnknownNote": "संस्करण-अनुसरण सुविधा से पहले के संस्करण पर चल रही बातचीत उसी पर रहती है।",
+    "generationBadge": "संगतता पीढ़ी {{generation}}",
+    "generationTooltip": "संगतता पीढ़ी {{generation}}: इस एजेंट के समान पीढ़ी वाले संस्करण संगत हैं, इसलिए चल रही बातचीत अपनी अगली बारी में सबसे नए डिप्लॉय किए गए संस्करण पर चली जाती है। असंगत सेव एक नई पीढ़ी शुरू करता है।",
+    "impactTitle": "v{{version}} को {{environment}} में डिप्लॉय करना — चल रही बातचीत",
+    "impactFollow_one": "v{{from}} पर {{count}} सक्रिय बातचीत v{{to}} पर जारी रहेगी",
+    "impactFollow_other": "v{{from}} पर {{count}} सक्रिय बातचीत v{{to}} पर जारी रहेंगी",
+    "impactStay_one": "v{{from}} पर {{count}} सक्रिय बातचीत v{{from}} पर ही रहेगी",
+    "impactStay_other": "v{{from}} पर {{count}} सक्रिय बातचीत v{{from}} पर ही रहेंगी",
+    "impactReasonNewer": "नया संस्करण",
+    "impactReasonLegacy": "संस्करण-अनुसरण से पहले का",
+    "impactReasonBreaking": "असंगत बदलाव",
+    "switchNotice": "एजेंट v{{from}} से v{{to}} पर चला गया"
   }
 }

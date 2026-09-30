@@ -265,7 +265,8 @@
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
-    "deployFailedIn": "{{environment}} へのデプロイに失敗しました"
+    "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
+    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -678,7 +679,9 @@
     "exportMd": "Markdownでエクスポート",
     "toolSummary": "ツール使用状況",
     "totalCost": "合計コスト",
-    "cacheHitRate": "キャッシュヒット率"
+    "cacheHitRate": "キャッシュヒット率",
+    "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
+    "stepAgentVersion": "エージェントのバージョン {{version}} が応答"
   },
   "chat": {
     "hide": "非表示",
@@ -5060,5 +5063,22 @@
     "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
     "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
     "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "前のバージョンと互換 — 進行中の会話がこのバージョンに切り替わる場合があります",
+    "compatibleHint": "進行中の会話を壊さない変更（プロンプトの言い回しや別のモデルなど）の場合のみ。プロパティ、アクション、ワークフローのステップを名前変更または削除した場合はチェックしないでください。",
+    "compatibleLegacyNote": "現在のバージョンはバージョン追従より前のものなので、すでに実行中の会話はそのまま残ります。次の互換保存からチェーンがつながります。",
+    "compatibleUnknownNote": "バージョン追従より前のバージョンの会話はそのバージョンに残ります。",
+    "generationBadge": "互換世代 {{generation}}",
+    "generationTooltip": "互換世代 {{generation}}：同じ世代を持つこのエージェントのバージョンは互換性があるため、進行中の会話は次のターンで最新のデプロイ済みバージョンに移ります。互換性のない保存は新しい世代を開始します。",
+    "impactTitle": "v{{version}} を{{environment}}にデプロイ — 進行中の会話",
+    "impactFollow_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります",
+    "impactReasonNewer": "より新しいバージョン",
+    "impactReasonLegacy": "バージョン追従より前",
+    "impactReasonBreaking": "互換性のない変更",
+    "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
+    "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
   }
 }
