@@ -58,7 +58,7 @@ public interface IRestScheduleStore {
     @Path("/{scheduleId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update an existing schedule. Omitted metadata, tenantId and allowSelfScheduling keep their "
-            + "stored values. A RAG-ingestion schedule cannot be updated here (409 — change the source's cron on the knowledge "
+            + "stored values. enabled is ignored and always keeps its stored value — use /enable and /disable. A RAG-ingestion schedule cannot be updated here (409 — change the source's cron on the knowledge "
             + "base); a team-cadence schedule requires EDIT on its group.")
     Response updateSchedule(@PathParam("scheduleId") String scheduleId, ScheduleConfiguration schedule);
 

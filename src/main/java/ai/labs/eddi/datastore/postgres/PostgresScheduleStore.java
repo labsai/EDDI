@@ -379,10 +379,17 @@ public class PostgresScheduleStore implements IScheduleStore {
         // values over in REST narrowed the window to milliseconds; taking the columns
         // out closes it, and covers non-REST callers too. next_fire STAYS, because an
         // edited cron or interval legitimately re-arms the schedule.
+        //
+        // enabled is out too: it is a runtime switch owned by setScheduleEnabled (and
+        // markCompleted, which disables a finished one-shot). Writing it from the
+        // caller's object let an editor holding a copy read before another operator's
+        // /disable re-enable the schedule just by saving — and the model defaults it
+        // to true, so a body that omitted it did the same. Not naming the column keeps
+        // the stored value inside this one atomic UPDATE.
         String sql = """
                 UPDATE eddi_schedules SET name=?, agent_id=?, tenant_id=?, user_id=?, trigger_type=?, cron_expression=?,
                     heartbeat_interval_seconds=?, conversation_strategy=?, max_cost_per_fire=?,
-                    enabled=?, next_fire=?, metadata=?::jsonb, updated_at=?,
+                    next_fire=?, metadata=?::jsonb, updated_at=?,
                     message=?, one_time_at=?, time_zone=?, environment=?, agent_version=?, allow_self_scheduling=?
                 WHERE id=?
                 """;
@@ -396,17 +403,16 @@ public class PostgresScheduleStore implements IScheduleStore {
             setNullableLong(ps, 7, schedule.getHeartbeatIntervalSeconds());
             ps.setString(8, schedule.getConversationStrategy());
             setNullableDouble(ps, 9, schedule.getMaxCostPerFire());
-            ps.setBoolean(10, schedule.isEnabled());
-            setNullableEpoch(ps, 11, schedule.getNextFire());
-            ps.setString(12, serializeMetadata(schedule.getMetadata()));
-            setNullableEpoch(ps, 13, schedule.getUpdatedAt());
-            ps.setString(14, schedule.getMessage());
-            ps.setString(15, schedule.getOneTimeAt());
-            ps.setString(16, schedule.getTimeZone());
-            ps.setString(17, schedule.getEnvironment());
-            ps.setInt(18, schedule.getAgentVersion());
-            ps.setBoolean(19, schedule.isAllowSelfScheduling());
-            ps.setString(20, scheduleId);
+            setNullableEpoch(ps, 10, schedule.getNextFire());
+            ps.setString(11, serializeMetadata(schedule.getMetadata()));
+            setNullableEpoch(ps, 12, schedule.getUpdatedAt());
+            ps.setString(13, schedule.getMessage());
+            ps.setString(14, schedule.getOneTimeAt());
+            ps.setString(15, schedule.getTimeZone());
+            ps.setString(16, schedule.getEnvironment());
+            ps.setInt(17, schedule.getAgentVersion());
+            ps.setBoolean(18, schedule.isAllowSelfScheduling());
+            ps.setString(19, scheduleId);
             int rows = ps.executeUpdate();
             if (rows == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");

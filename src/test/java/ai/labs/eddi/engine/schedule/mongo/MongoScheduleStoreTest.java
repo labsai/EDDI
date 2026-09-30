@@ -309,6 +309,30 @@ class MongoScheduleStoreTest {
      * nothing for a non-REST caller; the two fields belong to the claim/completion
      * methods.
      */
+    /**
+     * {@code enabled} is a runtime switch owned by {@code setScheduleEnabled}.
+     * Writing it from the caller's object let an editor whose copy predated another
+     * operator's disable re-enable the schedule just by saving; left out of the
+     * {@code $set}, the stored value survives inside the same atomic update.
+     */
+    @Test
+    @DisplayName("updateSchedule — never writes enabled")
+    void updateScheduleDoesNotWriteEnabled() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(updateResult);
+
+        ScheduleConfiguration config = new ScheduleConfiguration();
+        config.setName("edited");
+        config.setEnabled(true);
+        store.updateSchedule("sched-1", config);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String rendered = update.getValue().toString();
+        assertFalse(rendered.contains("enabled"), "only /enable and /disable may change enabled: " + rendered);
+    }
+
     @Test
     @DisplayName("updateSchedule — never writes fireStatus or failCount")
     void updateScheduleDoesNotTouchTheFireLifecycle() throws Exception {

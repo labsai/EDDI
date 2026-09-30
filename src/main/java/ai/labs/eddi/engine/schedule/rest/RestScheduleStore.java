@@ -765,6 +765,15 @@ public class RestScheduleStore implements IRestScheduleStore {
      * {@code markCompleted}, {@code markFailed}, {@code setScheduleEnabled} and
      * {@code requeueDeadLetter}.
      * <p>
+     * {@code enabled} is carried over unconditionally, whatever the body says. It
+     * is a runtime switch owned by {@code /enable} and {@code /disable}, and both
+     * stores' {@code updateSchedule} leave it out of the write, so the stored value
+     * survives even if it changed after this read. Taking it from the body let an
+     * editor whose copy predated another operator's disable re-enable the schedule
+     * by saving — and the model defaults it to {@code true}, so omitting it did the
+     * same. Setting it here only keeps the in-memory body honest about what the row
+     * will hold; the store is what guarantees it.
+     * <p>
      * Recovering a FAILED or DEAD_LETTERED schedule is therefore deliberately NOT a
      * side effect of editing it: {@code POST /schedules/{id}/enable} and
      * {@code POST /schedules/{id}/retry} both clear the failure state explicitly.
@@ -798,6 +807,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         schedule.setFireId(stored.getFireId());
         schedule.setNextRetryAt(stored.getNextRetryAt());
         schedule.setPersistentConversationId(stored.getPersistentConversationId());
+        schedule.setEnabled(stored.isEnabled());
 
         if (!schedule.hasMetadata()) {
             schedule.setMetadata(stored.getMetadata());

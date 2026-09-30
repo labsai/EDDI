@@ -476,7 +476,10 @@ duplicate cron jobs. Such an update replaces what the schedule *does* — cron, 
 but never **who it runs as**: when the archive brings no identity of its own (the usual case,
 per the paragraph above), the owner already on the target is kept. Otherwise every promotion
 reset that schedule to the system scheduler, which stops Dream consolidation and drops the
-schedule's ownership protection. The target's HITL approval timers are excluded from that name matching —
+schedule's ownership protection. Nor does it change whether the schedule is **enabled**: the
+update goes through `PUT /schedulestore/schedules/{id}`, which keeps the stored `enabled`
+value, so a schedule an operator disabled on the target stays disabled (see
+[Enabling and disabling](scheduling.md#enabling-and-disabling)). The target's HITL approval timers are excluded from that name matching —
 they are per-conversation safety timers, never part of an agent's configuration, and the export
 side leaves them out for the same reason. If the import fails after a schedule was overwritten,
 the target's original is written back as part of the rollback. The merge preview says so:
