@@ -140,6 +140,21 @@ configuration — the same gap already closed in the agent wizard. Both handlers
 `apiKey`; a test switches each slot's provider and asserts the key is empty, and fails with either
 reset removed. The gap predates this branch; the added providers made it easier to hit.
 
+### Merge of main (2026-09-30)
+
+Main moved by ~270 commits while this was open. Conflicts resolved as follows:
+- The agent wizard and the operator form now pass `include={isProvisionableBySetup}` to
+  `ProviderSelect` (new prop), keeping main's rule that setup cannot provision `gemini-vertex`.
+- The wizard keeps clearing the API key on *any* provider switch — stricter than main's "carry it
+  between two keyed providers" rule, and it covers main's Jlama-token case too.
+- The operator form seeds its stored endpoint only when it keeps the stored provider, since main now
+  falls back from a provider the setup flow no longer offers.
+- `DynamicAgentToolsTest`'s new cases verify main's two-argument `setupAgent(request, origin)`; the
+  one-argument form would have made the `never()` check vacuous.
+- `operator-activation.test.tsx`'s fallback case (added on main) expected `claude-sonnet-5`
+  while #896 moved the default to `claude-sonnet-5-5` — main's own suite is red on it. It now
+  derives the expected model from `LLM_PROVIDERS[0]`.
+
 ### Design decisions
 
 ```decision-log
