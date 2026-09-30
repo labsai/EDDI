@@ -341,18 +341,43 @@ public final class SecretValueScrubber {
         OUTSIDE_REFERENCES
     }
 
-    /** A vault reference, in either spelling — left intact by that mode. */
-    private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
+    /**
+     * The openings of a vault reference, in either spelling — left intact by that
+     * mode.
+     */
+    private static final List<String> VAULT_REFERENCE_OPENINGS = List.of("${vault:", "${eddivault:");
 
+    /**
+     * Replaces the plaintexts everywhere except inside {@code ${vault:…}} and
+     * {@code ${eddivault:…}} spans, each running to its first closing brace. A
+     * linear scan rather than a regex: {@code find()} over an unterminated opening
+     * would rescan the rest of the text from every one of them.
+     */
     private static String replaceOutsideReferences(String text, List<String> plaintexts, String placeholder) {
-        Matcher reference = VAULT_REFERENCE.matcher(text);
         var cleaned = new StringBuilder(text.length());
         int from = 0;
-        while (reference.find()) {
-            cleaned.append(replaceAll(text.substring(from, reference.start()), plaintexts, placeholder, false)).append(reference.group());
-            from = reference.end();
+        int start;
+        while ((start = nextReferenceOpening(text, from)) >= 0) {
+            int end = text.indexOf('}', start);
+            if (end < 0) {
+                // No closing brace anywhere after this opening, so no later one closes either.
+                break;
+            }
+            cleaned.append(replaceAll(text.substring(from, start), plaintexts, placeholder, false)).append(text, start, end + 1);
+            from = end + 1;
         }
         return cleaned.append(replaceAll(text.substring(from), plaintexts, placeholder, false)).toString();
+    }
+
+    private static int nextReferenceOpening(String text, int from) {
+        for (int at = text.indexOf("${", from); at >= 0; at = text.indexOf("${", at + 2)) {
+            for (String opening : VAULT_REFERENCE_OPENINGS) {
+                if (text.startsWith(opening, at)) {
+                    return at;
+                }
+            }
+        }
+        return -1;
     }
 
     private static String replaceAll(String text, List<String> plaintexts, String placeholder, boolean wholeToken) {

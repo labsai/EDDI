@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 @DisplayName("SecretValueScrubber")
 class SecretValueScrubberTest {
@@ -208,5 +210,18 @@ class SecretValueScrubberTest {
         assertEquals("${vault:agent.u1.n1.accessToken}", map.get("cessTokenKey"));
         assertEquals("sent <p> and ${eddivault:x.accessToken} then <p>", map.get("echo"));
         assertNull(SecretValueScrubber.scrubDeepKeepingReferences("${vault:a.cessToken}", List.of("cessToken"), "<p>"));
+    }
+
+    @Test
+    @DisplayName("an unterminated reference opening is scrubbed like plain text, and the scan stays linear")
+    void keepingReferencesUnterminatedOpenings() {
+        assertEquals("<p> ${vault:x.cessToken} ${vault:<p>",
+                SecretValueScrubber.scrubDeepKeepingReferences("cessToken ${vault:x.cessToken} ${vault:cessToken", List.of("cessToken"),
+                        "<p>"));
+
+        String hostile = "${vault:".repeat(200_000) + "cessToken";
+        String cleaned = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> (String) SecretValueScrubber.scrubDeepKeepingReferences(hostile, List.of("cessToken"), "<p>"));
+        assertEquals("${vault:".repeat(200_000) + "<p>", cleaned);
     }
 }
