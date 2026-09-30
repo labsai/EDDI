@@ -49,6 +49,7 @@ class UserMemoryToolTest {
         assertTrue(result.contains("✅ Remembered"));
         assertTrue(result.contains("favorite_color"));
         verify(store).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).upsertIfOwnedBy(any(), any());
     }
 
     @Test
@@ -343,6 +344,7 @@ class UserMemoryToolTest {
 
         assertTrue(result.contains("owned by another agent"), "expected a cross-agent refusal, got: " + result);
         verify(store, never()).upsert(any());
+        verify(store, never()).upsertIfOwnedBy(any(), any());
     }
 
     @Test
@@ -350,12 +352,63 @@ class UserMemoryToolTest {
         config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
         when(store.getAllEntries("user-1")).thenReturn(List.of());
         when(store.countEntries("user-1")).thenReturn(0L);
-        when(store.upsert(any())).thenReturn("entry-id");
+        when(store.upsertIfOwnedBy(any(), eq("agent-1"))).thenReturn(true);
 
         String result = tool.rememberFact("my_key", "value", "fact", "global");
 
         assertTrue(result.contains("✅ Remembered"), "expected success, got: " + result);
-        verify(store).upsert(any());
+        // The ownership decision is made by the store's conditional write, not the
+        // read-then-upsert that raced.
+        ArgumentCaptor<UserMemoryEntry> captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store).upsertIfOwnedBy(captor.capture(), eq("agent-1"));
+        assertEquals("agent-1", captor.getValue().sourceAgentId());
+        assertEquals(Visibility.global, captor.getValue().visibility());
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    void rememberFact_globalKeyClaimedConcurrently_refused() throws Exception {
+        // Both agents saw the key as free; the other agent's write landed first, so
+        // the store's owner-conditional write applies nothing.
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.upsertIfOwnedBy(any(), eq("agent-1"))).thenReturn(false);
+
+        String result = tool.rememberFact("shared_key", "value", "fact", "global");
+
+        assertTrue(result.contains("owned by another agent"), "expected a cross-agent refusal, got: " + result);
+        assertFalse(result.contains("✅"), result);
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    void rememberFact_refusedGlobalWrite_doesNotUseUpTheTurnBudget() throws Exception {
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        config.getGuardrails().setMaxWritesPerTurn(1);
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.upsertIfOwnedBy(any(), eq("agent-1"))).thenReturn(false);
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        tool.rememberFact("shared_key", "value", "fact", "global");
+        String second = tool.rememberFact("own_key", "value", "fact", "self");
+
+        assertTrue(second.contains("✅ Remembered"), "a refused write must not count against the turn, got: " + second);
+    }
+
+    @Test
+    void rememberFact_globalWithoutAgentIdentity_refused() throws Exception {
+        // With no agent id there is no owner to write as, so the conditional write
+        // cannot be made; refuse rather than store an ownerless global entry.
+        config.getGuardrails().setAllowedVisibilities(List.of("self", "global"));
+        var anonymous = new UserMemoryTool(store, "user-1", null, "conv-1", List.of(), config);
+
+        String result = anonymous.rememberFact("shared_key", "value", "fact", "global");
+
+        assertTrue(result.contains("owned by another agent"), "expected a refusal, got: " + result);
+        verify(store, never()).upsert(any());
+        verify(store, never()).upsertIfOwnedBy(any(), any());
     }
 
     @Test
@@ -387,6 +440,7 @@ class UserMemoryToolTest {
 
         assertTrue(result.contains("owner is unknown"), "expected an unknown-owner refusal, got: " + result);
         verify(store, never()).upsert(any());
+        verify(store, never()).upsertIfOwnedBy(any(), any());
     }
 
     @Test
@@ -402,6 +456,9 @@ class UserMemoryToolTest {
         String result = tool.rememberFact("shared_key", "new value", "fact", "global");
 
         assertTrue(result.contains("✅ Remembered"), "expected success, got: " + result);
+        // allowGlobalKeyOverwrite keeps the plain upsert: the operator opted in to
+        // cross-agent overwrites, so there is no ownership to enforce.
         verify(store).upsert(any());
+        verify(store, never()).upsertIfOwnedBy(any(), any());
     }
 }
