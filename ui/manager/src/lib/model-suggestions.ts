@@ -30,6 +30,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   openai: [
     "gpt-6-astra",
+    // gpt-6.1-sol supersedes gpt-6-sol (still served) since 2026-09-29.
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -53,7 +55,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
+    // Gemini 3.1 Pro is preview-only: the API documents no bare "gemini-3.1-pro".
     "gemini-3.1-pro-preview",
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite",
@@ -68,7 +70,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
     "gemini-2.5-pro",
@@ -91,7 +92,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "llama3.3:70b",
     "qwen3:8b",
     "gemma3:4b",
-    "phi4:mini",
+    // Not "phi4:mini": the phi4 library only has 14b tags. Needs Ollama 0.5.13+.
+    "phi4-mini",
     "deepseek-r1:8b",
   ],
   // Jlama resolves a model through its own registry, which downloads it from
@@ -107,23 +109,26 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   huggingface: [
     "deepseek-ai/DeepSeek-V4",
     "google/gemma-4-assistant",
-    "THUDM/GLM-5.1",
+    "zai-org/GLM-5.1",
     "Qwen/Qwen3.5-7B",
     "meta-llama/Llama-3.2-1B",
   ],
   mistral: [
+    // The dated ids are the ones Mistral's model pages document; the -latest
+    // aliases still resolve. Devstral was retired and Magistral deprecated by
+    // 2026-07-31: reasoning now comes from reasoning_effort on Small and Medium.
     "mistral-large-latest",
+    "mistral-large-2512",
+    "mistral-medium-3-5",
     "mistral-medium-latest",
     "mistral-small-latest",
-    "mistral-small-4",
+    "mistral-small-2603",
+    "ministral-14b-2512",
     "ministral-14b-latest",
     "ministral-8b-latest",
     "ministral-3b-latest",
-    "devstral-latest",
-    "devstral-small-latest",
+    "codestral-2508",
     "codestral-latest",
-    "magistral-medium-latest",
-    "magistral-small-latest",
   ],
   // Azure uses your own deployment names — these are standard Microsoft-managed
   // deployment identifiers for Azure OpenAI Service
@@ -150,8 +155,10 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "anthropic.claude-haiku-4-5-20251001-v1:0",
     "anthropic.claude-sonnet-4-6-v1:0",
     // Meta Llama
-    "meta.llama4-maverick-17b-instruct-v1:0",
-    "meta.llama4-scout-17b-instruct-v1:0",
+    // Llama 4 is served only through cross-region inference profiles; the bare
+    // model id fails with "on-demand throughput isn't supported".
+    "us.meta.llama4-maverick-17b-instruct-v1:0",
+    "us.meta.llama4-scout-17b-instruct-v1:0",
     "meta.llama3-3-70b-instruct-v1:0",
     "meta.llama3-1-405b-instruct-v1:0",
     // Amazon
@@ -162,13 +169,14 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   "oracle-genai": [
     // Cohere
-    "cohere.command-latest",
-    "cohere.command-plus-latest",
-    "cohere.command-r-plus-v2",
-    "cohere.command-r-plus",
+    // Command R and R+ are retired on OCI (the last on 2026-07-30); Command A
+    // replaced them. OCI has never had "cohere.command-latest".
+    "cohere.command-a-03-2025",
+    "cohere.command-a-reasoning",
+    "cohere.command-a-vision",
     // Meta Llama
-    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    // OCI's API name, not the Hugging Face repository name.
+    "meta.llama-4-maverick-17b-128e-instruct-fp8",
     "meta.llama-3.3-70b-instruct",
     "meta.llama-3.1-70b-instruct",
     // OpenAI

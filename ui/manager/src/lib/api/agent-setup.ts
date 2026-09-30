@@ -134,7 +134,7 @@ export const LLM_PROVIDERS = [
   { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-3.5-flash", needsKey: false, group: "cloud" },
   { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true, group: "cloud" },
   { id: "bedrock", name: "Amazon Bedrock", defaultModel: "global.anthropic.claude-sonnet-5-5", needsKey: false, group: "cloud" },
-  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false, group: "cloud" },
+  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-a-03-2025", needsKey: false, group: "cloud" },
   { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true, group: "cloud" },
   { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false, group: "local" },
   // Jlama loads from Hugging Face, so the default has to be a real `owner/name`
