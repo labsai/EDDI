@@ -138,7 +138,7 @@ export function defaultOperatorConfig(promptBody?: string): OperatorConfig {
     version: null,
     environment: "production",
     provider: "anthropic",
-    model: "claude-sonnet-5",
+    model: "claude-sonnet-5-5",
     credentialKey: null,
     // Resolved from the backend at activation time — see apiBaseUrl's doc comment.
     apiBaseUrl: null,

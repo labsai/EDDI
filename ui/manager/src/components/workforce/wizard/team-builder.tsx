@@ -134,7 +134,7 @@ function LlmFields({
               ? t("Workforce.wizard.useDefault", "Workforce default ({{value}})", {
                   value: inherit.model,
                 })
-              : t("Workforce.wizard.modelPlaceholder", "e.g. claude-sonnet-5")
+              : t("Workforce.wizard.modelPlaceholder", "e.g. claude-sonnet-5-5")
           }
           className={cn(inputClass, "border-input")}
         />
