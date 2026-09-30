@@ -561,7 +561,14 @@ public class McpAdminTools {
                                             + "\"eddi://...?version=2\"}, ...]") String resourceMappings,
                                     @ToolArg(description = "Redeploy the Agent after cascading changes? (default: false)") Boolean redeploy,
                                     @ToolArg(description = "Environment for redeployment: "
-                                            + "'production' (default) or 'test'") String environment) {
+                                            + "'production' (default) or 'test'") String environment,
+                                    @ToolArg(description = "Is the new Agent version compatible with the one it replaces? "
+                                            + "true = conversations already running switch to it on their next turn once it is "
+                                            + "deployed. Only for changes that cannot break a conversation in progress, e.g. prompt "
+                                            + "wording or a different model. false (the default) = a breaking change: running "
+                                            + "conversations stay on their version. Choose false if properties or actions were "
+                                            + "renamed or removed, or if the new version needs conversation state older "
+                                            + "conversations do not have.") Boolean compatible) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -644,7 +651,7 @@ public class McpAdminTools {
             int newAgentVersion = ver;
             if (updatedWorkflowCount > 0) {
                 agentConfig.setWorkflows(updatedWorkflowUris);
-                Response agentResponse = localAgentStore.updateAgent(agentId, ver, agentConfig);
+                Response agentResponse = localAgentStore.updateAgent(agentId, ver, agentConfig, Boolean.TRUE.equals(compatible));
                 String agentLocation = agentResponse.getHeaderString("Location");
                 newAgentVersion = agentLocation != null ? extractVersionFromLocation(agentLocation) : ver + 1;
             }
@@ -655,6 +662,9 @@ public class McpAdminTools {
             result.put("previousAgentVersion", ver);
             result.put("newAgentVersion", newAgentVersion);
             result.put("updatedWorkflows", updatedWorkflowCount);
+            if (updatedWorkflowCount > 0) {
+                result.put("compatibleWithPreviousVersion", Boolean.TRUE.equals(compatible));
+            }
             result.put("totalWorkflows", originalWorkflowUris.size());
             result.put("mappingsApplied", mappings.size());
 

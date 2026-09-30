@@ -94,6 +94,14 @@ public interface IConversationMemoryStore {
 
     void setConversationState(String conversationId, ConversationState conversationState);
 
+    /**
+     * Record why a conversation ended, as a narrow field update that — like
+     * {@link #setConversationState} — does not bump the document revision.
+     * Best-effort by contract: a caller ends the conversation first and a failure
+     * here must not undo that.
+     */
+    void setConversationEndReason(String conversationId, String endReason);
+
     void deleteConversationMemorySnapshot(String conversationId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 

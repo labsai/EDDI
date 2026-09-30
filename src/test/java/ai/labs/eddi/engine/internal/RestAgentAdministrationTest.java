@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
@@ -229,7 +230,7 @@ class RestAgentAdministrationTest {
                     Deployment.Environment.test, "agent-1", 1, true, false);
 
             assertEquals(202, response.getStatus());
-            verify(restConversationStore).endActiveConversations(any());
+            verify(restConversationStore).endActiveConversations(any(), eq(IConversationService.END_REASON_AGENT_VERSION_RETIRED));
         }
 
         @Test
@@ -239,7 +240,7 @@ class RestAgentAdministrationTest {
             // undeploying on top of a conversation still open is what it must not do.
             when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
             when(restConversationStore.getActiveConversations("agent-1", 1)).thenReturn(List.of());
-            when(restConversationStore.endActiveConversations(any())).thenReturn(Response.serverError().build());
+            when(restConversationStore.endActiveConversations(any(), any())).thenReturn(Response.serverError().build());
 
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentAdmin.undeployAgent(Deployment.Environment.test, "agent-1", 1, true, false));

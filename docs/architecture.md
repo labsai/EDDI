@@ -258,6 +258,11 @@ A agent is simply a **list of workflow references**:
 }
 ```
 
+Every agent version also carries a server-assigned `compatibilityGeneration`. Versions with the
+same generation are declared compatible, and a running conversation follows the newest deployed
+one from its next turn; every save is a breaking change unless the save says otherwise. See
+[Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
 ### 2. Workflow Level
 
 **File**: `{workflowId}.workflow.json`

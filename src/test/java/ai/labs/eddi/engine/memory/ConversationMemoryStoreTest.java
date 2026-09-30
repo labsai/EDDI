@@ -234,6 +234,17 @@ class ConversationMemoryStoreTest {
         verify(documentCollection).updateOne(any(Document.class), any(Document.class));
     }
 
+    @Test
+    @DisplayName("setConversationEndReason — sets only the endReason field on the conversation's document")
+    void setConversationEndReason() {
+        when(documentCollection.updateOne(any(Document.class), any(Document.class))).thenReturn(mock(UpdateResult.class));
+
+        store.setConversationEndReason(VALID_ID, "agent-version-retired");
+
+        verify(documentCollection).updateOne(new Document("_id", new ObjectId(VALID_ID)),
+                new Document("$set", new Document("endReason", "agent-version-retired")));
+    }
+
     // ==================== deleteConversationMemorySnapshot ====================
 
     @Test

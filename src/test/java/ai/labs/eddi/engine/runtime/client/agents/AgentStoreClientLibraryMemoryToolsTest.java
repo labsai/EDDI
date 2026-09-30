@@ -52,6 +52,24 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
+    @DisplayName("the deployed agent carries its version's compatibility generation")
+    void carriesCompatibilityGeneration() throws Exception {
+        var config = configuration(false, null);
+        config.setCompatibilityGeneration(3);
+        when(agentStoreService.getAgentConfiguration("agent-1", 4)).thenReturn(config);
+
+        assertEquals(3, library.getAgent("agent-1", 4).getCompatibilityGeneration());
+    }
+
+    @Test
+    @DisplayName("a version without a generation deploys without one")
+    void legacyVersionHasNoGeneration() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));
+
+        assertNull(library.getAgent("agent-1", 1).getCompatibilityGeneration());
+    }
+
+    @Test
     @DisplayName("enabled with no config — falls back to the defaults instead of skipping")
     void defaultsWhenConfigOmitted() throws Exception {
         when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(true, null));

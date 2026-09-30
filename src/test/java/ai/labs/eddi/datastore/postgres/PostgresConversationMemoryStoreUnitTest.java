@@ -320,6 +320,25 @@ class PostgresConversationMemoryStoreUnitTest {
         assertThrows(RuntimeException.class, () -> store.setConversationState("conv", ConversationState.ENDED));
     }
 
+    @Test
+    void setConversationEndReason_patchesOnlyTheJsonField() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.setConversationEndReason("conv-1", "agent-version-retired");
+
+        verify(connection).prepareStatement(
+                "UPDATE conversation_memories SET data = jsonb_set(data, '{endReason}', to_jsonb(?::text)) WHERE id = ?::uuid");
+        verify(preparedStatement).setString(1, "agent-version-retired");
+        verify(preparedStatement).setString(2, "conv-1");
+    }
+
+    @Test
+    void setConversationEndReason_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
+
+        assertThrows(RuntimeException.class, () -> store.setConversationEndReason("conv-1", "agent-version-retired"));
+    }
+
     // ─── deleteConversationMemorySnapshot ───
 
     @Test

@@ -38,6 +38,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
@@ -690,7 +692,7 @@ public class ScheduleFireExecutor {
                     // Every fire into an ended conversation was refused with "conversation
                     // has ended", and the schedule never recovered on its own.
                     LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — starting a new one",
-                            conversationId, schedule.getId());
+                            sanitize(conversationId), sanitize(schedule.getId()));
                 } else if (!rollOverIfDue(schedule, conversationId, existing)) {
                     return conversationId;
                 } else if (Objects.equals(existing.getUserId(), scheduleUserId(schedule))) {

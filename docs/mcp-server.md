@@ -65,7 +65,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `update_resource`      | Update any resource config by type and ID. Returns the new version URI              |
 | `create_resource`      | Create a new resource. Returns the new resource ID and URI                          |
 | `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete)        |
-| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy  |
+| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change  |
 | `list_agent_resources` | Walk agent → packages → extensions to get a complete resource inventory in one call |
 
 ### Diagnostic Tools (2)

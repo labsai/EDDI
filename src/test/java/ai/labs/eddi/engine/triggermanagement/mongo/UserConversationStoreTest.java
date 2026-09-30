@@ -10,16 +10,21 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.result.DeleteResult;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.List;
@@ -126,6 +131,82 @@ class UserConversationStoreTest {
         when(collection.deleteOne(any(Document.class))).thenReturn(mock(DeleteResult.class));
         store.deleteUserConversation("greeting", "user-1");
         verify(collection).deleteOne(any(Document.class));
+    }
+
+    /**
+     * The read-then-insert is not atomic: a concurrent create for the same key
+     * lands in between and the unique index rejects this insert. Callers resolve a
+     * create race on ResourceAlreadyExistsException; a raw MongoWriteException
+     * failed the turn instead.
+     */
+    @Test
+    @DisplayName("createUserConversation — a duplicate-key insert is reported as already existing")
+    void createUserConversationDuplicateKeyRace() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize("{}", Document.class)).thenReturn(new Document());
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress()))
+                .when(collection).insertOne(any(Document.class));
+
+        UserConversation uc = new UserConversation("greeting", "user-1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+
+        assertThrows(ResourceAlreadyExistsException.class, () -> store.createUserConversation(uc));
+    }
+
+    @Test
+    @DisplayName("createUserConversation — any other write error still propagates")
+    void createUserConversationOtherWriteError() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize("{}", Document.class)).thenReturn(new Document());
+        doThrow(new MongoWriteException(new WriteError(2, "bad value", new BsonDocument()), new ServerAddress()))
+                .when(collection).insertOne(any(Document.class));
+
+        UserConversation uc = new UserConversation("greeting", "user-1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+
+        assertThrows(MongoWriteException.class, () -> store.createUserConversation(uc));
+    }
+
+    // ==================== deleteUserConversationIfMatches ====================
+
+    @Test
+    @DisplayName("deleteUserConversationIfMatches — filters on the conversation id as well as the key")
+    void deleteIfMatchesFiltersOnConversationId() throws Exception {
+        DeleteResult deleteResult = mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(1L);
+        when(collection.deleteOne(any(Document.class))).thenReturn(deleteResult);
+
+        assertTrue(store.deleteUserConversationIfMatches("greeting", "user-1", "conv-ended"));
+
+        ArgumentCaptor<Document> filter = ArgumentCaptor.forClass(Document.class);
+        verify(collection).deleteOne(filter.capture());
+        assertEquals(new Document("intent", "greeting").append("userId", "user-1").append("conversationId", "conv-ended"),
+                filter.getValue());
+    }
+
+    @Test
+    @DisplayName("deleteUserConversationIfMatches — reports false when the mapping names another conversation")
+    void deleteIfMatchesNoMatch() throws Exception {
+        DeleteResult deleteResult = mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(0L);
+        when(collection.deleteOne(any(Document.class))).thenReturn(deleteResult);
+
+        assertFalse(store.deleteUserConversationIfMatches("greeting", "user-1", "conv-ended"));
+    }
+
+    @Test
+    @DisplayName("deleteUserConversationIfMatches — a driver failure is a ResourceStoreException")
+    void deleteIfMatchesWrapsFailure() {
+        when(collection.deleteOne(any(Document.class))).thenThrow(new IllegalStateException("down"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> store.deleteUserConversationIfMatches("greeting", "user-1", "conv-ended"));
     }
 
     // ==================== deleteAllForUser ====================

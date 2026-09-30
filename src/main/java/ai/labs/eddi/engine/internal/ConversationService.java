@@ -40,6 +40,8 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -228,6 +230,7 @@ public class ConversationService implements IConversationService, UserErasurePar
     private final Counter counterConversationProcessing;
     private final Counter counterConversationUndo;
     private final Counter counterConversationRedo;
+    private final Counter counterAgentVersionSwitch;
     final Counter counterHitlPause;
     private final Counter counterHitlResume;
     /**
@@ -309,6 +312,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+        this.counterAgentVersionSwitch = meterRegistry.counter("eddi_conversation_agent_version_switch_count");
         this.counterConversationStoreConflict = meterRegistry.counter("eddi_conversation_store_conflict_count");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
@@ -562,6 +566,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Override
     public void endConversation(String conversationId, String endedBy) {
+        endConversation(conversationId, endedBy, null);
+    }
+
+    @Override
+    public void endConversation(String conversationId, String endedBy, String endReason) {
         long startTime = System.nanoTime();
         // Signal any in-flight resume on this pod (mirrors cancelConversation): a
         // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
@@ -578,6 +587,14 @@ public class ConversationService implements IConversationService, UserErasurePar
         // leave a dead schedule row forever) and clear the persisted bookmark.
         ConversationState previousState = conversationMemoryStore.getConversationState(conversationId);
         setConversationState(conversationId, ConversationState.ENDED);
+        if (endReason != null) {
+            try {
+                conversationMemoryStore.setConversationEndReason(conversationId, endReason);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Conversation %s ended, but its end reason '%s' could not be recorded: %s",
+                        sanitize(conversationId), sanitize(endReason), e.getMessage());
+            }
+        }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
         // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
         // its
@@ -698,6 +715,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentMismatchException(message);
             }
 
+            rejectIfEnded(conversationMemory);
+
             // HITL fast-fail: a paused conversation cannot consume input — reject
             // promptly (REST: 409) instead of dropping the turn into the 60s
             // watchdog. Checked BEFORE quota/reference bookkeeping so nothing
@@ -708,13 +727,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            // M-E1: an ended conversation is refused BEFORE getAgent, whose lazy redeploy
-            // would otherwise bring back an agent an operator undeployed — without the
-            // tenant gate or a deployment-store write — just to tell the caller the
-            // conversation is over.
-            rejectIfEnded(conversationMemory);
-
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -753,6 +771,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             // Everything bound to one memory instance lives in the builder, so a queued
             // turn can be rebuilt over the current document when it finally runs (H13a).
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
                     String envName = environment.toString();
@@ -767,6 +787,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             memorySnapshot.setEnvironment(environment);
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             processingTurn.release();
                             responseHandler.onComplete(memorySnapshot);
@@ -832,6 +853,24 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * An ended conversation is refused before its agent is looked up.
+     * <p>
+     * The check further down ({@code conversation.isEnded()}) comes after the agent
+     * lookup, so an ended conversation whose agent version had since been
+     * undeployed — the normal state after
+     * {@code undeploy?endAllActiveConversations=true} — answered "agent not ready"
+     * instead of "ended". Clients that recover from an ended conversation by
+     * starting a new one (Slack threads, managed conversations, {@code /v1}) never
+     * saw the signal they recover on, and retried a conversation that could never
+     * answer again.
+     */
+    static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {
+        if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+            throw new ConversationEndedException("Conversation has ended!");
+        }
+    }
+
     static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
             turn.release();
@@ -869,6 +908,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentMismatchException(message);
             }
 
+            rejectIfEnded(conversationMemory);
+
             // HITL fast-fail (mirrors say()): reject input into a paused
             // conversation promptly instead of leaving the SSE stream dangling.
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -877,13 +918,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            // M-E1: an ended conversation is refused BEFORE getAgent, whose lazy redeploy
-            // would otherwise bring back an agent an operator undeployed — without the
-            // tenant gate or a deployment-store write — just to tell the caller the
-            // conversation is over.
-            rejectIfEnded(conversationMemory);
-
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -959,6 +999,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             // Everything bound to one memory instance lives in the builder, so a queued
             // turn can be rebuilt over the current document when it finally runs (H13a).
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
                 // Set the event sink on memory so LifecycleManager and tasks can use it
                 memory.setEventSink(eventSink);
 
@@ -976,6 +1018,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             memorySnapshot.setEnvironment(environment);
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             processingTurn.release();
                             streamingHandler.onComplete(memorySnapshot);
@@ -1086,8 +1129,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                     return false;
                 }
                 // The undone step is now on top of the redo cache.
-                applyAgentMemoryConfig(environment, conversationMemory);
-                syncLongTermChanges(conversationMemory, conversationMemory.getRedoCache().peek(), true);
+                var undone = conversationMemory.getRedoCache().peek();
+                applyAgentMemoryConfig(environment, conversationMemory, undone);
+                syncLongTermChanges(conversationMemory, undone, true);
                 return true;
             } else {
                 return false;
@@ -1134,7 +1178,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversationId, loadedStateForRedo);
                     return false;
                 }
-                applyAgentMemoryConfig(environment, conversationMemory);
+                applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
                 syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
                 return true;
             } else {
@@ -1489,13 +1533,22 @@ public class ConversationService implements IConversationService, UserErasurePar
     /**
      * Undo and redo run outside a turn, so the loaded memory has no
      * {@code userMemoryConfig} (it is applied per turn and never persisted). Reads
-     * it from the deployed agent so {@link #syncLongTermChanges} can persist the
-     * way the turn did. Without a deployed agent it stays unset and the sync falls
-     * back to never widening a scope.
+     * it from the agent version that ran {@code step} — recorded on the step, since
+     * a conversation can move between compatible versions whose defaults differ —
+     * so {@link #syncLongTermChanges} persists the way that turn did. A step from
+     * before versions were recorded uses the conversation's version. When that
+     * version is not deployed it stays unset and the sync falls back to never
+     * widening a scope: another version's policy is not the one that governed the
+     * step.
      */
-    private void applyAgentMemoryConfig(Environment environment, IConversationMemory memory) {
+    void applyAgentMemoryConfig(Environment environment, IConversationMemory memory, IConversationMemory.IConversationStep step) {
+        Integer version = memory.getAgentVersion();
+        IData<Integer> ranOn = step == null ? null : step.getLatestData(MemoryKeys.AGENT_VERSION);
+        if (ranOn != null && ranOn.getResult() != null) {
+            version = ranOn.getResult();
+        }
         try {
-            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), version);
             if (agent != null) {
                 memory.setUserMemoryConfig(agent.getUserMemoryConfig());
             }
@@ -1638,6 +1691,99 @@ public class ConversationService implements IConversationService, UserErasurePar
         return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
     }
 
+    /**
+     * The agent version the next turn of this conversation runs on.
+     * <p>
+     * A conversation with a compatibility generation runs on the highest version of
+     * that generation that is {@code READY} on this node, moving to it if that is
+     * not where it is — a newer compatible version as soon as it is deployed, or an
+     * older one when the newer one was undeployed (a rollback) or has not reached
+     * this node yet. "Compatible" is declared in both directions for exactly that
+     * reason.
+     * <p>
+     * Everything else takes today's path, {@link #getAgent}: a conversation without
+     * a generation (pinned), a paused one (a resume must finish on the version that
+     * paused it; {@code say} refuses those anyway), and one whose generation has no
+     * version ready here — which deploys its own version on demand, as it always
+     * did.
+     */
+    IAgent resolveConversationAgent(Environment environment, IConversationMemory memory) throws ServiceException, IllegalAccessException {
+        Integer generation = memory.getCompatibilityGeneration();
+        if (generation != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+            IAgent candidate = agentFactory.getLatestReadyAgentOfGeneration(environment, memory.getAgentId(), generation);
+            if (candidate != null) {
+                if (!Objects.equals(candidate.getAgentVersion(), memory.getAgentVersion())) {
+                    moveToAgentVersion(memory, candidate.getAgentVersion(), generation);
+                }
+                return candidate;
+            }
+        }
+        return getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+    }
+
+    private void moveToAgentVersion(IConversationMemory memory, Integer toVersion, Integer generation) {
+        Integer fromVersion = memory.getAgentVersion();
+        memory.switchAgentVersion(toVersion);
+        LOGGER.infof("Conversation %s moves from version %s to version %s of agent %s (compatibility generation %s)",
+                sanitize(memory.getConversationId()), fromVersion, toVersion, sanitize(memory.getAgentId()), generation);
+    }
+
+    /**
+     * A queued turn is rebuilt over the reloaded document when another turn
+     * committed while it waited (see {@code ConversationStepRunner.TurnBuilder}).
+     * That document holds the version it was stored on, not the one resolved for
+     * this turn, so it moves there too — the agent that runs the turn is the one
+     * resolved for it. Only within the conversation's own generation: a
+     * conversation that does not follow versions was resolved to its own.
+     */
+    static void adoptResolvedAgentVersion(IConversationMemory memory, IAgent agent) {
+        Integer resolved = agent.getAgentVersion();
+        Integer generation = memory.getCompatibilityGeneration();
+        if (resolved != null && !Objects.equals(resolved, memory.getAgentVersion()) && generation != null
+                && generation.equals(agent.getCompatibilityGeneration())) {
+            memory.switchAgentVersion(resolved);
+        }
+    }
+
+    /**
+     * Once a turn has run on another version than the conversation was stored on:
+     * count the move, and point the descriptor — which names the agent version too,
+     * and which conversation listings filter on — at the version it ran on.
+     * <p>
+     * After the turn rather than when the version is resolved: a turn refused
+     * between the two (quota, a queued turn skipped) must not leave the descriptor
+     * naming a version the conversation never ran on.
+     * <p>
+     * A failed descriptor update is remembered on the memory, which this turn
+     * persists after this runs, and retried by later turns until it succeeds —
+     * otherwise every later turn, already on the new version, would see nothing to
+     * do and the listings would name the old version for good. The conversation
+     * runs on the right version either way.
+     */
+    void recordAgentVersionMove(IConversationMemory memory, Integer storedVersion) {
+        Integer ranOn = memory.getAgentVersion();
+        if (ranOn == null) {
+            return;
+        }
+        if (!Objects.equals(ranOn, storedVersion)) {
+            counterAgentVersionSwitch.increment();
+        }
+        Integer stale = memory.getStaleDescriptorAgentVersion();
+        Integer named = stale != null ? stale : storedVersion;
+        if (Objects.equals(ranOn, named)) {
+            memory.setStaleDescriptorAgentVersion(null);
+            return;
+        }
+        try {
+            conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), ranOn);
+            memory.setStaleDescriptorAgentVersion(null);
+        } catch (Exception e) {
+            memory.setStaleDescriptorAgentVersion(named);
+            LOGGER.warnf("Conversation %s runs on version %s of agent %s, but its descriptor still names version %s; the next turn retries: %s",
+                    sanitize(memory.getConversationId()), ranOn, sanitize(memory.getAgentId()), named, e.getMessage());
+        }
+    }
+
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
@@ -1662,12 +1808,6 @@ public class ConversationService implements IConversationService, UserErasurePar
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
                 loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
-    }
-
-    private static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {
-        if (conversationMemory.getConversationState() == ConversationState.ENDED) {
-            throw new ConversationEndedException("Conversation has ended!");
-        }
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {

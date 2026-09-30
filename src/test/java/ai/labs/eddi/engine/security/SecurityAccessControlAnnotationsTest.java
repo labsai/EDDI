@@ -37,7 +37,7 @@ class SecurityAccessControlAnnotationsTest {
     @DisplayName("Finding 1: active-conversation endpoints are role-gated")
     void activeConversationEndpointsRoleGated() throws Exception {
         var get = IRestConversationStore.class.getMethod("getActiveConversations", String.class, Integer.class);
-        var end = IRestConversationStore.class.getMethod("endActiveConversations", List.class);
+        var end = IRestConversationStore.class.getMethod("endActiveConversations", List.class, String.class);
 
         // Exactly the operator tier — the same contract RestConversationStoreTest
         // pins; agent EDIT (under workspace enforcement) is checked in the resource.

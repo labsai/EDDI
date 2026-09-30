@@ -368,7 +368,7 @@ class RestImportServiceScheduleFailureTest {
         when(documentDescriptorStore.readDescriptor(NEW_AGENT_ID, 1)).thenReturn(descriptor);
 
         var restAgentStore = mock(IRestAgentStore.class);
-        when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+        when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
 
         try (var cdi = stubCdi(IAgentStore.class, agentStore,
                 IRestScheduleStore.class, restScheduleStore,

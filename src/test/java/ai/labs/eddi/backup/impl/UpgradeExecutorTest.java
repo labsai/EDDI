@@ -321,7 +321,7 @@ class UpgradeExecutorTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());
             when(agentStore.readAgent("target-1", 3)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(3), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(3), any(), any()))
                     .thenReturn(Response.ok().build());
 
             var result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1"));
@@ -347,7 +347,7 @@ class UpgradeExecutorTest {
             // An unconditional updateAgent wrote a byte-identical configuration and
             // bumped the version, so a CI job that synced on every build inflated the
             // version history and "v14" said nothing about whether anything changed.
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
             assertFalse(result.agentUpdated());
             assertFalse(result.wroteAnything());
             assertEquals("eddi://ai.labs.agent/agentstore/agents/target-1?version=3",
@@ -390,14 +390,14 @@ class UpgradeExecutorTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfIdB + "?version=1"),
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfIdC + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any()))
                     .thenReturn(Response.ok().build());
 
             // Reverse order
             executor.executeUpgrade(source, "target-1", null, List.of(wfIdC, wfIdB, wfIdA));
 
             var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture(), any());
 
             List<URI> workflows = captor.getValue().getWorkflows();
             assertEquals(3, workflows.size());
@@ -464,7 +464,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -495,7 +495,7 @@ class UpgradeExecutorTest {
                 assertFalse(updatedStep.getExtensions().containsKey("uri"));
 
                 // ... and the agent is versioned because the workflow genuinely changed
-                verify(agentStore).updateAgent(eq("target-1"), eq(1), any());
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), any(), any());
             }
         }
 
@@ -624,7 +624,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -708,7 +708,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -788,7 +788,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -867,7 +867,7 @@ class UpgradeExecutorTest {
                 verify(wfDirectStore).create(any());
                 // Verify agent was updated with new workflow appended
                 var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
-                verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture(), any());
                 assertTrue(captor.getValue().getWorkflows().stream()
                         .anyMatch(uri -> uri.toString().contains(newWfId)));
             }
@@ -935,7 +935,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
@@ -954,7 +954,7 @@ class UpgradeExecutorTest {
             assertTrue(result.agentUpdated(), "the agent must point at the new workflow version");
 
             var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).updateAgent(eq("target-1"), eq(1), agentCaptor.capture());
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), agentCaptor.capture(), any());
             assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=2",
                     agentCaptor.getValue().getWorkflows().getFirst().toString());
         }
@@ -1063,7 +1063,7 @@ class UpgradeExecutorTest {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any()))
                     .thenThrow(new RuntimeException("DB error"));
 
             // A workflow order is what makes the agent config genuinely need writing;
@@ -1090,7 +1090,7 @@ class UpgradeExecutorTest {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(new ArrayList<>());
         when(agentStore.readAgent(targetAgentId, version)).thenReturn(agentConfig);
-        when(agentStore.updateAgent(eq(targetAgentId), eq(version), any()))
+        when(agentStore.updateAgent(eq(targetAgentId), eq(version), any(), any()))
                 .thenReturn(Response.ok().build());
     }
 
@@ -1259,7 +1259,7 @@ class UpgradeExecutorTest {
             assertFalse(result.agentUpdated(), "nothing changed, so the agent must not be rewritten");
             assertEquals(IRestAgentStore.resourceURI + "target-1", result.agentUri().toString(),
                     "an unresolvable version must be omitted, never guessed as 1");
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
         }
 
         @Test
@@ -1380,7 +1380,7 @@ class UpgradeExecutorTest {
                 assertNotNull(result.agentUri());
                 // Nothing landed, so no agent version is burned — and the failure is
                 // reported rather than logged and forgotten behind a 201.
-                verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+                verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
                 assertTrue(result.hasFailures());
                 assertEquals("workflow", result.failures().getFirst().resourceType());
             }
@@ -1479,7 +1479,7 @@ class UpgradeExecutorTest {
             assertTrue(thrown.getMessage().contains("could not be established"),
                     "the reason has to say the version is unknown, was: " + thrown.getMessage());
             // Nothing is written against a guessed version.
-            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
 
         @Test
@@ -1503,7 +1503,7 @@ class UpgradeExecutorTest {
             assertTrue(thrown.getMessage().contains("could not be established"),
                     "the reason has to say the version is unknown, was: " + thrown.getMessage());
             // Nothing is written against a guessed version.
-            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
 
         @Test
@@ -1526,7 +1526,7 @@ class UpgradeExecutorTest {
             assertTrue(thrown.getMessage().contains("could not be established"),
                     "the reason has to say the version is unknown, was: " + thrown.getMessage());
             // Nothing is written against a guessed version.
-            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any());
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
     }
 
@@ -1855,7 +1855,7 @@ class UpgradeExecutorTest {
             assertEquals(0, result.created());
             assertFalse(result.hasFailures());
             verify(snippetStore, never()).updateSnippet(anyString(), anyInt(), any());
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
             verify(metrics).upgradeCompleted(0, 0, 3, 0);
         }
 

@@ -364,7 +364,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             try (var cdi = stubCdi(IAgentStore.class, agentStore,
                     IRestScheduleStore.class, restScheduleStore,
                     IRestAgentStore.class, restAgentStore)) {
@@ -410,7 +410,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             try (var cdi = stubCdi(IAgentStore.class, agentStore,
                     IRestScheduleStore.class, restScheduleStore,
                     IRestAgentStore.class, restAgentStore)) {
@@ -458,7 +458,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             try (var cdi = stubCdi(IAgentStore.class, agentStore,
                     IRestScheduleStore.class, restScheduleStore,
                     IRestAgentStore.class, restAgentStore)) {
@@ -498,7 +498,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             // The descriptor bookkeeping that runs AFTER the schedules blows up. The
             // agent and workflow versions are rolled back; a create is compensated by
             // a delete — but an update overwrote something, and only a snapshot taken
@@ -606,7 +606,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             try (var cdi = stubCdi(IAgentStore.class, agentStore,
                     IRestScheduleStore.class, restScheduleStore,
                     IRestAgentStore.class, restAgentStore)) {
@@ -652,7 +652,7 @@ class RestImportServiceArchiveContractTest {
 
             var agentStore = stubAgentCreation();
             var restAgentStore = mock(IRestAgentStore.class);
-            when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
             try (var cdi = stubCdi(IAgentStore.class, agentStore,
                     IRestScheduleStore.class, restScheduleStore,
                     IRestAgentStore.class, restAgentStore)) {

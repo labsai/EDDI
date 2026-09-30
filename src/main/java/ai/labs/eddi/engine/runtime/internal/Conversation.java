@@ -279,6 +279,7 @@ public class Conversation implements IConversation {
             var lifecycleData = prepareLifecycleData("", context, null);
             executeConversationStep(lifecycleData, null);
         } finally {
+            recordAgentVersion();
             checkActionsForConversationEnd();
         }
     }
@@ -467,7 +468,6 @@ public class Conversation implements IConversation {
                 // The turn's starting point for undo — see recordPropertyChanges.
                 propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
-
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
             executeConversationStep(lifecycleData, restartTaskTypes);
 
@@ -478,6 +478,10 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            // Recorded last, after the pipeline, so a step's existing data keeps its
+            // positions — detailed snapshots are read by index — and on every run: a
+            // rerun re-executes the step, possibly on another version than the first.
+            recordAgentVersion();
             checkActionsForConversationEnd();
 
             if (getConversationState() == ConversationState.IN_PROGRESS) {
@@ -510,6 +514,24 @@ public class Conversation implements IConversation {
             cm.recordPropertyChanges(propertiesAtTurnStart);
         }
         storePropertiesPermanently();
+    }
+
+    /**
+     * Records which agent version runs the current step, and — on the first step
+     * after the conversation moved to another compatible version — where it moved
+     * from. See {@link MemoryKeys#AGENT_VERSION}.
+     */
+    private void recordAgentVersion() {
+        Integer agentVersion = conversationMemory.getAgentVersion();
+        if (agentVersion == null) {
+            return;
+        }
+        var currentStep = conversationMemory.getCurrentStep();
+        currentStep.set(MemoryKeys.AGENT_VERSION, agentVersion);
+        Integer previousVersion = conversationMemory.takePreviousAgentVersion();
+        if (previousVersion != null) {
+            currentStep.set(MemoryKeys.AGENT_VERSION_CHANGE, Map.of("from", previousVersion, "to", agentVersion));
+        }
     }
 
     /**
