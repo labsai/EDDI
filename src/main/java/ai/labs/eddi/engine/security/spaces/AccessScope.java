@@ -29,14 +29,18 @@ public final class AccessScope {
     /** The descriptor field naming the space a resource belongs to. */
     public static final String FIELD_SPACE_ID = "spaceId";
 
-    private static final AccessScope UNRESTRICTED = new AccessScope(null, null);
+    private static final AccessScope UNRESTRICTED = new AccessScope(null, null, Ownership.ANY, null);
 
     private final List<String> admittingTokens;
     private final String spaceId;
+    private final Ownership ownership;
+    private final String ownerPrincipal;
 
-    private AccessScope(List<String> admittingTokens, String spaceId) {
+    private AccessScope(List<String> admittingTokens, String spaceId, Ownership ownership, String ownerPrincipal) {
         this.admittingTokens = admittingTokens;
         this.spaceId = spaceId;
+        this.ownership = ownership == null ? Ownership.ANY : ownership;
+        this.ownerPrincipal = ownerPrincipal;
     }
 
     /**
@@ -56,7 +60,7 @@ public final class AccessScope {
      *            whether resources with no recorded owner are admitted
      */
     public static AccessScope forCaller(CallerSpaces caller, boolean admitLegacy) {
-        return new AccessScope(DescriptorAccess.admittingTokens(caller, admitLegacy), null);
+        return new AccessScope(DescriptorAccess.admittingTokens(caller, admitLegacy), null, Ownership.ANY, null);
     }
 
     /**
@@ -76,13 +80,38 @@ public final class AccessScope {
         if (spaceId == null || spaceId.isBlank()) {
             return this;
         }
-        return new AccessScope(admittingTokens, spaceId.trim());
+        return new AccessScope(admittingTokens, spaceId.trim(), ownership, ownerPrincipal);
+    }
+
+    /**
+     * Narrows this scope by who owns the resource — the server side of the "Mine"
+     * and "Shared with me" filters.
+     * <p>
+     * Like {@link #withinSpace}, a narrowing and never a widening: it ANDs onto
+     * whatever the scope already admits. "Shared with me" is therefore "everything
+     * I can reach that I do not own", which is the question the filter asks — a
+     * resource a teammate filed in our team space is shared with me, and one I
+     * filed there myself is mine.
+     *
+     * @param ownership
+     *            {@link Ownership#ANY} leaves the scope unchanged
+     * @param principal
+     *            the caller's principal; without one there is nothing to own, so
+     *            {@code MINE} matches nothing and {@code SHARED} matches everything
+     *            reachable
+     */
+    public AccessScope withOwnership(Ownership ownership, String principal) {
+        if (ownership == null || ownership == Ownership.ANY) {
+            return new AccessScope(admittingTokens, spaceId, Ownership.ANY, null);
+        }
+        String trimmed = principal == null || principal.isBlank() ? null : principal.trim();
+        return new AccessScope(admittingTokens, spaceId, ownership, trimmed);
     }
 
     /**
      * Whether the caller's own reach is unlimited. A space narrowing does not
      * change this — it is a view preference layered on top, and
-     * {@link #toSpaceFilter()} carries it separately.
+     * {@link #toNarrowingFilter()} carries it separately.
      */
     public boolean isUnrestricted() {
         return admittingTokens == null;
@@ -108,21 +137,43 @@ public final class AccessScope {
     }
 
     /**
-     * The space narrowing, as its own AND-ed group, or {@code null} when this scope
-     * names no space.
+     * The view narrowings — space and ownership — as one AND-ed group, or
+     * {@code null} when this scope applies neither.
      * <p>
      * Separate from {@link #toQueryFilters()} because filter groups are ANDed while
      * filters within a group follow the group's connector: the access tokens must
-     * stay an OR among themselves, and the space must AND with the result. Folding
-     * the space into the same group would OR it, turning a narrowing into a
-     * widening — the exact bug this shape exists to prevent.
+     * stay an OR among themselves, and each narrowing must AND with the result.
+     * Folding a narrowing into the access group would OR it, turning a narrowing
+     * into a widening — the exact bug this shape exists to prevent.
+     * <p>
+     * Ownership is matched on the access index's owner token rather than on the
+     * {@code ownerId} field, because the index is the field every listing already
+     * queries and indexes, and its token is escaped the same way everywhere.
      */
-    public IResourceFilter.QueryFilters toSpaceFilter() {
-        if (spaceId == null) {
-            return null;
+    public IResourceFilter.QueryFilters toNarrowingFilter() {
+        List<IResourceFilter.QueryFilter> filters = new ArrayList<>(2);
+        if (spaceId != null) {
+            filters.add(new IResourceFilter.QueryFilter(FIELD_SPACE_ID, Subjects.exactPattern(spaceId)));
         }
-        return new IResourceFilter.QueryFilters(List.of(
-                new IResourceFilter.QueryFilter(FIELD_SPACE_ID, Subjects.exactPattern(spaceId))));
+        if (ownership != Ownership.ANY) {
+            String ownerToken = ownerPrincipal == null
+                    ? null
+                    : Subjects.tokenPattern(Subjects.OWNER_TOKEN_PREFIX + Subjects.encode(ownerPrincipal));
+            if (ownership == Ownership.MINE) {
+                // No principal owns nothing. TOKEN_NONE is never admitted to anybody,
+                // so this is an explicit "match nothing" rather than a missing filter.
+                filters.add(new IResourceFilter.QueryFilter(DescriptorStore.FIELD_ACCESS_INDEX,
+                        ownerToken != null ? ownerToken : Subjects.tokenPattern(Subjects.TOKEN_NONE)));
+            } else if (ownerToken != null) {
+                filters.add(new IResourceFilter.QueryFilter(DescriptorStore.FIELD_ACCESS_INDEX, new IResourceFilter.NotMatching(ownerToken)));
+            }
+        }
+        return filters.isEmpty() ? null : new IResourceFilter.QueryFilters(filters);
+    }
+
+    /** The ownership narrowing this scope applies. */
+    public Ownership ownership() {
+        return ownership;
     }
 
     /** The space this scope is narrowed to, or {@code null}. */

@@ -1591,6 +1591,31 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * docker-compose publishes EDDI on {@code ${EDDI_PORT:-7070}}, but the realm
+         * listed fixed origins. Run on any other port, the Manager's token request was
+         * refused by CORS and the login failed with a bare 401 and nothing saying why.
+         * Keycloak substitutes {@code ${VAR:default}} on realm import, so the realm
+         * names the port variable and the compose file hands it over.
+         */
+        @Test
+        @DisplayName("the compose realm allows the origin EDDI is actually published on")
+        void composeRealmFollowsThePublishedPort() throws IOException {
+            List<String> origins = stringList(client(JSON.readTree(COMPOSE_REALM.toFile()), "eddi-frontend").get("webOrigins"));
+            assertTrue(origins.contains("http://localhost:${EDDI_PORT:7070}"),
+                    COMPOSE_REALM + " must list http://localhost:${EDDI_PORT:7070} as a web origin, or EDDI on a "
+                            + "non-default port cannot log in from the browser. Origins: " + origins);
+            assertTrue(origins.contains("https://localhost:${EDDI_HTTPS_PORT:7443}"),
+                    COMPOSE_REALM + " must list https://localhost:${EDDI_HTTPS_PORT:7443} as a web origin. Origins: " + origins);
+
+            JsonNode env = YAML.readTree(Path.of("docker-compose.auth.yml").toFile()).path("services").path("keycloak").path("environment");
+            assertEquals("${EDDI_PORT:-7070}", env.path("EDDI_PORT").asText(),
+                    "docker-compose.auth.yml must pass EDDI_PORT to Keycloak, or the realm's placeholder falls back "
+                            + "to 7070 whatever port EDDI is published on");
+            assertEquals("${EDDI_HTTPS_PORT:-7443}", env.path("EDDI_HTTPS_PORT").asText(),
+                    "docker-compose.auth.yml must pass EDDI_HTTPS_PORT to Keycloak");
+        }
+
+        /**
          * The realm-level switch that decides whether Keycloak will speak cleartext. It
          * shipped as {@code none}, which is "never require TLS, from anywhere" — every
          * login form, every authorization code and every token exchange served over

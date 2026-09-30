@@ -35,6 +35,46 @@ class GlobalVariableResolverTest {
         resolver.init();
     }
 
+    @Nested
+    @DisplayName("references assembled by substitution")
+    class AssembledReferences {
+
+        @Test
+        @DisplayName("a vault reference split across two variables is refused, not resolved")
+        void splitAcrossVariables() {
+            // Each half passes every write-time and deploy-time check on its own.
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("a", "${vau", "b", "lt:t.finance.0123abcd/openai}"));
+
+            assertThrows(GlobalVariableResolver.AssembledReferenceException.class,
+                    () -> resolver.resolveValue("${vars:a}${vars:b}"));
+        }
+
+        @Test
+        @DisplayName("a reference completed by the text around a variable is refused")
+        void completedByTheTemplate() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("k", "vault:t.finance.0123abcd/openai"));
+
+            assertThrows(GlobalVariableResolver.AssembledReferenceException.class,
+                    () -> resolver.resolveValue("Bearer ${${vars:k}}"));
+        }
+
+        @Test
+        @DisplayName("a reference that is one variable's whole value still resolves, as before")
+        void wholeReferenceInOneVariable() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("key", "${vault:openai}"));
+
+            assertEquals("Bearer ${vault:openai}", resolver.resolveValue("Bearer ${vars:key}"));
+        }
+
+        @Test
+        @DisplayName("a reference written in the configuration itself is untouched")
+        void referenceInTheValueAsWritten() {
+            when(store.getAll(DEFAULT)).thenReturn(Map.of("model", "gpt-x"));
+
+            assertEquals("${vault:openai} gpt-x", resolver.resolveValue("${vault:openai} ${vars:model}"));
+        }
+    }
+
     // ====================== Short Form (default tenant) ======================
 
     @Nested

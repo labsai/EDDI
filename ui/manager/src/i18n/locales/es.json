@@ -75,7 +75,8 @@
     "workforce": "Grupo de trabajo",
     "monitoring": "Supervisión de conversaciones",
     "analytics": "Analíticas",
-    "connections": "Conexiones"
+    "connections": "Conexiones",
+    "workspaces": "Espacios de trabajo"
   },
   "theme": {
     "light": "Claro",
@@ -447,7 +448,18 @@
     "toolPauseReasonPlaceholder": "p. ej. Se requiere aprobación para {toolNames}",
     "toolPendingMessage": "Mensaje al usuario durante la pausa ({toolNames} permitido)",
     "toolPendingMessagePlaceholder": "p. ej. Esperando a que una persona apruebe {toolNames}…",
-    "toolInGroupTurns": "Dentro de un turno de grupo, la llamada de herramienta controlada de un miembro se rechaza automáticamente (REJECT)."
+    "toolInGroupTurns": "Dentro de un turno de grupo, la llamada de herramienta controlada de un miembro se rechaza automáticamente (REJECT).",
+    "review": {
+      "title": "Uso y revisión de conversaciones",
+      "total": "Conversaciones",
+      "active": "Activas ahora",
+      "users": "Personas",
+      "description": "Las conversaciones son privadas para la persona que las mantuvo. Active esta opción para que todas las personas que pueden editar este agente lean sus conversaciones — para ver qué pregunta la gente y mejorarlo. El chat lo avisa antes de que escriban.",
+      "enable": "Permitir que los responsables de este agente lean sus conversaciones",
+      "notice": "Lo que el chat indica a las personas (déjelo vacío para usar el texto estándar)",
+      "noticePlaceholder": "Las conversaciones con este agente pueden ser leídas por las personas que lo mantienen, para mejorarlo.",
+      "versionNote": "Cubre las conversaciones con la versión que crea este cambio y las posteriores — nunca lo que se dijo antes. Slack, Teams y los clientes de la API no pueden mostrar el aviso; si las personas usan este agente por esos medios, indíquelo en el saludo."
+    }
   },
   "wizard": {
     "title": "Asistente de Agent"
@@ -767,6 +779,7 @@
     "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
     "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
     "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento.",
+    "reviewNoticeLabel": "Revisión de conversaciones",
     "sendRejected": "Tu mensaje no se envió: {{reason}}",
     "sendWhileLoading": "Tu mensaje no se envió: la conversación aún se está cargando. Inténtalo de nuevo en un momento.",
     "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo."
@@ -5052,7 +5065,9 @@
       "published": "Publicado",
       "shared": "Compartido",
       "sharedTitle": "Pertenece a {{owner}} · en {{space}}",
-      "ownedBy": "Pertenece a {{owner}}"
+      "ownedBy": "Pertenece a {{owner}}",
+      "internal": "Todos los usuarios con sesión iniciada",
+      "sharedBy": "Compartido por {{owner}}"
     },
     "level": {
       "use": "Puede chatear",
@@ -5070,7 +5085,9 @@
       "space": "Espacio",
       "spaceHint": "Todos los del espacio de este recurso.",
       "published": "Publicado",
-      "publishedHint": "Cualquiera con acceso a esta instalación.",
+      "publishedHint": "Cualquiera con acceso a esta instalación puede leerlo — incluidos los visitantes anónimos del chat.",
+      "internal": "Todos los usuarios con sesión iniciada",
+      "internalHint": "Cualquiera que inicie sesión puede chatear con él. Su configuración sigue siendo privada. No es accesible de forma anónima.",
       "confirmTitle": "¿Cambiar la visibilidad a {{visibility}}?",
       "cascadeLabel": "Aplicarla también a los flujos y configuraciones a los que hace referencia",
       "cascadeWarning": "Cada recurso referenciado que te pertenece recibe esta visibilidad, que sustituye su propia configuración. La configuración anterior no se conserva.",
@@ -5083,7 +5100,7 @@
       "visibility": "Visibilidad",
       "peopleAndTeams": "Personas y equipos",
       "subjectLabel": "Persona o equipo",
-      "subjectPlaceholder": "nombre@example.com o team:engineering",
+      "subjectPlaceholder": "Nombre, correo electrónico o equipo",
       "levelLabel": "Nivel de acceso",
       "add": "Compartir",
       "shared": "Compartido",
@@ -5113,7 +5130,13 @@
       "cascadeRevoked_one": "Eliminado de {{count}} recurso",
       "andMore_one": "y {{count}} más",
       "cascadeRevoked_other": "Eliminado de {{count}} recursos",
-      "andMore_other": "y {{count}} más"
+      "andMore_other": "y {{count}} más",
+      "unknownGrant": "Ningún usuario que inicie sesión coincide con esto — no llega a nadie. Elimínelo y vuelva a compartir.",
+      "copyFailed": "No se pudo copiar — seleccione la dirección y cópiela usted mismo.",
+      "chatLink": "Enlace de chat",
+      "copied": "Copiado",
+      "copy": "Copiar",
+      "chatLinkHint": "Funciona para cualquier persona con quien se haya compartido el agente con «Puede chatear» o superior."
     },
     "emptySpace": "No hay agentes en este espacio",
     "emptySpaceDescription": "Otros espacios pueden tener agentes que usted puede ver.",
@@ -5132,13 +5155,110 @@
       "cascade_one": "Propietario cambiado en {{count}} recurso",
       "cascade_other": "Propietario cambiado en {{count}} recursos",
       "cascade_many": "Propietario cambiado en {{count}} recursos"
-    }
+    },
+    "notifications": {
+      "granted": "Acceso concedido a {{name}}",
+      "labelUnread_one": "Notificaciones — {{count}} sin leer",
+      "labelUnread_many": "Notificaciones — {{count}} sin leer",
+      "labelUnread_other": "Notificaciones — {{count}} sin leer",
+      "label": "Notificaciones",
+      "markAll": "Marcar todo como leído",
+      "empty": "Nada nuevo. Aquí aparecen lo que se comparte con usted y las solicitudes de acceso.",
+      "unnamed": "un recurso sin nombre",
+      "requested": "{{who}} solicita acceso «{{level}}» a {{what}}",
+      "shared": "{{who}} compartió {{what}} con usted — {{level}}",
+      "grant": "Conceder",
+      "openChat": "Abrir chat",
+      "open": "Abrir",
+      "dismiss": "Descartar"
+    },
+    "request": {
+      "alreadyHas": "Ya tiene ese acceso — recargue la página.",
+      "chatOnlyTitle": "Puede chatear con este agente",
+      "title": "No tiene acceso a esto",
+      "chatOnly": "Se compartió con usted para chatear, por lo que su configuración sigue siendo privada.",
+      "subtitle": "Puede ser privado o estar compartido solo con otras personas. Puede solicitar acceso.",
+      "sent": "Solicitud enviada. Si existe y tiene propietario, este la verá en sus notificaciones — y cuando la conceda, usted también lo verá.",
+      "messagePlaceholder": "¿Para qué lo necesita? (opcional)",
+      "message": "Mensaje para el propietario",
+      "action": "Solicitar acceso"
+    },
+    "move": {
+      "done": "Movido",
+      "title": "Mover a un equipo",
+      "team": "Equipo",
+      "action": "Mover",
+      "hint": "Todos los miembros del equipo podrán encontrarlo y editarlo. Usted sigue siendo el propietario — solo usted puede eliminarlo o compartirlo con más personas.",
+      "cascade_one": "{{count}} recurso movido",
+      "cascade_many": "{{count}} recursos movidos",
+      "cascade_other": "{{count}} recursos movidos"
+    },
+    "preview": {
+      "title_one": "Este cambio afecta a {{count}} recurso",
+      "title_many": "Este cambio afecta a {{count}} recursos",
+      "title_other": "Este cambio afecta a {{count}} recursos",
+      "confirm": "Aplicar a todos"
+    },
+    "ownership": {
+      "mine": "Míos",
+      "shared": "Compartidos conmigo",
+      "any": "Todo lo que puedo ver",
+      "label": "Mostrar"
+    },
+    "create": {
+      "default": "su espacio predeterminado",
+      "hint": "Los elementos nuevos se crean en {{space}}."
+    },
+    "emptyShared": "Todavía no se ha compartido nada con usted",
+    "emptySharedDescription": "Cuando un colega comparta un agente con usted o su equipo, aparecerá aquí — y en sus notificaciones.",
+    "showEverything": "Mostrar todo lo que puedo ver"
   },
   "connectionRef": {
     "wrapped": "Una conexión proporciona el valor completo de la cabecera, esquema incluido. Use ${connection:name} solo y ponga «Bearer » en el valor de cabecera de la conexión.",
     "headerMismatch": "Esta conexión envía su credencial como «{{expected}}», así que la cabecera debe llamarse así; de lo contrario la configuración muestra un nombre y la solicitud lleva otro.",
     "refusedInRequest": "${connection:…} se rechaza en una ruta, un parámetro de consulta o un cuerpo: una credencial en una URL acaba en todos los registros de proxy y en un cuerpo no se lee. Haga referencia a la conexión desde una cabecera.",
     "refusedInModel": "Los modelos de lenguaje, los embeddings y los almacenes vectoriales no aceptan ${connection:…}: una conexión se resuelve en una cabecera completa y estos necesitan una credencial sin adornos. Use ${vault:…} aquí."
+  },
+  "workspacesPage": {
+    "title": "Espacios de trabajo",
+    "subtitle": "Sus espacios, los secretos y variables que guardan, y cómo se comparte el trabajo nuevo.",
+    "notEnforced": "Los espacios de trabajo no se aplican en esta instalación, así que todos ven todo. Un operador los activa con eddi.workspaces.enabled=true.",
+    "yourSpaces": "Sus espacios",
+    "yourSpacesHint": "Cada espacio tiene sus propios secretos y variables. Solo sus miembros pueden verlos o cambiarlos, y solo un miembro puede desplegar un agente que los use.",
+    "referenceCopied": "Referencia copiada",
+    "copyReference": "Copiar la referencia para usarla en un agente",
+    "secretStored": "Secreto guardado",
+    "secrets": "Secretos",
+    "noSecrets": "Aún no hay secretos en este espacio",
+    "deleteNamed": "Eliminar {{name}}",
+    "secretName": "Nombre, p. ej. openai-key",
+    "secretValue": "Valor — se guarda cifrado y no se vuelve a mostrar",
+    "add": "Añadir",
+    "deleteSecretTitle": "¿Eliminar este secreto?",
+    "deleteSecretDescription": "Los agentes que lo usan dejan de funcionar hasta que se vuelva a guardar. Esta acción no se puede deshacer.",
+    "variableStored": "Variable guardada",
+    "variables": "Variables",
+    "noVariables": "Aún no hay variables en este espacio",
+    "variableName": "Nombre, p. ej. model",
+    "variableValue": "Valor",
+    "pinned": "Fijado por {{property}}",
+    "stored": "Definido aquí",
+    "default": "Predeterminado",
+    "settings": "Configuración",
+    "settingsHint": "Se aplican de inmediato, en cada réplica en menos de cinco segundos. Si se aplican los espacios de trabajo y qué claim del token contiene los equipos son ajustes de arranque y se muestran solo como referencia.",
+    "enforcing": "Aplicados",
+    "enforcedYes": "Sí",
+    "enforcedNo": "No",
+    "groupsClaim": "Los equipos provienen del claim del token",
+    "defaultSpace": "Dónde se crea el trabajo nuevo de forma predeterminada",
+    "defaultSpacePlaceholder": "Vacío: el espacio propio de cada persona — o un nombre de equipo",
+    "defaultSpaceHelp": "Un nombre de equipo hace que la instalación priorice los equipos: los colegas ven el trabajo de los demás salvo que se haga privado. El espacio que una persona haya seleccionado siempre tiene prioridad.",
+    "legacy": "Recursos creados antes de que se registrara la propiedad",
+    "legacyShared": "Visibles para todos — nada desaparece tras una actualización",
+    "legacyAdminOnly": "Visibles solo para administradores — una vez asignados los propietarios",
+    "lastChanged": "Última modificación por {{who}}",
+    "neverChanged": "Aún no se ha modificado aquí",
+    "saved": "Configuración guardada"
   },
   "cascadeSave": {
     "workflowChanged": "El flujo de trabajo {{workflowId}} se modificó en otro lugar (ahora versión {{current}}, esta página tiene la versión {{version}}). Recarga la página. No se guardó nada.",

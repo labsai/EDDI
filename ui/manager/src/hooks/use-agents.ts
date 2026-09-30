@@ -23,6 +23,7 @@ import {
   type Agent,
   type AgentDescriptor,
   type EnvironmentStatus,
+  type Ownership,
   parseResourceUri,
 } from "@/lib/api/agents";
 
@@ -48,14 +49,14 @@ export function useAgentDescriptors(
  * at 50 — and the sync page, which matches against these pages, created
  * duplicates of every local agent past the first 50.
  */
-export function useInfiniteAgentDescriptors(filter = "", space = "", keySuffix?: string) {
+export function useInfiniteAgentDescriptors(filter = "", space = "", ownership: Ownership = "", keySuffix?: string) {
   return useInfiniteQuery({
-    // The space is part of the key: switching workspace must refetch rather
-    // than re-render a cached page belonging to the previous one.
+    // The space and ownership are part of the key: switching either must
+    // refetch rather than re-render a cached page belonging to the previous one.
     queryKey: keySuffix
-      ? [...agentKeys.descriptorsInfinite(filter), space, keySuffix]
-      : [...agentKeys.descriptorsInfinite(filter), space],
-    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
+      ? [...agentKeys.descriptorsInfinite(filter), space, ownership, keySuffix]
+      : [...agentKeys.descriptorsInfinite(filter), space, ownership],
+    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space, ownership),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more
@@ -81,7 +82,7 @@ export function useAllAgentDescriptors() {
   // Its own cache entry: sharing the Agents list's key would leave that list
   // holding every page after a visit to Sync, and each later invalidation
   // (deploy, save) would re-fetch all of them one page after another.
-  const query = useInfiniteAgentDescriptors("", "", "all-pages");
+  const query = useInfiniteAgentDescriptors("", "", "", "all-pages");
   const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
   // The page count is a dependency on purpose: the in-flight render can be
   // batched away, so after a page lands every other dependency may read exactly

@@ -44,15 +44,15 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     }
 
     @Override
-    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space) {
+    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space, String ownership) {
         try {
             // The cross-resource listing: it takes the descriptor type as a query
             // parameter rather than deriving it from a store, which makes it the one
             // endpoint that can enumerate every configuration type in the deployment. It
             // has to carry the caller's scope for the same reason each typed store does.
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
-                    accessGuard.listingScope().withinSpace(space));
-            descriptors.forEach(accessGuard::redactForCaller);
+                    accessGuard.listingScope(space, ownership));
+            accessGuard.redactAllForCaller(descriptors);
             return descriptors;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);

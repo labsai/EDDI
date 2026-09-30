@@ -27,6 +27,7 @@ import { SpaceSwitcher } from "@/components/workspaces/space-switcher";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { accessFor } from "@/lib/access";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
+import { chatLinkFor } from "@/lib/resource-links";
 
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
@@ -34,7 +35,7 @@ type SortDir = "asc" | "desc";
 /** The agents list page: search, sort, card/table view, create, import and share. */
 export function AgentsPage() {
   const { t } = useTranslation();
-  const { activeSpace, setActiveSpace, enabled: workspacesEnabled } = useSpaces();
+  const { activeSpace, setActiveSpace, enabled: workspacesEnabled, ownership, setOwnership } = useSpaces();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -61,7 +62,7 @@ export function AgentsPage() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteAgentDescriptors(search, activeSpace);
+  } = useInfiniteAgentDescriptors(search, activeSpace, ownership);
 
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
@@ -197,12 +198,25 @@ export function AgentsPage() {
       )}
 
       {!isLoading && !isError && groupedAgents.length === 0 && (
-        /* Three empty states, not two. "No agents yet" under an active
-           workspace filter is simply false — the agents exist, they are
-           somewhere else — and offering "Create agent" there compounds it,
-           because a new agent is filed in the default space and would not
-           appear in the filter either. */
-        activeSpace && !search ? (
+        /* Four empty states, not two. "No agents yet" under an active
+           workspace or ownership filter is simply false — the agents exist,
+           they are somewhere else — so each filter says what it is filtering
+           and offers the way out of it. */
+        ownership === "shared" && !search ? (
+          /* Nothing shared yet is a normal state, not an error, and not a
+             prompt to create something — a new agent would be the user's
+             own, and would not appear under this filter either. */
+          <EmptyState
+            icon={Bot}
+            title={t("workspaces.emptyShared", "Nothing has been shared with you yet")}
+            description={t(
+              "workspaces.emptySharedDescription",
+              "When a colleague shares an agent with you or your team, it appears here — and in your notifications."
+            )}
+            actionLabel={t("workspaces.showEverything", "Show everything I can see")}
+            onAction={() => setOwnership("")}
+          />
+        ) : activeSpace && !search ? (
           <EmptyState
             icon={Bot}
             title={t("workspaces.emptySpace", "No agents in this workspace")}
@@ -340,6 +354,7 @@ export function AgentsPage() {
                         <OwnershipBadge
                           className="ms-2 align-middle"
                           ownerId={agent.ownerId}
+                          ownerName={agent.ownerName}
                           spaceId={agent.spaceId}
                           visibility={agent.visibility}
                         />
@@ -484,6 +499,7 @@ export function AgentsPage() {
           onClose={() => setShareTarget(null)}
           resourceId={shareTarget.id}
           resourceName={shareTarget.name}
+          chatLink={chatLinkFor(shareTarget.id, shareTarget.name)}
         />
       )}
     </div>

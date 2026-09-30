@@ -75,7 +75,8 @@
     "workforce": "Effectif",
     "monitoring": "Suivi des conversations",
     "analytics": "Analyses",
-    "connections": "Connexions"
+    "connections": "Connexions",
+    "workspaces": "Espaces de travail"
   },
   "theme": {
     "light": "Clair",
@@ -447,7 +448,18 @@
     "toolPauseReasonPlaceholder": "p. ex. Approbation requise pour {toolNames}",
     "toolPendingMessage": "Message pour l'utilisateur final pendant la pause ({toolNames} autorisé)",
     "toolPendingMessagePlaceholder": "p. ex. En attente de l'approbation humaine de {toolNames}…",
-    "toolInGroupTurns": "Au sein d'un tour de groupe, l'appel d'outil contrôlé d'un membre est automatiquement rejeté (REJECT)."
+    "toolInGroupTurns": "Au sein d'un tour de groupe, l'appel d'outil contrôlé d'un membre est automatiquement rejeté (REJECT).",
+    "review": {
+      "title": "Utilisation et consultation des conversations",
+      "total": "Conversations",
+      "active": "Actives en ce moment",
+      "users": "Personnes",
+      "description": "Les conversations sont privées et réservées à la personne qui les a menées. Activez cette option pour permettre à toute personne pouvant modifier cet agent de lire ses conversations — pour voir ce que les gens demandent et l'améliorer. Le chat en informe les utilisateurs avant qu'ils écrivent.",
+      "enable": "Autoriser les responsables de cet agent à lire ses conversations",
+      "notice": "Ce que le chat indique aux utilisateurs (laisser vide pour le texte standard)",
+      "noticePlaceholder": "Les conversations avec cet agent peuvent être lues par les personnes qui le maintiennent, afin de l'améliorer.",
+      "versionNote": "S'applique aux conversations sur la version créée par cette modification et les suivantes — jamais à ce qui a été dit auparavant. Slack, Teams et les clients API ne peuvent pas afficher l'avis ; si des personnes utilisent cet agent par ces canaux, mentionnez-le dans le message d'accueil."
+    }
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -767,6 +779,7 @@
     "errorAgentNotReady": "Cet agent n’est pas encore déployé dans l’environnement sélectionné.",
     "errorAgentMismatch": "Cette conversation appartient à une autre version de l’agent.",
     "errorQuotaUnavailable": "Les limites d’utilisation n’ont pas pu être vérifiées pour l’instant. Réessayez dans un moment.",
+    "reviewNoticeLabel": "Consultation des conversations",
     "sendRejected": "Votre message n'a pas été envoyé : {{reason}}",
     "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
     "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
@@ -5052,7 +5065,9 @@
       "published": "Publié",
       "shared": "Partagé",
       "sharedTitle": "Appartient à {{owner}} · dans {{space}}",
-      "ownedBy": "Appartient à {{owner}}"
+      "ownedBy": "Appartient à {{owner}}",
+      "internal": "Tous les utilisateurs connectés",
+      "sharedBy": "Partagé par {{owner}}"
     },
     "level": {
       "use": "Peut discuter",
@@ -5070,7 +5085,9 @@
       "space": "Espace",
       "spaceHint": "Tous les membres de l'espace de cette ressource.",
       "published": "Publié",
-      "publishedHint": "Toute personne ayant accès à cette installation.",
+      "publishedHint": "Toute personne ayant accès à cette installation peut le lire — y compris les visiteurs anonymes du chat.",
+      "internal": "Tous les utilisateurs connectés",
+      "internalHint": "Toute personne connectée peut discuter avec lui. Sa configuration reste privée. Inaccessible de façon anonyme.",
       "confirmTitle": "Changer la visibilité en {{visibility}} ?",
       "cascadeLabel": "L'appliquer aussi aux workflows et configurations référencés",
       "cascadeWarning": "Chaque ressource référencée qui vous appartient reçoit cette visibilité, qui remplace son réglage propre. Les réglages précédents ne sont pas conservés.",
@@ -5083,7 +5100,7 @@
       "visibility": "Visibilité",
       "peopleAndTeams": "Personnes et équipes",
       "subjectLabel": "Personne ou équipe",
-      "subjectPlaceholder": "nom@example.com ou team:engineering",
+      "subjectPlaceholder": "Nom, e-mail ou équipe",
       "levelLabel": "Niveau d'accès",
       "add": "Partager",
       "shared": "Partagé",
@@ -5113,7 +5130,13 @@
       "cascadeRevoked_one": "Retiré de {{count}} ressource",
       "andMore_one": "et {{count}} autre",
       "cascadeRevoked_other": "Retiré de {{count}} ressources",
-      "andMore_other": "et {{count}} autres"
+      "andMore_other": "et {{count}} autres",
+      "unknownGrant": "Aucun utilisateur connecté ne correspond à ce partage — il n'atteint personne. Supprimez-le et partagez à nouveau.",
+      "copyFailed": "Copie impossible — sélectionnez l'adresse et copiez-la vous-même.",
+      "chatLink": "Lien de chat",
+      "copied": "Copié",
+      "copy": "Copier",
+      "chatLinkHint": "Fonctionne pour toute personne avec qui l'agent est partagé au niveau « Peut discuter » ou supérieur."
     },
     "emptySpace": "Aucun agent dans cet espace",
     "emptySpaceDescription": "D'autres espaces contiennent peut-être des agents accessibles.",
@@ -5132,13 +5155,110 @@
       "cascade_one": "Propriétaire modifié sur {{count}} ressource",
       "cascade_other": "Propriétaire modifié sur {{count}} ressources",
       "cascade_many": "Propriétaire modifié sur {{count}} ressources"
-    }
+    },
+    "notifications": {
+      "granted": "Accès accordé à {{name}}",
+      "labelUnread_one": "Notifications — {{count}} non lue",
+      "labelUnread_many": "Notifications — {{count}} non lues",
+      "labelUnread_other": "Notifications — {{count}} non lues",
+      "label": "Notifications",
+      "markAll": "Tout marquer comme lu",
+      "empty": "Rien de nouveau. Les partages avec vous et les demandes d'accès apparaissent ici.",
+      "unnamed": "une ressource sans nom",
+      "requested": "{{who}} demande l'accès « {{level}} » à {{what}}",
+      "shared": "{{who}} a partagé {{what}} avec vous — {{level}}",
+      "grant": "Accorder",
+      "openChat": "Ouvrir le chat",
+      "open": "Ouvrir",
+      "dismiss": "Ignorer"
+    },
+    "request": {
+      "alreadyHas": "Vous disposez déjà de cet accès — rechargez la page.",
+      "chatOnlyTitle": "Vous pouvez discuter avec cet agent",
+      "title": "Vous n'avez pas accès à cet élément",
+      "chatOnly": "Il a été partagé avec vous pour la discussion ; sa configuration reste donc privée.",
+      "subtitle": "Il est peut-être privé, ou partagé uniquement avec d'autres personnes. Vous pouvez demander l'accès.",
+      "sent": "Demande envoyée. Si cet élément existe et a un propriétaire, celui-ci la verra dans ses notifications — et dès qu'il vous accordera l'accès, vous le verrez aussi.",
+      "messagePlaceholder": "Pourquoi en avez-vous besoin ? (facultatif)",
+      "message": "Message au propriétaire",
+      "action": "Demander l'accès"
+    },
+    "move": {
+      "done": "Déplacé",
+      "title": "Déplacer vers une équipe",
+      "team": "Équipe",
+      "action": "Déplacer",
+      "hint": "Tous les membres de l'équipe pourront alors le trouver et le modifier. Vous restez propriétaire — vous seul pouvez le supprimer ou le partager plus largement.",
+      "cascade_one": "{{count}} ressource déplacée",
+      "cascade_many": "{{count}} ressources déplacées",
+      "cascade_other": "{{count}} ressources déplacées"
+    },
+    "preview": {
+      "title_one": "Cette modification concerne {{count}} ressource",
+      "title_many": "Cette modification concerne {{count}} ressources",
+      "title_other": "Cette modification concerne {{count}} ressources",
+      "confirm": "Appliquer à toutes"
+    },
+    "ownership": {
+      "mine": "Les miens",
+      "shared": "Partagés avec moi",
+      "any": "Tout ce que je peux voir",
+      "label": "Afficher"
+    },
+    "create": {
+      "default": "votre espace par défaut",
+      "hint": "Les nouveaux éléments sont créés dans {{space}}."
+    },
+    "emptyShared": "Rien n'a encore été partagé avec vous",
+    "emptySharedDescription": "Lorsqu'un collègue partage un agent avec vous ou votre équipe, il apparaît ici — et dans vos notifications.",
+    "showEverything": "Afficher tout ce que je peux voir"
   },
   "connectionRef": {
     "wrapped": "Une connexion fournit la valeur complète de l'en-tête, schéma compris. Utilisez ${connection:name} seul et placez « Bearer » dans la valeur d'en-tête de la connexion.",
     "headerMismatch": "Cette connexion envoie son identifiant sous « {{expected}} », l'en-tête doit donc porter ce nom — sinon la configuration affiche un nom et la requête en porte un autre.",
     "refusedInRequest": "${connection:…} est refusé dans un chemin, un paramètre de requête ou un corps — un identifiant dans une URL finit dans chaque journal de proxy, et dans un corps il n'est pas lu. Référencez plutôt la connexion depuis un en-tête.",
     "refusedInModel": "Les modèles de langage, les embeddings et les bases vectorielles n'acceptent pas ${connection:…} : une connexion se résout en un en-tête complet, alors qu'ils ont besoin d'un identifiant brut. Utilisez ${vault:…} ici."
+  },
+  "workspacesPage": {
+    "title": "Espaces de travail",
+    "subtitle": "Vos espaces, les secrets et variables qu'ils conservent, et la façon dont les nouveaux travaux sont partagés.",
+    "notEnforced": "Les espaces de travail ne sont pas appliqués sur cette installation : tout le monde voit tout. Un opérateur les active avec eddi.workspaces.enabled=true.",
+    "yourSpaces": "Vos espaces",
+    "yourSpacesHint": "Chaque espace possède ses propres secrets et variables. Seuls ses membres peuvent les voir ou les modifier, et seul un membre peut déployer un agent qui les utilise.",
+    "referenceCopied": "Référence copiée",
+    "copyReference": "Copier la référence à utiliser dans un agent",
+    "secretStored": "Secret enregistré",
+    "secrets": "Secrets",
+    "noSecrets": "Aucun secret dans cet espace pour l'instant",
+    "deleteNamed": "Supprimer {{name}}",
+    "secretName": "Nom, p. ex. openai-key",
+    "secretValue": "Valeur — stockée chiffrée, plus jamais affichée",
+    "add": "Ajouter",
+    "deleteSecretTitle": "Supprimer ce secret ?",
+    "deleteSecretDescription": "Les agents qui l'utilisent cessent de fonctionner jusqu'à ce qu'il soit à nouveau enregistré. Cette action est irréversible.",
+    "variableStored": "Variable enregistrée",
+    "variables": "Variables",
+    "noVariables": "Aucune variable dans cet espace pour l'instant",
+    "variableName": "Nom, p. ex. model",
+    "variableValue": "Valeur",
+    "pinned": "Fixé par {{property}}",
+    "stored": "Défini ici",
+    "default": "Par défaut",
+    "settings": "Paramètres",
+    "settingsHint": "Prennent effet immédiatement, sur chaque réplique en moins de cinq secondes. L'application des espaces de travail et la revendication du jeton qui contient les équipes sont des paramètres de démarrage, affichés à titre indicatif uniquement.",
+    "enforcing": "Appliqués",
+    "enforcedYes": "Oui",
+    "enforcedNo": "Non",
+    "groupsClaim": "Les équipes proviennent de la revendication du jeton",
+    "defaultSpace": "Où les nouveaux travaux sont créés par défaut",
+    "defaultSpacePlaceholder": "Vide : l'espace personnel de chacun — ou un nom d'équipe",
+    "defaultSpaceHelp": "Un nom d'équipe rend l'installation orientée équipe : les collègues voient le travail des uns et des autres, sauf s'il est rendu privé. L'espace sélectionné par une personne a toujours la priorité.",
+    "legacy": "Ressources créées avant l'enregistrement de la propriété",
+    "legacyShared": "Visibles par tous — rien ne disparaît après une mise à niveau",
+    "legacyAdminOnly": "Visibles par les administrateurs uniquement — une fois les propriétaires attribués",
+    "lastChanged": "Dernière modification par {{who}}",
+    "neverChanged": "Pas encore modifié ici",
+    "saved": "Paramètres enregistrés"
   },
   "cascadeSave": {
     "workflowChanged": "Le workflow {{workflowId}} a été modifié ailleurs (version actuelle {{current}}, cette page affiche la version {{version}}). Rechargez la page. Rien n'a été enregistré.",

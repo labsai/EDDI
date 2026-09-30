@@ -57,6 +57,10 @@ import java.util.Map;
  *            only (connection, status, scopes, dates). Token material is never
  *            exported: it is a credential, not the user's data, and the
  *            ciphertext is meaningless outside this deployment.
+ * @param additionalData
+ *            what each {@link IGdprParticipant} holds on the user — the user
+ *            directory entry, workspace notifications — keyed by the
+ *            participant's name. Empty when none of them holds anything
  *
  * @author ginccc
  * @since 6.0.0
@@ -72,11 +76,26 @@ public record UserDataExport(
         int totalConversations,
         boolean conversationsTruncated,
         List<String> failedConversationIds,
-        List<ConnectionGrantExportEntry> connectionGrants) {
+        List<ConnectionGrantExportEntry> connectionGrants,
+        Map<String, Object> additionalData) {
 
     public UserDataExport {
         failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
         connectionGrants = connectionGrants == null ? List.of() : List.copyOf(connectionGrants);
+        additionalData = additionalData == null ? Map.of() : Map.copyOf(additionalData);
+    }
+
+    /**
+     * Backward-compatible constructor for the shape that predates
+     * {@link IGdprParticipant} sections.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds,
+            List<ConnectionGrantExportEntry> connectionGrants) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, Map.of());
     }
 
     /**
@@ -88,7 +107,7 @@ public record UserDataExport(
             List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
             int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds) {
         this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
-                totalConversations, conversationsTruncated, failedConversationIds, List.of());
+                totalConversations, conversationsTruncated, failedConversationIds, List.of(), Map.of());
     }
 
     /**
@@ -138,6 +157,12 @@ public record UserDataExport(
      * Javadoc: a data subject whose data lives only in these categories would
      * otherwise be handed an empty bundle described as complete.
      */
+    /**
+     * The section a participant contributes when its export failed — present, so
+     * the bundle says what it is missing, and counted by {@link #complete()}.
+     */
+    public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
+
     public static final List<String> OMITTED_CATEGORIES = List.of("groupConversations", "sharedArtifacts", "schedules", "journalEntries");
 
     /**
@@ -174,7 +199,8 @@ public record UserDataExport(
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean complete() {
-        return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty();
+        return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty()
+                && !additionalData.containsValue(EXPORT_FAILED);
     }
 
     /**

@@ -40,6 +40,38 @@ export function parseErrorMessage(data: string): string {
 }
 
 /**
+ * Longest tool name the status line will show. Tool names are identifiers the
+ * agent designer chose (built-ins, httpcall names, MCP tool names), so there is
+ * no upper bound on the wire; an overlong one would stretch the indicator
+ * bubble across the widget.
+ */
+const MAX_TOOL_NAME_LENGTH = 48;
+
+/**
+ * Extract the tool name from a `tool_call` payload — `{"tool":"<name>"}`,
+ * emitted right before each tool executes. Arguments are NOT in it (they reach
+ * the client only redacted, in `task_complete`'s toolTrace).
+ *
+ * Returns null for anything unusable, so a malformed event leaves the indicator
+ * on its previous copy instead of rendering "Using undefined…".
+ */
+export function parseToolCallName(data: string): string | null {
+  if (!data.trim()) return null;
+  try {
+    const parsed = JSON.parse(data);
+    const tool = parsed && typeof parsed === "object" ? parsed.tool : undefined;
+    if (typeof tool !== "string") return null;
+    const name = tool.trim();
+    if (!name) return null;
+    return name.length > MAX_TOOL_NAME_LENGTH
+      ? `${name.slice(0, MAX_TOOL_NAME_LENGTH - 1)}…`
+      : name;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The `code` values the backend puts on an `error` frame for a turn it refused
  * BEFORE consuming it — `RestAgentEngineStreaming
  * .buildKnownConditionOrOpaqueErrorEvent`. Such a turn never ran, so the

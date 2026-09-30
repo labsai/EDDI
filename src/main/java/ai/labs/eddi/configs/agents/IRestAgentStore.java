@@ -44,6 +44,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
      *            space". A narrowing only: asking for a space you cannot reach
      *            returns nothing rather than granting it. Blank means every space
      *            you can reach.
+     * @param ownership
+     *            {@code mine} for what the caller owns, {@code shared} for what
+     *            others own and the caller can reach; blank for both. Applied in
+     *            the query for the same paging reason as {@code space}.
      */
     @GET
     @Path("descriptors")
@@ -56,7 +60,17 @@ public interface IRestAgentStore extends IRestVersionInfo {
                                                   @QueryParam("limit")
                                                   @DefaultValue("20") Integer limit,
                                                   @QueryParam("space")
-                                                  @DefaultValue("") String space);
+                                                  @DefaultValue("") String space,
+                                                  @QueryParam("ownership")
+                                                  @DefaultValue("") String ownership);
+
+    /**
+     * As the listing above with no ownership narrowing — the shape every in-process
+     * caller used before "Mine" and "Shared with me" existed.
+     */
+    default List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String space) {
+        return readAgentDescriptors(filter, index, limit, space, "");
+    }
 
     @POST
     @Path("descriptors")

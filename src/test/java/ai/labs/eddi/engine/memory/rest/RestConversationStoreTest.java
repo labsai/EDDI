@@ -533,7 +533,7 @@ class RestConversationStoreTest {
         @DisplayName("readSimpleConversationLog denies a foreign conversation and never loads it")
         void simpleReadIsGuarded() throws Exception {
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationRead("conv-of-user-a");
 
             assertThrows(ForbiddenException.class,
                     () -> restConversationStore.readSimpleConversationLog("conv-of-user-a", false, false, null));
@@ -568,11 +568,32 @@ class RestConversationStoreTest {
             restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
             restConversationStore.deleteConversationLog("conv-1", false);
 
-            // Reads use the plain owner guard; the irreversible delete uses the strict
-            // variant (finding 10). Both are ForbiddenException-throwing owner checks —
-            // every per-conversation call is still gated.
-            verify(conversationAccessGuard, times(2)).requireConversationOwner("conv-1");
+            // The raw document is owner-only; the simple log admits a reviewing
+            // maintainer; the irreversible delete uses the strict owner variant
+            // (finding 10) — no reviewer, no unowned legacy row.
+            verify(conversationAccessGuard, times(1)).requireConversationOwner("conv-1");
+            verify(conversationAccessGuard, times(1)).requireConversationRead("conv-1");
             verify(conversationAccessGuard, times(1)).requireConversationOwnerStrict(eq("conv-1"), any());
+        }
+
+        @Test
+        @DisplayName("a reviewing maintainer sees the dialogue, never the person's properties or the detailed view")
+        void reviewerSeesLess() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationSteps(new ArrayList<>());
+            snapshot.getConversationProperties().put("favourite_food", new Property("favourite_food", "sushi", Property.Scope.longTerm));
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+            when(conversationAccessGuard.requireConversationRead("conv-1")).thenReturn(new ConversationAccessGuard.ConversationRead("alice", false));
+            var owners = restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
+            assertNotNull(owners.getConversationProperties(), "the owner keeps their properties");
+            assertFalse(owners.getConversationProperties().isEmpty(), "the owner keeps their properties");
+
+            when(conversationAccessGuard.requireConversationRead("conv-1")).thenReturn(new ConversationAccessGuard.ConversationRead("alice", true));
+            var reviewers = restConversationStore.readSimpleConversationLog("conv-1", true, false, null);
+            assertTrue(reviewers.getConversationProperties() == null || reviewers.getConversationProperties().isEmpty(),
+                    "long-term memory is not the reviewer's to read");
         }
     }
 

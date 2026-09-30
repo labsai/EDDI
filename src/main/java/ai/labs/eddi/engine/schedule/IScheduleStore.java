@@ -30,6 +30,16 @@ public interface IScheduleStore {
 
     ScheduleConfiguration readSchedule(String scheduleId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
+    /**
+     * Replace the editable configuration of a schedule.
+     * <p>
+     * Writes neither {@code enabled} nor the fire lifecycle ({@code fireStatus},
+     * {@code failCount}, the claim record): the stored values are kept by the same
+     * atomic write. {@code enabled} changes only through
+     * {@link #setScheduleEnabled} (and {@code markCompleted} for a finished
+     * one-shot), so a caller holding a copy read before a concurrent disable cannot
+     * re-enable the schedule by writing that copy back.
+     */
     void updateSchedule(String scheduleId, ScheduleConfiguration schedule)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 

@@ -10,6 +10,7 @@ import {
   isPausedState,
   extractOutputTexts,
   isTurnPaused,
+  parseToolCallName,
 } from "./sse-events";
 
 describe("parseErrorMessage", () => {
@@ -200,5 +201,29 @@ describe("isSkippedTurn — the prior-state guard applies only where it is ambig
     expect(
       isSkippedTurn({ conversationState: "AWAITING_HUMAN" }, 0, "AWAITING_HUMAN"),
     ).toBe(true);
+  });
+});
+
+describe("parseToolCallName", () => {
+  it("reads the tool name from the backend's payload", () => {
+    // RestAgentEngineStreaming: {"tool":"<name>"}.
+    expect(parseToolCallName('{"tool":"calculator"}')).toBe("calculator");
+  });
+
+  it("returns null for anything that carries no usable name", () => {
+    // Each of these would otherwise render "Using undefined…" or "Using …".
+    for (const data of ["", "   ", "calculator", "null", "[]", '{"tool":""}', '{"tool":"  "}', '{"tool":42}', "{}"]) {
+      expect(parseToolCallName(data)).toBeNull();
+    }
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(parseToolCallName('{"tool":"  websearch \\n"}')).toBe("websearch");
+  });
+
+  it("caps an overlong name so it cannot stretch the indicator", () => {
+    const name = parseToolCallName(JSON.stringify({ tool: "x".repeat(200) }));
+    expect(name).toHaveLength(48);
+    expect(name!.endsWith("…")).toBe(true);
   });
 });

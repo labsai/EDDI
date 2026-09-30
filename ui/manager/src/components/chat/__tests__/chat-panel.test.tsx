@@ -268,6 +268,8 @@ describe("ChatPanel", () => {
     const input = screen.getByTestId("chat-input");
     const sendBtn = screen.getByTestId("chat-send");
     expect(sendBtn).toBeInTheDocument();
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(input).toBeEnabled());
 
     await user.type(input, "Hello bot");
     await user.click(sendBtn);
@@ -285,6 +287,33 @@ describe("ChatPanel", () => {
       const messages = useChatStore.getState().messages;
       expect(messages.some((m) => m.role === "user" && m.content === "Yes")).toBe(true);
     });
+  });
+
+  it("holds every send until the agent's review notice has had its chance to appear", async () => {
+    // The notice loads on its own; sending was open as soon as a conversation
+    // existed, so a turn could be committed before the person was told it may be read.
+    let answer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    server.use(
+      http.get("*/agents/:agentId/profile", async () => {
+        await answered;
+        return HttpResponse.json({ agentId: "agent1", reviewNotice: "The team may read this chat." });
+      })
+    );
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setQuickReplies(["Yes"]);
+
+    renderWithProviders(<ChatPanel />);
+
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+    expect(screen.queryByTestId("quick-reply-btn")).not.toBeInTheDocument();
+
+    answer();
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The team may read this chat.");
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+    expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
   });
 
   it("toggles secret mode and sends a masked input", async () => {
@@ -737,7 +766,8 @@ describe("ChatPanel", () => {
     );
 
     renderWithProviders(<ChatPanel />);
-    expect(screen.getByTestId("chat-input")).toBeEnabled();
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeEnabled());
     expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
 
     await user.click(screen.getByTestId("undo-btn"));

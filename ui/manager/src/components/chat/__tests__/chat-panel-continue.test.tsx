@@ -156,6 +156,8 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
     );
 
     renderWithProviders(<ChatPanel />, { initialRoute: "/manage/chat" });
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(screen.getByLabelText("API Key")).toBeEnabled());
 
     await userEvent.type(screen.getByLabelText("API Key"), "sk-live-key{Enter}");
 
@@ -181,6 +183,8 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
 
     renderWithProviders(<ChatPanel />, { initialRoute: "/manage/chat" });
     const field = screen.getByLabelText("API Key");
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(field).toBeEnabled());
     await userEvent.type(field, "sk-live-key");
 
     act(() => {

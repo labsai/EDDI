@@ -53,13 +53,13 @@ describe("useSpaces", () => {
     expect(result.current.principal).toBe("alice");
   });
 
-  it("hides the switcher when there is only one space to switch to", async () => {
+  it("still offers the switcher with one space — for Mine and Shared with me", async () => {
     vi.spyOn(workspacesApi, "getWorkspaceInfo").mockResolvedValue(info({ spaces: [PERSONAL] }));
 
     const { result } = render();
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.hasChoice).toBe(false);
+    expect(result.current.hasChoice).toBe(true);
   });
 
   it("offers nothing at all when the deployment does not enforce workspaces", async () => {

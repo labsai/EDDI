@@ -12,9 +12,12 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
+
+import java.net.URI;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -52,6 +55,13 @@ public class ConversationAccessGuard {
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IConversationDescriptorStore conversationDescriptorStore;
+
+    /**
+     * Field-injected and optional, so the many tests that build this guard with its
+     * constructor keep working and simply have no review access.
+     */
+    @Inject
+    Instance<ConversationReviewPolicy> reviewPolicyInstance;
 
     @Inject
     public ConversationAccessGuard(SecurityIdentity identity,
@@ -248,6 +258,74 @@ public class ConversationAccessGuard {
                     sanitize(e.getMessage()));
             return null;
         }
+    }
+
+    /**
+     * As {@link #requireConversationOwner}, but also admits somebody who maintains
+     * the agent the conversation ran on, when that agent version opted in to
+     * conversation review — see {@link ConversationReviewPolicy}.
+     * <p>
+     * For <b>reading</b> only. Continuing, deleting or otherwise acting on a
+     * conversation stays with its owner, so every write path keeps calling
+     * {@link #requireConversationOwner}. Each review read is logged naming the
+     * reader, because it is one person reading another's conversation.
+     */
+    public String requireConversationReader(String conversationId) {
+        return requireConversationRead(conversationId).ownerId();
+    }
+
+    /**
+     * Who may read a conversation, and on what grounds.
+     *
+     * @param ownerId
+     *            the conversation's owner
+     * @param review
+     *            {@code true} when the caller was admitted as a reviewing
+     *            maintainer rather than as the owner or an administrator — the
+     *            caller then sees the dialogue and nothing of the person's stored
+     *            properties
+     */
+    public record ConversationRead(String ownerId, boolean review) {
+    }
+
+    /**
+     * As {@link #requireConversationReader}, also saying whether the caller got in
+     * as a reviewer, so a read surface can show a reviewer less than the owner.
+     */
+    public ConversationRead requireConversationRead(String conversationId) {
+        try {
+            return new ConversationRead(requireConversationOwner(conversationId), false);
+        } catch (ForbiddenException denied) {
+            ConversationReviewPolicy policy = reviewPolicy();
+            if (policy == null) {
+                throw denied;
+            }
+            try {
+                var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+                if (descriptor != null && policy.mayReview(descriptor.getAgentResource())) {
+                    LOGGER.infof("[REVIEW] '%s' read conversation %s of agent %s (conversation review is enabled for it)",
+                            sanitize(identity.getPrincipal() == null ? null : identity.getPrincipal().getName()), sanitize(conversationId),
+                            sanitize(String.valueOf(descriptor.getAgentResource())));
+                    return new ConversationRead(descriptor.getUserId(), true);
+                }
+            } catch (ResourceNotFoundException | ResourceStoreException e) {
+                LOGGER.debugf("Could not check review access to %s: %s", sanitize(conversationId), e.getMessage());
+            }
+            throw denied;
+        }
+    }
+
+    /**
+     * Whether the caller may review conversations that ran on this agent resource —
+     * the listing counterpart of {@link #requireConversationReader}.
+     */
+    public boolean canReview(URI agentResource) {
+        ConversationReviewPolicy policy = reviewPolicy();
+        return policy != null && policy.mayReview(agentResource);
+    }
+
+    private ConversationReviewPolicy reviewPolicy() {
+        return reviewPolicyInstance != null && reviewPolicyInstance.isResolvable() ? reviewPolicyInstance.get() : null;
     }
 
     /**

@@ -33,6 +33,9 @@ public interface IRestDocumentDescriptorStore {
      *            switcher. A narrowing only: asking for a space you cannot reach
      *            returns nothing rather than granting it. Blank means every space
      *            you can reach.
+     * @param ownership
+     *            {@code mine}, {@code shared}, or blank for both — see
+     *            {@code IRestAgentStore#readAgentDescriptors}
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -45,7 +48,14 @@ public interface IRestDocumentDescriptorStore {
                                              @QueryParam("limit")
                                              @DefaultValue("20") Integer limit,
                                              @QueryParam("space")
-                                             @DefaultValue("") String space);
+                                             @DefaultValue("") String space,
+                                             @QueryParam("ownership")
+                                             @DefaultValue("") String ownership);
+
+    /** As above with no ownership narrowing. */
+    default List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space) {
+        return readDescriptors(type, filter, index, limit, space, "");
+    }
 
     @GET
     @Path("/{id}")

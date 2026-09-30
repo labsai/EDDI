@@ -292,13 +292,34 @@ class PostgresScheduleStoreUnitTest {
 
         sut.updateSchedule("sched-1", config);
 
-        // fire_status and fail_count left the SET list, so every parameter after
-        // next_fire shifted down by two.
-        verify(preparedStatement).setString(14, "changed");
-        verify(preparedStatement).setString(16, "Europe/Vienna");
-        verify(preparedStatement).setString(17, "test");
-        verify(preparedStatement).setInt(18, 3);
-        verify(preparedStatement).setBoolean(19, true);
+        // fire_status, fail_count and then enabled left the SET list, so every
+        // parameter from next_fire on shifted down.
+        verify(preparedStatement).setString(13, "changed");
+        verify(preparedStatement).setString(15, "Europe/Vienna");
+        verify(preparedStatement).setString(16, "test");
+        verify(preparedStatement).setInt(17, 3);
+        verify(preparedStatement).setBoolean(18, true);
+        verify(preparedStatement).setString(19, "sched-1");
+    }
+
+    /**
+     * enabled is a runtime switch owned by setScheduleEnabled. Writing it from the
+     * caller's object let an editor whose copy predated another operator's /disable
+     * re-enable the schedule by saving; with the column out of the SET list the
+     * stored value survives inside the same UPDATE.
+     */
+    @Test
+    void updateSchedule_doesNotWriteEnabled() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        var config = newScheduleConfig();
+        config.setEnabled(true);
+
+        sut.updateSchedule("sched-1", config);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertFalse(sql.getValue().contains("enabled"),
+                "enabled must not be in the UPDATE — only /enable and /disable change it: " + sql.getValue());
     }
 
     /**

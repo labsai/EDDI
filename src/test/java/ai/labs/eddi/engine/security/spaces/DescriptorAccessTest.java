@@ -96,6 +96,27 @@ class DescriptorAccessTest {
         }
 
         @Test
+        @DisplayName("internal lets every signed-in caller use it, and nobody read it through visibility alone")
+        void internalGrantsUseToSignedIn() {
+            var d = descriptor("alice", Subjects.personalSpace("alice"), ResourceVisibility.internal);
+
+            assertEquals(AccessLevel.USE, DescriptorAccess.effectiveLevel(d, BOB, true));
+            assertFalse(DescriptorAccess.effectiveLevel(d, BOB, true).includes(AccessLevel.VIEW),
+                    "the organisation may talk to it; reading its prompt and tools is a separate grant");
+            assertEquals(AccessLevel.OWN, DescriptorAccess.effectiveLevel(d, ALICE, true));
+        }
+
+        @Test
+        @DisplayName("internal admits no anonymous caller — not the public chat, not the shared-key /v1 API")
+        void internalExcludesAnonymous() {
+            var d = descriptor("alice", Subjects.personalSpace("alice"), ResourceVisibility.internal);
+
+            assertNull(DescriptorAccess.effectiveLevel(d, CallerSpaces.ANONYMOUS, true));
+            assertFalse(listedFor(d, CallerSpaces.ANONYMOUS, true));
+            assertTrue(listedFor(d, BOB, true));
+        }
+
+        @Test
         @DisplayName("private hides from a teammate who has no explicit grant")
         void privateHidesFromTeam() {
             var d = descriptor("alice", Subjects.teamSpace("engineering"), ResourceVisibility.privateAccess);

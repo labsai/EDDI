@@ -358,3 +358,25 @@ export async function redoConversation(
     "Failed to redo",
   );
 }
+
+/* ─── Agent profile ─────────────────────────── */
+
+/**
+ * What a chat window shows about an agent: its name, and whether the people
+ * who maintain it may read this conversation.
+ *
+ * Readable by anybody who may chat with the agent — unlike the configuration
+ * store, which someone the agent was shared with "for chatting" cannot read. An
+ * older EDDI without the endpoint answers 404. The name itself arrives with the
+ * conversation read (`agentName` on the snapshot), which needs no editor role.
+ */
+export async function fetchAgentProfile(
+  agentId: string,
+  environment = "production",
+): Promise<{ name?: string | null; reviewNotice?: string | null } | null> {
+  return requestJson<{ name?: string | null; reviewNotice?: string | null }>(
+    `/agents/${encodeSegment(agentId)}/profile?environment=${encodeURIComponent(environment)}`,
+    undefined,
+    "Failed to read the agent profile",
+  );
+}

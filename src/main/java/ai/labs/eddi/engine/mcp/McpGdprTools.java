@@ -110,6 +110,7 @@ public class McpGdprTools {
             map.put("schedulesDeleted", result.schedulesDeleted());
             map.put("connectionGrantsDeleted", result.connectionGrantsDeleted());
             map.put("autoVaultedSecretsDeleted", result.autoVaultedSecretsDeleted());
+            map.put("additionalDeleted", result.additionalDeleted());
             map.put("completedAt", result.completedAt().toString());
             if (!result.complete()) {
                 LOGGER.warnf("MCP delete_user_data: erasure cascade incomplete — failed steps: %s",
@@ -168,6 +169,7 @@ public class McpGdprTools {
             map.put("managedConversations", export.managedConversations());
             // Metadata only — the export entries never carry token material.
             map.put("connectionGrants", export.connectionGrants());
+            map.put("additionalData", export.additionalData());
             return jsonSerialization.serialize(map);
         } catch (Exception e) {
             LOGGER.errorf(e, "MCP export_user_data failed");

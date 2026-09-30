@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,9 +34,11 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -659,6 +663,88 @@ class VaultGrantCheckerTest {
             when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+    }
+
+    @Nested
+    @DisplayName("referenced tenants — the workspace deploy check")
+    class ReferencedTenants {
+
+        private static final String AGENT_ID = "7c1d2e3f4a5b6c7d8e9f0a1c";
+
+        private void agentWhoseCallCarries(String text) throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/?key=" + text);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+        }
+
+        @Test
+        @DisplayName("names every explicit tenant, vault and variables alike, and not the short forms")
+        void explicitTenants() throws Exception {
+            agentWhoseCallCarries("${vault:t.eng.1a2b3c4d/openai}&m=${vars:u.alice.5e6f7a8b/model}&x=${vault:plain}");
+
+            assertEquals(Set.of("t.eng.1a2b3c4d", "u.alice.5e6f7a8b"), checker.referencedTenants(AGENT_ID, 1));
+        }
+
+        @Test
+        @DisplayName("sees a secret hidden behind a variable, as the runtime does")
+        void seesThroughVariables() throws Exception {
+            agentWhoseCallCarries("${vars:u.carol.0a0b0c0d/token}");
+            when(globalVariableResolver.resolveValue("${vars:u.carol.0a0b0c0d/token}", "default")).thenReturn("${vault:t.finance.9e8d7c6b/key}");
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "a variable in carol's own space holding finance's secret must not smuggle it past the membership check");
+        }
+
+        @Test
+        @DisplayName("follows a connection into its document, so a team secret cannot hide behind one")
+        void followsConnections() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenReturn(oauthConnection("${vault:t.finance.9e8d7c6b/key}"));
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "an agent that names only the connection must still count as using finance's secret");
+        }
+
+        @Test
+        @DisplayName("an unreadable workflow or scanned config fails closed; an unscanned step type does not")
+        void unreadableResourcesFailClosed() throws Exception {
+            // "Could not read it" is not "it names no tenant" — a workflow cached from an
+            // earlier build can still resolve whatever it names.
+            agentWhoseCallCarries("unused");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            // An output step is not read by design, so it is not "unreadable".
+            var agent = agentWithStep("ai.labs.output", LLM_ID);
+            when(agentStore.read("output-agent-0000000000", 1)).thenReturn(agent);
+            assertTrue(checker.referencedTenants("output-agent-0000000000", 1).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a missing agent names nothing — the deploy answers 404 — but a store failure fails closed")
+        void missingVersusUnreadableAgent() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceNotFoundException("gone"));
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
+
+            when(agentStore.read(AGENT_ID, 2)).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 2));
+        }
+
+        @Test
+        @DisplayName("an unreadable connection fails closed; an absent one names nothing")
+        void unreadableConnectionFailsClosed() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            doReturn(null).when(connectionStore).readByName("default", "finance-api");
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
         }
     }
 }

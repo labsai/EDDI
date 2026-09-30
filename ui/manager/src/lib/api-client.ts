@@ -203,11 +203,56 @@ export function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+/**
+ * The request header that files what a POST creates into one of the caller's
+ * spaces — the backend's `SpaceContext.SPACE_HEADER`.
+ */
+export const SPACE_HEADER = "X-EDDI-Space";
+
+/**
+ * Whether a POST to `path` creates configuration resources — the only requests
+ * the chosen space means anything for.
+ *
+ * The header used to go on every POST, chat turns included. The server refuses
+ * a header naming a space the caller is no longer in, so someone removed from a
+ * team could not send a chat message until the Manager refetched their spaces.
+ * The stores are the `…store/` collections (plus agent setup); the descriptor
+ * store (sharing) and the conversation store (ending conversations) create
+ * nothing.
+ */
+export function createsResources(path: string): boolean {
+  const bare = path.split("?")[0] ?? "";
+  if (bare.startsWith("/administration/agents/setup")) return true;
+  if (bare.startsWith("/descriptorstore/") || bare.startsWith("/conversationstore/")) return false;
+  return /^\/[a-z]+store\//i.test(bare);
+}
+
 class ApiClient {
   private baseUrl: string;
   private headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  /**
+   * The space new resources are created in, or null for the server's default.
+   *
+   * Sent on every POST rather than on a hand-maintained list of create calls:
+   * resources are created by fifteen stores, duplication, import and the
+   * wizards, and a list would miss the next one. A POST that creates nothing
+   * ignores the header. The backend refuses a space the caller is not in, so
+   * this must only ever hold one of the caller's own — `useSpaces` keeps it that
+   * way and clears it the moment the choice stops being valid.
+   */
+  private createSpace: string | null = null;
+
+  /** Sets (or clears, with null) the space new resources are created in. */
+  setCreateSpace(spaceId: string | null) {
+    this.createSpace = spaceId || null;
+  }
+
+  /** The space new resources are currently created in, or null. */
+  getCreateSpace(): string | null {
+    return this.createSpace;
+  }
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -264,7 +309,10 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
 
-    const mergedHeaders = { ...this.headers, ...requestHeaders };
+    const mergedHeaders: Record<string, string> = { ...this.headers, ...requestHeaders };
+    if (method === "POST" && this.createSpace && createsResources(path) && !(SPACE_HEADER in mergedHeaders)) {
+      mergedHeaders[SPACE_HEADER] = this.createSpace;
+    }
 
     let response: Response;
     try {

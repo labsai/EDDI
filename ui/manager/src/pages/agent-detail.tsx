@@ -1,3 +1,6 @@
+import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -115,7 +118,7 @@ export function AgentDetailPage() {
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
 
-  const { data: agent, isLoading, isError, refetch } = useAgent(id!, resolvedVersion);
+  const { data: agent, isLoading, isError, error: loadError, refetch } = useAgent(id!, resolvedVersion);
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
@@ -300,6 +303,15 @@ export function AgentDetailPage() {
     return (
       <div className="flex items-center justify-center py-20" data-testid="agent-detail-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isForbidden(loadError)) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <RequestAccessPanel resourceId={id!} isAgent />
       </div>
     );
   }
@@ -711,6 +723,9 @@ export function AgentDetailPage() {
 
       {/* Session Management */}
       <SessionManagementSection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* Usage, and opt-in review of conversations by the agent's maintainers */}
+      <ConversationReviewSection agent={agent} agentId={id!} version={resolvedVersion} />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={agent} agentId={id!} version={resolvedVersion} />

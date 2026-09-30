@@ -607,9 +607,13 @@ function ScheduleFormDialog({
   const updateMutation = useUpdateSchedule();
   const isEdit = editing != null;
   // `editing` is the row as it was when the dialog opened. The list keeps
-  // polling underneath, and the PUT is a full replace, so the lifecycle fields
-  // the form does not own (enabled above all — someone may have disabled the
-  // schedule meanwhile) are taken from the freshest copy at submit time.
+  // polling underneath, and the PUT replaces the configuration, so the fields
+  // the form does not own but must echo (tenantId, allowSelfScheduling,
+  // metadata) are taken from the freshest copy at submit time. `enabled` is
+  // not among them: the server ignores it on a PUT and keeps the stored value,
+  // so a disable by another operator after this dialog read its copy cannot be
+  // undone by saving. It changes only through /enable and /disable (the row
+  // toggle).
   const { data: liveSchedules } = useSchedules();
 
   const [formMode, setFormMode] = useState<FormMode>("cron");
@@ -775,8 +779,10 @@ function ScheduleFormDialog({
       userId: userId.trim() || undefined,
       maxCostPerFire: unlimitedCost ? UNLIMITED_COST : maxCost,
       conversationStrategy: effectiveStrategy,
-      enabled: latest ? latest.enabled : true,
     };
+    // Only on create. An edit never sends `enabled` — see the comment on
+    // liveSchedules above.
+    if (!latest) config.enabled = true;
     if (latest) {
       // Not editable here, but part of the stored document: a PUT that omits
       // them resets tenantId to null and allowSelfScheduling to false (the Java

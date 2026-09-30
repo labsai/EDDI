@@ -96,6 +96,12 @@ public final class DescriptorAccess {
             best = higher(best, AccessLevel.VIEW);
         }
 
+        if (visibility == ResourceVisibility.internal && !caller.isAnonymous()) {
+            // USE, not VIEW: talking to an agent the whole organisation may use is a
+            // different act from reading its system prompt and tools.
+            best = higher(best, AccessLevel.USE);
+        }
+
         if (visibility == ResourceVisibility.space) {
             String spaceId = descriptor.getSpaceId();
             if (spaceId != null && !spaceId.isBlank() && caller.spaces().contains(spaceId)) {
@@ -209,6 +215,10 @@ public final class DescriptorAccess {
             tokens.add(Subjects.TOKEN_ALL);
         }
 
+        if (visibility == ResourceVisibility.internal) {
+            tokens.add(Subjects.TOKEN_AUTHENTICATED);
+        }
+
         String spaceId = descriptor.getSpaceId();
         if (visibility == ResourceVisibility.space && spaceId != null && !spaceId.isBlank() && !Subjects.LEGACY.equals(spaceId)) {
             tokens.add(Subjects.SPACE_TOKEN_PREFIX + Subjects.encode(spaceId));
@@ -255,9 +265,10 @@ public final class DescriptorAccess {
         if (admitLegacy) {
             tokens.add(Subjects.LEGACY);
         }
-        if (caller == null) {
+        if (caller == null || caller.isAnonymous()) {
             return tokens;
         }
+        tokens.add(Subjects.TOKEN_AUTHENTICATED);
         for (String self : caller.selfPrincipals()) {
             tokens.add(Subjects.OWNER_TOKEN_PREFIX + Subjects.encode(self));
         }

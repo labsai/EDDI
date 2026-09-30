@@ -68,7 +68,7 @@ describe("SchedulesPage — system-managed schedules", () => {
 });
 
 describe("SchedulesPage — edit keeps what the form does not own", () => {
-  it("echoes tenantId, allowSelfScheduling and metadata, and takes enabled from the freshest row", async () => {
+  it("echoes tenantId, allowSelfScheduling and metadata from the freshest row, and never sends enabled", async () => {
     let enabledNow = true;
     let putBody: Record<string, unknown> | null = null;
     server.use(
@@ -113,11 +113,49 @@ describe("SchedulesPage — edit keeps what the form does not own", () => {
     await user.click(within(dialog).getByTestId("schedule-submit-btn"));
     await waitFor(() => expect(putBody).not.toBeNull());
 
-    expect(putBody!.enabled).toBe(false);
+    // enabled is not part of the configuration PUT at all: the server keeps
+    // the stored value, and toggling goes through /enable and /disable.
+    expect(putBody).not.toHaveProperty("enabled");
     expect(putBody!.tenantId).toBe("tenant-a");
     expect(putBody!.allowSelfScheduling).toBe(true);
     expect(putBody!.metadata).toEqual({ origin: "import" });
     expect(putBody!.persistentConversationId).toBeUndefined();
+  });
+});
+
+describe("SchedulesPage — a disable between snapshot and save", () => {
+  it("is not overwritten when the list never saw the disable", async () => {
+    // The snapshot the dialog opened on still says enabled=true, and no poll
+    // lands before Save: another operator's POST /disable happened meanwhile.
+    // The PUT must carry nothing that could re-enable the schedule, and must
+    // not call /enable either.
+    let putBody: Record<string, unknown> | null = null;
+    let enableCalls = 0;
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({ id: "chat-2", name: "Nightly", enabled: true }),
+        ])
+      ),
+      http.put("*/schedulestore/schedules/:id", async ({ request }) => {
+        putBody = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.post("*/schedulestore/schedules/:id/enable", () => {
+        enableCalls++;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderSchedules();
+    await user.click(await screen.findByTestId("edit-chat-2"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByTestId("schedule-submit-btn"));
+    await waitFor(() => expect(putBody).not.toBeNull());
+
+    expect(putBody).not.toHaveProperty("enabled");
+    expect(enableCalls).toBe(0);
   });
 });
 

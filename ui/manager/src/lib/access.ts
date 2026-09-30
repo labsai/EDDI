@@ -1,3 +1,4 @@
+import { ApiClientError } from "@/lib/api-client";
 import { levelIncludes, type AccessLevel } from "@/lib/api/sharing";
 import { parseResourceUri } from "@/lib/api/agents";
 
@@ -63,6 +64,14 @@ export function accessFor(callerLevel?: string | null): ResourceAccess {
     canOwn: levelIncludes(level, "OWN"),
     known: true,
   };
+}
+
+/**
+ * Whether a failed request failed because the caller may not see the resource —
+ * which deserves "ask for access", not "something went wrong".
+ */
+export function isForbidden(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 403;
 }
 
 /** Nothing offered — the shape while the answer is not in yet, or cannot be. */

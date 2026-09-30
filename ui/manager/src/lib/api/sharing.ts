@@ -28,11 +28,17 @@ export function levelIncludes(held: AccessLevel | null | undefined, required: Ac
  * memory — that vocabulary refers to *agent* groups and means something else
  * entirely.
  */
-export type ResourceVisibility = "private" | "space" | "published";
+export type ResourceVisibility = "private" | "space" | "internal" | "published";
 
+/**
+ * The visibilities, narrowest first. `internal` sits between `space` and
+ * `published`: everyone signed in may *use* it, nobody reads its configuration
+ * through visibility alone, and anonymous callers are not admitted at all.
+ */
 export const RESOURCE_VISIBILITIES: readonly ResourceVisibility[] = [
   "private",
   "space",
+  "internal",
   "published",
 ];
 
@@ -43,6 +49,18 @@ export interface ResourceGrant {
   level: AccessLevel;
   grantedBy?: string;
   grantedOn?: number;
+  /** `user` or `team`. Absent from a backend that predates the user directory. */
+  kind?: "user" | "team";
+  /** A person's name or a team's name, for display. Never send it back. */
+  label?: string;
+  /** A secondary line — the person's email, when the deployment shows emails. */
+  detail?: string | null;
+  /**
+   * Whether the subject still names somebody who has signed in. A grant made
+   * before the directory existed can name a principal that never signs in —
+   * such as one typed as an email address — and reaches nobody.
+   */
+  known?: boolean;
 }
 
 /** How a resource is shared, plus what the calling user may do with it. */
@@ -55,6 +73,8 @@ export interface ShareInfo {
    * `NON_NULL`, so an unowned resource omits this field entirely.
    */
   ownerId?: string | null;
+  /** The owner's name from the user directory, else their principal. */
+  ownerLabel?: string | null;
   /** `user:<principal>` or `team:<group>` or `legacy`, absent when unrecorded. */
   spaceId?: string | null;
   visibility: ResourceVisibility;
@@ -99,6 +119,22 @@ export interface ShareTarget {
 export interface ShareResult {
   updated: ShareTarget[];
   skipped: ShareTarget[];
+  /** True for a preview: the lists say what WOULD change, and nothing did. */
+  dryRun?: boolean;
+}
+
+/** Options every sharing change takes. */
+export interface ShareOptions {
+  /** Apply to everything the resource references that the caller owns. Default true. */
+  cascade?: boolean;
+  /** Report what would change without writing anything. Default false. */
+  dryRun?: boolean;
+}
+
+function changeParams(base: Record<string, string>, options: ShareOptions = {}): string {
+  const params = new URLSearchParams({ ...base, cascade: String(options.cascade ?? true) });
+  if (options.dryRun) params.set("dryRun", "true");
+  return params.toString();
 }
 
 const basePath = (resourceId: string) =>
@@ -121,33 +157,61 @@ export function shareResource(
   resourceId: string,
   subject: string,
   level: AccessLevel,
-  cascade = true
+  options: ShareOptions = {}
 ): Promise<ShareResult> {
-  const params = new URLSearchParams({ subject, level, cascade: String(cascade) });
-  return api.post<ShareResult>(`${basePath(resourceId)}?${params.toString()}`, undefined);
+  return api.post<ShareResult>(`${basePath(resourceId)}?${changeParams({ subject, level }, options)}`, undefined);
 }
 
 /** Remove a subject's grant, mirroring {@link shareResource}. */
 export function revokeShare(
   resourceId: string,
   subject: string,
-  cascade = true
+  options: ShareOptions = {}
 ): Promise<ShareResult> {
-  const params = new URLSearchParams({ subject, cascade: String(cascade) });
-  return api.delete<ShareResult>(`${basePath(resourceId)}?${params.toString()}`);
+  return api.delete<ShareResult>(`${basePath(resourceId)}?${changeParams({ subject }, options)}`);
 }
 
-/** Set visibility: private, space or published. */
+/** Set visibility: private, space, internal or published. */
 export function setResourceVisibility(
   resourceId: string,
   visibility: ResourceVisibility,
-  cascade = true
+  options: ShareOptions = {}
 ): Promise<ShareResult> {
-  const params = new URLSearchParams({ visibility, cascade: String(cascade) });
-  return api.put<ShareResult>(
-    `${basePath(resourceId)}/visibility?${params.toString()}`,
+  return api.put<ShareResult>(`${basePath(resourceId)}/visibility?${changeParams({ visibility }, options)}`, undefined);
+}
+
+/**
+ * File a resource the caller owns under another of their spaces — how personal
+ * work becomes team work. Ownership does not change; the team gains edit access
+ * through the space.
+ */
+export function moveToSpace(resourceId: string, spaceId: string, options: ShareOptions = {}): Promise<ShareResult> {
+  return api.put<ShareResult>(`${basePath(resourceId)}/space?${changeParams({ spaceId }, options)}`, undefined);
+}
+
+/** What the server says happened to an access request. */
+export type AccessRequestOutcome = "SENT" | "ALREADY_HAS_ACCESS";
+
+/**
+ * Ask the owner of a resource the caller cannot open for access.
+ *
+ * The answer never says whether the resource exists or who owns it — an id
+ * that matches nothing is answered `SENT` too — so do not phrase the
+ * confirmation as "the owner was notified".
+ */
+export async function requestAccess(
+  resourceId: string,
+  level: Exclude<AccessLevel, "OWN">,
+  message?: string
+): Promise<AccessRequestOutcome> {
+  const params = new URLSearchParams({ level });
+  if (message?.trim()) params.set("message", message.trim());
+  const result = await api.post<{ outcome: AccessRequestOutcome } | undefined>(
+    `${basePath(resourceId)}/requests?${params.toString()}`,
     undefined
   );
+  // An older server answered 202 with no body; SENT was its only answer.
+  return result?.outcome ?? "SENT";
 }
 
 /**
@@ -158,9 +222,9 @@ export function transferOwnership(
   resourceId: string,
   ownerId: string,
   spaceId?: string,
-  cascade = true
+  options: ShareOptions = {}
 ): Promise<ShareResult> {
-  const params = new URLSearchParams({ ownerId, cascade: String(cascade) });
-  if (spaceId) params.set("spaceId", spaceId);
-  return api.put<ShareResult>(`${basePath(resourceId)}/owner?${params.toString()}`, undefined);
+  const base: Record<string, string> = { ownerId };
+  if (spaceId) base.spaceId = spaceId;
+  return api.put<ShareResult>(`${basePath(resourceId)}/owner?${changeParams(base, options)}`, undefined);
 }

@@ -104,6 +104,7 @@ describe("sendMessageStreaming — SSE parsing", () => {
       "event: task_start\ndata: {}\n\n",
       "event: task_complete\ndata: {}\n\n",
       "event: task_failed\ndata: {}\n\n",
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
       "event: cascade_escalation\ndata: {}\n\n",
       "event: done\ndata: {}\n\n",
     ]);
@@ -112,6 +113,7 @@ describe("sendMessageStreaming — SSE parsing", () => {
       "task_start",
       "task_complete",
       "task_failed",
+      "tool_call",
       "cascade_escalation",
       "done",
     ]);

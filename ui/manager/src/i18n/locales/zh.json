@@ -75,7 +75,8 @@
     "workforce": "团队",
     "monitoring": "对话监控",
     "analytics": "分析",
-    "connections": "连接"
+    "connections": "连接",
+    "workspaces": "工作区"
   },
   "theme": {
     "light": "浅色",
@@ -446,7 +447,18 @@
     "toolPauseReasonPlaceholder": "例如：{toolNames} 需要审批",
     "toolPendingMessage": "暂停期间显示给终端用户的消息（允许使用 {toolNames}）",
     "toolPendingMessagePlaceholder": "例如：正在等待人工审批 {toolNames}…",
-    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。"
+    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。",
+    "review": {
+      "title": "使用情况与对话审阅",
+      "total": "对话",
+      "active": "当前活跃",
+      "users": "用户",
+      "description": "对话仅对进行对话的本人可见。开启后，所有能编辑此智能体的人都可以阅读它的对话——以了解用户在问什么并加以改进。聊天会在用户输入前告知他们。",
+      "enable": "允许此智能体的维护者阅读其对话",
+      "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
+      "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
+      "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
+    }
   },
   "wizard": {
     "title": "Agent 向导"
@@ -757,6 +769,7 @@
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
     "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
+    "reviewNoticeLabel": "对话审阅",
     "sendRejected": "您的消息未发送：{{reason}}",
     "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
     "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
@@ -5003,7 +5016,9 @@
       "published": "已发布",
       "shared": "已共享",
       "sharedTitle": "归 {{owner}} 所有 · 位于 {{space}}",
-      "ownedBy": "归 {{owner}} 所有"
+      "ownedBy": "归 {{owner}} 所有",
+      "internal": "所有已登录用户",
+      "sharedBy": "由 {{owner}} 共享"
     },
     "level": {
       "use": "可对话",
@@ -5021,7 +5036,9 @@
       "space": "工作区",
       "spaceHint": "该资源所在工作区的所有人。",
       "published": "已发布",
-      "publishedHint": "所有能访问此部署的人。",
+      "publishedHint": "所有能访问此部署的人都可以阅读——包括匿名的聊天访客。",
+      "internal": "所有已登录用户",
+      "internalHint": "任何登录的人都可以与它对话。其配置保持私有。无法匿名访问。",
       "confirmTitle": "将可见性更改为{{visibility}}？",
       "cascadeLabel": "同时应用于其引用的工作流和配置",
       "cascadeWarning": "你拥有的每个被引用资源都会采用此可见性，替换其各自的设置。之前的设置不会保留。",
@@ -5034,7 +5051,7 @@
       "visibility": "可见性",
       "peopleAndTeams": "人员和团队",
       "subjectLabel": "人员或团队",
-      "subjectPlaceholder": "name@example.com 或 team:engineering",
+      "subjectPlaceholder": "姓名、电子邮件或团队",
       "levelLabel": "访问级别",
       "add": "共享",
       "shared": "已共享",
@@ -5060,7 +5077,13 @@
       "cascadeRevoked_other": "已从 {{count}} 项资源中移除",
       "andMore_other": "另有 {{count}} 项",
       "cascadeRevoked_one": "已从 {{count}} 项资源中移除",
-      "andMore_one": "另有 {{count}} 项"
+      "andMore_one": "另有 {{count}} 项",
+      "unknownGrant": "没有任何登录用户与此匹配——它不会到达任何人。请删除后重新共享。",
+      "copyFailed": "无法复制——请选中地址后自行复制。",
+      "chatLink": "聊天链接",
+      "copied": "已复制",
+      "copy": "复制",
+      "chatLinkHint": "适用于以“可对话”或更高权限共享了该智能体的所有人。"
     },
     "emptySpace": "此工作区中没有智能体",
     "emptySpaceDescription": "其他工作区可能有您可以查看的智能体。",
@@ -5078,13 +5101,107 @@
       "warning": "这将取代当前所有者（{{owner}}），其将失去对该资源的控制权。",
       "cascade_other": "已更改 {{count}} 项资源的所有者",
       "cascade_one": "已更改 {{count}} 项资源的所有者"
-    }
+    },
+    "notifications": {
+      "granted": "已向 {{name}} 授予访问权限",
+      "labelUnread_one": "通知 — {{count}} 条未读",
+      "labelUnread_other": "通知 — {{count}} 条未读",
+      "label": "通知",
+      "markAll": "全部标为已读",
+      "empty": "暂无新内容。与您共享的内容和访问请求会显示在这里。",
+      "unnamed": "未命名的资源",
+      "requested": "{{who}} 请求对 {{what}} 的“{{level}}”访问权限",
+      "shared": "{{who}} 与您共享了 {{what}} — {{level}}",
+      "grant": "授予",
+      "openChat": "打开聊天",
+      "open": "打开",
+      "dismiss": "忽略"
+    },
+    "request": {
+      "alreadyHas": "您已拥有该访问权限——请重新加载页面。",
+      "chatOnlyTitle": "您可以与此智能体对话",
+      "title": "您无权访问此内容",
+      "chatOnly": "它是为对话而与您共享的，因此其配置保持私有。",
+      "subtitle": "它可能是私有的，或仅与其他人共享。您可以申请访问。",
+      "sent": "请求已发送。如果该内容存在且有所有者，所有者会在通知中看到——一旦授予，您也会收到通知。",
+      "messagePlaceholder": "您为什么需要它？（可选）",
+      "message": "给所有者的留言",
+      "action": "申请访问"
+    },
+    "move": {
+      "done": "已移动",
+      "title": "移动到团队",
+      "team": "团队",
+      "action": "移动",
+      "hint": "之后团队中的每个人都可以找到并编辑它。您仍是所有者——只有您可以删除或进一步共享它。",
+      "cascade_one": "已移动 {{count}} 项资源",
+      "cascade_other": "已移动 {{count}} 项资源"
+    },
+    "preview": {
+      "title_one": "此更改将影响 {{count}} 项资源",
+      "title_other": "此更改将影响 {{count}} 项资源",
+      "confirm": "全部应用"
+    },
+    "ownership": {
+      "mine": "我的",
+      "shared": "与我共享",
+      "any": "我能看到的全部",
+      "label": "显示"
+    },
+    "create": {
+      "default": "您的默认工作区",
+      "hint": "新项目将在 {{space}} 中创建。"
+    },
+    "emptyShared": "还没有人与您共享任何内容",
+    "emptySharedDescription": "当同事与您或您的团队共享智能体时，它会显示在这里——以及您的通知中。",
+    "showEverything": "显示我能看到的全部"
   },
   "connectionRef": {
     "wrapped": "连接提供完整的标头值（含方案）。请单独使用 ${connection:name}，并把“Bearer ”放到连接的标头值中。",
     "headerMismatch": "此连接以“{{expected}}”发送其凭据，因此标头必须使用该名称——否则配置显示一个名称而请求携带另一个。",
     "refusedInRequest": "${connection:…} 在路径、查询参数或请求体中会被拒绝——URL 中的凭据会进入每个代理日志，请求体中的凭据不会被读取。请改为在标头中引用连接。",
     "refusedInModel": "语言模型、嵌入和向量存储不接受 ${connection:…}：连接会解析为完整标头，而它们需要裸凭据。请在此使用 ${vault:…}。"
+  },
+  "workspacesPage": {
+    "title": "工作区",
+    "subtitle": "您的工作区、其中保存的密钥和变量，以及新工作的共享方式。",
+    "notEnforced": "此部署未强制启用工作区，因此所有人都能看到所有内容。运维人员可通过 eddi.workspaces.enabled=true 启用。",
+    "yourSpaces": "您的工作区",
+    "yourSpacesHint": "每个工作区都有自己的密钥和变量。只有其成员可以查看或更改它们，也只有成员可以部署使用它们的智能体。",
+    "referenceCopied": "引用已复制",
+    "copyReference": "复制引用以在智能体中使用",
+    "secretStored": "密钥已保存",
+    "secrets": "密钥",
+    "noSecrets": "此工作区中还没有密钥",
+    "deleteNamed": "删除 {{name}}",
+    "secretName": "名称，例如 openai-key",
+    "secretValue": "值——加密存储，之后不再显示",
+    "add": "添加",
+    "deleteSecretTitle": "删除此密钥？",
+    "deleteSecretDescription": "使用它的智能体将停止工作，直到重新保存。此操作无法撤销。",
+    "variableStored": "变量已保存",
+    "variables": "变量",
+    "noVariables": "此工作区中还没有变量",
+    "variableName": "名称，例如 model",
+    "variableValue": "值",
+    "pinned": "由 {{property}} 固定",
+    "stored": "在此设置",
+    "default": "默认",
+    "settings": "设置",
+    "settingsHint": "立即生效，五秒内同步到每个副本。是否强制启用工作区，以及哪个令牌声明携带团队信息，属于启动设置，仅供参考。",
+    "enforcing": "已强制启用",
+    "enforcedYes": "是",
+    "enforcedNo": "否",
+    "groupsClaim": "团队来自令牌声明",
+    "defaultSpace": "新工作的默认位置",
+    "defaultSpacePlaceholder": "留空：每个人自己的工作区——或填写团队名称",
+    "defaultSpaceHelp": "填写团队名称会让部署以团队优先：除非设为私有，同事之间可以看到彼此的工作。个人所选的工作区始终优先。",
+    "legacy": "在记录所有权之前创建的资源",
+    "legacyShared": "所有人可见——升级后不会有任何内容消失",
+    "legacyAdminOnly": "仅管理员可见——在分配所有者之后",
+    "lastChanged": "最后由 {{who}} 更改",
+    "neverChanged": "尚未在此更改",
+    "saved": "设置已保存"
   },
   "cascadeSave": {
     "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
