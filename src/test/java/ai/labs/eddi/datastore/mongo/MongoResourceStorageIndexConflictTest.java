@@ -97,7 +97,9 @@ class MongoResourceStorageIndexConflictTest extends MongoTestBase {
         for (var collection : List.of(descriptors, history)) {
             var onResource = indexesOn(collection, new Document("resource", 1));
             assertEquals(1, onResource.size(), "exactly one index on {resource: 1} in " + collection.getNamespace());
-            assertEquals("resource_1", onResource.getFirst().getString("name"));
+            // Built before the stale one was dropped, so under the alternate name: the
+            // key is never without an index.
+            assertEquals("resource_1_eddi", onResource.getFirst().getString("name"));
             assertFalse(onResource.getFirst().getBoolean("unique", false), "the 6.x index is not unique");
         }
         assertDescriptorRoundTrip(store);
