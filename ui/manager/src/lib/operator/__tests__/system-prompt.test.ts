@@ -276,8 +276,25 @@ describe("buildOperatorPromptBody", () => {
       for (const body of [defaultOperatorPromptBody("read_only"), defaultOperatorPromptBody("read_write")]) {
         expect(body).toContain("Knowledge bases (RAG)");
         expect(body).toContain("read it by id AND version");
-        expect(body).toContain("ingestion run's status");
+        expect(body).toContain("run history");
       }
+    });
+
+    it("teaches the three-part binding that fails silently when any part is missing", () => {
+      // rag.md's troubleshooting table names the missing workflow step as the
+      // usual cause of "the agent ignores its knowledge base" — and the match is
+      // on the document's own `name`, which the descriptor name need not equal.
+      const body = defaultOperatorPromptBody("read_only");
+      expect(body).toContain("THREE things line up");
+      expect(body).toContain("`eddi://ai.labs.rag` step");
+      expect(body).toContain("`knowledgeBases`");
+      expect(body).toContain("`enableWorkflowRag: true`");
+      expect(body).toContain("BY THE DOCUMENT'S OWN");
+      expect(body).toContain("`httpCallRag`");
+    });
+
+    it("flags the in-memory store, the default that empties itself", () => {
+      expect(defaultOperatorPromptBody("read_only")).toContain("`in-memory` (the default) is dev/test only");
     });
 
     it("states the read-only boundary while no RAG write is granted", () => {
@@ -316,26 +333,48 @@ describe("buildOperatorPromptBody", () => {
       expect(buildOperatorPromptBody(byIdOnly)).toContain("You have NO tool to list, read or check one");
     });
 
-    it("promises the ingestion check only when that endpoint is granted", () => {
-      // The three reads can be granted independently, so the claim has to track
-      // its own endpoint rather than ride along with the other two.
-      const configReadsOnly = [
-        ...withoutRag(),
-        "GET /ragstore/rags/descriptors",
-        "GET /ragstore/rags/{id}",
-      ];
-      const body = buildOperatorPromptBody(configReadsOnly);
+    it("promises each ingestion check only when its own endpoint is granted", () => {
+      // The reads can be granted independently, so every claim has to track its
+      // own endpoint rather than ride along with the configuration reads.
+      const configReads = ["GET /ragstore/rags/descriptors", "GET /ragstore/rags/{id}"];
+      const body = buildOperatorPromptBody([...withoutRag(), ...configReads]);
       expect(body).toContain("Find one by name in the descriptor listing");
-      expect(body).not.toContain("ingestion run's status");
+      expect(body).not.toContain("run history");
+      expect(body).not.toContain("list the files it holds");
+      expect(body).not.toContain("ingestion-status read");
+      expect(body).not.toContain("with no `sources` is filled by direct uploads");
 
-      expect(defaultOperatorPromptBody("read_only")).toContain("ingestion run's status");
+      const runsOnly = buildOperatorPromptBody([
+        ...withoutRag(),
+        ...configReads,
+        "GET /ragstore/rags/{id}/sources/{sourceId}/runs",
+      ]);
+      expect(runsOnly).toContain("run history");
+      expect(runsOnly).toContain("with no `sources` is filled by direct uploads");
+      expect(runsOnly).not.toContain("list the files it holds");
+
+      const read = defaultOperatorPromptBody("read_only");
+      expect(read).toContain("run history");
+      expect(read).toContain("list the files it holds");
+      expect(read).toContain("ingestion-status read");
     });
 
     it("names the rag step type so a workflow read is still interpretable", () => {
-      // Both branches: with the reads it is the section's first bullet, without
-      // them it is the step the boundary text names.
-      expect(defaultOperatorPromptBody("read_only")).toContain("by a workflow's `rag` step");
+      // Both branches: with the reads it is the binding the section explains,
+      // without them it is the step the boundary text names.
+      expect(defaultOperatorPromptBody("read_only")).toContain("`eddi://ai.labs.rag` step");
       expect(buildOperatorPromptBody(withoutRag())).toContain("A workflow may contain a `rag` step");
+    });
+
+    it("offers to connect an existing knowledge base only with both authoring writes", () => {
+      expect(defaultOperatorPromptBody("read_write")).toContain("connect an EXISTING knowledge base");
+      expect(defaultOperatorPromptBody("read_write")).toContain("you cannot grant secrets");
+      expect(defaultOperatorPromptBody("read_only")).not.toContain("connect an EXISTING knowledge base");
+      // Half a binding retrieves nothing, so half the grant must not advertise it.
+      const workflowOnly = [...READ_ENDPOINTS, "PUT /workflowstore/workflows/{id}"];
+      expect(buildOperatorPromptBody(workflowOnly)).not.toContain("connect an EXISTING knowledge base");
+      const noReads = [...withoutRag(), "PUT /workflowstore/workflows/{id}", "PUT /llmstore/llms/{id}"];
+      expect(buildOperatorPromptBody(noReads)).not.toContain("connect an EXISTING knowledge base");
     });
   });
 
@@ -365,16 +404,42 @@ describe("the app-context section — what screen the admin is on", () => {
   });
 
   it("references context.screen and the id fields the drawer's route hook actually produces", () => {
-    // Must match useCurrentScreenContext's real field names (screen, agentId,
-    // workflowId, groupId, boardId) exactly — Qute resolves by literal
-    // property name, so a mismatch here renders as silently missing context,
-    // not an error.
+    // Must match useCurrentScreenContext's real field names exactly — Qute
+    // resolves by literal property name, so a mismatch here renders as silently
+    // missing context, not an error.
     const body = buildOperatorPromptBody(READ_ENDPOINTS);
     expect(body).toContain("{context.screen}");
     expect(body).toContain("{#if context.agentId} (agent {context.agentId}){/if}");
     expect(body).toContain("{#if context.workflowId} (workflow {context.workflowId}){/if}");
-    expect(body).toContain("{#if context.groupId} (group {context.groupId}){/if}");
+    expect(body).toContain("{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}");
+    expect(body).toContain(
+      "{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}",
+    );
+    expect(body).toContain("{#if context.conversationId} (conversation {context.conversationId}){/if}");
+    expect(body).toContain("{#if context.channelId} (channel {context.channelId}){/if}");
     expect(body).toContain("{#if context.boardId} (workforce board {context.boardId}){/if}");
+  });
+
+  it("reads no engine-reserved context key, which the backend strips from a client's turn", () => {
+    // `ClientContextGuard.RESERVED_KEYS` on the backend. The group hint once read
+    // `context.groupId`; after the reserved-key hardening it rendered empty on
+    // every turn, silently. A reserved key — or one starting with one, which the
+    // guard strips too — can never reach this template from the drawer.
+    const reserved = [
+      "groupId",
+      "groupConversationId",
+      "groupDepth",
+      "groupTranscript",
+      "dynamicAgentConfig",
+      "dynamicCreatedAgentIds",
+      "delegationDepth",
+    ];
+    const body = buildOperatorPromptBody(READ_ENDPOINTS);
+    const keys = [...body.matchAll(/context\.([A-Za-z]+)/g)].map((m) => m[1]!);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      for (const r of reserved) expect(key.startsWith(r), `context.${key} is reserved (${r})`).toBe(false);
+    }
   });
 
   it("degrades to nothing rather than a stray literal when no context was sent", () => {

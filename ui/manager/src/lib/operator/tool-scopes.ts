@@ -162,13 +162,25 @@ export const READ_ENDPOINTS: readonly string[] = [
   // `${vault:...}` references resolved at runtime (`VaultGrantChecker` reads
   // this store for exactly that reason), not plaintext the read hands back.
   //
-  // Ingestion: the STATUS read only. `POST /ragstore/rags/{id}/ingest` stays
+  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, a source's `run`
+  // and `preview`, file upload and delete, and the state purge all stay
   // excluded, as `planning/operator-write-scope-plan.md` §5 requires — but
   // "did the documents actually land?" is the question an admin asks about a
   // knowledge base, and answering it needs no write.
+  //
+  // The single-ingestion STATUS read answers it only for a manual
+  // `POST …/ingest`, whose id comes back in that call's response alone — the
+  // operator never sees one unless the admin pastes it. What answers it for a
+  // configured source (`sources[]` on the document) is the run history and, for
+  // an upload source, the file list. Neither carries a credential: a run is
+  // counters, cost, timestamps and an error string; a file is a name, type,
+  // size and content hash; and `IngestionSource` has no header or secret field
+  // at all.
   "GET /ragstore/rags/descriptors",
   "GET /ragstore/rags/{id}",
   "GET /ragstore/rags/{id}/ingestion/{ingestionId}/status",
+  "GET /ragstore/rags/{id}/sources/{sourceId}/runs",
+  "GET /ragstore/rags/{id}/sources/{sourceId}/files",
   // Audit
   "GET /auditstore/agent/{agentId}",
 ] as const;
@@ -533,6 +545,41 @@ export function grantsKnowledgeBaseReads(endpoints: readonly string[]): boolean 
  */
 export function grantsIngestionStatusReads(endpoints: readonly string[]): boolean {
   return new Set(endpoints).has("GET /ragstore/rags/{id}/ingestion/{ingestionId}/status");
+}
+
+/**
+ * Whether a configured ingestion source's run history can be read.
+ *
+ * Its own predicate for the same reason as {@link grantsIngestionStatusReads}:
+ * each is a separate sentence in the prompt, and a sentence may only appear
+ * when its tool was generated.
+ */
+export function grantsIngestionRunReads(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("GET /ragstore/rags/{id}/sources/{sourceId}/runs");
+}
+
+/**
+ * Whether the operator can connect an EXISTING knowledge base to an agent.
+ *
+ * That is not a knowledge-base write — nothing in the `rag` store changes — but
+ * two authoring writes the operator already holds: the workflow gains an
+ * `eddi://ai.labs.rag` step, and the LLM task names the knowledge base. Both are
+ * required, plus the reads that resolve a name to an id and version; with only
+ * one of the writes the binding is half-made and retrieves nothing, which is
+ * exactly the silent failure the prompt teaches the operator to diagnose.
+ */
+export function grantsKnowledgeBaseBinding(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return (
+    grantsKnowledgeBaseReads(endpoints) &&
+    set.has("PUT /workflowstore/workflows/{id}") &&
+    set.has("PUT /llmstore/llms/{id}")
+  );
+}
+
+/** Whether an upload source's stored files can be listed. */
+export function grantsIngestionFileReads(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("GET /ragstore/rags/{id}/sources/{sourceId}/files");
 }
 
 /**

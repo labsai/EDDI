@@ -598,6 +598,18 @@
                     <exclude>META-INF/resources/img/**</exclude>
                 </excludes>
             </resource>
+            <!-- The Platform Operator's provisioning revision, owned by the Manager
+                 (ui/manager/src/lib/operator/operator-revision.json). Copied onto the
+                 backend classpath on EVERY build, -DskipUi included, so
+                 OperatorRevisionCheck can warn at startup when the deployed operator
+                 predates the Manager this jar ships. One file, read by both halves. -->
+            <resource>
+                <directory>ui/manager/src/lib/operator</directory>
+                <targetPath>eddi-manager</targetPath>
+                <includes>
+                    <include>operator-revision.json</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
             <plugin>
