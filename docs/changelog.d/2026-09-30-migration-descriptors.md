@@ -1,4 +1,4 @@
-## 🐛 fix(migration): conversation descriptors and steps reach the v6 shape on databases an earlier 6.x migrated (2026-09-30)
+## 🐛 fix(migration): conversation descriptors and steps reach the v6 shape on databases an earlier 6.x migrated; an unconvertible template is an ERROR once (2026-09-30)
 
 **Repo:** EDDI (`fix/650-migration-descriptors`)
 
@@ -46,8 +46,34 @@ snapshot — while a comment said nothing depended on that alias.
   net that has to stay (a database awaiting its catch-up, a v5 step written after the pass), and
   now say so.
 
+### 3. An unconvertible Thymeleaf template was logged at ERROR on every boot
+
+A template `V6QuteMigration` refuses (one that builds template syntax) keeps the migration
+incomplete, so it re-ran and re-reported the same document on every boot, for as long as the
+legacy config existed.
+
+- **`V6QuteMigration`** — the first boot that finds a refused document logs an ERROR with the
+  collection, id (with the version, for a history row), field paths and the remedy. Later boots
+  list the documents already reported in **one WARN**. The reported set is kept in `migrationlog`
+  under `v6-qute-migration-unconvertible` (an `entries` list); a document fixed since is converted
+  and dropped from it, a new refused one gets its own ERROR, and the record is removed when none
+  is left. The end-of-run summary is an ERROR only for real failures (an unreadable collection, a
+  failed write); refusals alone end with an INFO. A cursor failing part-way through a collection is
+  now counted as a failure instead of escaping the pass.
+- **`IMigrationLogStore`** — `readMigrationEntries` / `writeMigrationEntries`, implemented by the
+  MongoDB store on a plain document. The defaults keep nothing, so a store without them reports as
+  on a first boot every time (the PostgreSQL store; the Qute migration reads MongoDB anyway).
+- **Docs** — [`configuration-reference.md`](../configuration-reference.md) (`eddi.migration.v6-qute.enabled`)
+  and [`output-templating.md`](../output-templating.md).
+
 ### Design decisions
 
+- **The Qute migration stays incomplete while any document is refused, reported or not.**
+  Completion means no stored template is still Thymeleaf, and it is also what stops the scan: once
+  complete, a refused document fixed later would never be converted, and a refused one restored
+  later would never be reported. Re-checking only the recorded ones would be a second path through
+  the same four config collections; the full scan is cheap, and it is what an incomplete migration
+  already cost.
 - **The descriptor passes bump no revision**, unlike the conversation passes of #909. A descriptor
   has no `_rev`; its `_version` is part of the conversation's URI (`?version=`) and must not move,
   and descriptor writes are unconditional replaces that a bump would not guard anyway. A replace
@@ -69,5 +95,16 @@ snapshot — while a comment said nothing depended on that alias.
 - `V6RenameMigrationFirstBootTest` (Testcontainers): the step-shape catch-up on a database an
   earlier 6.x migrated — renamed, revision bumped, loads with the same item counts, a second run
   changes nothing — and it does not run once recorded.
-- Every behavioural test above was mutation-checked: 11 mutants (each fix reverted in turn), all
+- `V6QuteMigrationReportingTest` (Testcontainers): ERROR per document on the first boot; one WARN and
+  no ERROR on the second; a fixed document converted and dropped, completion once none is left; a
+  new refused document gets its own ERROR; a history row named with its version.
+- `LogCaptureSupport.captureRecordsOf` — captures the level and the formatted message.
+- Every behavioural test above was mutation-checked: 18 mutants (each fix reverted in turn), all
   killed by the test written for it.
+
+### Open
+
+- A refused template that is fixed through the API leaves its old version in the `.history`
+  collection, where it is still refused: the migration completes only once that row is corrected
+  or removed by hand. That is deliberate — an agent pinned to the old version still reads it — and
+  the ERROR says so.

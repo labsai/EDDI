@@ -15,9 +15,13 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
+import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.VERSION_FIELD;
 import static com.mongodb.client.model.Filters.eq;
 
 /**
@@ -26,6 +30,33 @@ import static com.mongodb.client.model.Filters.eq;
  * <p>
  * Idempotent — records completion in migration_log. Controlled by
  * {@code eddi.migration.v6-qute.enabled} (default: false).
+ *
+ * <h2>Templates it cannot convert</h2>
+ * <p>
+ * A template the converter cannot convert safely — one that builds template
+ * syntax, say — is left exactly as it is, and so is every other field of its
+ * document. The first start that finds such a document logs it at ERROR, with
+ * its collection, id, field paths and what to do about it, and records it under
+ * {@link #REPORTED_KEY} in the migration log. Every later start checks it again
+ * — a document fixed in the meantime is converted and leaves the record — but
+ * lists the ones still refused in a single WARN instead of an ERROR each: they
+ * are known, and an error that repeats on every start for the same legacy
+ * config stops being read. A refused document that is not in the record yet
+ * gets its own ERROR, whenever it turns up.
+ * </p>
+ *
+ * <p>
+ * <b>The migration is not marked complete while any document is refused</b>,
+ * even when every one of them has been reported already. Completion means no
+ * stored template is still Thymeleaf, and that is not true yet. It is also what
+ * keeps the whole scan running: once complete, nothing is checked again, so a
+ * refused document fixed later would never be converted, and a refused one
+ * written later — restored from a backup, say — would never be reported.
+ * Checking only the recorded documents instead would need a second path through
+ * the same collections for the same result; the full scan covers four config
+ * collections, which is cheap, and it is what an incomplete migration has
+ * always cost on each start.
+ * </p>
  *
  * @since 6.0.0
  */
@@ -36,6 +67,12 @@ public class V6QuteMigration {
     private static final String MIGRATION_KEY = "v6-qute-migration-complete";
 
     /**
+     * The migration-log record listing the documents already reported as
+     * unconvertible, as {@code collection/id}. Removed once none is left.
+     */
+    static final String REPORTED_KEY = "v6-qute-migration-unconvertible";
+
+    /**
      * MongoDB {@code NamespaceNotFound} — the only count failure that means
      * "nothing to migrate here" rather than "this collection was never read".
      */
@@ -43,6 +80,8 @@ public class V6QuteMigration {
 
     /** Collections containing template strings. */
     private static final String[] TEMPLATE_COLLECTIONS = {"apicalls", "outputs", "propertysetter", "llms"};
+
+    private static final String HISTORY_SUFFIX = ".history";
 
     private final MongoDatabase database;
     private final IMigrationLogStore migrationLogStore;
@@ -70,18 +109,24 @@ public class V6QuteMigration {
         }
 
         LOGGER.info("Starting V6 Qute template migration...");
-        int total = 0;
-        int failed = 0;
+        Set<String> reported = readReported();
+        Scan scan = new Scan(reported);
 
         for (String colName : TEMPLATE_COLLECTIONS) {
-            for (String name : List.of(colName, colName + ".history")) {
-                CollectionResult result = migrateCollection(name);
-                total += result.migrated();
-                failed += result.failed();
+            for (String name : List.of(colName, colName + HISTORY_SUFFIX)) {
+                migrateCollection(name, scan);
             }
         }
 
-        if (failed > 0) {
+        if (!scan.stillRefused.isEmpty()) {
+            LOGGER.warnf("V6 Qute migration: %d document(s) reported on an earlier start still hold templates that cannot "
+                    + "be converted automatically, and were left unchanged again: %s. Fix or remove them to let the "
+                    + "migration complete; it checks them again on every start.", scan.stillRefused.size(),
+                    String.join(", ", scan.stillRefused));
+        }
+        recordReported(reported, scan);
+
+        if (scan.failed > 0) {
             // Deliberately not marked complete: whatever failed is still on Thymeleaf
             // syntax and would render as literal text. Running again is safe — a
             // migrated document no longer contains Thymeleaf syntax, so it is not
@@ -89,22 +134,108 @@ public class V6QuteMigration {
             // is cheap next to shipping a half-migrated database.
             LOGGER.errorf("V6 Qute migration migrated %d document(s) with %d failure(s) (logged above, per document or "
                     + "collection). Not marking the migration complete, so it runs again on the next startup — deal "
-                    + "with those first.", total, failed);
+                    + "with those first.", scan.migrated, scan.failed);
+            return;
+        }
+        if (!scan.refused.isEmpty()) {
+            // Not an error of this start: each refused document has had its ERROR, on
+            // this start or an earlier one. See the class Javadoc for why this is still
+            // not complete.
+            LOGGER.infof("V6 Qute migration migrated %d document(s); %d left unchanged because their templates cannot be "
+                    + "converted automatically (see above). Not marking the migration complete, so it checks them again "
+                    + "on the next startup.", scan.migrated, scan.refused.size());
             return;
         }
 
-        LOGGER.infof("V6 Qute migration complete: %d documents migrated", total);
+        LOGGER.infof("V6 Qute migration complete: %d documents migrated", scan.migrated);
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
-    /** What one collection's pass did. */
-    private record CollectionResult(int migrated, int failed) {
+    /**
+     * What one start's scan found. {@code failed} counts every failure other than a
+     * refused template: an unreadable collection, a document that could not be
+     * written.
+     */
+    private static final class Scan {
+        /** The documents reported on an earlier start, or {@code null} if unknown. */
+        private final Set<String> reported;
+        /** Every document refused on this start, as {@code collection/id}. */
+        private final Set<String> refused = new TreeSet<>();
+        /** The refused documents that were already reported. */
+        private final List<String> stillRefused = new ArrayList<>();
+        /** Collections this start could not read — their record is kept as it was. */
+        private final Set<String> unreadCollections = new HashSet<>();
+        private int migrated;
+        private int failed;
+
+        private Scan(Set<String> reported) {
+            this.reported = reported;
+        }
     }
 
-    private CollectionResult countFailure(String colName, Exception e) {
+    /**
+     * The documents reported as unconvertible on earlier starts. A record that
+     * cannot be read answers {@code null}, and every refused document is then
+     * reported as new: an ERROR too many is the safe way to be wrong.
+     */
+    private Set<String> readReported() {
+        try {
+            return new HashSet<>(migrationLogStore.readMigrationEntries(REPORTED_KEY));
+        } catch (Exception e) {
+            LOGGER.warnf("V6 Qute migration could not read which unconvertible templates it has reported before (%s) — "
+                    + "reporting each one found as new", e.toString());
+            return null;
+        }
+    }
+
+    /**
+     * Stores the documents refused on this start as the reported ones: a document
+     * fixed since is dropped, a new one added. The entries of a collection this
+     * start could not read are kept, since whether they are still refused is not
+     * known. Written only when it changed; a failed write is logged, and costs no
+     * more than those documents being reported as new on the next start.
+     */
+    private void recordReported(Set<String> reported, Scan scan) {
+        Set<String> entries = new TreeSet<>(scan.refused);
+        if (reported != null) {
+            for (String entry : reported) {
+                if (scan.unreadCollections.contains(collectionOf(entry))) {
+                    entries.add(entry);
+                }
+            }
+            if (entries.equals(reported)) {
+                return;
+            }
+        }
+        try {
+            migrationLogStore.writeMigrationEntries(REPORTED_KEY, List.copyOf(entries));
+        } catch (Exception e) {
+            LOGGER.warnf("V6 Qute migration could not record which unconvertible templates it has reported (%s) — they are "
+                    + "reported as new on the next start", e.toString());
+        }
+    }
+
+    private static String collectionOf(String entry) {
+        int slash = entry.indexOf('/');
+        return slash < 0 ? entry : entry.substring(0, slash);
+    }
+
+    /**
+     * How a document is named in the log and in the record: {@code collection/id},
+     * with the version for a history row, whose {@code _id} holds both.
+     */
+    private static String documentKey(String colName, Object id) {
+        if (id instanceof Document compound && compound.containsKey(ID_FIELD)) {
+            return colName + "/" + compound.get(ID_FIELD) + " v" + compound.get(VERSION_FIELD);
+        }
+        return colName + "/" + id;
+    }
+
+    private void countFailure(String colName, Exception e, Scan scan) {
         LOGGER.errorf("V6 Qute migration could not read '%s' — it may still hold Thymeleaf templates, so the migration "
                 + "is not marked complete: %s", colName, e.toString());
-        return new CollectionResult(0, 1);
+        scan.failed++;
+        scan.unreadCollections.add(colName);
     }
 
     /**
@@ -131,56 +262,84 @@ public class V6QuteMigration {
      * never read.
      * </p>
      */
-    private CollectionResult migrateCollection(String colName) {
+    private void migrateCollection(String colName, Scan scan) {
         MongoCollection<Document> col;
         try {
             col = database.getCollection(colName);
             if (col.estimatedDocumentCount() == 0) {
-                return new CollectionResult(0, 0);
+                return;
             }
         } catch (MongoCommandException e) {
             if (e.getErrorCode() == NAMESPACE_NOT_FOUND_ERROR_CODE) {
                 LOGGER.debugf("V6 Qute migration skipped '%s': the collection does not exist", colName);
-                return new CollectionResult(0, 0);
+                return;
             }
-            return countFailure(colName, e);
+            countFailure(colName, e, scan);
+            return;
         } catch (Exception e) {
-            return countFailure(colName, e);
+            countFailure(colName, e, scan);
+            return;
         }
 
         int migrated = 0;
-        int failed = 0;
-        for (Document doc : col.find()) {
-            try {
-                List<String> unconvertible = new ArrayList<>();
-                boolean changed = migrateDocument(doc, "", unconvertible);
-                if (!unconvertible.isEmpty()) {
-                    // Nothing of this document is written, not even the fields that did
-                    // convert: a half-migrated document mixes two template languages,
-                    // and the one that stays behind still renders as literal text.
-                    failed++;
-                    LOGGER.warnf("V6 Qute migration left %s/%s unchanged: %d field(s) cannot be converted safely — %s. "
-                            + "Convert them by hand; until then the migration is not marked complete.", colName,
-                            doc.get(ID_FIELD), unconvertible.size(), String.join("; ", unconvertible));
-                    continue;
+        try {
+            for (Document doc : col.find()) {
+                try {
+                    List<String> unconvertible = new ArrayList<>();
+                    boolean changed = migrateDocument(doc, "", unconvertible);
+                    if (!unconvertible.isEmpty()) {
+                        // Nothing of this document is written, not even the fields that did
+                        // convert: a half-migrated document mixes two template languages,
+                        // and the one that stays behind still renders as literal text.
+                        refuse(colName, doc.get(ID_FIELD), unconvertible, scan);
+                        continue;
+                    }
+                    if (changed) {
+                        col.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
+                        migrated++;
+                    }
+                } catch (Exception e) {
+                    // The document is never written when this happens — migrateDocument
+                    // mutates its in-memory copy, and the replaceOne it would have been
+                    // written by is what threw or was never reached.
+                    scan.failed++;
+                    LOGGER.errorf("V6 Qute migration could not migrate %s/%s — leaving it unchanged and continuing: %s",
+                            colName, doc.get(ID_FIELD), e.toString());
                 }
-                if (changed) {
-                    col.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
-                    migrated++;
-                }
-            } catch (Exception e) {
-                // The document is never written when this happens — migrateDocument
-                // mutates its in-memory copy, and the replaceOne it would have been
-                // written by is what threw or was never reached.
-                failed++;
-                LOGGER.errorf("V6 Qute migration could not migrate %s/%s — leaving it unchanged and continuing: %s",
-                        colName, doc.get(ID_FIELD), e.toString());
             }
+        } catch (Exception e) {
+            // The cursor itself failed part-way: whatever it had not reached yet was
+            // never looked at.
+            countFailure(colName, e, scan);
         }
         if (migrated > 0) {
             LOGGER.infof("  %s: migrated %d documents", colName, migrated);
         }
-        return new CollectionResult(migrated, failed);
+        scan.migrated += migrated;
+    }
+
+    /**
+     * A document left unchanged because a template of it cannot be converted
+     * safely: an ERROR the first time, and a line of the start's single WARN on
+     * every later one.
+     */
+    private void refuse(String colName, Object id, List<String> unconvertible, Scan scan) {
+        String key = documentKey(colName, id);
+        scan.refused.add(key);
+        if (scan.reported != null && scan.reported.contains(key)) {
+            scan.stillRefused.add(key);
+            return;
+        }
+        String remedy = colName.endsWith(HISTORY_SUFFIX)
+                ? "This is a stored earlier version of a config, which the API does not edit: once no deployed agent "
+                        + "uses that version, correct or remove the row in the database by hand"
+                : "Rewrite the template(s) as Qute by hand, or delete or retire the config. Either way the version "
+                        + "refused here is kept in '" + colName + HISTORY_SUFFIX + "', which is checked too: once no "
+                        + "deployed agent uses it, remove that row by hand";
+        LOGGER.errorf("V6 Qute migration left %s unchanged: %d field(s) cannot be converted automatically — %s. %s. Until "
+                + "then the migration is not marked complete and checks it again on every start; later starts list it in "
+                + "one warning instead of repeating this error.", key, unconvertible.size(), String.join("; ", unconvertible),
+                remedy);
     }
 
     /**

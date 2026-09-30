@@ -177,7 +177,7 @@ Templates run in a restricted engine. Beyond the namespaces above, the pass-thro
 
 ## Migration from Thymeleaf (v5 → v6)
 
-If you are upgrading from EDDI v5, set `eddi.migration.v6-qute.enabled=true` for the first boot and the stored templates are converted as below. A template that cannot be converted safely (one that generates template syntax) is left unchanged and reported by collection, id and field:
+If you are upgrading from EDDI v5, set `eddi.migration.v6-qute.enabled=true` for the first boot and the stored templates are converted as below. A template that cannot be converted safely (one that generates template syntax) is left unchanged, and so is the rest of its document. The first boot that finds it logs an ERROR naming the collection, id and field; later boots list the documents already reported in a single WARN. The migration is not marked complete while any remain, so it checks them again on every boot and converts one as soon as it has been fixed by hand:
 
 | v5 (Thymeleaf) | v6 (Qute) |
 | --- | --- |
