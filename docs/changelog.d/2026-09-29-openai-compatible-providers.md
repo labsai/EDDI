@@ -155,6 +155,16 @@ Main moved by ~270 commits while this was open. Conflicts resolved as follows:
   while #896 moved the default to `claude-sonnet-5-5` — main's own suite is red on it. It now
   derives the expected model from `LLM_PROVIDERS[0]`.
 
+### Review follow-up: cross-provider summary model
+
+CodeRabbit (PR 904, outside-diff finding on `LlmTask`): a `conversationSummary` naming another
+provider but no model inherited the parent's model — with this branch's preset defaults an `xai`
+parent would send `grok-4.7` to an Anthropic summary. `resolveEffectiveSummaryConfig` now inherits
+the parent model only when the summary uses the parent's provider (or names none); otherwise the
+model stays unset and the summary provider's builder applies its own default. The pre-existing
+`inheritsModelOnly` test had pinned the cross-provider inheritance with a contrived pair and now uses
+a same-provider parent; `crossProviderDoesNotInheritModel` covers the fix.
+
 ### Design decisions
 
 ```decision-log

@@ -1434,7 +1434,13 @@ public class LlmTask implements ILifecycleTask {
         var effective = new LlmConfiguration.ConversationSummaryConfig();
         effective.setEnabled(configured.isEnabled());
         effective.setLlmProvider(providerMissing ? parentProvider : configured.getLlmProvider());
-        effective.setLlmModel(modelMissing ? parentModel : configured.getLlmModel());
+        // The parent's model is only meaningful to the parent's provider: a summary
+        // config naming another vendor with no model of its own would otherwise send,
+        // say, an xAI parent's grok-4.7 to Anthropic. Left unset, the summary
+        // provider's builder applies its own default.
+        boolean sameProvider = providerMissing
+                || (!isNullOrEmpty(parentProvider) && configured.getLlmProvider().trim().equalsIgnoreCase(parentProvider.trim()));
+        effective.setLlmModel(modelMissing ? (sameProvider ? parentModel : null) : configured.getLlmModel());
         effective.setMaxSummaryTokens(configured.getMaxSummaryTokens());
         effective.setExcludePropertiesFromSummary(configured.isExcludePropertiesFromSummary());
         effective.setRecentWindowSteps(configured.getRecentWindowSteps());
