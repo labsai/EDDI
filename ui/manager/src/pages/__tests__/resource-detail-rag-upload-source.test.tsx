@@ -43,6 +43,30 @@ function renderRagPage(id = "res1") {
   );
 }
 
+/**
+ * The headers of the first part of a multipart upload.
+ *
+ * Only the headers, and read from the raw body rather than through
+ * `request.formData()`. Node 24's fetch (undici 7) brand-checks `Blob` and
+ * `File` where Node 22's accepted anything shaped like one, and the jsdom
+ * environment replaces the global `File` with its own. So in this environment a
+ * dropped file reaches the handler without its bytes, and `formData()` fails
+ * its own check on the `File` it builds (an ERR_ASSERTION inside undici). What
+ * survives on every Node is the part's field name and content type — and in a
+ * browser, where there is only one `File`, none of this applies.
+ */
+async function firstUploadedPart(request: Request): Promise<{ field?: string; type?: string }> {
+  const contentType = request.headers.get("content-type") ?? "";
+  const boundary = /boundary="?([^";]+)"?/.exec(contentType)?.[1];
+  if (!boundary) throw new Error(`not a multipart upload: ${contentType}`);
+  const part = (await request.text()).split(`--${boundary}`)[1] ?? "";
+  const headers = part.slice(0, part.indexOf("\r\n\r\n"));
+  return {
+    field: /content-disposition:[^\r\n]*\bname="([^"]*)"/i.exec(headers)?.[1],
+    type: /content-type:\s*([^\r\n;]+)/i.exec(headers)?.[1]?.trim(),
+  };
+}
+
 async function openTheSource(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(screen.getByTestId("rag-editor")).toBeInTheDocument());
   await user.click(screen.getByRole("button", { name: /ingestion sources/i }));
@@ -85,22 +109,21 @@ describe("RAG upload source", () => {
   });
 
   it("uploads a dropped file and refreshes the list", async () => {
-    const uploaded: string[] = [];
+    const uploaded: { field?: string; type?: string }[] = [];
     server.use(
       http.post("*/ragstore/rags/:id/sources/:sourceId/files", async ({ request }) => {
-        const form = await request.formData();
-        const file = form.get("files") as File;
-        // The body, not the name: jsdom's XMLHttpRequest drops a multipart
-        // part's filename, so asserting on it here would be asserting on the
-        // test environment rather than on the upload.
-        uploaded.push(await file.text());
+        // Not the file name: jsdom's XMLHttpRequest drops a multipart part's
+        // filename, so asserting on it would be asserting on the test
+        // environment rather than on the upload. Not the bytes either - see
+        // firstUploadedPart.
+        uploaded.push(await firstUploadedPart(request));
         return HttpResponse.json({
           stored: [
             {
               fileId: "aa11bb22cc33dd44ee55ff6677889900",
               fileName: "notes.md",
               mimeType: "text/markdown",
-              sizeBytes: file.size,
+              sizeBytes: 7,
               contentHash: "d4e5f6",
               uploadedAt: "2026-09-18T09:20:00Z",
             },
@@ -118,17 +141,15 @@ describe("RAG upload source", () => {
     const file = new File(["# notes"], "notes.md", { type: "text/markdown" });
     fireEvent.drop(dropzone, { dataTransfer: { files: [file] } });
 
-    await waitFor(() => expect(uploaded).toEqual(["# notes"]));
+    await waitFor(() => expect(uploaded).toEqual([{ field: "files", type: "text/markdown" }]));
     expect(await screen.findByTestId("ingestion-source-0-upload-done")).toBeInTheDocument();
   });
 
   it("shows the server's reason when a file is refused, and keeps the others", async () => {
     server.use(
       http.post("*/ragstore/rags/:id/sources/:sourceId/files", async ({ request }) => {
-        const form = await request.formData();
-        const file = form.get("files") as File;
-        // Matched on the content for the same reason as above.
-        if ((await file.text()).startsWith("%PDF")) {
+        // Matched on the part's content type, for the same reasons as above.
+        if ((await firstUploadedPart(request)).type === "application/pdf") {
           return HttpResponse.json(
             {
               stored: [],
@@ -143,7 +164,7 @@ describe("RAG upload source", () => {
               fileId: "bb22",
               fileName: "readme.txt",
               mimeType: "text/plain",
-              sizeBytes: file.size,
+              sizeBytes: 5,
               contentHash: "c3",
               uploadedAt: "2026-09-18T09:20:00Z",
             },

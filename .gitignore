@@ -154,8 +154,8 @@ ui/manager/.claude/*
 !/.claude/skills/
 
 # === Generated frontend output (ui/manager and ui/chat, built by Maven) ===
-# frontend-maven-plugin installs Node into ui/node (installDirectory is ui/, so
-# ui/*/node would NOT match it).
+# frontend-maven-plugin installs Node into ui/node/<node.version>/node (see the
+# installDirectory comment in pom.xml; ui/*/node would NOT match it).
 ui/node/
 ui/*/node_modules/
 ui/*/dist/
