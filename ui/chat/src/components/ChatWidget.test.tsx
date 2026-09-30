@@ -1117,4 +1117,73 @@ describe("ChatWidget — conversation review notice", () => {
     await waitFor(() => expect(calls.some((c) => c.includes("/profile"))).toBe(true));
     expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
   });
+
+  it("sends no quick reply before the notice has had its chance to appear", async () => {
+    // Only the composer waited; a quick reply calls handleSend directly.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    const sends: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (init?.method === "POST") sends.push(href);
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: ["Pick one"], quickReplies: [{ value: "Yes" }] }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Yes" }));
+    expect(sends).toEqual([]);
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(sends.length).toBeGreaterThan(0));
+  });
+
+  it("shows the notice of the agent behind a managed route", async () => {
+    // The managed route names an intent, not an agent; the snapshot names the agent.
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) {
+        return new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 });
+      }
+      if (href.includes("/agentstore/") || href.includes("/descriptorstore/")) return new Response("{}", { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationId: "managed-conv-9",
+          agentId: "agent-9",
+          agentVersion: 1,
+          conversationState: "READY",
+          conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hi from managed"] }], timestamp: "2026-07-21T10:00:00Z" }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    render(
+      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The support team may read this.");
+    expect(calls.some((c) => c.includes("/agents/agent-9/profile"))).toBe(true);
+  });
 });

@@ -160,6 +160,10 @@ From CodeRabbit's review of the PR:
   changes, and a slower answer for the previous target cannot overwrite it. The
   input stays closed until the profile lookup has answered, so nobody can type
   before being told the conversation may be read.
+- That wait now covers every way to send, quick replies and the requested input
+  field included, not only the composer. A managed route
+  (`/chat/managed/:intent/:userId`) names no agent, so it now takes the agent
+  from the loaded conversation and shows that agent's notice.
 
 Deliberately not changed, and documented instead:
 
