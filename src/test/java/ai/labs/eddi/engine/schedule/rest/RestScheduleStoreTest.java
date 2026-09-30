@@ -28,6 +28,8 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
@@ -762,6 +764,54 @@ class RestScheduleStoreTest {
         assertEquals("tenant-a", written.getValue().getTenantId());
         assertTrue(written.getValue().isAllowSelfScheduling(), "an omitted allowSelfScheduling must not reset to false");
         assertEquals("0 4 * * *", written.getValue().getCronExpression(), "the edit itself still applies");
+    }
+
+    /**
+     * The race CodeRabbit raised on the Manager editor: it reads a schedule,
+     * another operator disables it, and the editor's save sends the stale
+     * {@code "enabled": true}. The PUT is a configuration edit and must leave the
+     * switch alone — and must never reach for {@code setScheduleEnabled} to "apply"
+     * the body's value. An omitted {@code enabled} deserializes to the model's
+     * {@code true} default, so both shapes are covered.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {",\"enabled\":true", ""})
+    void updateSchedule_neverReEnablesAScheduleDisabledSinceTheCallerReadIt(String enabledField) throws Exception {
+        asEditor("editor-1");
+        var stored = dreamSchedule("dis1", "editor-1");
+        stored.setEnabled(false);
+        when(scheduleStore.readSchedule("dis1")).thenReturn(stored);
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"dream-dis1","agentId":"agent-1","triggerType":"CRON","cronExpression":"0 4 * * *",
+                 "userId":"editor-1","message":"hello"%s}
+                """.formatted(enabledField), ScheduleConfiguration.class);
+        assertTrue(body.isEnabled(), "precondition: the stale body claims enabled");
+
+        assertEquals(200, rest.updateSchedule("dis1", body).getStatus());
+
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("dis1"), written.capture());
+        assertFalse(written.getValue().isEnabled(), "the stored enabled=false must be carried over, not the body's true");
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+    }
+
+    @Test
+    void updateSchedule_bodySayingDisabled_doesNotDisableAnEnabledSchedule() throws Exception {
+        asEditor("editor-1");
+        when(scheduleStore.readSchedule("en1")).thenReturn(dreamSchedule("en1", "editor-1"));
+
+        var body = new ObjectMapper().readValue("""
+                {"name":"dream-en1","agentId":"agent-1","triggerType":"CRON","cronExpression":"0 4 * * *",
+                 "userId":"editor-1","message":"hello","enabled":false}
+                """, ScheduleConfiguration.class);
+
+        assertEquals(200, rest.updateSchedule("en1", body).getStatus());
+
+        ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore).updateSchedule(eq("en1"), written.capture());
+        assertTrue(written.getValue().isEnabled(), "enabled changes only through /enable and /disable");
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
     }
 
     @Test

@@ -132,7 +132,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `userId` | string | `system:scheduler` | User identity for the fire |
 | `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
-| `enabled` | boolean | `true` | Whether the schedule is active |
+| `enabled` | boolean | `true` | Whether the schedule is active. Set on create only: a `PUT` ignores it and keeps the stored value — change it with `/enable` and `/disable` (see [Enabling and disabling](#enabling-and-disabling)) |
 | `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
 | `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
@@ -144,7 +144,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `POST` | `/schedulestore/schedules` | Create a schedule |
 | `GET` | `/schedulestore/schedules` | List schedules, newest first (optional `?agentId=` filter; `?limit=` default 500, max 1000; `?offset=` default 0) |
 | `GET` | `/schedulestore/schedules/{id}` | Get a specific schedule |
-| `PUT` | `/schedulestore/schedules/{id}` | Update a schedule |
+| `PUT` | `/schedulestore/schedules/{id}` | Update a schedule's configuration. Does **not** change `enabled` |
 | `DELETE` | `/schedulestore/schedules/{id}` | Delete a schedule |
 | `POST` | `/schedulestore/schedules/{id}/enable` | Enable a schedule |
 | `POST` | `/schedulestore/schedules/{id}/disable` | Disable a schedule |
@@ -191,6 +191,31 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > proxy or client with a shorter read timeout may give up before the fire log
 > comes back. The fire itself continues, and the schedule stays claimed until it
 > ends — a retry in the meantime answers `409`.
+
+### Enabling and disabling
+
+`enabled` is a switch, not configuration, and only `POST /{id}/enable` and
+`POST /{id}/disable` flip it (a finished one-shot is also disabled by its own fire).
+A `PUT` keeps the stored value whatever its body says — `"enabled": true`,
+`"enabled": false` or no `enabled` at all — and the store leaves the field out of
+the same atomic write, so there is no window in which a stale value can land.
+
+This is what makes concurrent editing safe. An editor that read a schedule, while
+another operator disabled it before the editor pressed Save, used to send its
+stale `"enabled": true` and silently re-enable the schedule, letting it fire again.
+Now the save changes only what the form edits and the schedule stays disabled.
+Leaving `enabled` out of the body would not have been enough on its own: the field
+defaults to `true`, so an omitted value read as "enable".
+
+Two consequences worth knowing:
+
+- Editing a one-shot that has already fired (and so disabled itself) does not
+  re-arm it. Save the new `oneTimeAt`, then `POST /{id}/enable`.
+- An agent import with `strategy=merge` that updates an existing schedule keeps
+  that schedule's `enabled` state on the target, as it keeps its owner.
+
+The Manager's schedule editor sends no `enabled` on an edit; the row's toggle
+calls `/enable` or `/disable`.
 
 ### Who Can See and Manage a Schedule
 

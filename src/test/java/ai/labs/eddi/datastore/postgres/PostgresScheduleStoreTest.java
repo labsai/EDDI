@@ -112,12 +112,40 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             String id = store.createSchedule(config);
 
             config.setName("Updated Name");
-            config.setEnabled(false);
             store.updateSchedule(id, config);
 
             var found = store.readSchedule(id);
             assertEquals("Updated Name", found.getName());
-            assertFalse(found.isEnabled());
+        }
+
+        @Test
+        @DisplayName("updateSchedule — a disable between snapshot and save is not overwritten")
+        void updateKeepsAConcurrentDisable() throws Exception {
+            String id = store.createSchedule(createCronSchedule("Race", "agent1", "t"));
+
+            // An editor reads the schedule (enabled) ...
+            var snapshot = store.readSchedule(id);
+            assertTrue(snapshot.isEnabled());
+            // ... another operator disables it ...
+            store.setScheduleEnabled(id, false, null);
+            // ... and the editor saves the stale copy.
+            snapshot.setName("Edited");
+            store.updateSchedule(id, snapshot);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit itself lands");
+            assertFalse(found.isEnabled(), "the stale enabled=true must not re-enable the schedule");
+        }
+
+        @Test
+        @DisplayName("updateSchedule — never disables either; enabled changes only via setScheduleEnabled")
+        void updateDoesNotDisable() throws Exception {
+            String id = store.createSchedule(createCronSchedule("Stay on", "agent1", "t"));
+            var body = store.readSchedule(id);
+            body.setEnabled(false);
+            store.updateSchedule(id, body);
+
+            assertTrue(store.readSchedule(id).isEnabled());
         }
 
         @Test

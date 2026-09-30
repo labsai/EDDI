@@ -230,6 +230,15 @@ public class MongoScheduleStore implements IScheduleStore {
      * to a millisecond window and left any non-REST caller un-claiming
      * unconditionally, so the columns are simply not part of a configuration
      * update. {@code nextFire} stays, because an edited cron legitimately re-arms.
+     * <p>
+     * {@code enabled} is out for the same reason. It is a runtime switch owned by
+     * {@link #setScheduleEnabled} (and by {@code markCompleted}, which disables a
+     * finished one-shot), not configuration. Writing it from the caller's object
+     * let an editor that had read the schedule before another operator's
+     * {@code /disable} re-enable it by saving — and because the field defaults to
+     * {@code true} on the model, a body that merely omitted it did the same.
+     * Leaving it out of the {@code $set} keeps the stored value in the same atomic
+     * write, with no read-then-write window.
      */
     @Override
     public void updateSchedule(String scheduleId, ScheduleConfiguration schedule)
@@ -254,7 +263,6 @@ public class MongoScheduleStore implements IScheduleStore {
             updates.add(set("conversationStrategy", schedule.getConversationStrategy()));
             updates.add(set("maxCostPerFire", schedule.getMaxCostPerFire()));
             updates.add(set("allowSelfScheduling", schedule.isAllowSelfScheduling()));
-            updates.add(set(ENABLED, schedule.isEnabled()));
             updates.add(set(NEXT_FIRE, schedule.getNextFire() == null ? null : epochMillis(schedule.getNextFire())));
             updates.add(set(METADATA, schedule.getMetadata()));
             updates.add(set(UPDATED_AT, epochMillis(now)));

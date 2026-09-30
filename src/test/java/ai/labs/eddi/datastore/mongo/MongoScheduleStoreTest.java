@@ -78,6 +78,40 @@ class MongoScheduleStoreTest extends MongoTestBase {
         }
 
         @Test
+        @DisplayName("update — a disable between snapshot and save is not overwritten")
+        void updateKeepsAConcurrentDisable() throws Exception {
+            var created = newSchedule("Race", "agent-1");
+            created.setEnabled(true);
+            String id = store.createSchedule(created);
+
+            // An editor reads the schedule (enabled) ...
+            var snapshot = store.readSchedule(id);
+            assertTrue(snapshot.isEnabled());
+            // ... another operator disables it ...
+            store.setScheduleEnabled(id, false, null);
+            // ... and the editor saves the stale copy.
+            snapshot.setName("Edited");
+            store.updateSchedule(id, snapshot);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit itself lands");
+            assertFalse(found.isEnabled(), "the stale enabled=true must not re-enable the schedule");
+        }
+
+        @Test
+        @DisplayName("update — never disables either; enabled changes only via setScheduleEnabled")
+        void updateDoesNotDisable() throws Exception {
+            var created = newSchedule("Stay on", "agent-1");
+            created.setEnabled(true);
+            String id = store.createSchedule(created);
+            var body = store.readSchedule(id);
+            body.setEnabled(false);
+            store.updateSchedule(id, body);
+
+            assertTrue(store.readSchedule(id).isEnabled());
+        }
+
+        @Test
         @DisplayName("update non-existent — throws ResourceNotFoundException")
         void updateNotFound() {
             assertThrows(IResourceStore.ResourceNotFoundException.class,
