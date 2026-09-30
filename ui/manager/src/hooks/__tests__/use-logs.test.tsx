@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
@@ -9,7 +9,11 @@ import {
   useInstanceId,
   useLogStream,
 } from "@/hooks/use-logs";
-import { subscriberCount, isStreamOpen } from "@/hooks/session-log-store";
+import {
+  subscriberCount,
+  isStreamOpen,
+  useSessionLogStore,
+} from "@/hooks/session-log-store";
 import { http, HttpResponse } from "msw";
 
 function createWrapper() {
@@ -345,3 +349,107 @@ describe("useLogStream — unfiltered stream ownership", () => {
     expect(isStreamOpen()).toBe(false);
   });
 });
+
+// ── Regressions ─────────────────────────────────────────────────────────
+
+describe("useLogStream — pause", () => {
+  // Pause used to be implemented only on the filtered path. The default
+  // unfiltered view reads the shared session store, so the button flipped its
+  // label while the list kept moving underneath.
+  it("freezes the unfiltered view and shows what arrived meanwhile on resume", async () => {
+    const line = (timestamp: number, message: string) => ({
+      timestamp,
+      level: "INFO",
+      loggerName: "t",
+      message,
+    });
+    useSessionLogStore.setState({ entries: [line(1000, "before")] });
+
+    const { result, unmount } = renderHook(() => useLogStream(), {
+      wrapper: createWrapper(),
+    });
+    expect(result.current.entries.map((e) => e.message)).toEqual(["before"]);
+
+    act(() => result.current.setPaused(true));
+    act(() => {
+      useSessionLogStore.setState((s) => ({
+        entries: [line(2000, "during"), ...s.entries],
+      }));
+    });
+    expect(result.current.paused).toBe(true);
+    expect(result.current.entries.map((e) => e.message)).toEqual(["before"]);
+
+    act(() => result.current.setPaused(false));
+    expect(result.current.entries.map((e) => e.message)).toEqual([
+      "during",
+      "before",
+    ]);
+
+    unmount();
+    useSessionLogStore.setState({ entries: [] });
+  });
+});
+
+describe("useHistoryLogs — paging", () => {
+  // History used to be one request for the newest 100 rows with no way to
+  // reach anything older.
+  it("loads older pages by row offset and de-duplicates rows that shifted between pages", async () => {
+    const row = (i: number) => ({
+      timestamp: 10_000 - i,
+      level: "INFO",
+      loggerName: "t",
+      message: `row ${i}`,
+    });
+    const skips: string[] = [];
+    server.use(
+      http.get("*/logs/history", ({ request }) => {
+        const url = new URL(request.url);
+        const skip = Number(url.searchParams.get("skip") ?? "0");
+        skips.push(String(skip));
+        if (skip === 0) {
+          return HttpResponse.json(Array.from({ length: 100 }, (_, i) => row(i)));
+        }
+        // A row written meanwhile pushed row 99 into the second page as well.
+        return HttpResponse.json([row(99), row(100), row(101)]);
+      })
+    );
+
+    const { result } = renderHook(() => useHistoryLogs({ limit: 100 }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(100);
+    expect(result.current.hasMore).toBe(true);
+
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.data).toHaveLength(102));
+    expect(skips).toEqual(["0", "100"]);
+    // A short page is the last one.
+    expect(result.current.hasMore).toBe(false);
+  });
+});
+
+describe("useHistoryLogs — repeated rows", () => {
+  it("keeps identical rows within a page and drops only the rows a page boundary repeats", async () => {
+    const same = { timestamp: 5000, level: "WARN", loggerName: "t", message: "retry" };
+    server.use(
+      http.get("*/logs/history", ({ request }) => {
+        const skip = Number(new URL(request.url).searchParams.get("skip") ?? "0");
+        return HttpResponse.json(
+          skip === 0
+            ? [same, { ...same }]
+            // One row shifted in from the previous page, plus one older row.
+            : [{ ...same }, { timestamp: 4000, level: "INFO", loggerName: "t", message: "older" }]
+        );
+      })
+    );
+    const { result } = renderHook(() => useHistoryLogs({ limit: 2 }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    expect(result.current.data!.map((r) => r.message)).toEqual(["retry", "retry", "older"]);
+  });
+});
+

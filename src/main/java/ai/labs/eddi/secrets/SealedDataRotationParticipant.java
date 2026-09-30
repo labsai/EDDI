@@ -69,4 +69,23 @@ public interface SealedDataRotationParticipant {
      *         returns — zero means the tenant is fully migrated
      */
     int resealAll(String tenantId, String activeDekId, UnaryOperator<ISecretProvider.SealedValue> resealer);
+
+    /**
+     * Discards every value this participant sealed for a tenant whose vault is
+     * being reset.
+     * <p>
+     * A reset deletes every DEK generation the tenant holds, so these values can
+     * never be opened again — and worse than unreadable: the tenant's next DEK is
+     * generation 1 again, carrying the same dekId the stranded rows name, so each
+     * later read would open them with the wrong key and fail authentication on
+     * every request, instead of finding nothing and asking the user to start over.
+     * <p>
+     * Called <b>before</b> the DEKs are deleted. Throwing stops the reset with the
+     * DEKs still in place, so it can be re-run.
+     *
+     * @return how many values were discarded
+     */
+    default int discardAll(String tenantId) {
+        return 0;
+    }
 }

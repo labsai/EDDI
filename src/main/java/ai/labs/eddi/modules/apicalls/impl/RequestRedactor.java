@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
@@ -16,6 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
@@ -338,6 +340,39 @@ public class RequestRedactor {
         String queryParams = redactResolvedSecrets(asString(raw.get(IRequest.KEY_QUERY_PARAMS)), resolvedSecrets);
         String body = truncateAndClean(redactResolvedSecrets(asString(raw.get(IRequest.KEY_BODY)), resolvedSecrets));
         return "Request{uri=" + uri + ", method=" + method + ", requestBody=\"" + body + "\", queryParams=" + queryParams + "}";
+    }
+
+    /**
+     * The response counterpart of {@link #safeRequestLog}: status, status message,
+     * body and headers, with every plaintext the request substituted removed and
+     * credential-named headers masked, redacted BEFORE the body is cut to log
+     * length so a truncation cannot leave a fragment that no longer matches.
+     * <p>
+     * {@code IResponse.toString()} used to be logged at INFO for every call, and a
+     * server that rejects a credential routinely echoes it in the body.
+     *
+     * @param resolvedSecrets
+     *            the plaintexts the request carried, from
+     *            {@code ApiCallExecutor.BuiltRequest#resolvedSecrets}
+     */
+    public static String safeResponseLog(IResponse response, Set<String> resolvedSecrets) {
+        if (response == null) {
+            return "null";
+        }
+        String message = redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
+        String body = truncateAndClean(redactResolvedSecrets(response.getContentAsString(), resolvedSecrets));
+        Map<String, String> headers = null;
+        if (response.getHttpHeader() != null) {
+            headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            for (var header : response.getHttpHeader().entrySet()) {
+                String value = isSensitiveHeaderName(header.getKey()) || "set-cookie".equalsIgnoreCase(header.getKey())
+                        ? REDACTED
+                        : redactResolvedSecrets(header.getValue(), resolvedSecrets);
+                headers.put(header.getKey(), value);
+            }
+        }
+        return "Response{httpCode=" + response.getHttpCode() + ", httpCodeMessage=\"" + message + "\", responseBody=\"" + body
+                + "\", httpHeader=" + headers + "}";
     }
 
     private static String asString(Object value) {

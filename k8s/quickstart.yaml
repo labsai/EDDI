@@ -56,6 +56,11 @@
 #   kubectl port-forward svc/eddi 7070:7070 -n eddi
 #   open http://localhost:7070
 #
+# ⚠️  EVALUATION ONLY. This one-file MongoDB runs WITHOUT authentication; the
+# NetworkPolicy below admits only the EDDI pod to it, which is a control only
+# where the cluster's CNI enforces NetworkPolicy. For anything that holds real
+# data use k8s/overlays/mongodb (authenticated) or the Helm chart.
+#
 # ─────────────────────────────────────────────────────────────
 
 # --- Namespace ---
@@ -150,6 +155,8 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # MongoDB never calls the Kubernetes API.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:
@@ -181,6 +188,37 @@ spec:
         resources:
           requests:
             storage: 10Gi
+
+---
+# --- MongoDB NetworkPolicy ---
+# Only the EDDI pod may connect. Any pod in the cluster could reach this
+# unauthenticated database on its Service before. `kubectl exec` and
+# port-forward do not traverse pod networking and are unaffected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongodb
+  namespace: eddi
+  labels:
+    app.kubernetes.io/name: mongodb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mongodb
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: eddi
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 27017
 
 ---
 # --- EDDI Service ---
@@ -240,6 +278,9 @@ spec:
         prometheus.io/port: "7070"
         prometheus.io/path: "/q/metrics"
     spec:
+      # EDDI never calls the Kubernetes API, so it does not mount the service
+      # account token — nothing to steal for a process that gets in.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 185

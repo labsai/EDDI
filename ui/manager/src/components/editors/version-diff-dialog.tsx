@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
@@ -54,31 +54,43 @@ export function VersionDiffDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch both versions
-  const loadVersions = useCallback(async () => {
+  // The latest fetchVersion, without making it an effect dependency: callers
+  // pass an inline arrow, and a new identity on every parent render would
+  // refetch both versions each time.
+  const fetchVersionRef = useRef(fetchVersion);
+  useEffect(() => {
+    fetchVersionRef.current = fetchVersion;
+  }, [fetchVersion]);
+
+  // Fetch both versions whenever the pair changes. This used to start the
+  // fetch during render and let every response land: pick v1, then v2 before
+  // v1 answered, and whichever finished last was shown — under v2's labels
+  // when that was v1. Only the most recent request may write now.
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
     setLoading(true);
     setError(null);
-    try {
-      const [left, right] = await Promise.all([
-        fetchVersion(leftVersion),
-        fetchVersion(rightVersion),
-      ]);
-      setLeftData(prettify(left));
-      setRightData(prettify(right));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load versions");
-    } finally {
-      setLoading(false);
-    }
-  }, [leftVersion, rightVersion, fetchVersion]);
-
-  // Load on first render and when versions change
-  const [lastLoaded, setLastLoaded] = useState("");
-  const loadKey = `${leftVersion}-${rightVersion}`;
-  if (open && loadKey !== lastLoaded) {
-    setLastLoaded(loadKey);
-    loadVersions();
-  }
+    Promise.all([
+      fetchVersionRef.current(leftVersion),
+      fetchVersionRef.current(rightVersion),
+    ])
+      .then(([left, right]) => {
+        if (!current) return;
+        setLeftData(prettify(left));
+        setRightData(prettify(right));
+      })
+      .catch((e: unknown) => {
+        if (!current) return;
+        setError(e instanceof Error ? e.message : "Failed to load versions");
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [open, leftVersion, rightVersion]);
 
   if (!open) return null;
 

@@ -96,7 +96,7 @@ class PropertySetterTaskSecretScrubTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         task = new PropertySetterTask(expressionProvider, memoryItemConverter, templatingEngine,
-                new DataFactory(), resourceClientLibrary, new ObjectMapper(), secretProvider);
+                new DataFactory(), resourceClientLibrary, new ObjectMapper(), new SecretPropertyVault(secretProvider, new DataFactory()));
     }
 
     /**
@@ -267,7 +267,7 @@ class PropertySetterTaskSecretScrubTest {
 
         var stored = memory.getConversationProperties().get("apiKey");
         assertEquals("${vault:agent-1.apiKey}", stored.getValueString(), "a vault-reference-shaped value, stored verbatim");
-        assertNull(stored.getAutoVaulted(), "nothing but autoVaultSecret may mark a property");
+        assertNull(stored.getAutoVaulted(), "nothing but SecretPropertyVault may mark a property");
     }
 
     @Test

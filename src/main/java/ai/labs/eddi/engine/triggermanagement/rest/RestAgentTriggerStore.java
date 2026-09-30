@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.triggermanagement.rest;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -37,10 +38,23 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         agentTriggersCache = cacheFactory.getCache(CACHE_NAME);
     }
 
+    /**
+     * Only the triggers the caller could have authored: those whose every target
+     * agent they may {@link AccessLevel#USE}. A trigger names the intent an
+     * integration routes by and the agents it routes to, so listing another team's
+     * is the first half of re-pointing it. Also backs the MCP
+     * {@code discover_agents} intent mapping. Unfiltered while workspaces are not
+     * enforced.
+     */
     @Override
     public List<AgentTriggerConfiguration> readAllAgentTriggers() {
         try {
-            return agentTriggerStore.readAllAgentTriggers();
+            if (resourceAccessGuard.seesEverything()) {
+                return agentTriggerStore.readAllAgentTriggers();
+            }
+            return agentTriggerStore.readAllAgentTriggers().stream()
+                    .filter(trigger -> holdsOnEveryTarget(trigger, AccessLevel.USE))
+                    .toList();
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -54,11 +68,33 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
                 agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
                 agentTriggersCache.put(intent, agentTriggerConfiguration);
             }
+            // Same visibility rule as the listing, and answered like an absent intent so
+            // the endpoint cannot be used to probe which intents another team routes.
+            if (!holdsOnEveryTarget(agentTriggerConfiguration, AccessLevel.USE)) {
+                throw new TriggerNotVisibleException("No agent trigger for this intent.");
+            }
 
             return agentTriggerConfiguration;
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Whether the caller holds at least {@code level} on every agent the trigger
+     * routes to.
+     */
+    private boolean holdsOnEveryTarget(AgentTriggerConfiguration configuration, AccessLevel level) {
+        if (configuration == null || configuration.getAgentDeployments() == null) {
+            return true;
+        }
+        for (var deployment : configuration.getAgentDeployments()) {
+            if (deployment != null && deployment.getAgentId() != null && !deployment.getAgentId().isBlank()
+                    && !resourceAccessGuard.hasAccess(deployment.getAgentId(), level)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

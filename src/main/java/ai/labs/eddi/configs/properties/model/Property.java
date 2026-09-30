@@ -21,7 +21,7 @@ public class Property {
 
     /**
      * Provenance marker: {@code TRUE} on the value
-     * {@code PropertySetterTask.autoVaultSecret} wrote, and only on that value.
+     * {@code SecretPropertyVault.vault} wrote, and only on that value.
      * <p>
      * A {@code scope: "secret"} property instruction stores the vault reference
      * with {@code scope: conversation}, so on the wire and in the conversation
@@ -195,8 +195,8 @@ public class Property {
     }
 
     /**
-     * @return {@code TRUE} when {@code autoVaultSecret} produced this value,
-     *         {@code null} otherwise — see the field for why {@code null} is
+     * @return {@code TRUE} when {@code SecretPropertyVault.vault} produced this
+     *         value, {@code null} otherwise — see the field for why {@code null} is
      *         refused rather than trusted
      */
     public Boolean getAutoVaulted() {

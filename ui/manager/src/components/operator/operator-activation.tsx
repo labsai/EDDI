@@ -6,7 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired, supportsBaseUrl } from "@/lib/model-suggestions";
+import {
+  MODEL_SUGGESTIONS,
+  isBaseUrlRequired,
+  isProvisionableBySetup,
+  provisionableProviderOr,
+  supportsBaseUrl,
+} from "@/lib/model-suggestions";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSelfUrl } from "@/hooks/use-operator";
@@ -46,13 +52,19 @@ export function OperatorActivation({
   const { data: vaultHealth } = useVaultHealth();
 
   const [step, setStep] = useState<Step>("model");
-  const [provider, setProvider] = useState(initial.provider);
-  const [model, setModel] = useState(initial.model);
+  // A stored provider the setup flow no longer offers falls back to the first
+  // one that it does, with that provider's default model and no carried key.
+  const initialProvider = provisionableProviderOr(initial.provider, LLM_PROVIDERS[0].id);
+  const keepsStoredProvider = initialProvider === initial.provider;
+  const [provider, setProvider] = useState(initialProvider);
+  const [model, setModel] = useState(
+    keepsStoredProvider ? initial.model : (getProviderConfig(initialProvider)?.defaultModel ?? ""),
+  );
   // Seeded from the stored vault key *name* so reconfiguring (e.g. switching
   // model) does not demand a credential the vault already holds. Plain-text
   // keys are not stored, so those still have to be re-entered.
   const [apiKey, setApiKey] = useState(
-    initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
+    keepsStoredProvider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
   const [baseUrl, setBaseUrl] = useState("");
   /**
@@ -265,7 +277,9 @@ export function OperatorActivation({
                 id="operator-provider"
                 data-testid="operator-provider"
               >
-                {LLM_PROVIDERS.map((p) => (
+                {/* The operator is provisioned through setup-api, which cannot
+                    configure every provider (see isProvisionableBySetup). */}
+                {LLM_PROVIDERS.filter((p) => isProvisionableBySetup(p.id)).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>

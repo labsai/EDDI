@@ -78,8 +78,6 @@ const executionConfig: LlmConfig = {
       type: "openai",
       actions: [],
       parameters: { systemMessage: "" },
-      enableParallelExecution: true,
-      parallelExecutionTimeoutMs: 60000,
       enableRateLimiting: true,
       defaultRateLimit: 100,
       toolRateLimits: { my_tool: 50 },
@@ -539,14 +537,17 @@ describe("LlmEditor", () => {
 
   // ── Execution section ───────────────────────────────────────────────────────
 
-  it("shows parallel execution checkbox when section is opened", async () => {
+  it("does not offer parallel tool execution, which the engine never read", async () => {
+    // enableParallelExecution / parallelExecutionTimeoutMs were removed from
+    // LlmConfiguration.Task; a checkbox for them saved a setting with no effect.
     const user = userEvent.setup();
     renderWithProviders(
       <LlmEditor data={executionConfig} onChange={onChange} />
     );
     // Execution section is defaultOpen={false}
     await openSection(user, "Execution");
-    expect(screen.getByTestId("enable-parallel-execution")).toBeChecked();
+    expect(screen.queryByTestId("enable-parallel-execution")).not.toBeInTheDocument();
+    expect(screen.queryByText("Parallel Tool Execution")).not.toBeInTheDocument();
   });
 
   it("shows tool response default chars input in execution section", async () => {
@@ -885,17 +886,6 @@ describe("LlmEditor", () => {
     expect(screen.getByText("Tool Caching")).toBeInTheDocument();
   });
 
-  // ── Execution section: parallel timeout ──────────────────────────────────
-
-  it("shows parallel execution timeout when parallel is enabled", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <LlmEditor data={executionConfig} onChange={onChange} />
-    );
-    await openSection(user, "Execution");
-    expect(screen.getByDisplayValue("60000")).toBeInTheDocument();
-  });
-
   it("shows max tool iterations input", async () => {
     const user = userEvent.setup();
     const configWithMaxIter: LlmConfig = {
@@ -1074,5 +1064,76 @@ describe("LlmEditor", () => {
       <LlmEditor data={agentConfig} onChange={onChange} />
     );
     expect(screen.getByDisplayValue("30000")).toBeInTheDocument();
+  });
+});
+
+// ─── Model parameter names (editors review) ──────────────────────────────────
+
+describe("LlmEditor model parameter names", () => {
+  const onChange = vi.fn();
+  beforeEach(() => vi.clearAllMocks());
+
+  const withParams = (parameters: Record<string, string>): LlmConfig => ({
+    tasks: [{ type: "openai", actions: [], parameters }],
+  });
+  const lastParams = () =>
+    (onChange.mock.lastCall![0] as LlmConfig).tasks[0]!.parameters!;
+
+  it("renames a parameter on blur, keeping its value and position", async () => {
+    // The name input was read-only: "Add Parameter" could only ever produce
+    // a key called param<n>, which no provider reads.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LlmEditor
+        data={withParams({ systemMessage: "hi", param1: "0.2", modelName: "gpt-4o" })}
+        onChange={onChange}
+      />,
+    );
+    await openSection(user, "Model Parameters");
+    const name = screen.getByDisplayValue("param1");
+    await user.clear(name);
+    await user.type(name, "temperature");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.tab();
+    expect(Object.entries(lastParams())).toEqual([
+      ["systemMessage", "hi"],
+      ["temperature", "0.2"],
+      ["modelName", "gpt-4o"],
+    ]);
+  });
+
+  it("refuses a name that is taken or hidden rather than overwriting that parameter", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LlmEditor data={withParams({ systemMessage: "hi", param1: "x", modelName: "m" })} onChange={onChange} />,
+    );
+    await openSection(user, "Model Parameters");
+    const name = screen.getByDisplayValue("param1");
+
+    await user.clear(name);
+    await user.type(name, "modelName");
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    await user.keyboard("{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+
+    // systemMessage is edited in its own section; a row renamed onto it
+    // would vanish from this one.
+    await user.clear(name);
+    await user.type(name, "systemMessage");
+    await user.tab();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(name).toHaveValue("param1");
+  });
+
+  it("adds a parameter under a free name instead of overwriting an existing one", async () => {
+    // `param${keys.length}` with {systemMessage, param1} produced "param2"
+    // only by luck; with {systemMessage, param2} it produced param2 again.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LlmEditor data={withParams({ systemMessage: "", param2: "keep" })} onChange={onChange} />,
+    );
+    await openSection(user, "Model Parameters");
+    await user.click(screen.getByText("Add Parameter"));
+    expect(lastParams()).toEqual({ systemMessage: "", param2: "keep", param1: "" });
   });
 });
