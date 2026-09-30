@@ -191,37 +191,87 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             return;
         }
 
-        for (Document index : mismatched) {
-            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with another specification (%s); replacing it with "
-                    + "the current one (unique=%s).", index.getString("name"), collectionName, index.toJson(), unique);
-            mongoCollection.dropIndex(index.getString("name"));
-        }
-
         Document equivalent = onKey.stream().filter(index -> !mismatched.contains(index)).findFirst().orElse(null);
-        if (equivalent != null) {
-            if (conflict != null) {
-                LOGGER.infof("Index %s on '%s' already exists as '%s' with the same specification; kept.", keyPattern.toJson(),
-                        collectionName, equivalent.getString("name"));
+        if (equivalent == null) {
+            // A hidden index that is otherwise right is made visible in place: the
+            // server refuses a second index identical to it but for the name.
+            Document hiddenButRight = mismatched.stream()
+                    .filter(index -> index.getBoolean("hidden", false) && hasSpecification(visible(index), unique, defaultCollation))
+                    .findFirst().orElse(null);
+            if (hiddenButRight != null && unhide(database, collectionName, hiddenButRight)) {
+                equivalent = hiddenButRight;
             }
-            return;
+        }
+        if (equivalent == null) {
+            // The replacement is built BEFORE anything is dropped, so the key is never
+            // without an index — not if the build fails, and not while another instance
+            // starting at the same moment is doing the same. The server accepts a
+            // second index on one key when the specifications differ; it takes the
+            // generated name if that is free, the alternate one otherwise.
+            // The generated name is free only if nothing holds it: a stale index of ours
+            // still exists at this point, and a foreign one is never dropped.
+            IndexOptions options = new IndexOptions().unique(unique);
+            if (nameHolder != null) {
+                options.name(generatedName + ALTERNATE_INDEX_NAME_SUFFIX);
+            }
+            if (nameHeldByForeignIndex) {
+                LOGGER.errorf("The index name '%s' on '%s' is held by an index on a different key (%s); it was left alone, and "
+                        + "%s is built as '%s' instead. Rename or remove that index by hand.", generatedName, collectionName,
+                        nameHolder.get("key"), keyPattern.toJson(), generatedName + ALTERNATE_INDEX_NAME_SUFFIX);
+            }
+            try {
+                mongoCollection.createIndex(keyPattern, options);
+            } catch (RuntimeException e) {
+                LOGGER.errorf("Could not build %s on '%s': %s. Any existing index on that key is kept as it is.",
+                        keyPattern.toJson(), collectionName, e.getMessage());
+                return;
+            }
+        } else if (conflict != null && mismatched.isEmpty()) {
+            LOGGER.infof("Index %s on '%s' already exists as '%s' with the same specification; kept.", keyPattern.toJson(),
+                    collectionName, equivalent.getString("name"));
         }
 
-        IndexOptions options = new IndexOptions().unique(unique);
-        if (nameHeldByForeignIndex) {
-            // Someone else's index holds the name. It is never dropped, and it does not
-            // stop the stale index on OUR key from being replaced above; ours is built
-            // under another name instead.
-            String alternateName = generatedName + ALTERNATE_INDEX_NAME_SUFFIX;
-            LOGGER.errorf("The index name '%s' on '%s' is held by an index on a different key (%s); it was left alone, and "
-                    + "%s is built as '%s' instead. Rename or remove that index by hand.", generatedName, collectionName,
-                    nameHolder.get("key"), keyPattern.toJson(), alternateName);
-            options.name(alternateName);
+        for (Document index : mismatched) {
+            if (index == equivalent) {
+                continue;
+            }
+            LOGGER.warnf("Index '%s' on '%s' was built by an earlier EDDI with another specification (%s); replaced by one "
+                    + "with the current specification (unique=%s).", index.getString("name"), collectionName, index.toJson(), unique);
+            try {
+                mongoCollection.dropIndex(index.getString("name"));
+            } catch (MongoCommandException e) {
+                if (e.getErrorCode() != INDEX_NOT_FOUND_ERROR_CODE) {
+                    throw e;
+                }
+                // Another instance starting at the same time dropped it first.
+            }
         }
+    }
+
+    /** MongoDB {@code IndexNotFound}. */
+    static final int INDEX_NOT_FOUND_ERROR_CODE = 27;
+
+    /**
+     * {@code index} without its {@code hidden} flag, for comparing the rest of it.
+     */
+    private static Document visible(Document index) {
+        Document copy = new Document(index);
+        copy.remove("hidden");
+        return copy;
+    }
+
+    /** Makes a hidden index visible; whether that worked. */
+    private static boolean unhide(MongoDatabase database, String collectionName, Document index) {
         try {
-            mongoCollection.createIndex(keyPattern, options);
+            database.runCommand(new Document("collMod", collectionName).append("index",
+                    new Document("name", index.getString("name")).append("hidden", false)));
+            LOGGER.warnf("Index '%s' on '%s' was hidden, so no query used it; made it visible.", index.getString("name"),
+                    collectionName);
+            return true;
         } catch (RuntimeException e) {
-            LOGGER.errorf("Could not build %s on '%s': %s. Queries on this field scan until the index is created by hand.",
-                    keyPattern.toJson(), collectionName, e.getMessage());
+            LOGGER.warnf("Could not make the hidden index '%s' on '%s' visible (%s); building a replacement.",
+                    index.getString("name"), collectionName, e.getMessage());
+            return false;
         }
     }
 
