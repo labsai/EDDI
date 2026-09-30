@@ -6,6 +6,7 @@ import { server } from "@/test/mocks/server";
 import { OperatorActivation } from "../operator-activation";
 import { extractVaultKeyName } from "@/lib/operator/vault-ref";
 import { defaultOperatorConfig } from "@/lib/api/operator";
+import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 
 const authState = { method: "none" as "none" | "keycloak" };
 vi.mock("@/hooks/use-auth", () => ({
@@ -522,7 +523,11 @@ describe("OperatorActivation — stored provider the setup flow no longer offers
 
     const select = screen.getByTestId("operator-provider") as HTMLSelectElement;
     expect(select.value).toBe("anthropic");
-    expect(screen.getByTestId("operator-model")).toHaveValue("claude-sonnet-5");
+    // Read from the provider list rather than spelled out: a default-model bump
+    // (claude-sonnet-5 → claude-sonnet-5-5) left this literal stale on main.
+    const anthropicDefault = LLM_PROVIDERS.find((p) => p.id === "anthropic")?.defaultModel;
+    expect(anthropicDefault).toBeTruthy();
+    expect(screen.getByTestId("operator-model")).toHaveValue(anthropicDefault);
     expect(screen.getByTestId("operator-api-key-input")).toHaveValue("");
   });
 });
