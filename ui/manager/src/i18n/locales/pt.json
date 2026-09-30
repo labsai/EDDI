@@ -266,7 +266,8 @@
     "openExternalChatIn": "Abrir o chat de {{environment}} numa nova aba",
     "deployToProduction": "Implantar em produção",
     "undeployFromProduction": "Remover da produção",
-    "deployFailedIn": "A implantação falhou em {{environment}}"
+    "deployFailedIn": "A implantação falhou em {{environment}}",
+    "undeployCompatibleHint": "Conversas que uma versão compatível implantada pode continuar não são encerradas: elas passam para ela no próximo turno."
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -686,7 +687,9 @@
     "exportMd": "Exportar como Markdown",
     "toolSummary": "Resumo de utilização de ferramentas",
     "totalCost": "Custo total",
-    "cacheHitRate": "Taxa de acerto de cache"
+    "cacheHitRate": "Taxa de acerto de cache",
+    "endReasonRetired": "Encerrada: a versão do agente foi desativada",
+    "stepAgentVersion": "Respondido pela versão {{version}} do agente"
   },
   "chat": {
     "hide": "Ocultar",
@@ -1349,6 +1352,10 @@
     "streamingTimeoutSecondsHint": "Substitui o padrão do mecanismo (120s). Aplica-se apenas durante o streaming; vazio = usar o padrão.",
     "taskPricing": "Preços de chamadas simples",
     "taskPricingDesc": "Define o preço das chamadas de modelo comuns (sem cascata) desta tarefa para o rastreio de custos e os limites de custo do grupo. Sem preço (em branco) contribui com $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — adicione um parâmetro baseUrl ou region para substituir",
+    "compatibleEndpointOverridden": "Ponto de extremidade: {{url}}",
+    "modelType": "Tipo de modelo",
     "paramName": "Nome do parâmetro",
     "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas."
   },
@@ -4438,7 +4445,10 @@
       "platformBaseUrlAuto": "resolvida pelo servidor",
       "platformBaseUrlDiffers": "Esta instalação indica atualmente o seu próprio endereço como {{serverUrl}}. O valor acima é diferente — mantenha-o apenas se o definiu de propósito.",
       "platformBaseUrlQueryFailed": "Não foi possível perguntar ao servidor o seu próprio endereço. A ativação falhará a menos que o introduza aqui — ou recarregue para tentar de novo.",
-      "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui."
+      "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui.",
+      "llmEndpoint": "Endpoint do modelo",
+      "promptBodyDiffers": "Estas instruções diferem da predefinição atual — foram editadas ou escritas por uma versão anterior do Manager.",
+      "promptBodyReset": "Repor a predefinição"
     },
     "authMode": {
       "none": {
@@ -4606,6 +4616,30 @@
     },
     "superseded": {
       "title": "O agente operador anterior continua implantado."
+    },
+    "upgrade": {
+      "hint": "Há uma atualização disponível para o Platform Operator.",
+      "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
+      "addedTools_other": "{{count}} ferramentas novas",
+      "action": "Atualizar",
+      "addedTools_one": "{{count}} ferramenta nova",
+      "blockerProvider": "O fornecedor do modelo já não pode ser configurado desta forma — escolha outro para atualizar.",
+      "useNewDefault": "Substituí-las pela nova predefinição",
+      "confirmBody": "É criado um novo operador com as instruções e ferramentas atuais e verificado como numa nova ativação; só então o antigo é removido. O modelo, a chave, o ambiente e as definições de acesso são mantidos. O chat aberto com o operador termina, e as conversas com o operador antigo deixam de aparecer no histórico.",
+      "description": "Ele foi configurado por uma versão anterior do Manager (revisão {{from}}; esta versão traz a {{to}}), por isso as suas instruções e ferramentas estão desatualizadas.",
+      "removedTools_many": "{{count}} ferramentas removidas",
+      "blockerCredential": "A chave do modelo foi introduzida como texto simples, que nunca é guardado — introduza-a novamente para atualizar.",
+      "reviewAction": "Rever e atualizar",
+      "instructionsUnknown": "As instruções do operador diferem da predefinição atual — ou uma predefinição antiga ou as suas próprias edições.",
+      "instructionsCustomized": "Editou as instruções do operador.",
+      "confirmTitle": "Atualizar o Platform Operator?",
+      "removedTools_other": "{{count}} ferramentas removidas",
+      "removedTools_one": "{{count}} ferramenta removida",
+      "addedTools_many": "{{count}} ferramentas novas",
+      "confirm": "Atualizar agora",
+      "hintAction": "Atualizar",
+      "keepCurrent": "Manter o texto atual (não aprenderá o que a nova predefinição acrescenta)",
+      "title": "Há uma atualização disponível para o Platform Operator"
     }
   },
   "groupWorkspace": {
@@ -5112,5 +5146,42 @@
     "workflowMissingResource": "O fluxo de trabalho {{workflowId}} (versão {{version}}) não referencia {{resource}}, pelo que guardá-lo aqui não alteraria o agente. Nada foi guardado.",
     "agentWorkflowMismatch": "O agente {{agentId}} (versão {{version}}) referencia o fluxo de trabalho {{workflowId}} na versão {{found}}, não na versão {{expected}}. O agente mudou desde que esta página foi aberta. Recarregue-a. Nada foi guardado.",
     "agentMissingWorkflow": "O agente {{agentId}} (versão {{version}}) não referencia o fluxo de trabalho {{workflowId}}. Nada foi guardado."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratórios de modelos",
+      "compatible": "Provedores compatíveis com OpenAI",
+      "cloud": "Plataformas de nuvem",
+      "local": "Local / auto-hospedado"
+    },
+    "region": {
+      "label": "Região",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abaixo)"
+    },
+    "compatibleNote": "Conecta pela API compatível com OpenAI do provedor ({{url}}). Altere apenas para um proxy ou outra região.",
+    "keyHint": "Obtenha uma chave de API em {{url}}",
+    "select": "Selecione um provedor"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatível com a versão anterior — conversas em andamento podem mudar para ela",
+    "compatibleHint": "Apenas para alterações que não podem quebrar uma conversa em andamento, p. ex. a redação do prompt ou outro modelo. Deixe desmarcado se propriedades, ações ou etapas do workflow foram renomeadas ou removidas.",
+    "compatibleLegacyNote": "A versão atual é anterior ao acompanhamento de versões, então as conversas que já a usam permanecem nela. O próximo salvamento compatível liga a cadeia.",
+    "compatibleUnknownNote": "Conversas em uma versão anterior ao acompanhamento de versões permanecem nela.",
+    "generationBadge": "ger. compat. {{generation}}",
+    "generationTooltip": "Geração de compatibilidade {{generation}}: versões deste agente com a mesma geração são compatíveis, então uma conversa em andamento passa para a mais recente implantada no próximo turno. Um salvamento incompatível inicia uma nova geração.",
+    "impactTitle": "Implantar v{{version}} em {{environment}} — conversas em andamento",
+    "impactFollow_one": "{{count}} conversa ativa na v{{from}} continuará na v{{to}}",
+    "impactFollow_many": "{{count}} conversas ativas na v{{from}} continuarão na v{{to}}",
+    "impactFollow_other": "{{count}} conversas ativas na v{{from}} continuarão na v{{to}}",
+    "impactStay_one": "{{count}} conversa ativa na v{{from}} permanecerá na v{{from}}",
+    "impactStay_many": "{{count}} conversas ativas na v{{from}} permanecerão na v{{from}}",
+    "impactStay_other": "{{count}} conversas ativas na v{{from}} permanecerão na v{{from}}",
+    "impactReasonNewer": "versão mais recente",
+    "impactReasonLegacy": "anterior ao acompanhamento de versões",
+    "impactReasonBreaking": "alteração incompatível",
+    "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
   }
 }

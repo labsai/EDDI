@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   readOperatorConfig,
@@ -26,6 +27,13 @@ import {
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent, getAgentCurrentVersion } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
+import {
+  OPERATOR_REVISION,
+  assessOperatorUpgrade,
+  logOutdatedOnce,
+  type OperatorUpgradeAssessment,
+} from "@/lib/operator/operator-revision";
 import {
   enforceGateDryRun,
   runBackgroundWriteProbe,
@@ -198,7 +206,17 @@ export function useActivateOperator() {
       // persisted on the config, so the operator screen can show it and a later
       // reconfigure reuses the admin's choice instead of re-deriving it.
       const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
-      const effectiveConfig: OperatorConfig = { ...config, apiBaseUrl };
+      const effectiveConfig: OperatorConfig = {
+        ...config,
+        apiBaseUrl,
+        // Stamped on EVERY activation path — the form, Reconfigure, and the
+        // one-click upgrade — so what is recorded is always what was actually
+        // provisioned. These four fields are what a later upgrade reads.
+        provisionedRevision: OPERATOR_REVISION,
+        provisionedEndpoints: [...endpointsForScope(config.scope)],
+        promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
+        llmBaseUrl: baseUrl?.trim() || null,
+      };
 
       // The stored config this activation replaces, captured BEFORE anything is
       // written, so a replacement that fails verification can hand the deployment
@@ -620,6 +638,26 @@ export function useResetOperator() {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },
   });
+}
+
+/* ─── Upgrade ─── */
+
+/**
+ * Whether the live operator predates this Manager, and what an upgrade changes.
+ *
+ * Derived from the config the caller already holds rather than fetched: every
+ * surface that shows the notice (the operator page, the drawer, the dashboard)
+ * already reads the config, so this costs no request. Logs once per page load
+ * to the browser console as well — see `logOutdatedOnce`.
+ */
+export function useOperatorUpgradeAssessment(
+  config: OperatorConfig | null | undefined,
+): OperatorUpgradeAssessment | null {
+  const assessment = useMemo(() => assessOperatorUpgrade(config), [config]);
+  useEffect(() => {
+    logOutdatedOnce(assessment);
+  }, [assessment]);
+  return assessment;
 }
 
 /* ─── Helpers ─── */

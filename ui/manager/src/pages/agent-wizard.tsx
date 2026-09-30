@@ -32,7 +32,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import {
-  LLM_PROVIDERS,
   getProviderConfig,
   type SetupAgentRequest,
   type CreateApiAgentRequest,
@@ -45,6 +44,12 @@ import {
   isProvisionableBySetup,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
+import {
+  getApiKeyUrl,
+  getDefaultBaseUrl,
+  getKeyPlaceholder,
+} from "@/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -130,6 +135,16 @@ const STEPS_API = [
    Main Wizard Component
    ================================================================ */
 
+/**
+ * True when either side of a provider switch is a named OpenAI-compatible
+ * provider. Their base URL is a per-provider endpoint (or a region of it), so
+ * carrying it to another provider would send that provider's traffic, and its
+ * key, to the wrong host.
+ */
+function isCompatibleSwitch(from: string, to: string): boolean {
+  return getDefaultBaseUrl(from) !== undefined || getDefaultBaseUrl(to) !== undefined;
+}
+
 export function AgentWizardPage() {
   const { t } = useTranslation();
 
@@ -151,22 +166,22 @@ export function AgentWizardPage() {
   );
 
   function handleProviderChange(providerId: string) {
-    const config = getProviderConfig(providerId);
-    const previous = getProviderConfig(state.provider);
     update({
       provider: providerId,
       model: "",
-      // Carried over only between two providers that both take an API key. A
-      // Jlama Hugging Face token must not become an OpenAI key, nor the other
-      // way round (it would be sent to Hugging Face as authToken).
-      apiKey: config?.needsKey && previous?.needsKey ? state.apiKey : "",
+      // A key is issued by one vendor. Carried across a provider switch it would be
+      // sent to another vendor's endpoint — an OpenAI key to DeepSeek, or a Jlama
+      // Hugging Face token to OpenAI and back — so any switch clears it (the
+      // operator form does the same).
+      apiKey: "",
       // A provider with no endpoint hides the field, so a URL left over from
       // the previous provider would be submitted with no way to see or clear
-      // it. What the user cannot see, the wizard does not send.
-      baseUrl: supportsBaseUrl(providerId) ? state.baseUrl : "",
-      // A provider with no endpoint hides the field, so a URL left over from
-      // the previous provider would be submitted with no way to see or clear
-      // it. What the user cannot see, the wizard does not send.
+      // it. What the user cannot see, the wizard does not send. The same goes
+      // for a named compatible provider's endpoint (see isCompatibleSwitch).
+      baseUrl:
+        supportsBaseUrl(providerId) && !isCompatibleSwitch(state.provider, providerId)
+          ? state.baseUrl
+          : "",
     });
   }
 
@@ -768,6 +783,8 @@ function LlmStep({
   const baseUrlRequired = isBaseUrlRequired(provider);
   const baseUrlSupported = supportsBaseUrl(provider);
   const inProcess = !baseUrlSupported;
+  const defaultBaseUrl = getDefaultBaseUrl(provider);
+  const apiKeyUrl = getApiKeyUrl(provider);
 
   return (
     <div>
@@ -781,25 +798,32 @@ function LlmStep({
       <div className="mt-6 space-y-5">
         {/* Provider */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
+          <label
+            htmlFor="wizard-provider"
+            className="mb-1.5 block text-sm font-medium text-foreground"
+          >
             {t("setupWizard.provider", "Provider")}
           </label>
           <div className="relative">
-            <select
+            <ProviderSelect
               value={provider}
-              onChange={(e) => onProviderChange(e.target.value)}
+              onChange={onProviderChange}
               className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-              data-testid="wizard-provider"
-            >
-              {LLM_PROVIDERS.filter((p) => isProvisionableBySetup(p.id)).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              id="wizard-provider"
+              testId="wizard-provider"
+              include={isProvisionableBySetup}
+            />
             <ChevronDown className="pointer-events-none absolute inset-e-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
         </div>
+
+        {/* Region — only for compatible providers with more than one endpoint.
+            A non-default region fills the base URL below; the default clears it. */}
+        <ProviderRegionSelect
+          provider={provider}
+          baseUrl={baseUrl}
+          onBaseUrlChange={onBaseUrlChange}
+        />
 
         {/* Model — combobox with autocomplete suggestions */}
         <div>
@@ -850,9 +874,21 @@ function LlmStep({
             <SecretKeyPicker
               value={apiKey}
               onChange={onApiKeyChange}
-              placeholder="sk-..."
+              placeholder={getKeyPlaceholder(provider)}
               testId="wizard-apikey"
             />
+            {apiKeyUrl && (
+              <p className="mt-1 text-xs text-muted-foreground" data-testid="wizard-key-hint">
+                <a
+                  href={apiKeyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-foreground"
+                >
+                  {t("llmProviders.keyHint", "Get an API key at {{url}}", { url: apiKeyUrl })}
+                </a>
+              </p>
+            )}
           </div>
         )}
 
@@ -912,11 +948,20 @@ function LlmStep({
               placeholder={
                 provider === "ollama"
                   ? "http://localhost:11434"
-                  : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
+                  : (defaultBaseUrl ?? t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL"))
               }
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
               data-testid="wizard-baseurl"
             />
+            {defaultBaseUrl && (
+              <p className="mt-1 text-xs text-muted-foreground" data-testid="wizard-compatible-note">
+                {t(
+                  "llmProviders.compatibleNote",
+                  "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
+                  { url: defaultBaseUrl },
+                )}
+              </p>
+            )}
             <p className="mt-1 text-xs text-muted-foreground">
               {baseUrlRequired
                 ? t(

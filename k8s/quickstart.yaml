@@ -344,7 +344,7 @@ spec:
               mountPath: /opt/eddi/data
           startupProbe:
             httpGet:
-              path: /q/health/ready
+              path: /q/health/live
               port: http
             failureThreshold: 30
             periodSeconds: 2

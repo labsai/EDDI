@@ -274,6 +274,20 @@ what it finds. Off by default. Worth knowing before touching it:
   reported through `ActivationOutcome.supersededWarning`, never swallowed: two
   `READY` operators with nothing on screen saying which one the UI addresses once
   sent an engineer to repair the abandoned one.
+- **What activation provisions is a snapshot — upgrades are how it moves.**
+  The prompt, allow-list and gate are baked into the agent at activation and
+  never change by themselves. `src/lib/operator/operator-revision.json` holds the
+  provisioning revision; activation stamps it (plus the granted endpoints,
+  whether the instructions were the untouched default, and the model-server
+  address) into the config, and `assessOperatorUpgrade` compares. An older
+  operator gets an Upgrade banner on the operator page, a hint in the drawer and
+  on the dashboard, a browser-console warning, and a backend startup WARN
+  (`OperatorRevisionCheck`, which reads the same JSON from the classpath). The
+  upgrade is a Reconfigure with every setting carried over — a replacement, not
+  an in-place edit — and keeps edited instructions unless the admin picks the
+  new default. **Changing the prompt, the allow-list or the gate means bumping
+  the revision**: `operator-revision.test.ts` pins a fingerprint of all three
+  and fails until you do, printing the new fingerprint.
 - **`authMode: "caller-identity"`** makes tool calls run as the signed-in user
   via the backend's `${caller:token}` resolver (EDDI 6.2.0+). `"none"` is
   blocked at activation when OIDC is on, because every tool call would 401.

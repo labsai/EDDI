@@ -265,7 +265,8 @@
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
-    "deployFailedIn": "在 {{environment}} 中部署失败"
+    "deployFailedIn": "在 {{environment}} 中部署失败",
+    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -678,7 +679,9 @@
     "exportMd": "导出为 Markdown",
     "toolSummary": "工具使用概览",
     "totalCost": "总成本",
-    "cacheHitRate": "缓存命中率"
+    "cacheHitRate": "缓存命中率",
+    "endReasonRetired": "已结束：该智能体版本已被停用",
+    "stepAgentVersion": "由智能体版本 {{version}} 回答"
   },
   "chat": {
     "hide": "隐藏",
@@ -1335,6 +1338,10 @@
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
     "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "unknownType": "{{type}}（自定义）",
+    "compatibleEndpoint": "端点：{{url}} — 添加 baseUrl 或 region 参数即可覆盖",
+    "compatibleEndpointOverridden": "端点：{{url}}",
+    "modelType": "模型类型",
     "paramName": "参数名称",
     "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
   },
@@ -4394,7 +4401,10 @@
       "platformBaseUrlAuto": "由服务器解析",
       "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
       "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
-      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。"
+      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。",
+      "llmEndpoint": "模型端点",
+      "promptBodyDiffers": "这些说明与当前默认值不同——它们已被编辑，或由较早版本的 Manager 编写。",
+      "promptBodyReset": "重置为默认值"
     },
     "authMode": {
       "none": {
@@ -4560,6 +4570,28 @@
     },
     "superseded": {
       "title": "之前的运维助手智能体仍处于部署状态。"
+    },
+    "upgrade": {
+      "hint": "Platform Operator 有可用更新。",
+      "blockerBaseUrl": "其模型服务器地址未被记录——请重新输入以进行升级。",
+      "addedTools_other": "{{count}} 个新工具",
+      "action": "升级",
+      "addedTools_one": "{{count}} 个新工具",
+      "blockerProvider": "其模型提供商已无法通过此方式设置——请选择其他提供商以进行升级。",
+      "useNewDefault": "替换为新的默认值",
+      "confirmBody": "将使用当前的说明和工具构建一个新的 Operator，并像新激活一样进行检查；之后才会移除旧的 Operator。模型、密钥、环境和访问设置保持不变。当前打开的 Operator 聊天将结束，与旧 Operator 的对话将不再显示在历史记录中。",
+      "description": "它由较早版本的 Manager 设置（修订版 {{from}}；此版本提供 {{to}}），因此其说明和工具已过时。",
+      "blockerCredential": "其模型密钥以明文输入，明文从不保存——请重新输入以进行升级。",
+      "reviewAction": "检查并升级",
+      "instructionsUnknown": "Operator 的说明与当前默认值不同——可能是较旧的默认值，也可能是你自己的修改。",
+      "instructionsCustomized": "你编辑过 Operator 的说明。",
+      "confirmTitle": "升级 Platform Operator？",
+      "removedTools_other": "已移除 {{count}} 个工具",
+      "removedTools_one": "已移除 {{count}} 个工具",
+      "confirm": "立即升级",
+      "hintAction": "升级",
+      "keepCurrent": "保留当前文本（它不会学到新默认值新增的内容）",
+      "title": "Platform Operator 有可用更新"
     }
   },
   "groupWorkspace": {
@@ -5060,5 +5092,40 @@
     "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
     "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
     "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "模型实验室",
+      "compatible": "兼容 OpenAI 的提供商",
+      "cloud": "云平台",
+      "local": "本地 / 自托管"
+    },
+    "region": {
+      "label": "区域",
+      "intl": "国际",
+      "cn": "中国大陆",
+      "us": "美国",
+      "custom": "自定义 URL(见下方)"
+    },
+    "compatibleNote": "通过提供商兼容 OpenAI 的 API（{{url}}）连接。仅在使用代理或其他区域时才需要覆盖。",
+    "keyHint": "在 {{url}} 获取 API 密钥",
+    "select": "选择提供商"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "与上一版本兼容 — 进行中的会话可以切换到此版本",
+    "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
+    "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
+    "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
+    "generationBadge": "兼容代 {{generation}}",
+    "generationTooltip": "兼容代 {{generation}}：此智能体中兼容代相同的版本彼此兼容，因此进行中的会话会在下一轮切换到最新部署的版本。不兼容的保存会开始新的兼容代。",
+    "impactTitle": "将 v{{version}} 部署到{{environment}} — 进行中的会话",
+    "impactFollow_other": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_other": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}",
+    "impactReasonNewer": "更新的版本",
+    "impactReasonLegacy": "早于版本跟随功能",
+    "impactReasonBreaking": "不兼容的更改",
+    "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
+    "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
   }
 }

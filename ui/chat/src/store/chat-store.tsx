@@ -20,6 +20,12 @@ export interface ChatState {
   messages: ChatMessage[];
   conversationId: string | null;
   conversationState: ConversationState | null;
+  /**
+   * Why an ENDED conversation ended, when the backend said (snapshot
+   * `endReason`). Null while the conversation is not ended, or when no reason
+   * is known.
+   */
+  endReason: string | null;
   quickReplies: QuickReply[];
   isProcessing: boolean;
   isThinking: boolean;
@@ -78,6 +84,7 @@ export const initialState: ChatState = {
   messages: [],
   conversationId: null,
   conversationState: null,
+  endReason: null,
   quickReplies: [],
   isProcessing: false,
   isThinking: false,
@@ -97,7 +104,16 @@ export const initialState: ChatState = {
 
 export type ChatAction =
   | { type: "SET_CONVERSATION_ID"; id: string | null }
-  | { type: "SET_CONVERSATION_STATE"; state: ConversationState }
+  | {
+      type: "SET_CONVERSATION_STATE";
+      state: ConversationState;
+      /**
+       * The snapshot's `endReason`, from a read that carries one (`null` when
+       * it had none). Omit it from sources that never do — the trimmed `done`
+       * payload — so a reason already learned is kept.
+       */
+      endReason?: string | null;
+    }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "ADD_SNAPSHOT_MESSAGE"; message: ChatMessage }
   | { type: "APPEND_TO_LAST_AGENT"; token: string }
@@ -158,7 +174,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, conversationId: action.id };
 
     case "SET_CONVERSATION_STATE":
-      return { ...state, conversationState: action.state };
+      return {
+        ...state,
+        conversationState: action.state,
+        // A reason only ever describes an ENDED conversation.
+        endReason:
+          action.state !== "ENDED"
+            ? null
+            : action.endReason !== undefined
+              ? action.endReason
+              : state.endReason,
+      };
 
     case "ADD_MESSAGE":
       return { ...state, messages: [...state.messages, action.message] };
@@ -257,6 +283,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         conversationId: null,
         quickReplies: [],
         conversationState: null,
+        endReason: null,
         // A cleared conversation is not processing anything. This used to be
         // lowered only as a side effect of the abandoned stream's
         // FINISH_STREAMING safety net, which meant New Conversation mid-stream

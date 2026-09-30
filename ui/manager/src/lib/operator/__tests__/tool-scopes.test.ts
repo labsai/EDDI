@@ -12,7 +12,10 @@ import {
   grantsAgentModification,
   grantsKnowledgeBaseReads,
   grantsIngestionStatusReads,
+  grantsIngestionRunReads,
+  grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
+  grantsKnowledgeBaseBinding,
 } from "../tool-scopes";
 
 describe("tool-scopes", () => {
@@ -77,6 +80,41 @@ describe("tool-scopes", () => {
       expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/descriptors");
       expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}");
       expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}/ingestion/{ingestionId}/status");
+    });
+
+    it("can read a source's run history and files — what actually answers 'did it land?'", () => {
+      // The status read above needs an id only a direct ingest call returns;
+      // configured sources are answered by their runs and (uploads) their files.
+      expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}/sources/{sourceId}/runs");
+      expect(READ_ENDPOINTS).toContain("GET /ragstore/rags/{id}/sources/{sourceId}/files");
+      expect(grantsIngestionRunReads(READ_ENDPOINTS)).toBe(true);
+      expect(grantsIngestionFileReads(READ_ENDPOINTS)).toBe(true);
+      expect(grantsIngestionRunReads(["GET /ragstore/rags/{id}"])).toBe(false);
+      expect(grantsIngestionFileReads(["GET /ragstore/rags/{id}"])).toBe(false);
+    });
+
+    it("never grants a source's run, preview, upload, file delete or purge", () => {
+      // Each of those rewrites what every agent using the knowledge base
+      // retrieves (or spends embedding money) — ingestion stays reads only.
+      const all = endpointsForScope("read_write");
+      for (const verb of [
+        "POST /ragstore/rags/{id}/sources/{sourceId}/run",
+        "POST /ragstore/rags/{id}/sources/{sourceId}/preview",
+        "POST /ragstore/rags/{id}/sources/{sourceId}/files",
+        "DELETE /ragstore/rags/{id}/sources/{sourceId}/files/{fileId}",
+        "DELETE /ragstore/rags/{id}/sources/{sourceId}/documents",
+      ]) {
+        expect(all, verb).not.toContain(verb);
+      }
+    });
+
+    it("can connect an existing knowledge base only with the reads and BOTH authoring writes", () => {
+      expect(grantsKnowledgeBaseBinding(endpointsForScope("read_write"))).toBe(true);
+      expect(grantsKnowledgeBaseBinding(endpointsForScope("read_only"))).toBe(false);
+      const withoutLlmPut = endpointsForScope("read_write").filter((e) => e !== "PUT /llmstore/llms/{id}");
+      expect(grantsKnowledgeBaseBinding(withoutLlmPut)).toBe(false);
+      const withoutReads = endpointsForScope("read_write").filter((e) => e !== "GET /ragstore/rags/descriptors");
+      expect(grantsKnowledgeBaseBinding(withoutReads)).toBe(false);
     });
 
     it("cannot change a knowledge base or ingest into one", () => {

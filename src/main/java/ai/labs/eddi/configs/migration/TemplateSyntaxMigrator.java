@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.migration;
 
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayDeque;
@@ -47,10 +48,13 @@ public class TemplateSyntaxMigrator {
 
     /**
      * Migrate a string from Thymeleaf to Qute syntax. Returns input unchanged if no
-     * Thymeleaf patterns are found.
+     * Thymeleaf patterns are found, and also when it has a shape this converter
+     * cannot convert safely — see {@link #unconvertibleReason(String)}. Leaving a
+     * template in Thymeleaf syntax is visible and fixable; rewriting it wrongly is
+     * neither.
      */
     public String migrate(String input) {
-        if (input == null || input.isEmpty()) {
+        if (input == null || input.isEmpty() || unconvertibleReason(input) != null) {
             return input;
         }
 
@@ -170,8 +174,13 @@ public class TemplateSyntaxMigrator {
         for (String part : splitOnConcatOperator(expr)) {
             String trimmed = part.trim();
             if (isStringLiteral(trimmed)) {
-                // String literal → inline without braces
-                replacement.append(literalText(trimmed));
+                // String literal → inline without braces. A literal holding '{' is output
+                // text in Thymeleaf, but inlined as-is it would open a Qute expression:
+                // '{' + 'name' + '}' became {name}, which Qute evaluates. Such text goes
+                // into an unparsed block, which Qute outputs verbatim. A lone '}' is only
+                // text to Qute and stays as it is.
+                String text = literalText(trimmed);
+                replacement.append(text.indexOf('{') >= 0 ? TemplateEscaping.unparsedBlock(text) : text);
             } else if (!trimmed.isEmpty()) {
                 // Variable → wrap in Qute expression. An empty part is not a variable:
                 // it only arises from a leading, trailing or doubled +, i.e. from a
@@ -311,6 +320,153 @@ public class TemplateSyntaxMigrator {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Expression openers that must not appear inside a string literal of an
+     * expression: a literal holding one generates template syntax. A lone closer
+     * ({@code ]]}, {@code )]}) is only text — {@code [[${a + ']]' + b}]]} converts
+     * safely to <code>{a}]]{b}</code>, because the delimiter scan is quote-aware.
+     */
+    private static final List<String> NESTED_TEMPLATE_MARKERS = List.of("[[", "[(", "${");
+
+    /** Every inline-expression opener and the closer that ends it. */
+    private static final String[][] INLINE_DELIMITERS = {{"[[", "]]"}, {"[(", ")]"}};
+
+    /**
+     * Why {@code input} cannot be converted safely, or {@code null} when it can.
+     *
+     * <p>
+     * The shape this exists for is an inline expression with a string literal that
+     * is itself template syntax — {@code [['[[${' + 'x.x' + '}]]']]}, an expression
+     * producing text that contains Thymeleaf. The converter finds the inner
+     * {@code [[${} first, takes the literal quotes around it for operands, and
+     * produced {@code [['+'x.x'+']]}: no Thymeleaf delimiter left, so nothing
+     * downstream noticed, the document was counted as migrated, and the call
+     * rendered literal text. Generating template syntax from a template has no
+     * counterpart this converter can emit, so the shape is refused instead: any
+     * string literal inside {@code [[…]]} or {@code [(…)]} that contains {@code
+     * [[}, {@code [(}, <code>${</code>, {@code ]]} or {@code )]}.
+     * </p>
+     *
+     * <p>
+     * Literals are found with the same quote and escape rules the conversion uses,
+     * so a JSON body such as {@code [["a", "b"]]} — a string literal with no
+     * delimiter in it — is not refused.
+     * </p>
+     */
+    public String unconvertibleReason(String input) {
+        if (input == null) {
+            return null;
+        }
+        for (String[] delimiters : INLINE_DELIMITERS) {
+            int from = 0;
+            while (true) {
+                int open = input.indexOf(delimiters[0], from);
+                if (open < 0) {
+                    break;
+                }
+                int bodyStart = open + delimiters[0].length();
+                int close = closingDelimiter(input, bodyStart, delimiters[1]);
+                if (close < 0) {
+                    break;
+                }
+                for (String literal : stringLiterals(input.substring(bodyStart, close))) {
+                    for (String marker : NESTED_TEMPLATE_MARKERS) {
+                        if (literal.contains(marker)) {
+                            return "a string literal inside " + delimiters[0] + "…" + delimiters[1] + " contains the template delimiter '"
+                                    + marker + "' — a template that generates template syntax, which cannot be converted to Qute safely";
+                        }
+                    }
+                }
+                from = bodyStart;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The bodies of the quoted string literals in {@code expr}, quotes excluded.
+     */
+    private static List<String> stringLiterals(String expr) {
+        var literals = new ArrayList<String>();
+        var current = new StringBuilder();
+        char openQuote = 0;
+        boolean escaped = false;
+        for (int i = 0; i < expr.length(); i++) {
+            char c = expr.charAt(i);
+            if (openQuote == 0) {
+                if (c == '\'' || c == '"') {
+                    openQuote = c;
+                    current.setLength(0);
+                }
+            } else if (escaped) {
+                current.append(c);
+                escaped = false;
+            } else if (c == ESCAPE) {
+                escaped = true;
+            } else if (c == openQuote) {
+                literals.add(current.toString());
+                openQuote = 0;
+            } else {
+                current.append(c);
+            }
+        }
+        if (openQuote != 0) {
+            // An unterminated literal runs to the end of the expression.
+            literals.add(current.toString());
+        }
+        return literals;
+    }
+
+    /**
+     * Whether a converted string still holds a Thymeleaf expression delimiter — the
+     * check for a conversion that did not happen. Narrower than
+     * {@link #containsThymeleafSyntax(String)} on purpose: a prompt or description
+     * that merely mentions {@code th:if} or {@code #strings.} is text, not a
+     * template left behind.
+     */
+    public boolean containsThymeleafDelimiters(String input) {
+        return input != null && THYMELEAF_DELIMITER.matcher(input).find();
+    }
+
+    /**
+     * The expression openers, and a directive opener with any whitespace between
+     * {@code [#} and {@code th:} — the shape the conversion patterns accept.
+     */
+    private static final Pattern THYMELEAF_DELIMITER = Pattern.compile("\\[\\[\\$\\{|\\[\\(\\$\\{|\\[#\\s*th:");
+
+    /**
+     * {@link #unconvertibleReason(String)} for every string in a decoded JSON
+     * document, or {@code null} when all of them are convertible.
+     *
+     * <p>
+     * For the import, which converts a resource as one JSON string. Judged on the
+     * raw JSON, the escaped quotes of a double-quoted literal ({@code \"}) hide
+     * where it ends, so a template the scan would refuse as a value passes as JSON
+     * text — and the conversion then rewrites the expression inside it.
+     * </p>
+     */
+    public String unconvertibleReasonIn(Object decoded) {
+        if (decoded instanceof String text) {
+            return containsThymeleafSyntax(text) ? unconvertibleReason(text) : null;
+        }
+        if (decoded instanceof Map<?, ?> map) {
+            for (Object value : map.values()) {
+                String reason = unconvertibleReasonIn(value);
+                if (reason != null) {
+                    return reason;
+                }
+            }
+        } else if (decoded instanceof List<?> list) {
+            for (Object item : list) {
+                String reason = unconvertibleReasonIn(item);
+                if (reason != null) {
+                    return reason;
+                }
+            }
+        }
+        return null;
     }
 
     /**

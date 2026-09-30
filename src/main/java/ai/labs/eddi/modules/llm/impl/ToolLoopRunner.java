@@ -149,6 +149,21 @@ class ToolLoopRunner {
                                                        ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                                                        JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
+        return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
+                transcriptMaxBytes, jsonPolicy, null);
+    }
+
+    /**
+     * As above, additionally recording every completed tool call and its result
+     * into {@code exchangeRecorder} as the loop runs (see
+     * {@link ToolExchangeRecorder}); {@code null} records nothing.
+     */
+    AgentOrchestrator.ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages,
+                                                       AgentOrchestrator.ToolSetup setup,
+                                                       LlmConfiguration.Task task, IConversationMemory memory,
+                                                       ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                                                       JsonResponseFormatPolicy jsonPolicy, ToolExchangeRecorder exchangeRecorder)
+            throws LifecycleException {
 
         // The setup's executors / sources / built-in specs are deliberately NOT
         // unpacked here: this method hands the whole ToolSetup to runToolCallLoop,
@@ -177,7 +192,7 @@ class ToolLoopRunner {
         List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy,
-                finalTranscript);
+                finalTranscript, exchangeRecorder);
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
@@ -298,12 +313,16 @@ class ToolLoopRunner {
      * @param transcriptOut
      *            when non-null, receives the loop's final message list on a normal
      *            return (not on a pause or a failure)
+     * @param exchangeRecorder
+     *            when non-null, receives each tool call together with its result
+     *            the moment the result is appended — the part of the exchange that
+     *            survives a pause, a failure or a cancellation of this run
      */
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                            List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                            int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
-                           JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut)
+                           JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -436,8 +455,9 @@ class ToolLoopRunner {
                             // the model to stop asking so the loop can still finish
                             // with the ungated results.
                             for (ToolExecutionRequest gatedReq : gateResult.gated()) {
-                                currentMessages.add(ToolExecutionResultMessage.from(gatedReq,
-                                        "{\"status\":\"DENIED\",\"reason\":\"approval-pause limit for this turn reached; do not retry\"}"));
+                                addResult(currentMessages, aiMessage, gatedReq,
+                                        "{\"status\":\"DENIED\",\"reason\":\"approval-pause limit for this turn reached; do not retry\"}",
+                                        exchangeRecorder);
                                 Map<String, Object> capStep = new HashMap<>();
                                 capStep.put("type", "tool_error");
                                 capStep.put("tool", gatedReq.name());
@@ -467,15 +487,19 @@ class ToolLoopRunner {
                                         allowedReq, setup.toolRequestResolvers(), conversationId);
                                 if (selfTargetedPre != null) {
                                     LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(allowedReq.name()), selfTargetedPre);
-                                    currentMessages.add(ToolExecutionResultMessage.from(allowedReq,
-                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                                    addResult(currentMessages, aiMessage, allowedReq,
+                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}",
+                                            exchangeRecorder);
                                     trace.add(Map.of("type", "hitl_self_conversation", "tool", allowedReq.name(),
                                             "detail", selfTargetedPre));
                                     continue;
                                 }
-                                executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
-                                        toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
-                                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
+                                addResult(currentMessages, aiMessage, allowedReq,
+                                        executeSingleToolCallResult(allowedReq, memory, trace, toolExecutors, toolRateLimits,
+                                                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
+                                                enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs,
+                                                activeSpecs),
+                                        exchangeRecorder);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -537,16 +561,19 @@ class ToolLoopRunner {
                                 toolRequest, setup.toolRequestResolvers(), conversationId);
                         if (selfTargeted != null) {
                             LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(toolRequest.name()), selfTargeted);
-                            currentMessages.add(ToolExecutionResultMessage.from(toolRequest,
-                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
+                            addResult(currentMessages, aiMessage, toolRequest,
+                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}",
+                                    exchangeRecorder);
                             trace.add(Map.of("type", "hitl_self_conversation", "tool", toolRequest.name(),
                                     "detail", selfTargeted));
                             continue;
                         }
 
-                        executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors,
-                                toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
-                                enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
+                        addResult(currentMessages, aiMessage, toolRequest,
+                                executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
+                                        toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
+                                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs),
+                                exchangeRecorder);
                     }
                 } else {
                     return finish(currentMessages, transcriptOut, aiMessage.text());
@@ -591,6 +618,20 @@ class ToolLoopRunner {
     static final class FailedBeforeToolsException extends LifecycleException {
         FailedBeforeToolsException(LifecycleException failure) {
             super(failure.getMessage(), failure);
+        }
+    }
+
+    /**
+     * Appends one tool result to the loop's transcript and, in the same step,
+     * records the call and result as a completed pair — the only moment a call
+     * becomes part of the exchange a cancelled run leaves behind.
+     */
+    private static void addResult(List<ChatMessage> currentMessages, AiMessage call, ToolExecutionRequest request, String result,
+                                  ToolExchangeRecorder exchangeRecorder) {
+        var message = ToolExecutionResultMessage.from(request, result);
+        currentMessages.add(message);
+        if (exchangeRecorder != null) {
+            exchangeRecorder.record(call, request, message);
         }
     }
 

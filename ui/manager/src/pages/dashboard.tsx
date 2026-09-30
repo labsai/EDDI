@@ -38,7 +38,8 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
 import { useAgentDescriptors } from "@/hooks/use-agents";
-import { useOperatorConfig } from "@/hooks/use-operator";
+import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 
 // ─── State badge color helper ────────────────────────────────────────────────
 
@@ -451,10 +452,15 @@ export function DashboardPage() {
 function OperatorDiscoveryCard() {
   const { t } = useTranslation();
   const { data: config, isLoading, isError } = useOperatorConfig();
+  const upgrade = useOperatorUpgradeAssessment(config);
 
-  // Hide once an operator exists at all — a paused one is configured, not
-  // undiscovered — and while the config cannot be read.
-  if (isLoading || isError || config?.agentId) return null;
+  if (isLoading || isError) return null;
+  // A running operator that predates this Manager is the one thing about an
+  // existing operator worth a dashboard line — it will not update itself.
+  if (upgrade?.needed) return <OperatorUpgradeHint testId="operator-dashboard-upgrade-hint" />;
+  // Otherwise hide once an operator exists at all — a paused one is
+  // configured, not undiscovered.
+  if (config?.agentId) return null;
 
   return (
     <Card className="border-primary/30 bg-primary/5" data-testid="operator-discovery-card">

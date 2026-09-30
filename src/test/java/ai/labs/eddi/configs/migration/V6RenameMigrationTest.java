@@ -156,8 +156,39 @@ class V6RenameMigrationTest {
         @DisplayName("should skip when already applied")
         void skipsWhenAlreadyApplied() {
             when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            // An applied migration only checks whether an earlier 6.x left triggers
+            // or mappings in the v5 shape; with nothing there, it writes nothing.
+            @SuppressWarnings("unchecked")
+            MongoCollection<Document> empty = mock(MongoCollection.class);
+            when(empty.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString())).thenReturn(empty);
+
             migration.runIfNeeded();
-            verify(database, never()).getCollection(anyString());
+
+            verify(migrationLogStore, never()).createMigrationLog(any());
+            verify(empty, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(empty, never()).updateMany(any(), anyList());
+            verify(empty, never()).replaceOne(any(), any());
+        }
+
+        /**
+         * A count that fails is not an empty collection: the triggers an earlier 6.x
+         * left under bottriggers would then never be moved.
+         */
+        @Test
+        @DisplayName("an already-applied migration does not take a failed trigger count for none")
+        @SuppressWarnings("unchecked")
+        void failedTriggerCountIsNotEmpty() {
+            when(migrationLogStore.readMigrationLog("v6-rename-migration-complete")).thenReturn(new MigrationLog("v6-rename-migration-complete"));
+            MongoCollection<Document> unreadable = mock(MongoCollection.class);
+            when(unreadable.countDocuments()).thenThrow(new IllegalStateException("not authorized"));
+            MongoCollection<Document> agentTriggers = mock(MongoCollection.class);
+            when(database.getCollection(anyString())).thenAnswer(i -> "bottriggers".equals(i.getArgument(0)) ? unreadable : agentTriggers);
+
+            migration.runIfNeeded();
+
+            verify(unreadable, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(agentTriggers, never()).estimatedDocumentCount();
         }
 
         @Test
@@ -176,7 +207,7 @@ class V6RenameMigrationTest {
 
             // Should record the migration as complete
             ArgumentCaptor<MigrationLog> captor = ArgumentCaptor.forClass(MigrationLog.class);
-            verify(migrationLogStore).createMigrationLog(captor.capture());
+            verify(migrationLogStore, times(2)).createMigrationLog(captor.capture());
             assertEquals("v6-rename-migration-complete", captor.getValue().getName());
         }
     }
@@ -471,7 +502,7 @@ class V6RenameMigrationTest {
 
             assertTrue(migration.detectCollectionRenameConflicts().isEmpty());
             verify(bots).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -569,7 +600,7 @@ class V6RenameMigrationTest {
                     "an empty leftover v6 namespace must be dropped — otherwise the rename fails with 48, the run "
                             + "aborts, the app re-creates the namespace on the next boot and the migration can never complete");
             // ...and because the rename went through, the run finishes and is recorded.
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         @SuppressWarnings("unchecked")
@@ -739,7 +770,7 @@ class V6RenameMigrationTest {
             MongoCollection<Document> emptyCol = mock(MongoCollection.class);
             when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
             when(database.getCollection(anyString()))
-                    .thenAnswer(invocation -> "conversationmemories".equals(invocation.getArgument(0)) ? envCol : emptyCol);
+                    .thenAnswer(invocation -> "deployments".equals(invocation.getArgument(0)) ? envCol : emptyCol);
             when(database.getName()).thenReturn("eddi");
 
             migration.runIfNeeded();
@@ -1056,7 +1087,7 @@ class V6RenameMigrationTest {
 
             migration.runIfNeeded();
 
-            verify(migrationLogStore).createMigrationLog(any());
+            verify(migrationLogStore).createMigrationLog(argThat(log -> "v6-rename-migration-complete".equals(log.getName())));
         }
 
         /**

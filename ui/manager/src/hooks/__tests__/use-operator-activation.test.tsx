@@ -7,6 +7,8 @@ import { useActivateOperator, runPostActivationProbes } from "@/hooks/use-operat
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
 import { READ_ENDPOINTS, WRITE_ENDPOINTS, parseEndpoint } from "@/lib/operator/tool-scopes";
+import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
+import { OPERATOR_REVISION } from "@/lib/operator/operator-revision";
 
 /**
  * The activation safety gate.
@@ -304,5 +306,65 @@ describe("runPostActivationProbes", () => {
     expect(readResults).toHaveLength(1);
     expect((readResults[0] as { ok: boolean }).ok).toBe(false);
     expect(writeReports).toHaveLength(0);
+  });
+});
+
+describe("useActivateOperator — the upgrade stamp", () => {
+  beforeEach(() => {
+    server.resetHandlers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("records what was provisioned, so a later Manager can tell it is out of date", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+    const written: OperatorConfig[] = [];
+    server.use(
+      http.put(VAR_URL, async ({ request }) => {
+        const body = (await request.json()) as { value: string };
+        written.push(JSON.parse(body.value) as OperatorConfig);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_only", promptBody: defaultOperatorPromptBody("read_only") }),
+      apiKey: "",
+      baseUrl: " http://ollama:11434 ",
+    });
+
+    await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+    expect(result.current.isError).toBe(false);
+    const saved = written[written.length - 1]!;
+    expect(saved.provisionedRevision).toBe(OPERATOR_REVISION);
+    expect(saved.provisionedEndpoints).toEqual([...READ_ENDPOINTS]);
+    expect(saved.promptBodyIsDefault).toBe(true);
+    expect(saved.llmBaseUrl).toBe("http://ollama:11434");
+  });
+
+  it("marks edited instructions as edited, so an upgrade keeps them", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+    const written: OperatorConfig[] = [];
+    server.use(
+      http.put(VAR_URL, async ({ request }) => {
+        const body = (await request.json()) as { value: string };
+        written.push(JSON.parse(body.value) as OperatorConfig);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_only", promptBody: "My own words." }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+    expect(written[written.length - 1]!.promptBodyIsDefault).toBe(false);
+    expect(written[written.length - 1]!.llmBaseUrl).toBeNull();
   });
 });

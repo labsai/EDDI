@@ -161,16 +161,22 @@ export function useCascadeSave(slug: string) {
       body,
       context,
       skipResourceSave,
+      compatible,
     }: {
       id: string;
       version: number;
       body: unknown;
       context?: CascadeContext;
       skipResourceSave?: boolean;
+      /** The agent version the cascade writes is compatible — see `CascadeOptions`. */
+      compatible?: boolean;
     }) => {
       if (!rt)
         return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return cascadeSaveResource(rt, id, version, body, context, { skipResourceSave });
+      return cascadeSaveResource(rt, id, version, body, context, {
+        skipResourceSave,
+        ...(compatible ? { compatible: true } : {}),
+      });
     },
     onSuccess: (result, { id, body, skipResourceSave }) => {
       // Seed the version the save created with the body just written, so an

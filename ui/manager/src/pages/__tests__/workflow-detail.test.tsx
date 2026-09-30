@@ -4,6 +4,7 @@ import { renderPage, userEvent } from "@/test/test-utils";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
+import { useNavigate } from "react-router-dom";
 
 function renderWorkflow(id = "wf1", searchParams = "") {
   return renderPage(
@@ -375,3 +376,40 @@ describe("WorkflowDetailPage", () => {
   });
 });
 
+/**
+ * The page stays mounted when only its query string changes, so the agent
+ * context can switch underneath it. A compatibility tick given for one agent's
+ * next version must not be carried into another agent's Save & Test.
+ */
+describe("WorkflowDetailPage — agent context switch", () => {
+  function SwitchAgent() {
+    const navigate = useNavigate();
+    return (
+      <button onClick={() => navigate("/manage/workflowview/wf1?agentId=agent2&agentVer=3")}>
+        switch agent
+      </button>
+    );
+  }
+
+  it("drops the compatibility tick when the agent changes", async () => {
+    renderPage(
+      "/manage/workflowview/wf1?agentId=agent1&agentVer=1",
+      <>
+        <SwitchAgent />
+        <WorkflowDetailPage />
+      </>,
+      "/manage/workflowview/:id",
+    );
+    const user = userEvent.setup();
+
+    const box = (await screen.findByTestId("save-test-compatible-checkbox")) as HTMLInputElement;
+    await user.click(box);
+    expect(box.checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "switch agent" }));
+
+    await waitFor(() =>
+      expect((screen.getByTestId("save-test-compatible-checkbox") as HTMLInputElement).checked).toBe(false),
+    );
+  });
+});

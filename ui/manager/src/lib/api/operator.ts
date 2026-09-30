@@ -90,10 +90,33 @@ export interface OperatorConfig {
    * the problem to a cast.
    */
   apiBaseUrl?: string | null;
+  /**
+   * The LLM endpoint the operator was activated with (a named provider's
+   * non-default region, or a proxy / local server), so a reconfigure can show and
+   * keep it. Distinct from `apiBaseUrl` above, which is where the generated tools
+   * point. Optional: configs written before this field existed lack it, and
+   * `null` / absent both mean the provider's default endpoint.
+   */
+  llmBaseUrl?: string | null;
   scope: OperatorScope;
   authMode: OperatorAuthMode;
   /** Editable half of the system prompt; the safety preamble is prepended. */
   promptBody: string;
+  /**
+   * Whether `promptBody` was the untouched default for its scope when it was
+   * provisioned. An upgrade replaces a default body with the new default and
+   * keeps an edited one. Absent on configs written before upgrades existed —
+   * see `instructionsState` in `operator-revision.ts` for how that is read.
+   */
+  promptBodyIsDefault?: boolean;
+  /**
+   * `OPERATOR_REVISION` of the Manager that provisioned this operator. Absent
+   * (read as 0) on configs written before revisions existed. The backend reads
+   * it too, for its startup warning (`OperatorRevisionCheck`).
+   */
+  provisionedRevision?: number;
+  /** The endpoint allow-list this operator was provisioned with — what an upgrade diffs against. */
+  provisionedEndpoints?: string[];
 }
 
 /**

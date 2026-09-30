@@ -76,9 +76,19 @@ class V6RenameMigrationBranchTest {
             when(migrationLogStore.readMigrationLog(anyString()))
                     .thenReturn(new MigrationLog("v6-rename-migration-complete"));
 
+            // An applied migration only checks whether an earlier 6.x left triggers
+            // or mappings in the v5 shape; with nothing there, it writes nothing.
+            @SuppressWarnings("unchecked")
+            MongoCollection<Document> empty = mock(MongoCollection.class);
+            when(empty.estimatedDocumentCount()).thenReturn(0L);
+            when(database.getCollection(anyString())).thenReturn(empty);
+
             migration.runIfNeeded();
+
             verify(migrationLogStore, never()).createMigrationLog(any());
-            verify(database, never()).getCollection(anyString());
+            verify(empty, never()).renameCollection(any(MongoNamespace.class), any(RenameCollectionOptions.class));
+            verify(empty, never()).updateMany(any(), anyList());
+            verify(empty, never()).replaceOne(any(), any());
         }
     }
 

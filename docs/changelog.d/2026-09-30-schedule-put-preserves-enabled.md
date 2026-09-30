@@ -55,10 +55,6 @@ of the two considered.
 - Manager `schedules-regressions.test.tsx`: an edit's PUT body has no `enabled`, even
   when the snapshot the dialog opened on is stale, and Save never calls `/enable`.
 
-### Also on this branch
-
-- `operator-activation.test.tsx` expected the Anthropic default model `claude-sonnet-5`. labsai/EDDI#896 moved `LLM_PROVIDERS` to `claude-sonnet-5-5` without updating the test, and `main`'s own CI run skipped the UI jobs, so it merged red and failed `UI Manager Checks` on every PR touching `ui/manager`. The test now reads the default from `LLM_PROVIDERS`, so the next model bump cannot leave it stale.
-
 ```decision-log
 | 2026-09-30 | Schedule `enabled` changes only through `/enable`/`/disable`; a configuration PUT keeps the stored value inside the same atomic write on both stores | CodeRabbit on labsai/EDDI#854: the Manager editor's save re-enabled a schedule another operator had disabled after the dialog read it | Optimistic concurrency on `updatedAt` with 409 (needs a client protocol change, and the other lifecycle fields already follow the keep-stored rule); simply omitting `enabled` from the PUT (the model defaults it to `true`) |
 ```

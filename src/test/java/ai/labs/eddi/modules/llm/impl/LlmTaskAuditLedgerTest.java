@@ -197,6 +197,9 @@ class LlmTaskAuditLedgerTest {
     private void agentReturns(String response, List<Map<String, Object>> trace, Map<String, Object> metadata) throws Exception {
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(response, trace, metadata));
+        // The cascade calls the overload that records the tool exchange as it runs.
+        lenient().when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult(response, trace, metadata));
     }
 
     @SuppressWarnings("unchecked")
@@ -477,7 +480,7 @@ class LlmTaskAuditLedgerTest {
         strong.setTimeoutMs(5000L);
         cascade.setSteps(List.of(cheap, strong));
 
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("weak", new ArrayList<>(), Map.of("toolCostUsd", 0.003)))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("strong answer", new ArrayList<>(), Map.of("toolCostUsd", 0.004)));
 

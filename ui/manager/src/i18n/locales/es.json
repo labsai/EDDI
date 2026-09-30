@@ -266,7 +266,8 @@
     "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
     "deployToProduction": "Desplegar en producción",
     "undeployFromProduction": "Retirar de producción",
-    "deployFailedIn": "El despliegue falló en {{environment}}"
+    "deployFailedIn": "El despliegue falló en {{environment}}",
+    "undeployCompatibleHint": "Las conversaciones que una versión compatible desplegada puede continuar no se terminan: pasan a ella en su siguiente turno."
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -686,7 +687,9 @@
     "exportMd": "Exportar como Markdown",
     "toolSummary": "Uso de herramientas",
     "totalCost": "Coste total",
-    "cacheHitRate": "Tasa de acierto de caché"
+    "cacheHitRate": "Tasa de acierto de caché",
+    "endReasonRetired": "Finalizada: la versión del agente fue retirada",
+    "stepAgentVersion": "Respondido por la versión {{version}} del agente"
   },
   "chat": {
     "hide": "Ocultar",
@@ -1349,6 +1352,10 @@
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
     "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo",
+    "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
+    "modelType": "Tipo de modelo",
     "paramName": "Nombre del parámetro",
     "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
   },
@@ -4438,7 +4445,10 @@
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
-      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección.",
+      "llmEndpoint": "Endpoint del modelo",
+      "promptBodyDiffers": "Estas instrucciones difieren del valor predeterminado actual: se editaron o las escribió una versión anterior del Manager.",
+      "promptBodyReset": "Restablecer el valor predeterminado"
     },
     "authMode": {
       "none": {
@@ -4606,6 +4616,30 @@
     },
     "superseded": {
       "title": "El agente operador anterior sigue desplegado."
+    },
+    "upgrade": {
+      "hint": "Hay una actualización disponible para el Platform Operator.",
+      "blockerBaseUrl": "La dirección de su servidor de modelos no se guardó: vuelve a introducirla para actualizar.",
+      "addedTools_other": "{{count}} herramientas nuevas",
+      "action": "Actualizar",
+      "addedTools_one": "{{count}} herramienta nueva",
+      "blockerProvider": "Su proveedor de modelos ya no se puede configurar así: elige otro para actualizar.",
+      "useNewDefault": "Reemplazarlas por el nuevo valor predeterminado",
+      "confirmBody": "Se crea un operador nuevo con las instrucciones y herramientas actuales y se verifica como en una activación nueva; solo entonces se elimina el anterior. Se conservan el modelo, la clave, el entorno y la configuración de acceso. El chat abierto con el operador termina, y las conversaciones con el operador anterior dejan de aparecer en el historial.",
+      "description": "Lo configuró una versión anterior del Manager (revisión {{from}}; esta versión incluye la {{to}}), por lo que sus instrucciones y herramientas están desactualizadas.",
+      "removedTools_many": "{{count}} herramientas eliminadas",
+      "blockerCredential": "Su clave de modelo se introdujo como texto plano, que nunca se guarda: vuelve a introducirla para actualizar.",
+      "reviewAction": "Revisar y actualizar",
+      "instructionsUnknown": "Las instrucciones del operador difieren del valor predeterminado actual: son un valor predeterminado anterior o tus propias ediciones.",
+      "instructionsCustomized": "Editaste las instrucciones del operador.",
+      "confirmTitle": "¿Actualizar el Platform Operator?",
+      "removedTools_other": "{{count}} herramientas eliminadas",
+      "removedTools_one": "{{count}} herramienta eliminada",
+      "addedTools_many": "{{count}} herramientas nuevas",
+      "confirm": "Actualizar ahora",
+      "hintAction": "Actualizar",
+      "keepCurrent": "Conservar el texto actual (no aprenderá lo que añade el nuevo valor predeterminado)",
+      "title": "Hay una actualización disponible para el Platform Operator"
     }
   },
   "groupWorkspace": {
@@ -5112,5 +5146,42 @@
     "workflowMissingResource": "El flujo de trabajo {{workflowId}} (versión {{version}}) no hace referencia a {{resource}}, por lo que guardarlo aquí no cambiaría el agente. No se guardó nada.",
     "agentWorkflowMismatch": "El agente {{agentId}} (versión {{version}}) hace referencia al flujo de trabajo {{workflowId}} en la versión {{found}}, no en la versión {{expected}}. El agente cambió desde que se abrió esta página. Recárgala. No se guardó nada.",
     "agentMissingWorkflow": "El agente {{agentId}} (versión {{version}}) no hace referencia al flujo de trabajo {{workflowId}}. No se guardó nada."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratorios de modelos",
+      "compatible": "Proveedores compatibles con OpenAI",
+      "cloud": "Plataformas en la nube",
+      "local": "Local / autoalojado"
+    },
+    "region": {
+      "label": "Región",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abajo)"
+    },
+    "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
+    "keyHint": "Obtén una clave de API en {{url}}",
+    "select": "Selecciona un proveedor"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatible con la versión anterior — las conversaciones en curso pueden cambiar a ella",
+    "compatibleHint": "Solo para cambios que no pueden romper una conversación en curso, p. ej. la redacción del prompt o un modelo distinto. Déjalo sin marcar si se renombraron o eliminaron propiedades, acciones o pasos del workflow.",
+    "compatibleLegacyNote": "La versión actual es anterior al seguimiento de versiones, así que las conversaciones que ya la usan se quedan en ella. El próximo guardado compatible enlaza la cadena.",
+    "compatibleUnknownNote": "Las conversaciones en una versión anterior al seguimiento de versiones se quedan en ella.",
+    "generationBadge": "gen. compat. {{generation}}",
+    "generationTooltip": "Generación de compatibilidad {{generation}}: las versiones de este agente con la misma generación son compatibles, por lo que una conversación en curso pasa a la más reciente desplegada en su siguiente turno. Un guardado incompatible inicia una nueva generación.",
+    "impactTitle": "Desplegar v{{version}} en {{environment}} — conversaciones en curso",
+    "impactFollow_one": "{{count}} conversación activa en v{{from}} continuará en v{{to}}",
+    "impactFollow_many": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactFollow_other": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactStay_one": "{{count}} conversación activa en v{{from}} se quedará en v{{from}}",
+    "impactStay_many": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactStay_other": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactReasonNewer": "versión más reciente",
+    "impactReasonLegacy": "anterior al seguimiento de versiones",
+    "impactReasonBreaking": "cambio incompatible",
+    "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
   }
 }

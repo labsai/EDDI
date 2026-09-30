@@ -4,7 +4,8 @@ import { useLocation, Link } from "react-router-dom";
 import { Sparkles, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OperatorChat } from "@/components/operator/operator-chat";
-import { useOperatorConfig } from "@/hooks/use-operator";
+import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
 import { useCurrentScreenContext, toContextPayload } from "@/hooks/use-current-screen-context";
@@ -59,6 +60,9 @@ export function OperatorDrawer() {
     authMethod === "none" || roles.includes("eddi-admin") || roles.includes("eddi-editor");
   const { data: config, isLoading: configLoading, isError: configError } = useOperatorConfig(canReadOperatorConfig);
   const chat = useOperatorChat(config);
+  // Mounted on every page, so this is also what fires the browser-console
+  // warning for an out-of-date operator wherever the admin happens to be.
+  const upgrade = useOperatorUpgradeAssessment(config);
   // Mirrors operator.tsx's own preference for approval-status's pauseReason
   // over the chat hook's derived one: the hook's is null on some pause paths
   // (a 409 arriving with no reason of its own), and approval-status is the
@@ -200,6 +204,15 @@ export function OperatorDrawer() {
             aria-hidden="true"
           />
         )}
+        {/* An out-of-date operator is worth a dot, but never louder than a
+            decision that is waiting: the pending dot wins the same corner. */}
+        {upgrade?.needed && !operatorHasPendingApproval && !isOpen && (
+          <span
+            className="absolute end-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-primary"
+            data-testid="operator-drawer-upgrade-dot"
+            aria-hidden="true"
+          />
+        )}
         <Sparkles className="h-4 w-4" aria-hidden="true" />
       </button>
 
@@ -238,6 +251,12 @@ export function OperatorDrawer() {
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
             ) : isActive ? (
+              <>
+              {upgrade?.needed && (
+                <div className="border-b border-border p-2">
+                  <OperatorUpgradeHint testId="operator-drawer-upgrade-hint" />
+                </div>
+              )}
               <OperatorChat
                 messages={chat.messages}
                 events={chat.events}
@@ -257,6 +276,7 @@ export function OperatorDrawer() {
                 resolveError={chat.resolveError}
                 pauseSurface="compact"
               />
+              </>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
                 <Sparkles className="h-8 w-8 text-muted-foreground/40" />

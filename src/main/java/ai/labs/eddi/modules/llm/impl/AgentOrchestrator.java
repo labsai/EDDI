@@ -542,6 +542,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                                  IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
                                                  int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex,
+                transcriptMaxBytes, jsonPolicy, null);
+    }
+
+    @Override
+    public ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages,
+                                                 LlmConfiguration.Task task,
+                                                 IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                 int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy,
+                                                 ToolExchangeRecorder exchangeRecorder)
+            throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
         // prologue the resume path uses.
@@ -553,7 +564,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         }
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
-                transcriptMaxBytes, jsonPolicy);
+                transcriptMaxBytes, jsonPolicy, exchangeRecorder);
     }
 
     /**
@@ -838,10 +849,10 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
                                              ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                             JsonResponseFormatPolicy jsonPolicy)
+                                             JsonResponseFormatPolicy jsonPolicy, ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
         return toolLoopRunner.executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory,
-                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy, exchangeRecorder);
     }
 
     /** @see ToolLoopRunner#conversationToolCost */
@@ -863,7 +874,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
         return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
-                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null);
+                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null, null);
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2

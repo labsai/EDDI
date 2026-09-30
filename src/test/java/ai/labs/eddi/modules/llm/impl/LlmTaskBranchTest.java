@@ -462,6 +462,20 @@ class LlmTaskBranchTest {
             var task = createTask(Map.of("apiKey", "key", "deploymentName", "my-deployment"));
             assertDoesNotThrow(() -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
         }
+
+        @Test
+        @DisplayName("a named OpenAI-compatible provider without a model resolves to its preset default")
+        void compatibleProviderDefaultModel() {
+            assertEquals("grok-4.7", LlmTask.resolveModelName(Map.of("apiKey", "k"), "xai"));
+            assertEquals("grok-4.7", LlmTask.resolveModelName(Map.of("modelName", " "), "xai"));
+        }
+
+        @Test
+        @DisplayName("an explicit model wins over the preset default; other types stay null")
+        void explicitModelAndOtherTypes() {
+            assertEquals("grok-4.5", LlmTask.resolveModelName(Map.of("modelName", "grok-4.5"), "xai"));
+            assertNull(LlmTask.resolveModelName(Map.of("apiKey", "k"), "openai"));
+        }
     }
 
     // ==================== summary config ====================

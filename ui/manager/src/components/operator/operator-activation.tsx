@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
+import { getProviderRegions } from "@/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import {
   MODEL_SUGGESTIONS,
   isBaseUrlRequired,
@@ -66,7 +68,10 @@ export function OperatorActivation({
   const [apiKey, setApiKey] = useState(
     keepsStoredProvider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "",
   );
-  const [baseUrl, setBaseUrl] = useState("");
+  // Seeded from the stored config so reconfiguring keeps the region / endpoint the
+  // operator was activated with instead of silently falling back to the default —
+  // unless the stored provider fell back above, whose endpoint is not this one's.
+  const [baseUrl, setBaseUrl] = useState(keepsStoredProvider ? (initial.llmBaseUrl ?? "") : "");
   /**
    * The address EDDI can reach ITSELF at — what the generated tools will target.
    *
@@ -147,9 +152,23 @@ export function OperatorActivation({
   const grantedEndpoints = useMemo(() => endpointsForScope(scope), [scope]);
   const safetyPreamble = useMemo(() => safetyPreambleForScope(scope), [scope]);
 
+  /**
+   * Seeded with TODAY's default unless the admin had edited the text.
+   *
+   * This used to be `initial.promptBody || default` — the stored body, whatever
+   * it was. Stored is a snapshot from whenever the operator was activated, so
+   * every Reconfigure re-provisioned the OLD default and no prompt improvement
+   * ever reached an operator that already existed. `promptBodyIsDefault` (set by
+   * activation) says whether the stored text is the admin's or just a stale
+   * copy of ours; a config from before that flag keeps its text, and the reset
+   * button below is how to get the current default.
+   */
   const [promptBody, setPromptBody] = useState(
-    initial.promptBody || defaultOperatorPromptBody(scope),
+    initial.promptBody && initial.promptBodyIsDefault !== true
+      ? initial.promptBody
+      : defaultOperatorPromptBody(scope),
   );
+  const promptBodyDiffersFromDefault = promptBody !== defaultOperatorPromptBody(scope);
 
   /**
    * Swaps the editable body to the new scope's default when the admin flips
@@ -211,10 +230,12 @@ export function OperatorActivation({
     setProvider(next);
     const cfg = getProviderConfig(next);
     if (cfg) setModel(cfg.defaultModel);
-    // The field only renders for a provider that needs one, so a URL carried
-    // across a switch would be sent invisibly — and for an in-process provider
-    // it would be sent to something that has no endpoint to begin with.
-    if (!supportsBaseUrl(next)) setBaseUrl("");
+    // An endpoint belongs to one provider: carried across a switch it would be
+    // sent to the wrong vendor, and mostly invisibly (the field only renders for
+    // a provider that needs one) — ollama's http://localhost:11434 ended up
+    // submitted with openai. So any switch clears it, and switching back to the
+    // stored provider restores the stored endpoint.
+    setBaseUrl(next === initial.provider && supportsBaseUrl(next) ? (initial.llmBaseUrl ?? "") : "");
     // A key is provider-specific, so carrying it across a provider switch would
     // silently send the wrong credential.
     setApiKey(next === initial.provider && initial.credentialKey ? toVaultRef(initial.credentialKey) : "");
@@ -233,10 +254,12 @@ export function OperatorActivation({
         // Trimmed to null rather than "" so `resolveOperatorApiBaseUrl` sees
         // "not set" and asks the backend, instead of provisioning a blank target.
         apiBaseUrl: normalizeBaseUrl(apiBaseUrl) || null,
+        // Persisted so a later reconfigure shows (and keeps) the region.
+        llmBaseUrl: baseUrl.trim() || null,
         scope,
       },
       apiKey,
-      baseUrl || undefined,
+      baseUrl.trim() || undefined,
     );
   }
 
@@ -270,22 +293,30 @@ export function OperatorActivation({
           </CardHeader>
           <CardContent className="space-y-5">
             <Field label={t("operator.activation.provider", "Provider")} htmlFor="operator-provider">
-              <select
+              <ProviderSelect
                 value={provider}
-                onChange={(e) => handleProviderChange(e.target.value)}
+                onChange={handleProviderChange}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 id="operator-provider"
-                data-testid="operator-provider"
-              >
-                {/* The operator is provisioned through setup-api, which cannot
-                    configure every provider (see isProvisionableBySetup). */}
-                {LLM_PROVIDERS.filter((p) => isProvisionableBySetup(p.id)).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                testId="operator-provider"
+                // The operator is provisioned through setup-api, which cannot
+                // configure every provider (see isProvisionableBySetup).
+                include={isProvisionableBySetup}
+              />
             </Field>
+
+            {getProviderRegions(provider).length >= 2 && (
+              <Field label={t("llmProviders.region.label", "Region")} htmlFor="operator-region">
+                <ProviderRegionSelect
+                  provider={provider}
+                  baseUrl={baseUrl}
+                  onBaseUrlChange={setBaseUrl}
+                  hideLabel
+                  className="h-10 rounded-md py-0"
+                  testId="operator-region"
+                />
+              </Field>
+            )}
 
             <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
               <input
@@ -451,6 +482,12 @@ export function OperatorActivation({
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <Summary label={t("operator.activation.provider", "Provider")} value={providerConfig?.name ?? provider} />
               <Summary label={t("operator.activation.model", "Model")} value={model} />
+              {baseUrl.trim() && (
+                <Summary
+                  label={t("operator.activation.llmEndpoint", "Model endpoint")}
+                  value={baseUrl.trim()}
+                />
+              )}
               <Summary label={t("operator.activation.environment", "Environment")} value={environment} />
               <Summary
                 label={t("operator.activation.platformBaseUrl", "Platform base URL")}
@@ -490,6 +527,25 @@ export function OperatorActivation({
                 id="operator-prompt-body"
                 data-testid="operator-prompt-body"
               />
+              {promptBodyDiffersFromDefault && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="flex-1">
+                    {t(
+                      "operator.activation.promptBodyDiffers",
+                      "These instructions differ from the current default — they were edited, or written by an earlier version of the Manager.",
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPromptBody(defaultOperatorPromptBody(scope))}
+                    data-testid="operator-prompt-body-reset"
+                  >
+                    {t("operator.activation.promptBodyReset", "Reset to default")}
+                  </Button>
+                </div>
+              )}
             </Field>
 
             <Field

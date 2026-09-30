@@ -50,6 +50,8 @@ import {
 } from "@/hooks/use-agents";
 import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
+import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
+import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
@@ -340,6 +342,7 @@ export function AgentDetailPage() {
                 <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
                   v{resolvedVersion}
                 </span>
+                <CompatibilityGenerationBadge generation={agent.compatibilityGeneration} />
               </p>
             </div>
           </div>
@@ -562,6 +565,8 @@ export function AgentDetailPage() {
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
+          agentId={id!}
+          version={resolvedVersion}
           statuses={envStatuses}
           onDeploy={(env) => deployMutation.mutate(
             { environment: env, agentId: id!, version: resolvedVersion },
@@ -758,6 +763,12 @@ export function AgentDetailPage() {
                   "Immediately terminates every in-progress conversation on this deployment. This cannot be undone."
                 )}
               </span>
+              <span className="mt-0.5 block text-xs" data-testid="undeploy-compatible-hint">
+                {t(
+                  "agents.undeployCompatibleHint",
+                  "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
+                )}
+              </span>
             </span>
           </label>
           <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
@@ -865,11 +876,15 @@ function VersionSelect({
 
 /* ─── Environment Status Badges ─── */
 function EnvironmentBadges({
+  agentId,
+  version,
   statuses,
   onDeploy,
   onUndeploy,
   isBusy,
 }: {
+  agentId: string;
+  version: number;
   statuses: EnvironmentStatus[];
   onDeploy: (env: string) => void;
   onUndeploy: (env: string) => void;
@@ -947,6 +962,19 @@ function EnvironmentBadges({
             </div>
           );
         })}
+      </div>
+      {/* What deploying this version does to conversations on the agent's
+          other deployed versions. Each panel hides itself when there are none. */}
+      <div className="divide-y divide-border border-t border-border empty:hidden">
+        {statuses.map(({ environment }) => (
+          <DeploymentImpactPanel
+            key={environment}
+            agentId={agentId}
+            version={version}
+            environment={environment}
+            environmentLabel={t(envLabels[environment] ?? environment)}
+          />
+        ))}
       </div>
     </section>
   );
