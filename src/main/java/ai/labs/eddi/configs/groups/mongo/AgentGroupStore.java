@@ -59,6 +59,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateFacilitator(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
+        repairNegotiationArbitration(groupConfiguration);
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
@@ -81,6 +82,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateFacilitator(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
+        repairNegotiationArbitration(groupConfiguration);
         warnCostCeilingNeedsPricedMembers(groupConfiguration);
         warnOnModeratorlessPhases(groupConfiguration);
         warnOnSummarizerlessWindow(groupConfiguration);
@@ -703,6 +705,24 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         } else if (stance.inputPricePer1M() != null || stance.outputPricePer1M() != null) {
             LOGGER.warnf("Group '%s' sets stanceSummary prices but names no llmProvider/llmModel — nothing will be "
                     + "billed because no summarizer runs", LogSanitizer.sanitize(groupConfiguration.getName()));
+        }
+    }
+
+    /**
+     * Stores a NEGOTIATION group's prompt-less Arbitration phase with the preset's
+     * arbitration prompt, whichever client sent it. Filled in rather than rejected:
+     * the Manager saved exactly this shape, so a 400 would make groups it created
+     * unsaveable through the API that stored them. The runtime applies the same
+     * repair to groups stored before this ran; see
+     * {@link DiscussionStylePresets#withNegotiationArbitrationRepaired}.
+     */
+    static void repairNegotiationArbitration(AgentGroupConfiguration groupConfiguration) {
+        List<DiscussionPhase> phases = groupConfiguration.getPhases();
+        List<DiscussionPhase> repaired = DiscussionStylePresets.withNegotiationArbitrationRepaired(groupConfiguration.getStyle(), phases);
+        if (repaired != phases) {
+            LOGGER.infof("Group '%s': its NEGOTIATION Arbitration phase had no prompt; stored with the preset arbitration prompt",
+                    LogSanitizer.sanitize(groupConfiguration.getName()));
+            groupConfiguration.setPhases(repaired);
         }
     }
 

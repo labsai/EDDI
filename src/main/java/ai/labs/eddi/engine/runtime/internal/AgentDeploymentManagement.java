@@ -203,7 +203,44 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
 
+    /**
+     * Whether the daily sweep ends conversations for being idle.
+     *
+     * <p>
+     * A limit below one day turns it off. It used to be taken literally: the check
+     * is {@code DAYS.between(lastInteraction, today) >= limit}, which every
+     * conversation passes for a limit of {@code 0} or {@code -1}, so both ENDED
+     * every conversation the sweep reached. {@code -1} is how the neighbouring
+     * {@code deleteEndedConversationsOnceOlderThanDays} and
+     * {@code eddi.usermemories.deleteOlderThanDays} say "never", and an operator
+     * copying that idiom closed every open conversation five minutes after boot.
+     * The same threshold as the retention sweep ({@code < 1} is off), so all three
+     * settings read {@code -1} the same way.
+     * </p>
+     *
+     * <p>
+     * Only the ENDING is switched off. The sweep still deploys the latest version
+     * of each agent, still retires an old version whose conversations can move to a
+     * newer compatible one, and still undeploys an old version that has <em>no</em>
+     * active conversation left. None of that ends a conversation or loses anything
+     * — a version with no active conversation serves nobody, and
+     * {@code getActiveConversationCount} counts idle-but-open conversations as
+     * active, so an old version keeps its deployment for exactly as long as one of
+     * them is still open. Stopping those too would leave superseded versions
+     * holding memory for ever, which is a different decision from "don't close
+     * conversations" and would need a setting of its own.
+     * </p>
+     */
+    boolean idleEndingEnabled() {
+        return maximumLifeTimeOfIdleConversationsInDays >= 1;
+    }
+
     void onStart(@Observes StartupEvent ev) {
+        if (!idleEndingEnabled()) {
+            LOGGER.infof("Idle conversations are never ended: eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=%d "
+                    + "(below 1 disables it). Old agent versions with no active conversation are still undeployed.",
+                    maximumLifeTimeOfIdleConversationsInDays);
+        }
         runtime.getScheduledExecutorService().schedule(() -> {
             autoDeployAgents();
 
@@ -762,6 +799,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     }
 
     private void endOldConversationsWithOldAgents(String agentId, Integer agentVersion) throws ResourceStoreException, ResourceNotFoundException {
+        if (!idleEndingEnabled()) {
+            // Disabled (see idleEndingEnabled): no conversation is loaded, let alone
+            // ended. The caller's undeploy check still runs, and keeps this version
+            // deployed while it has any conversation open.
+            return;
+        }
 
         var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
 

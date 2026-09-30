@@ -1920,9 +1920,12 @@ public class GroupConversationService implements IGroupConversationService, User
     // Public: called back from GroupHitlCoordinator.resumeDiscussion (Wave R, R1
     // step 7).
     public List<DiscussionPhase> resolvePhases(AgentGroupConfiguration config) {
-        // Custom phases take priority
+        // Custom phases take priority. A NEGOTIATION group stored with a prompt-less
+        // Arbitration phase gets the preset's arbitration prompt back here, whichever
+        // client saved it (see
+        // DiscussionStylePresets.withNegotiationArbitrationRepaired).
         if (config.getPhases() != null && !config.getPhases().isEmpty()) {
-            return config.getPhases();
+            return DiscussionStylePresets.withNegotiationArbitrationRepaired(config.getStyle(), config.getPhases());
         }
 
         // Expand style preset
@@ -1940,7 +1943,12 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     public List<DiscussionPhase> effectivePhases(GroupConversation gc, AgentGroupConfiguration config) {
         List<DiscussionPhase> runtime = gc.getRuntimePhases();
-        return runtime != null && !runtime.isEmpty() ? runtime : resolvePhases(config);
+        // A runtime list persisted before the arbitration repair existed can carry
+        // the prompt-less phase too; the repair changes no name or index, so the
+        // resume drift guards see the same list.
+        return runtime != null && !runtime.isEmpty()
+                ? DiscussionStylePresets.withNegotiationArbitrationRepaired(config != null ? config.getStyle() : null, runtime)
+                : resolvePhases(config);
     }
 
     /**
