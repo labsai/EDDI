@@ -95,6 +95,13 @@ public class OperatorRevisionCheck {
         });
     }
 
+    /**
+     * Compares the deployed operator's recorded revision with the one this build
+     * ships, and logs a WARN when the operator is older.
+     *
+     * @return what was concluded; every outcome but {@link Outcome#OUTDATED} is
+     *         logged at DEBUG only
+     */
     Outcome check() {
         OptionalInt shipped = shippedRevision();
         if (shipped.isEmpty()) {
@@ -127,6 +134,13 @@ public class OperatorRevisionCheck {
         return Outcome.OUTDATED;
     }
 
+    /**
+     * The revision the Manager in this build provisions, read from
+     * {@value #REVISION_RESOURCE}.
+     *
+     * @return the revision, or empty when the file is absent, unreadable or has no
+     *         integer {@code revision}
+     */
     OptionalInt shippedRevision() {
         try (InputStream in = openRevisionResource()) {
             if (in == null) {
@@ -145,6 +159,11 @@ public class OperatorRevisionCheck {
         return Thread.currentThread().getContextClassLoader().getResourceAsStream(REVISION_RESOURCE);
     }
 
+    /**
+     * The operator configuration as a JSON object, or {@code null} when the
+     * variable is missing, blank, not JSON, or not an object — all of which mean
+     * there is no operator whose revision could be compared.
+     */
     private JsonNode parse(GlobalVariable variable) {
         if (variable == null || variable.value() == null || variable.value().isBlank()) {
             return null;

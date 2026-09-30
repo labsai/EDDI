@@ -99,6 +99,10 @@ function isLiveOperator(config: OperatorConfig | null | undefined): config is Op
   return Boolean(config?.enabled && config.agentId);
 }
 
+/**
+ * Whether the operator's stored instructions are an untouched default, an edit,
+ * or — on a config written before `promptBodyIsDefault` existed — unknowable.
+ */
 export function instructionsState(config: OperatorConfig): InstructionsState {
   if (config.promptBodyIsDefault === true) return "default";
   if (config.promptBodyIsDefault === false) return "customized";
