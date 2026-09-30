@@ -14,6 +14,11 @@ paths around them.
 - **The move was recorded before the turn was admitted.** The descriptor update and the switch
   counter ran when the version was resolved, before the quota check, so a refused turn left the
   descriptor naming a version the conversation never ran on. Both now run when the turn completes.
+- **A queued turn rebuilt over a reloaded memory ran on the stored version's memory.** Main's H13a
+  rebuilds a superseded queued turn over the current document, which holds the version it was
+  stored on. The rebuilt memory now adopts the version resolved for the turn within its own
+  generation (`ConversationService.adoptResolvedAgentVersion`), and the move is recorded against
+  the version that document was stored on.
 - **A failed descriptor update was never retried.** The next turn is already on the new version,
   so it saw no move and the listings named the old version for good. The memory now keeps
   `staleDescriptorAgentVersion` (persisted, absent otherwise) and every turn retries until the

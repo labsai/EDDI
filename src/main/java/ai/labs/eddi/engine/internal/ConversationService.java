@@ -76,6 +76,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -109,6 +110,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     static final String SOFT_DELETED_ACTOR = "system:delete";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
+    /**
+     * How long a cached conversation state is served before the store is asked
+     * again. The cache used to keep entries until size eviction, and several
+     * writers never touch it — another instance, the HITL timeout and crash
+     * recovery paths, a narrow state write — so a stale entry could be served for
+     * the lifetime of the process. Short enough to bound that staleness, long
+     * enough to absorb a client polling the state of a running turn.
+     */
+    public static final Duration CONVERSATION_STATE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String USER_ID = "userId";
 
     private final IAgentFactory agentFactory;
@@ -279,7 +289,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.scheduleStore = scheduleStore;
         this.agentStore = agentStore;
         this.jsonSerialization = jsonSerialization;
-        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
+        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE, CONVERSATION_STATE_CACHE_TTL);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.callerIdentityContext = callerIdentityContext;
@@ -746,26 +756,6 @@ public class ConversationService implements IConversationService, UserErasurePar
             admittedTurn = new ProcessingTurn(processingConversationCount);
             final ProcessingTurn processingTurn = admittedTurn;
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
-                    returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordAgentVersionMove(returnConversationMemory, agentVersion);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        responseHandler.onComplete(memorySnapshot);
-                    });
-
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
             // persisted state and WITHOUT the metrics reference leaking.
@@ -778,35 +768,62 @@ public class ConversationService implements IConversationService, UserErasurePar
                 responseHandler.onSkipped(memorySnapshot);
             };
 
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                }
 
-            Callable<Void> executeConversation;
-            if (rerunOnly) {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.rerun(inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            } else {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.say(inputData.getInput(), inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            }
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                        returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            responseHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation;
+                if (rerunOnly) {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.rerun(inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                } else {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.say(inputData.getInput(), inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                }
+                return withResolutionPrincipal(memory, executeConversation);
+            };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -979,42 +996,49 @@ public class ConversationService implements IConversationService, UserErasurePar
                 }
             };
 
-            // Set the event sink on memory so LifecycleManager and tasks can use it
-            conversationMemory.setEventSink(eventSink);
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
+                // Set the event sink on memory so LifecycleManager and tasks can use it
+                memory.setEventSink(eventSink);
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
-                    returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordAgentVersionMove(returnConversationMemory, agentVersion);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        streamingHandler.onComplete(memorySnapshot);
-                    });
-
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
-
-            Callable<Void> executeConversation = () -> {
-                try {
-                    contextLogger.setLoggingContext(loggingContext);
-                    conversation.say(inputData.getInput(), inputData.getContext());
-                } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                    LOGGER.error(e.getLocalizedMessage(), e);
-                    streamingHandler.onError(e);
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
                 }
-                return null;
+
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                        returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            streamingHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation = () -> {
+                    try {
+                        contextLogger.setLoggingContext(loggingContext);
+                        conversation.say(inputData.getInput(), inputData.getContext());
+                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                        LOGGER.error(e.getLocalizedMessage(), e);
+                        streamingHandler.onError(e);
+                    }
+                    return null;
+                };
+                return withResolutionPrincipal(memory, executeConversation);
             };
 
             // Handler contract (mirrors say()): a skipped turn must terminate the
@@ -1029,7 +1053,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, true, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1705,6 +1729,23 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
+     * A queued turn is rebuilt over the reloaded document when another turn
+     * committed while it waited (see {@code ConversationStepRunner.TurnBuilder}).
+     * That document holds the version it was stored on, not the one resolved for
+     * this turn, so it moves there too — the agent that runs the turn is the one
+     * resolved for it. Only within the conversation's own generation: a
+     * conversation that does not follow versions was resolved to its own.
+     */
+    static void adoptResolvedAgentVersion(IConversationMemory memory, IAgent agent) {
+        Integer resolved = agent.getAgentVersion();
+        Integer generation = memory.getCompatibilityGeneration();
+        if (resolved != null && !Objects.equals(resolved, memory.getAgentVersion()) && generation != null
+                && generation.equals(agent.getCompatibilityGeneration())) {
+            memory.switchAgentVersion(resolved);
+        }
+    }
+
+    /**
      * Once a turn has run on another version than the conversation was stored on:
      * count the move, and point the descriptor — which names the agent version too,
      * and which conversation listings filter on — at the version it ran on.
@@ -1761,10 +1802,12 @@ public class ConversationService implements IConversationService, UserErasurePar
     // on this class, and ConversationHitlService calls the rest by name.
 
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
+                                                     Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
+                                                     boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
+                                                     ProcessingTurn processingTurn)
+            throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, executeConversation, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {

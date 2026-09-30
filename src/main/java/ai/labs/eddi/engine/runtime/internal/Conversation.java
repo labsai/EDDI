@@ -465,9 +465,10 @@ public class Conversation implements IConversation {
     }
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
-        removeOldInvalidProperties();
         if (propertiesAtTurnStart != null && conversationMemory instanceof ConversationMemory cm) {
-            // After the step-scope cleanup, so only what outlives the turn is recorded.
+            // After the step-scope cleanup (the turn's finally block, see
+            // clearStepScopedPropertiesUnlessPaused), so only what outlives the turn is
+            // recorded.
             // A turn completed through a HITL resume runs in a new Conversation without
             // this snapshot and records nothing — undo then leaves its properties as
             // they are, which is the behaviour every turn had before.
@@ -491,6 +492,26 @@ public class Conversation implements IConversation {
         Integer previousVersion = conversationMemory.takePreviousAgentVersion();
         if (previousVersion != null) {
             currentStep.set(MemoryKeys.AGENT_VERSION_CHANGE, Map.of("from", previousVersion, "to", agentVersion));
+        }
+    }
+
+    /**
+     * Drops the {@code step}-scoped properties at the end of a turn — every end,
+     * not just a clean one.
+     * <p>
+     * This used to run only from {@link #postConversationLifecycleTasks()}, which a
+     * turn that fails (ERROR), is cancelled or is abandoned never reaches. The
+     * snapshot of that turn is still persisted, step properties included, so a
+     * value documented as "cleared at the end of the turn" survived into the next
+     * turn's {@code {properties.x}} and behaviour-rule matching after any error.
+     * <p>
+     * A HITL pause is the one exit that keeps them: the step is not over, and the
+     * resume continues the same pipeline, whose later tasks may read what an
+     * earlier task set.
+     */
+    private void clearStepScopedPropertiesUnlessPaused(boolean paused) {
+        if (!paused) {
+            removeOldInvalidProperties();
         }
     }
 
@@ -641,6 +662,7 @@ public class Conversation implements IConversation {
             // Also before the audit flush: TurnAuditBuffer redacts the recorded user
             // input exactly when input:initial reads as the placeholder.
             Set<String> secretInputForms = scrubSecretClientInput();
+            clearStepScopedPropertiesUnlessPaused(paused);
             if (auditBuffer != null) {
                 auditBuffer.addSecretInputForms(secretInputForms);
                 auditBuffer.flush(conversationMemory, searchableSecretContextValues());
@@ -1653,6 +1675,7 @@ public class Conversation implements IConversation {
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
+            clearStepScopedPropertiesUnlessPaused(finalState == ConversationState.AWAITING_HUMAN);
             // Tool-pause safety-net: the batch normally survives clearHitlBookmark()
             // until LlmTask consumes it and clears it. But on any exit where LlmTask
             // did NOT consume it — config drift, a degraded path, an error, or simply

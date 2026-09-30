@@ -116,7 +116,7 @@ class ConversationServiceAgentVersionTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         meterRegistry = new SimpleMeterRegistry();
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
@@ -321,6 +321,46 @@ class ConversationServiceAgentVersionTest {
 
             verify(conversationSetup, never()).updateConversationAgentVersion(anyString(), anyString(), anyInt());
             assertNull(memory.getStaleDescriptorAgentVersion());
+        }
+    }
+
+    /**
+     * A queued turn superseded by another is rebuilt over the reloaded document,
+     * which holds the stored version rather than the one resolved for the turn.
+     */
+    @Nested
+    @DisplayName("a turn rebuilt over a reloaded memory")
+    class RebuiltTurn {
+
+        @Test
+        @DisplayName("moves the reloaded memory to the version resolved for the turn")
+        void reloadedMemoryAdoptsResolvedVersion() {
+            var reloaded = memoryOn(1, 2);
+
+            ConversationService.adoptResolvedAgentVersion(reloaded, agent(3, 2));
+
+            assertEquals(3, reloaded.getAgentVersion());
+            assertEquals(1, reloaded.takePreviousAgentVersion(), "the step records where it moved from");
+        }
+
+        @Test
+        @DisplayName("leaves a conversation that does not follow versions where it is")
+        void pinnedMemoryIsNotMoved() {
+            var reloaded = memoryOn(1, null);
+
+            ConversationService.adoptResolvedAgentVersion(reloaded, agent(3, null));
+
+            assertEquals(1, reloaded.getAgentVersion());
+        }
+
+        @Test
+        @DisplayName("never moves to a version of another generation")
+        void otherGenerationIsNotAdopted() {
+            var reloaded = memoryOn(1, 2);
+
+            ConversationService.adoptResolvedAgentVersion(reloaded, agent(3, 3));
+
+            assertEquals(1, reloaded.getAgentVersion());
         }
     }
 
