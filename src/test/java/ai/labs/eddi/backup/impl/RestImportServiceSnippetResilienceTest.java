@@ -289,6 +289,8 @@ class RestImportServiceSnippetResilienceTest {
         doReturn(Response.status(200).build()).when(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());
 
         var snippetStore = mock(IPromptSnippetStore.class);
+        // Readable, so the merge can snapshot the snippet it overwrites.
+        when(snippetStore.read(EXISTING_SNIPPET_ID, 2)).thenReturn(existing);
         assertThrows(InternalServerErrorException.class, () -> runFailingImport(snippetStore, true));
 
         verify(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());

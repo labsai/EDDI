@@ -101,6 +101,26 @@ public class AutoVaultedSecrets {
         }
     }
 
+    /**
+     * Whether a property name can be the last segment of a slot name without
+     * changing what {@code ${vault:<slot>}} parses to: a {@code /} would re-parse
+     * as a tenant separator, a {@code }} would end the reference early, and a
+     * {@code {} or {@code $} would start another one. Checked when a {@code scope:
+     * "secret"} configuration is saved and again when a templated name is vaulted.
+     */
+    public static boolean isEmbeddable(String propertyName) {
+        if (propertyName == null || propertyName.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < propertyName.length(); i++) {
+            char c = propertyName.charAt(i);
+            if (c == '/' || c == '{' || c == '}' || c == '$' || Character.isISOControl(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Whether a slot name is in the current per-write format. */
     static boolean isCurrentFormat(String keyName) {
         return keyName != null && CURRENT_FORMAT.matcher(keyName).matches();

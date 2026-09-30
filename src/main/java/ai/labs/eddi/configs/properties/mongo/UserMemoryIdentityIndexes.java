@@ -5,10 +5,8 @@
 package ai.labs.eddi.configs.properties.mongo;
 
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
-import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
-import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
@@ -55,7 +53,7 @@ final class UserMemoryIdentityIndexes {
 
     private static final Logger LOGGER = Logger.getLogger(UserMemoryIdentityIndexes.class);
 
-    static final String GLOBAL_INDEX = "idx_um_upsert_global";
+    static final String GLOBAL_INDEX = MongoUserMemoryStore.GLOBAL_KEY_INDEX;
     static final String AGENT_INDEX = "idx_um_upsert_agent";
 
     private static final String FIELD_ID = "_id";
@@ -210,15 +208,5 @@ final class UserMemoryIdentityIndexes {
             names.add(index.getString("name"));
         }
         return names;
-    }
-
-    /**
-     * Whether a write lost a race for an identity to a concurrent first insert. An
-     * upsert whose filter is not a plain equality on the index keys is not retried
-     * by the server, so the store retries it once itself — the second attempt finds
-     * the winner's document and updates it.
-     */
-    static boolean isDuplicateKey(MongoWriteException e) {
-        return e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY;
     }
 }

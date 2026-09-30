@@ -228,7 +228,7 @@ public final class StanceSummaryEngine {
     private static StanceResult summarize(GroupConversation gc, String agentId, List<TranscriptEntry> entries,
                                           int coverage, StanceSummaryConfig config,
                                           SummarizationService summarizationService, int maxChars) {
-        String content = renderForSummarizer(entries);
+        String content = renderForSummarizer(entries, config.maxInputChars(), config.maxEntryChars());
         if (content.isBlank()) {
             return null;
         }
@@ -384,15 +384,64 @@ public final class StanceSummaryEngine {
         return cut.strip() + "…";
     }
 
-    /** Renders one member's contributions as summarizer input, newest last. */
-    private static String renderForSummarizer(List<TranscriptEntry> entries) {
-        var sb = new StringBuilder();
-        for (var e : entries) {
+    /**
+     * G3 defaults for {@link StanceSummaryConfig#maxEntryChars()} and
+     * {@link StanceSummaryConfig#maxInputChars()}. The summarizer input used to be
+     * every contribution the member made this discussion, concatenated — growing
+     * with the discussion, re-sent at every boundary the member spoke at, and
+     * eventually past the summarizer's context window, where every call fails (and
+     * bills). The newest contributions are kept: a stance is where the member
+     * stands NOW.
+     */
+    static final int MAX_SUMMARIZER_ENTRY_CHARS = StanceSummaryConfig.DEFAULT_MAX_ENTRY_CHARS;
+    static final int MAX_SUMMARIZER_INPUT_CHARS = StanceSummaryConfig.DEFAULT_MAX_INPUT_CHARS;
+
+    static String renderForSummarizer(List<TranscriptEntry> entries) {
+        return renderForSummarizer(entries, MAX_SUMMARIZER_INPUT_CHARS, MAX_SUMMARIZER_ENTRY_CHARS);
+    }
+
+    /**
+     * Renders one member's contributions as summarizer input, newest last, bounded
+     * by {@code maxInputChars} (oldest dropped first, with a marker saying how
+     * many) and {@code maxEntryChars} per contribution.
+     */
+    static String renderForSummarizer(List<TranscriptEntry> entries, int maxInputChars, int maxEntryChars) {
+        var blocks = new ArrayList<String>();
+        int used = 0;
+        int omitted = 0;
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            var e = entries.get(i);
             if (e.content() == null || e.content().isBlank()) {
                 continue;
             }
-            sb.append("[").append(e.phaseName() == null ? "" : e.phaseName()).append("] ")
-                    .append(e.content().strip()).append("\n\n");
+            if (used >= maxInputChars) {
+                omitted++;
+                continue;
+            }
+            String content = e.content().strip();
+            if (content.length() > maxEntryChars) {
+                content = content.substring(0, maxEntryChars) + " […]";
+            }
+            String block = "[" + (e.phaseName() == null ? "" : e.phaseName()) + "] " + content;
+            int room = maxInputChars - used;
+            if (block.length() > room) {
+                if (room < 200) {
+                    // Too little left for a meaningful slice — count it as omitted.
+                    omitted++;
+                    used = maxInputChars;
+                    continue;
+                }
+                block = block.substring(0, room) + " […]";
+            }
+            blocks.add(0, block);
+            used += block.length();
+        }
+        var sb = new StringBuilder();
+        if (omitted > 0) {
+            sb.append("[").append(omitted).append(" earlier contribution(s) omitted]\n\n");
+        }
+        for (String block : blocks) {
+            sb.append(block).append("\n\n");
         }
         return sb.toString().strip();
     }

@@ -184,7 +184,7 @@ class RestAgentStoreExtendedTest {
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF1_ID + "?version=2");
-            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri);
+            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri, false);
 
             // Should have updated successfully
             assertNotNull(response);
@@ -199,7 +199,7 @@ class RestAgentStoreExtendedTest {
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/differentId?version=2");
-            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri);
+            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri, false);
 
             assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
         }
@@ -221,7 +221,7 @@ class RestAgentStoreExtendedTest {
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/differentId?version=2");
-            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri);
+            Response response = restAgentStore.updateResourceInAgent(AGENT_ID, 1, newUri, false);
 
             assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=1"),
                     response.getEntity());

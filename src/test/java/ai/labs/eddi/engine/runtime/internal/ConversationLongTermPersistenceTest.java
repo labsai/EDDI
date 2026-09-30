@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import org.junit.jupiter.api.BeforeEach;
@@ -154,6 +155,44 @@ class ConversationLongTermPersistenceTest {
     @Test
     @DisplayName("a group-visible property outside any group is stored as self — reachable by its owner, never wider")
     void groupPropertyWithoutAGroupFallsBackToSelf() throws Exception {
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.self, stored.visibility());
+        assertEquals(List.of(), stored.groupIds());
+    }
+
+    /** An earlier step on which the group orchestrator put the member's group. */
+    private void earlierStepInGroup(String groupId, String groupConversationId) {
+        memory.getCurrentStep().storeData(new Data<Object>("context:groupId", new Context(Context.ContextType.string, groupId)));
+        memory.getCurrentStep()
+                .storeData(new Data<Object>("context:groupConversationId", new Context(Context.ContextType.string, groupConversationId)));
+        memory.startNextStep();
+    }
+
+    @Test
+    @DisplayName("an earlier step's groupId scopes a group property when the running discussion confirms the membership")
+    void earlierStepGroupIdIsUsedWhenVerified() throws Exception {
+        earlierStepInGroup("team-1", "gc-1");
+        when(propertiesHandler.getGroupMembershipCheck())
+                .thenReturn((discussion, conversation, group) -> "gc-1".equals(discussion) && memory.getConversationId().equals(conversation)
+                        && "team-1".equals(group));
+        var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
+        property.setVisibility(Visibility.group);
+
+        UserMemoryEntry stored = persistedAfterTurn(property, new LinkedHashMap<>());
+
+        assertEquals(Visibility.group, stored.visibility());
+        assertEquals(List.of("team-1"), stored.groupIds());
+    }
+
+    @Test
+    @DisplayName("an unverified earlier-step groupId (e.g. forged before ClientContextGuard) does not scope a group property")
+    void earlierStepGroupIdIsIgnoredWhenUnverified() throws Exception {
+        earlierStepInGroup("another-team", "gc-gone");
+        when(propertiesHandler.getGroupMembershipCheck()).thenReturn((discussion, conversation, group) -> false);
         var property = new Property("sprint_goal", "ship billing", Scope.longTerm);
         property.setVisibility(Visibility.group);
 
@@ -431,5 +470,43 @@ class ConversationLongTermPersistenceTest {
 
         assertEquals("new", Conversation.mostSpecificPerKey(List.of(older, newer)).getFirst().id());
         assertEquals("new", Conversation.mostSpecificPerKey(List.of(newer, older)).getFirst().id());
+    }
+
+    @Test
+    @DisplayName("a step-scoped property is dropped even when the turn ERRORs")
+    void stepScopedPropertyIsDroppedWhenTheTurnFails() throws Exception {
+        IExecutableWorkflow failing = workflowThat(() -> {
+            memory.getConversationProperties().put("temp", new Property("temp", "value", Scope.step));
+            throw new LifecycleException("task blew up");
+        });
+
+        Conversation errored = turnWith(failing);
+        assertThrows(LifecycleException.class, () -> errored.say("hi", new LinkedHashMap<>()));
+
+        // The ERROR snapshot is still persisted — before, it carried the step property
+        // into the next turn's {properties.temp} and rule matching.
+        assertEquals(ConversationState.ERROR, memory.getConversationState());
+        assertFalse(memory.getConversationProperties().containsKey("temp"),
+                "step scope means cleared at the end of the turn — a failed turn ends too");
+        assertNull(mirroredProperties().get("temp"));
+    }
+
+    @Test
+    @DisplayName("a step-scoped property survives a HITL pause, and is dropped when the resumed step ends")
+    void stepScopedPropertySurvivesAPauseUntilTheResumedStepEnds() throws Exception {
+        IExecutableWorkflow pausing = workflowThat(() -> {
+            memory.getConversationProperties().put("temp", new Property("temp", "value", Scope.step));
+            throw new ConversationPauseException("wf1", 2, "needs approval");
+        });
+
+        turnWith(pausing).say("hi", new LinkedHashMap<>());
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        assertTrue(memory.getConversationProperties().containsKey("temp"),
+                "the paused step is not over: the resumed pipeline may still read it");
+
+        turnWith(pausing).resume(approved());
+
+        assertFalse(memory.getConversationProperties().containsKey("temp"));
     }
 }

@@ -61,7 +61,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 ### Standalone Development
 
 ```bash
-# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.2), EDDI backend on localhost:7070
+# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 22.23.3), EDDI backend on localhost:7070
 npm install
 npm run dev        # Vite dev server on http://localhost:5174
 ```
@@ -127,7 +127,15 @@ interface ChatConfig {
 
 ## 📦 Embedding
 
-The chat UI can be embedded in any HTML page via iframe:
+The chat UI can be embedded in any HTML page via iframe — **once EDDI is told which pages may do it.** By default `/chat` answers with `Content-Security-Policy: frame-ancestors 'none'`, and the browser refuses to render it in anyone's iframe. List the embedding origins, space-separated:
+
+```properties
+# application.properties, or EDDI_CHAT_FRAME_ANCESTORS in the environment
+# (Helm: eddi.chat.frameAncestors)
+eddi.chat.frame-ancestors=https://www.example.com https://*.example.org
+```
+
+Only `/chat` takes this setting; the Manager and the API always refuse to be framed.
 
 ```html
 <iframe

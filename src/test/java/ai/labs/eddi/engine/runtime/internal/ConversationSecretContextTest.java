@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -46,11 +47,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * A context value the client marks {@code "secret": true} is usable while its
@@ -235,6 +240,27 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("S4: a short secret inside a paused call's serialized arguments is replaced, not only a long one")
+    void shortValueInPendingToolCallArguments() throws Exception {
+        String pin = "4711";
+        doAnswer(invocation -> {
+            var call = new PendingToolCall();
+            call.setToolName("downstream");
+            call.setArgumentsRaw("{\"pin\":\"" + pin + "\",\"note\":\"order 14711\"}");
+            var batch = new PendingToolCallBatch();
+            batch.setCalls(List.of(call));
+            memory.setHitlPendingToolCalls(batch);
+            throw new ConversationPauseException("wf1", 1, "gated", PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(pin, true));
+
+        PendingToolCallBatch persisted = memory.getHitlPendingToolCalls();
+        assertNotNull(persisted);
+        assertEquals("{\"pin\":\"" + PLACEHOLDER + "\",\"note\":\"order 14711\"}", persisted.getCalls().getFirst().getArgumentsRaw());
+    }
+
+    @Test
     @DisplayName("a numeric leaf of a secret object is replaced where a task copied it")
     void numericSecretLeaf() throws Exception {
         doAnswer(invocation -> {
@@ -282,11 +308,117 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("S4: a short secret copied whole into a property, a datum, the longTerm store and the audit trail is replaced there")
+    void shortValueReplacedWhereAValueIsTheSecret() throws Exception {
+        String pin = "4711";
+        IUserMemoryStore store = mock(IUserMemoryStore.class);
+        lenient().when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
+        List<AuditEntry> ledger = new ArrayList<>();
+        memory.setAuditCollector(ledger::add);
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("pin", new Property("pin", pin, Scope.conversation));
+            memory.getConversationProperties().put("rememberedPin", new Property("rememberedPin", pin, Scope.longTerm));
+            memory.getConversationProperties().put("pinNumber", new Property("pinNumber", 4711, Scope.conversation));
+            memory.getCurrentStep().storeData(new Data<>("httpCalls:request", Map.of("pin", pin, "note", "order 14711 shipped")));
+            memory.getAuditCollector().collect(new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.httpcalls", "httpcalls", 0,
+                    1L, Map.of("userInput", "hello"), Map.of("pin", pin), null, null, List.of(), 0.0, Instant.now(), null, null));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("hello", contexts(pin, true));
+
+        assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pin").getValueString());
+        assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pinNumber").getValueString());
+        IData<Object> request = memory.getCurrentStep().getLatestData("httpCalls:request");
+        assertNotNull(request);
+        @SuppressWarnings("unchecked")
+        var requestMap = (Map<String, Object>) request.getResult();
+        assertEquals(PLACEHOLDER, requestMap.get("pin"));
+        assertEquals("order 14711 shipped", requestMap.get("note"), "a short value is never replaced INSIDE other text");
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, atLeastOnce()).upsert(written.capture());
+        written.getAllValues().forEach(entry -> assertFalse(pin.equals(String.valueOf(entry.value())), "written: " + entry.value()));
+
+        assertEquals(1, ledger.size());
+        assertEquals(PLACEHOLDER, ledger.getFirst().output().get("pin"));
+    }
+
+    @Test
+    @DisplayName("S4: true/false and values under four characters are never exact-matched")
+    void trivialValuesAreNotExactMatched() throws Exception {
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("flag", new Property("flag", "true", Scope.conversation));
+            memory.getConversationProperties().put("code", new Property("code", "abc", Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object, Map.of("enabled", true, "tag", "abc"));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("settings", secretObject));
+
+        assertEquals("true", memory.getConversationProperties().get("flag").getValueString());
+        assertEquals("abc", memory.getConversationProperties().get("code").getValueString());
+    }
+
+    @Test
+    @DisplayName("review #4: leaves of a secret OBJECT are never exact-matched — unrelated equal values survive")
+    void objectLeavesAreNotExactMatched() throws Exception {
+        doAnswer(invocation -> {
+            memory.getConversationProperties().put("preferredPort", new Property("preferredPort", "8080", Scope.longTerm));
+            memory.getConversationProperties().put("scheme", new Property("scheme", "Bearer", Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretObject = new Context(Context.ContextType.object,
+                Map.of("token", TOKEN, "tokenType", "Bearer", "port", 8080));
+        secretObject.setSecret(true);
+
+        conversation().say("hello", Map.of("oauth", secretObject));
+
+        assertEquals("8080", memory.getConversationProperties().get("preferredPort").getValueString());
+        assertEquals("Bearer", memory.getConversationProperties().get("scheme").getValueString());
+    }
+
+    @Test
     @DisplayName("JSON: the flag is read from requests and omitted from entries that do not set it")
     void contextJson() throws Exception {
         Context parsed = MAPPER.readValue("{\"type\":\"string\",\"value\":\"x\",\"secret\":true}", Context.class);
         assertInstanceOf(Boolean.class, parsed.getSecret());
         assertTrue(parsed.getSecret());
         assertFalse(MAPPER.writeValueAsString(new Context(Context.ContextType.string, "x")).contains("secret"));
+    }
+
+    /**
+     * A loaded longTerm property is scrubbed in place. The baseline the turn-end
+     * write diffs against used to hold the SAME object, so the scrubbed value
+     * looked unchanged and the store was never told — it kept the secret.
+     */
+    private void initWithStoredLongTerm(String key, Object storedValue, String secret) throws Exception {
+        IUserMemoryStore store = mock(IUserMemoryStore.class);
+        when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
+        var entry = new UserMemoryEntry(null, "user1", key, storedValue, "general", Visibility.self, "agent1", List.of(), "conv0", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getVisibleEntries(anyString(), anyString(), anyList(), anyString(), anyInt())).thenReturn(List.of(entry));
+
+        conversation().init(contexts(secret, true));
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, atLeastOnce()).upsert(written.capture());
+        var forKey = written.getAllValues().stream().filter(e -> key.equals(e.key())).toList();
+        assertFalse(forKey.isEmpty(), "the scrubbed longTerm property must be written back");
+        forKey.forEach(e -> assertFalse(String.valueOf(e.value()).contains(secret), "written: " + e.value()));
+        assertTrue(String.valueOf(forKey.getLast().value()).contains(PLACEHOLDER), "written: " + forKey.getLast().value());
+    }
+
+    @Test
+    @DisplayName("a longTerm property loaded from user memory and scrubbed during init() is persisted as the placeholder")
+    void loadedLongTermScrubbedDuringInitIsPersisted() throws Exception {
+        initWithStoredLongTerm("rememberedToken", "Bearer " + TOKEN, TOKEN);
+    }
+
+    @Test
+    @DisplayName("S4: a loaded longTerm property that IS a short secret is persisted as the placeholder")
+    void loadedLongTermShortSecretScrubbedDuringInitIsPersisted() throws Exception {
+        initWithStoredLongTerm("rememberedPin", "4711", "4711");
     }
 }

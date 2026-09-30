@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.LegacyTarget;
@@ -39,7 +39,7 @@ class ChannelTargetRouterBranchCoverageTest {
     @Mock
     private IDocumentDescriptorStore descriptorStore;
     @Mock
-    private IRestAgentAdministration agentAdmin;
+    private IDeploymentStatusReader agentAdmin;
     @Mock
     private IAgentStore agentStore;
     @Mock
@@ -60,7 +60,7 @@ class ChannelTargetRouterBranchCoverageTest {
         // Stub stores to return empty so refresh works without errors
         when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of());
-        when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
+        when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(List.of());
 
         router = new ChannelTargetRouter(channelStore, descriptorStore,
                 agentAdmin, agentStore, secretResolver, cacheFactory);

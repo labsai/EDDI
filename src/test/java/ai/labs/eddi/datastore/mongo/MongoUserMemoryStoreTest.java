@@ -483,6 +483,161 @@ class MongoUserMemoryStoreTest extends MongoTestBase {
         }
     }
 
+    // ─── Owner-conditional global write ─────────────────────────
+
+    @Nested
+    @DisplayName("upsertIfOwnedBy")
+    class OwnerConditionalGlobalWrite {
+
+        private MongoUserMemoryStore owned;
+
+        /**
+         * The outer @BeforeEach drops the collection, and its indexes with it, so build
+         * the store again here: the unique global-key index is what these tests
+         * exercise.
+         */
+        @BeforeEach
+        void freshStoreWithIndexes() {
+            owned = new MongoUserMemoryStore(getDatabase());
+        }
+
+        @Test
+        @DisplayName("a free key is written and stamped with the writer as owner")
+        void freeKeyIsClaimed() throws Exception {
+            assertTrue(owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a"));
+
+            var stored = owned.getAllEntries("u-own");
+            assertEquals(1, stored.size());
+            assertEquals("agent-a", stored.getFirst().sourceAgentId());
+            assertEquals("en", stored.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("the owner can update its own key")
+        void ownerUpdates() throws Exception {
+            owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a");
+
+            assertTrue(owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "de", "agent-a"), "agent-a"));
+
+            var stored = owned.getAllEntries("u-own");
+            assertEquals(1, stored.size());
+            assertEquals("de", stored.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("another agent's key is refused and left untouched")
+        void otherAgentsKeyIsRefused() throws Exception {
+            owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a");
+
+            assertFalse(owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-b"), "agent-b"));
+
+            var stored = owned.getAllEntries("u-own");
+            assertEquals(1, stored.size(), "a refused write must not add a second global entry");
+            assertEquals("en", stored.getFirst().value());
+            assertEquals("agent-a", stored.getFirst().sourceAgentId());
+        }
+
+        @Test
+        @DisplayName("a key with no recorded owner is refused")
+        void ownerlessKeyIsRefused() throws Exception {
+            // mergeProperties writes global entries without an owning agent
+            var props = new Properties();
+            props.put("lang", "en");
+            owned.mergeProperties("u-own", props);
+
+            assertFalse(owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-a"), "agent-a"));
+            assertEquals("en", owned.readProperties("u-own").get("lang"));
+        }
+
+        @Test
+        @DisplayName("a key with a blank owner is refused")
+        void blankOwnerIsRefused() throws Exception {
+            owned.upsert(ownedGlobal("u-own", "lang", "en", ""));
+
+            assertFalse(owned.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-a"), "agent-a"));
+            assertEquals("en", owned.getAllEntries("u-own").getFirst().value());
+        }
+
+        @Test
+        @DisplayName("agents racing for a fresh key: exactly one wins, and its value and ownership stick")
+        void concurrentClaimsHaveOneWinner() throws Exception {
+            for (int round = 0; round < 10; round++) {
+                String key = "race-" + round;
+                List<String> winners = raceForFreshKey(owned::upsertIfOwnedBy, "u-race", key, 8);
+
+                assertEquals(1, winners.size(), "round " + round + ": winners " + winners);
+                List<UserMemoryEntry> stored = owned.getAllEntries("u-race").stream().filter(e -> key.equals(e.key())).toList();
+                assertEquals(1, stored.size(), "round " + round + ": one global entry per key");
+                assertEquals(winners.getFirst(), stored.getFirst().sourceAgentId());
+                assertEquals("value-of-" + winners.getFirst(), stored.getFirst().value(),
+                        "the loser's value must not overwrite the winner's");
+            }
+        }
+
+        @Test
+        @DisplayName("concurrent plain upserts of a fresh global key leave one entry and do not fail")
+        void concurrentPlainUpsertsDoNotDuplicate() throws Exception {
+            List<String> applied = raceForFreshKey((entry, agent) -> owned.upsert(entry) != null, "u-plain", "shared", 8);
+
+            assertEquals(8, applied.size(), "every plain upsert must succeed, the losers by updating");
+            assertEquals(1, owned.getAllEntries("u-plain").size());
+        }
+
+        @Test
+        @DisplayName("the store builds the unique partial index on global keys")
+        void uniqueGlobalKeyIndexExists() {
+            Document index = null;
+            for (Document candidate : getDatabase().getCollection("usermemories").listIndexes()) {
+                if ("idx_um_upsert_global".equals(candidate.getString("name"))) {
+                    index = candidate;
+                }
+            }
+            assertNotNull(index);
+            assertEquals(Boolean.TRUE, index.getBoolean("unique"));
+            assertEquals(new Document("visibility", "global"), index.get("partialFilterExpression"));
+        }
+    }
+
+    /**
+     * Starts {@code agents} writers on the same fresh global key at once and
+     * returns which of them the store reported as applied.
+     */
+    private static List<String> raceForFreshKey(Store target, String userId, String key, int agents) throws Exception {
+        var pool = Executors.newFixedThreadPool(agents);
+        try {
+            var start = new CountDownLatch(1);
+            List<Future<String>> results = new ArrayList<>();
+            for (int i = 0; i < agents; i++) {
+                String agent = "agent-" + i;
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return target.write(ownedGlobal(userId, key, "value-of-" + agent, agent), agent) ? agent : null;
+                }));
+            }
+            start.countDown();
+            List<String> winners = new ArrayList<>();
+            for (Future<String> result : results) {
+                String winner = result.get(30, TimeUnit.SECONDS);
+                if (winner != null) {
+                    winners.add(winner);
+                }
+            }
+            return winners;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @FunctionalInterface
+    private interface Store {
+        boolean write(UserMemoryEntry entry, String agentId) throws Exception;
+    }
+
+    private static UserMemoryEntry ownedGlobal(String userId, String key, String value, String agentId) {
+        return new UserMemoryEntry(null, userId, key, value, "fact", Visibility.global, agentId, List.of(), "conv-own", false, 0, null,
+                null);
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private static UserMemoryEntry globalEntry(String userId, String key, String value, String agentId) {

@@ -30,9 +30,9 @@ import java.util.regex.Pattern;
  * <p>
  * The rule: every credential reference in the rendered value must also appear
  * in the configuration template of that same field — or be the value of a
- * property the template names that {@code PropertySetterTask.autoVaultSecret}
- * itself wrote, which {@link Property#getAutoVaulted()} records. Anything else
- * came from data, and the call is refused rather than resolved.
+ * property the template names that {@code SecretPropertyVault} itself wrote,
+ * which {@link Property#getAutoVaulted()} records. Anything else came from
+ * data, and the call is refused rather than resolved.
  * <p>
  * {@code ${vars:...}} is not itself a credential reference: global variables
  * hold configuration such as model names and base URLs, and resolving one a
@@ -43,8 +43,12 @@ import java.util.regex.Pattern;
  * variable expansion, with the configured template expanded the same way. This
  * class is unchanged by that: it only ever compares the references of a
  * configured value against the references of a rendered one.
+ * <p>
+ * The builder parameters of an LLM task, a cascade step and a cascade judge are
+ * resolved the same way — by {@code ChatModelRegistry}, after templating — so
+ * {@link #requireConfiguredParameters} applies this rule to them too.
  */
-final class ConfigReferenceGuard {
+public final class ConfigReferenceGuard {
 
     /** The references resolved after templating that release a credential. */
     static final Pattern CREDENTIAL_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|connection|caller):[^}]*\\}");
@@ -53,6 +57,11 @@ final class ConfigReferenceGuard {
      * {@code {properties.name}} and {@code properties.name} inside a template
      * expression.
      */
+    /**
+     * A global variable reference: not a credential, but a variable may hold one.
+     */
+    private static final Pattern VARS_REFERENCE = Pattern.compile("\\$\\{vars:[^}]*\\}");
+
     private static final Pattern PROPERTY_ACCESS = Pattern.compile("properties\\.([A-Za-z0-9_\\-]+)");
 
     private ConfigReferenceGuard() {
@@ -74,8 +83,8 @@ final class ConfigReferenceGuard {
      *             if {@code rendered} holds a credential reference the
      *             configuration did not write
      */
-    static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
-                                            Map<String, Property> conversationProperties) {
+    public static void requireConfiguredReferences(String template, String rendered, String location, Map<String, Object> templateData,
+                                                   Map<String, Property> conversationProperties) {
         if (rendered == null || !rendered.contains("${")) {
             return;
         }
@@ -89,6 +98,73 @@ final class ConfigReferenceGuard {
                         + " so the call is refused.");
             }
         }
+    }
+
+    /**
+     * {@link #requireConfiguredReferences} over every rendered parameter of a model
+     * client, plus the {@code ${vars:…}} indirection.
+     * <p>
+     * The builder parameters of an LLM task, a cascade step and a cascade judge are
+     * all resolved by {@code ChatModelRegistry} after templating — global variables
+     * first, then {@code ${vault:…}} — so a reference conversation data put into
+     * one used to be resolved with no grant check and handed to the provider
+     * client. The httpcall path guards {@code ${vars:…}} by guarding again after
+     * expansion; here expansion happens later, in the registry, so a data-supplied
+     * variable reference is refused outright.
+     *
+     * @param configured
+     *            the parameters as configured, before templating
+     * @param rendered
+     *            the same parameters after templating
+     * @param exempt
+     *            keys that are never resolved (the prompts) and so may carry
+     *            reference-shaped text from the conversation
+     * @param what
+     *            the owner of the parameters, for the message (e.g. {@code "LLM"})
+     * @throws IllegalArgumentException
+     *             naming the first parameter that carries a reference its template
+     *             did not write
+     */
+    public static void requireConfiguredParameters(Map<String, String> configured, Map<String, String> rendered, Set<String> exempt,
+                                                   String what, Map<String, Object> templateData, Map<String, Property> conversationProperties) {
+        if (rendered == null) {
+            return;
+        }
+        for (var entry : rendered.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if ((exempt != null && exempt.contains(key)) || value == null || !value.contains("${")) {
+                continue;
+            }
+            String template = configured != null ? configured.get(key) : null;
+            String location = what + " parameter '" + key + "'";
+            requireConfiguredReferences(template, value, location, templateData, conversationProperties);
+            Set<String> configuredVariables = variableReferences(template);
+            Matcher variables = VARS_REFERENCE.matcher(value);
+            while (variables.find()) {
+                String reference = variables.group();
+                if (!configuredVariables.contains(reference)) {
+                    throw new IllegalArgumentException(location + " contains the reference " + reference
+                            + ", which the agent configuration does not write there: it came from conversation data (user input, a model "
+                            + "reply, an API response or client context). References are only resolved where the configuration wrote them.");
+                }
+            }
+        }
+    }
+
+    /**
+     * The {@code ${vars:…}} references {@code template} writes — matched as whole
+     * references, like {@link #references}, not as substrings.
+     */
+    private static Set<String> variableReferences(String template) {
+        Set<String> found = new LinkedHashSet<>();
+        if (template != null) {
+            Matcher matcher = VARS_REFERENCE.matcher(template);
+            while (matcher.find()) {
+                found.add(matcher.group());
+            }
+        }
+        return found;
     }
 
     private static Set<String> references(String value) {
@@ -105,13 +181,13 @@ final class ConfigReferenceGuard {
     /**
      * The auto-vault references of the properties {@code template} names.
      * <p>
-     * A property qualifies only when {@code PropertySetterTask.autoVaultSecret}
-     * wrote its value — the {@link Property#getAutoVaulted()} marker, which that
-     * method is the only writer of. This is a provenance test, not a shape test:
-     * the value a {@code scope: "secret"} instruction stores is a plain
-     * conversation-scoped string, character-for-character reproducible by anyone
-     * who can write a property, so no amount of inspecting the value can establish
-     * where it came from. Only a marker set at the moment of vaulting can.
+     * A property qualifies only when {@code SecretPropertyVault} wrote its value —
+     * the {@link Property#getAutoVaulted()} marker, which that class is the only
+     * writer of. This is a provenance test, not a shape test: the value a
+     * {@code scope: "secret"} instruction stores is a plain conversation-scoped
+     * string, character-for-character reproducible by anyone who can write a
+     * property, so no amount of inspecting the value can establish where it came
+     * from. Only a marker set at the moment of vaulting can.
      * <p>
      * <b>The marker is necessary, not sufficient.</b> The value must still be this
      * conversation's own auto-vault reference for the property the template names,
@@ -119,13 +195,13 @@ final class ConfigReferenceGuard {
      * {@code <agentId>.u<userHash>.<nonce>.<name>} of this conversation's agent,
      * user and property (see {@code AutoVaultedSecrets}), or — for a conversation
      * vaulted before slots became per-write — the legacy {@code <agentId>.<name>}.
-     * The marker already implies all three, because {@code autoVaultSecret} derives
-     * them itself — so the comparison is redundant by construction and deliberately
-     * kept anyway, as the bound that still holds if a marked {@code Property} ever
-     * reaches memory from somewhere other than that method (a restored document, a
-     * future writer). A marked property whose tenant has since been rewritten under
-     * it fails this comparison and the call is refused, which is the safe direction
-     * of that corner.
+     * The marker already implies all three, because {@code SecretPropertyVault}
+     * derives them itself — so the comparison is redundant by construction and
+     * deliberately kept anyway, as the bound that still holds if a marked
+     * {@code Property} ever reaches memory from somewhere other than that method (a
+     * restored document, a future writer). A marked property whose tenant has since
+     * been rewritten under it fails this comparison and the call is refused, which
+     * is the safe direction of that corner.
      * <p>
      * Built by string comparison rather than a pattern compiled per call, so there
      * is no dynamic regex to reason about.
@@ -195,9 +271,9 @@ final class ConfigReferenceGuard {
     }
 
     /**
-     * The conversation's tenant, read the same way
-     * {@code PropertySetterTask.autoVaultSecret} reads it: the {@code valueString}
-     * of the {@code tenantId} property, defaulting to {@code default}.
+     * The conversation's tenant, read the same way {@code SecretPropertyVault}
+     * reads it: the {@code valueString} of the {@code tenantId} property,
+     * defaulting to {@code default}.
      */
     private static String tenantId(Map<String, Property> conversationProperties) {
         Property tenant = conversationProperties.get("tenantId");

@@ -119,7 +119,7 @@ class ConversationServiceHitlCoverageTest {
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         lenient().doReturn(new HashMap<String, String>()).when(contextLogger)
                 .createLoggingContext(any(), any(), any(), any());
         meterRegistry = new SimpleMeterRegistry();

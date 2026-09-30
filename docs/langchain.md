@@ -731,8 +731,8 @@ the builder does read; `threadCount` is deliberately absent from it — see
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
-| `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
-| `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
+| `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
+| `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
@@ -745,6 +745,7 @@ the builder does read; `threadCount` is deliberately absent from it — see
 | `ragDefaults`              | object   | `maxResults` / `minScore` applied under `enableWorkflowRag`; falls back to each KB's own defaults | (KB defaults) |
 | `httpCallRag`              | string   | Name of an httpCall to execute as a search, injecting its response as `## Search Results:`. Needs no vector store and no workflow step, but calls an **external** search API — it cannot query an EDDI knowledge base | (none) |
 | `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `markRagProvenance`        | boolean  | Wrap retrieved context in a `[retrieved context — source '…' …]` … `[end of retrieved context]` envelope that marks it as data, not instructions, before it joins the system prompt. The envelope adds about 200 characters on top of `maxRagContextChars` | true |
 | **Prompt & History Limits** |         |                                                  |                        |
 | `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
 | `conversationSummary`      | object   | Rolling conversation summary — see [Rolling Conversation Summary](#rolling-conversation-summary) | (none) |
@@ -1131,6 +1132,20 @@ The engine clamps these so a config cannot pin a pipeline thread: at most 10 att
 30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
 A clamped value is reported once in a WARN.
 
+**In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
+a tool-calling turn resends that one request — with every tool result gathered so far — rather
+than restarting the turn. Tools that already ran are never executed again by a retry. The
+60-second backoff ceiling still applies to the **whole turn**: every model request of one tool
+loop draws from the same budget, so a long tool loop cannot sleep for a minute per request. (A
+HITL resume continues the turn with a fresh budget.)
+
+When `convertToObject` requests the provider's native JSON mode and the call still fails after
+its retries, the engine falls back to a plain request only if the failure could mean "JSON mode
+is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice. A
+self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
+rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
+on that task (see the provider matrix below) so the format is never sent.
+
 ### Rolling Conversation Summary
 
 The third windowing strategy compresses older turns into a running summary that is injected into
@@ -1159,6 +1174,8 @@ back into the full text through the `conversationRecall` built-in tool.
 | `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
+| `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
+| `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
 Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
 the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A requested range such as
@@ -1274,7 +1291,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
-| **Smart Caching** | Deduplicates identical tool calls, partitioned per identity            | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
+| **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 
 #### Tool names: dispatch name vs. configuration slug
@@ -1336,10 +1353,24 @@ Negative `toolPricing` values are clamped to 0.0.
 
 #### Tool cache scoping
 
-Cached tool results are partitioned by identity. The cache key is
-`scopeTag|toolName:arguments`, and the scope tag is resolved per tool call as
-`toolCacheScopes[<dispatch name>]` → `toolCacheScopes[<slug>]` →
-`defaultToolCacheScope` → `user`:
+**What is cached.** Built-in tools, except the stateful ones (artifacts, group
+tasks, dynamic agents, memory, recall), which are never cached. **HTTP-call, MCP and
+A2A tools are not cached unless the task names the tool in `toolCacheScopes`.**
+Those tools reach systems EDDI does not control and can have side effects — a POST,
+an MCP write, a request to another agent — and a cache hit does not execute the
+call: before this rule, a second identical order placed within the TTL was answered
+from the cache and never placed. Naming a tool in `toolCacheScopes`
+(`{"lookupCustomer": "user"}`) is the explicit statement that repeating the call is
+safe to skip; do it only for read-only tools.
+
+Cached tool results are partitioned by identity, by the tool's source and by the
+agent. The cache key is `scopeTag|src:<source>|agent:<agentId>|toolName:arguments`
+— the agent segment is left out only for a built-in on the `global` scope, whose
+definition is the same for every agent. Without the source and agent segments, two
+agents serving the same user (or every scheduled run, which share the scheduler's
+identity) shared entries for any tool name they had in common. The scope tag is
+resolved per tool call as `toolCacheScopes[<dispatch name>]` →
+`toolCacheScopes[<slug>]` → `defaultToolCacheScope` → `user`:
 
 | Scope          | Tag                                    | A cached result is reused…                     |
 | -------------- | -------------------------------------- | ---------------------------------------------- |
@@ -1523,7 +1554,7 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
 | **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
-| **3. Validation** | Pre-parse `startsWith("{")` check before deserialization | All providers |
+| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn | All providers |
 
 If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
 
@@ -1718,8 +1749,8 @@ All LLM tools execute **inside a conversation pipeline**. The full execution pat
 
 ```
 LlmTask.execute(memory)
-  └─→ AgentOrchestrator.buildToolList(memory, config)
-      └─→ Constructs tool instances with conversation context
+  └─→ AgentOrchestrator.buildToolSetup(task, memory)
+      └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -1727,7 +1758,7 @@ LlmTask.execute(memory)
 
 ### Implicit Context
 
-`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it from their `ToolSourceProvider`, which gets the memory in the `ToolAssemblyContext` at tool-assembly time.
 
 This means:
 - **No ThreadLocal** or request-scoped beans needed

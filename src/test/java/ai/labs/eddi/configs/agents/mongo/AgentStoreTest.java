@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.net.URI;
@@ -101,6 +102,122 @@ class AgentStoreTest {
 
             assertThrows(RuntimeException.class,
                     () -> agentStore.update("aabbccdd11223344eeff5566", 1, config));
+        }
+    }
+
+    /**
+     * The compatibility generation is the store's to assign: it decides which
+     * versions running conversations may move between, so a value in the body —
+     * copied forward, exported, synced or forged — must never survive a write.
+     */
+    @Nested
+    @DisplayName("compatibility generation")
+    class CompatibilityGeneration {
+
+        private static final String ID = "aabbccdd11223344eeff5566";
+
+        private AgentConfiguration withGeneration(Integer generation) {
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            config.setCompatibilityGeneration(generation);
+            return config;
+        }
+
+        /**
+         * Version 2 is current and holds {@code previous}; returns what update writes.
+         */
+        @SuppressWarnings("unchecked")
+        private AgentConfiguration update(AgentConfiguration previous, AgentConfiguration next, Boolean compatible) throws Exception {
+            IResourceStorage.IResource<AgentConfiguration> stored = mock(IResourceStorage.IResource.class);
+            when(stored.getId()).thenReturn(ID);
+            when(stored.getVersion()).thenReturn(2);
+            when(stored.getData()).thenReturn(previous);
+            doReturn(stored).when(resourceStorage).read(ID, 2);
+            doReturn(mock(IResourceStorage.IResource.class)).when(resourceStorage).newResource(eq(ID), eq(3), any());
+
+            if (compatible == null) {
+                agentStore.update(ID, 2, next);
+            } else {
+                agentStore.update(ID, 2, next, compatible);
+            }
+            var written = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(resourceStorage).newResource(eq(ID), eq(3), written.capture());
+            return written.getValue();
+        }
+
+        @Test
+        @DisplayName("a new agent starts at generation 1, whatever the body claims")
+        @SuppressWarnings("unchecked")
+        void createStartsAtOne() throws Exception {
+            IResourceStorage.IResource<AgentConfiguration> created = mock(IResourceStorage.IResource.class);
+            when(created.getId()).thenReturn(ID);
+            when(created.getVersion()).thenReturn(1);
+            doReturn(created).when(resourceStorage).newResource(any());
+            var config = withGeneration(7);
+
+            agentStore.create(config);
+
+            var written = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(resourceStorage).newResource(written.capture());
+            assertEquals(1, written.getValue().getCompatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("a compatible update keeps the previous generation")
+        void compatibleKeepsGeneration() throws Exception {
+            assertEquals(3, update(withGeneration(3), withGeneration(null), true).getCompatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("an update not declared compatible is breaking: the next generation")
+        void breakingAdvancesGeneration() throws Exception {
+            assertEquals(4, update(withGeneration(3), withGeneration(null), false).getCompatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("the plain update is breaking")
+        void plainUpdateIsBreaking() throws Exception {
+            assertEquals(4, update(withGeneration(3), withGeneration(null), null).getCompatibilityGeneration());
+        }
+
+        /**
+         * The Manager saves by sending back the configuration it read, so the body
+         * routinely carries the previous version's generation. Honouring it would make
+         * every save compatible; a forged higher one would split a chain.
+         */
+        @Test
+        @DisplayName("a generation in the body is ignored in both directions")
+        void bodyValueIgnored() throws Exception {
+            assertEquals(4, update(withGeneration(3), withGeneration(3), false).getCompatibilityGeneration(),
+                    "a copied-forward generation must not make a breaking save compatible");
+        }
+
+        @Test
+        @DisplayName("a forged generation in the body cannot pull a compatible save onto another chain")
+        void forgedBodyValueIgnored() throws Exception {
+            assertEquals(3, update(withGeneration(3), withGeneration(99), true).getCompatibilityGeneration());
+        }
+
+        /**
+         * A version stored before generations existed is compatible only with itself,
+         * so its conversations stay pinned even when the next save is declared
+         * compatible: there is no chain to continue, only one to start.
+         */
+        @Test
+        @DisplayName("after a version without a generation, the next one starts a chain at 1 either way")
+        void legacyPreviousStartsAChain() throws Exception {
+            assertEquals(1, update(withGeneration(null), withGeneration(null), true).getCompatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("nextCompatibilityGeneration covers the whole rule")
+        void ruleTable() {
+            assertEquals(1, AgentStore.nextCompatibilityGeneration(null, true));
+            assertEquals(1, AgentStore.nextCompatibilityGeneration(null, false));
+            assertEquals(1, AgentStore.nextCompatibilityGeneration(withGeneration(null), true));
+            assertEquals(1, AgentStore.nextCompatibilityGeneration(withGeneration(null), false));
+            assertEquals(5, AgentStore.nextCompatibilityGeneration(withGeneration(5), true));
+            assertEquals(6, AgentStore.nextCompatibilityGeneration(withGeneration(5), false));
         }
     }
 

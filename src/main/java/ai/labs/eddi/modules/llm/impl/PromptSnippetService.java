@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -166,6 +167,26 @@ public class PromptSnippetService {
      */
     private final Set<String> collisionsWarned = ConcurrentHashMap.newKeySet();
 
+    /**
+     * The last snippets that loaded successfully, served while the store is
+     * failing. Survives cache invalidation and expiry on purpose: it is what keeps
+     * a safety snippet in the prompt through a transient database outage.
+     */
+    private volatile Loaded lastLoaded;
+
+    /**
+     * When the last load failed ({@code 0} = it did not). For
+     * {@link #FAILURE_BACKOFF_MS} after a failure the store is not asked again —
+     * during an outage every turn would otherwise block on the driver's timeout.
+     */
+    private volatile long lastFailureAtMs;
+
+    /** Serializes store reads; see {@link #load()}. */
+    private final ReentrantLock loadLock = new ReentrantLock();
+
+    /** How long a failed load is remembered before the store is tried again. */
+    static final long FAILURE_BACKOFF_MS = 10_000L;
+
     @Inject
     public PromptSnippetService(IPromptSnippetStore snippetStore,
             IDocumentDescriptorStore descriptorStore,
@@ -257,8 +278,13 @@ public class PromptSnippetService {
             }
         }
 
-        Map<String, Object> scoped = resolveScoped(load().entries(), agentDescriptor);
-        publish(generation, () -> agentSnippetCache.put(cacheKey, scoped));
+        Loaded loaded = load();
+        Map<String, Object> scoped = resolveScoped(loaded.entries(), agentDescriptor);
+        // A view built from a fallback (the store failing, or a load in flight) is
+        // served but not cached, so the next turn resolves from a fresh load (M-L6).
+        if (loaded.fresh()) {
+            publish(generation, () -> agentSnippetCache.put(cacheKey, scoped));
+        }
         return scoped;
     }
 
@@ -272,6 +298,8 @@ public class PromptSnippetService {
             snippetCache.invalidateAll();
             agentSnippetCache.invalidateAll();
         }
+        // An explicit invalidation (a snippet was just saved) retries at once.
+        lastFailureAtMs = 0L;
         LOGGER.debug("Snippet cache invalidated");
     }
 
@@ -331,12 +359,64 @@ public class PromptSnippetService {
         }
 
         cacheMissCounter.increment();
-        List<SnippetEntry> entries = loadAllSnippets();
-        Loaded loaded = new Loaded(entries, resolveUnscoped(entries));
-        publish(generation, () -> snippetCache.put(CACHE_KEY, loaded));
-        return loaded;
+        // One load at a time (single flight). Without it, every request that missed
+        // the cache in the same instant read the store on its own before the first
+        // failure could set the backoff — during an outage, a burst of request threads
+        // each blocked on the driver's timeout. A caller that finds a load in flight
+        // takes the last good set instead of queueing; only a caller with nothing to
+        // fall back on (the very first load) waits for it.
+        if (lastLoaded != null) {
+            if (!loadLock.tryLock()) {
+                return lastLoadedOrEmpty();
+            }
+        } else {
+            loadLock.lock();
+        }
+        try {
+            // Re-check under the lock: the load this caller waited for may have filled
+            // the cache or recorded a failure.
+            cached = snippetCache.getIfPresent(CACHE_KEY);
+            if (cached != null) {
+                return cached;
+            }
+            long failedAt = lastFailureAtMs;
+            if (failedAt != 0 && System.currentTimeMillis() - failedAt < FAILURE_BACKOFF_MS) {
+                return lastLoadedOrEmpty();
+            }
+            List<SnippetEntry> entries = loadAllSnippets();
+            if (entries == null) {
+                lastFailureAtMs = System.currentTimeMillis();
+                // A failed load is NOT cached (M-L6). It used to be, as an empty map, for
+                // the full five-minute TTL: one transient store error and every prompt
+                // rendered {snippets.x} — safety instructions included — as blank for
+                // five minutes, with nothing but one ERROR line to show for it. Serve the
+                // last good set instead, and try the store again after the backoff.
+                return lastLoadedOrEmpty();
+            }
+            lastFailureAtMs = 0L;
+            Loaded loaded = new Loaded(entries, resolveUnscoped(entries), true);
+            lastLoaded = loaded;
+            publish(generation, () -> snippetCache.put(CACHE_KEY, loaded));
+            return loaded;
+        } finally {
+            loadLock.unlock();
+        }
     }
 
+    /**
+     * The last good set — or nothing — marked as a fallback, never to be cached.
+     */
+    private Loaded lastLoadedOrEmpty() {
+        Loaded fallback = lastLoaded;
+        return fallback != null
+                ? new Loaded(fallback.entries(), fallback.all(), false)
+                : new Loaded(List.of(), Collections.emptyMap(), false);
+    }
+
+    /**
+     * @return every snippet, or {@code null} when the store could not be read —
+     *         which the caller must not mistake for "no snippets"
+     */
     private List<SnippetEntry> loadAllSnippets() {
         try {
             // Use descriptor store to enumerate all snippet resources
@@ -373,9 +453,9 @@ public class PromptSnippetService {
             LOGGER.debugv("Loaded {0} prompt snippets into cache", result.size());
             return Collections.unmodifiableList(result);
 
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            LOGGER.errorv("Failed to load prompt snippets: {0}", e.getMessage());
-            return Collections.emptyList();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+            LOGGER.errorv("Failed to load prompt snippets, keeping the last loaded set: {0}", e.getMessage());
+            return null;
         }
     }
 
@@ -519,7 +599,14 @@ public class PromptSnippetService {
     private record SnippetEntry(String id, String name, String content, Date createdOn, DocumentDescriptor descriptor) {
     }
 
-    /** The loaded entries and the unscoped view resolved from them. */
-    private record Loaded(List<SnippetEntry> entries, Map<String, Object> all) {
+    /**
+     * The loaded entries and the unscoped view resolved from them.
+     *
+     * @param fresh
+     *            false for a fallback served while the store is failing or a load
+     *            is in flight: usable for this render, never cached as a derived
+     *            view
+     */
+    private record Loaded(List<SnippetEntry> entries, Map<String, Object> all, boolean fresh) {
     }
 }

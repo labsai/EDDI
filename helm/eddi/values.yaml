@@ -162,6 +162,14 @@ eddi:
       # to authServerUrl, which is the in-cluster address a client cannot reach.
       authorizationServer: ""
 
+      # The ABSOLUTE public URL of the MCP endpoint, e.g.
+      # "https://eddi.example.com/mcp". Unset, EDDI advertises a relative
+      # identifier whose origin comes from each request's Host header — fine
+      # for port-forward, but behind a proxy that does not pin Host a crafted
+      # Host makes EDDI advertise a resource on another origin. Set it for any
+      # deployment reachable by name.
+      resource: ""
+
   resources:
     requests:
       cpu: 250m
@@ -173,6 +181,20 @@ eddi:
   service:
     type: ClusterIP
     port: 7070
+
+  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
+  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
+  # one path — only where /q/metrics cannot be reached from outside the
+  # cluster (the chart's ingress routes every path, /q/* included, unless you
+  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  metrics:
+    httpPolicy: ""
+
+  # Origins allowed to embed the Chat UI (/chat) in an <iframe>, space-separated,
+  # e.g. "https://www.example.com https://*.example.org". Empty keeps EDDI's
+  # default, 'none': no page may frame it.
+  chat:
+    frameAncestors: ""
 
   # Pod annotations (e.g., Prometheus scrape)
   podAnnotations:
@@ -410,6 +432,12 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # EDDI never calls the Kubernetes API, so its pod does not mount the service
+  # account token: a process that reaches the container (an RCE, a hostile
+  # dependency) gets no API credential to escalate with. Set true only if you
+  # add something that needs one — cloud workload identity (IRSA, GKE Workload
+  # Identity) injects its own projected token and does not need this.
+  automountToken: false
 
 # ── Namespace ──────────────────────────────────────────────
 #

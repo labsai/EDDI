@@ -14,7 +14,7 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.*;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -43,7 +43,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
 
     @SuppressWarnings("resource")
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
             .withNetwork(NETWORK)
             .withNetworkAliases("postgres")
             .withDatabaseName("eddi")

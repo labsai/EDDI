@@ -151,6 +151,8 @@ Each deployed agent is exposed under two ids:
 
 The format is `<slugified agent name>-<last 6 characters of the agent id>`. The suffix is there because agent names are not unique — two agents both called "Support" would otherwise be indistinguishable. Accented characters are folded (`Übersicht` → `ubersicht`) rather than dropped.
 
+In the rare case that two deployed agents share both the name slug and the last six id characters, each of them is listed as `<slugified agent name>-<full agent id>` instead, so both stay selectable. The short id still works as an alias when the caller may use exactly one of the two; when both are usable it is rejected as ambiguous rather than guessed. Agents that do not collide keep their short id.
+
 The adapter also accepts the bare agent id, the exact agent name, or the bare slug — the last two only when they match exactly one agent. An ambiguous name returns `400` listing the candidates rather than picking one.
 
 ### Stateless requests
@@ -638,7 +640,7 @@ Assembled from the standard shapes — see [`langchain.md`](langchain.md) for th
 }
 ```
 
-> A single unconditional `inputmatcher` deliberately departs from the guidance in [`AGENTS.md` §5.3](../AGENTS.md) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
+> A single unconditional `inputmatcher` deliberately departs from the guidance in [Agent Config Authoring](agent-config-authoring.md#behavior-rule-safety-rules) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
 
 **2. `…0003.langchain.json`** — the model:
 

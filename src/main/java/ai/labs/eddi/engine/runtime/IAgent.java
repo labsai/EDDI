@@ -59,4 +59,16 @@ public interface IAgent {
     default AgentConfiguration.MemoryPolicy getMemoryPolicy() {
         return null;
     }
+
+    /**
+     * The deployed version's compatibility generation — see
+     * {@link AgentConfiguration#getCompatibilityGeneration()}. {@code null} for a
+     * version stored before generations existed, which is compatible only with
+     * itself.
+     *
+     * @since 6.5.0
+     */
+    default Integer getCompatibilityGeneration() {
+        return null;
+    }
 }

@@ -15,21 +15,28 @@ same identities since the store was written (`idx_um_upsert_global`,
 
 ### What changed
 
-- **`UserMemoryIdentityIndexes`** (new) installs two partial unique indexes with the
-  PostgreSQL names: `(userId, key)` filtered to `visibility: global`, and
-  `(userId, key, sourceAgentId)` filtered to `visibility: {$in: [self, group]}` — a
-  partial filter accepts `$in` but not `$ne`. The store's constructor calls it.
-- **Startup merge.** A deployment that already holds duplicates cannot build a unique
-  index, so while either index is missing the pass groups each identity and keeps the
-  entry with the newest `updatedAt` (compared as parsed instants: `Instant.toString()`
-  has a variable-length fraction, so string order is wrong), summing `accessCount` across
-  the group onto it. Once both indexes exist the scan is skipped. A duplicate that
-  another node inserts between the merge and the build triggers one more pass. Any
-  failure is logged and startup continues, without the guarantee, as before.
-- **Race losers retry.** A duplicate-key error on `upsert`/`mergeProperties` is retried
-  once, which turns the loser's insert into an update of the winner's entry. The server
-  does not do this itself because neither identity filter is a plain equality on exactly
-  the index keys. `insertIfAbsent` answers "already present" instead.
+Since this branch was opened, #893 landed the same global index
+(`idx_um_upsert_global`) and a duplicate-key retry for its owner-checked writes, but
+left two gaps: it could not be built over data that already holds duplicates (the store
+then fell back to a non-atomic ownership check), and nothing enforced the per-agent
+identity. This change keeps #893's write path as it is and closes both.
+
+- **`UserMemoryIdentityIndexes`** (new) runs at startup, before the store's own global
+  index build. While either index is missing it merges duplicates, then installs both
+  partial unique indexes: `(userId, key)` filtered to `visibility: global` — the same
+  name and spec #893 builds, so the two never conflict — and
+  `(userId, key, sourceAgentId)` (`idx_um_upsert_agent`) filtered to
+  `visibility: {$in: [self, group]}`; a partial filter accepts `$in` but not `$ne`.
+- **Merge.** Per duplicated identity the entry with the newest `updatedAt` survives
+  (compared as parsed instants: `Instant.toString()` has a variable-length fraction, so
+  string order is wrong) and takes the summed `accessCount`. Once both indexes exist the
+  scan is skipped. A duplicate that another node inserts between the merge and the build
+  triggers one more pass. Any failure is logged and startup continues, so #893's
+  `globalKeyUnique` fallback still applies exactly as before. With the merge in place
+  that fallback becomes the exception rather than the rule for upgraded deployments.
+- **No new write-path code.** The duplicate-key retry and the `insertIfAbsent`
+  "already present" answer are #893's; this branch originally carried its own and
+  dropped it in favour of that one on merge.
 
 ### Tests
 
@@ -37,7 +44,6 @@ same identities since the store was written (`idx_um_upsert_global`,
 `Unique upsert identities` group: eight writers racing for one identity, 25 rounds each,
 for global upserts, per-agent upserts (self and group mixed), `mergeProperties` and
 `insertIfAbsent`; the startup merge; and the indexes refusing a duplicate written around
-the store. With the index call removed, six of the seven fail; with the retry removed,
-the three upsert races fail on `E11000`. The class now rebuilds the store after each
+the store. With the startup call removed, six of the seven fail. The class now rebuilds the store after each
 collection drop, so all its tests run under the new indexes. The two mock-based store
 tests stub the index listing (`IdentityIndexStubs`).
