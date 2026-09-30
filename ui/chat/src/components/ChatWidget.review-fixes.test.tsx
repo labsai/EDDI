@@ -63,7 +63,9 @@ function mockBackend(options: BackendOptions = {}) {
       });
     }
     if (url.includes("/descriptorstore/")) {
-      return new Response(JSON.stringify({ name: "Support Bot" }), { status: 200 });
+      // What a caller holding only eddi-user gets: the descriptor store is an
+      // authoring endpoint.
+      return new Response("Forbidden", { status: 403 });
     }
     if (url.includes("/stream")) {
       const enc = new TextEncoder();
@@ -338,14 +340,59 @@ describe("the ?token= parameter", () => {
 });
 
 describe("the agent name", () => {
-  it("is read from the versioned descriptor, with the caller's token", async () => {
-    const calls = mockBackend();
-    renderAt("/chat/production/agent-1?token=t0k");
+  it("is taken from the conversation read, so a user holding only eddi-user sees it", async () => {
+    const calls = mockBackend({
+      snapshot: {
+        agentId: "agent-1",
+        agentVersion: 3,
+        agentName: "Support Bot",
+        conversationState: "READY",
+        conversationSteps: [],
+      },
+    });
+    const { container } = renderAt("/chat/production/agent-1?token=t0k");
 
     expect(await screen.findByText("Support Bot")).toBeInTheDocument();
-    const read = calls.find((c) => c.url.includes("/descriptorstore/"))!;
-    expect(read.url).toContain("/descriptorstore/descriptors/agent-1/simple?version=3");
-    expect(read.headers.get("Authorization")).toBe("Bearer t0k");
+    expect(container.querySelector(".chat-header__agent-name")).toHaveTextContent("Support Bot");
+    // The descriptor store refuses that user; nothing may depend on it.
+    expect(calls.some((c) => c.url.includes("/descriptorstore/"))).toBe(false);
+  });
+
+  it("falls back to the logo and configured title when the read carries no name", async () => {
+    const calls = mockBackend({
+      snapshot: {
+        agentId: "agent-1",
+        agentVersion: 3,
+        conversationState: "READY",
+        conversationSteps: [],
+        conversationOutputs: [{ output: [{ type: "text", text: "Hello there" }] }],
+      },
+    });
+    const { container } = renderAt("/chat/production/agent-1?title=Help%20Desk");
+
+    expect(await screen.findByText("Hello there")).toBeInTheDocument();
+    expect(container.querySelector(".chat-header__agent-name")).toBeNull();
+    expect(screen.getByAltText("Help Desk")).toBeInTheDocument();
+    // Neither the raw agent id nor an error stands in for the name.
+    expect(screen.queryByText("agent-1")).not.toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes("/descriptorstore/"))).toBe(false);
+  });
+
+  it("ignores a blank name", async () => {
+    mockBackend({
+      snapshot: {
+        agentId: "agent-1",
+        agentVersion: 3,
+        agentName: "   ",
+        conversationState: "READY",
+        conversationSteps: [],
+        conversationOutputs: [{ output: [{ type: "text", text: "Hello there" }] }],
+      },
+    });
+    const { container } = renderAt("/chat/production/agent-1");
+
+    expect(await screen.findByText("Hello there")).toBeInTheDocument();
+    expect(container.querySelector(".chat-header__agent-name")).toBeNull();
   });
 });
 

@@ -80,7 +80,8 @@ class RestAgentEngineTest {
         var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
         var hitlToolJournalStore = mock(IHitlToolJournalStore.class);
         restAgentEngine = new RestAgentEngine(conversationService, conversationMemoryStore, identity, ownershipValidator,
-                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, 30);
+                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, mock(AgentDisplayNameResolver.class),
+                30);
     }
 
     @Nested
