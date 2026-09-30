@@ -32,6 +32,7 @@ saves and deploys cleanly, then fails on its first message.
 - **`ui/manager/src/lib/api/agent-setup.ts`**: the Oracle GenAI default model `cohere.command-r-plus-v2`
   → `cohere.command-a-03-2025`.
 - **`docs/langchain.md`**: the Oracle GenAI example and provider line name Command A.
+- **Platform Operator revision 1 → 2** (`operator-revision.json`): the Operator's system prompt carries a model catalogue built from these suggestions, so existing Operators are told to upgrade and stop recommending the retired ids.
 - **Test**: `model-suggestions.test.ts` lists the retired ids with the reason for each and fails if any
   provider suggests one or defaults to one.
 
