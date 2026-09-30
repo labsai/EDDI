@@ -120,10 +120,19 @@ public interface IRestConversationStore {
      * ended conversations are skipped. Ending continues past a conversation that
      * fails; the body lists the {@code ended}, {@code skipped} and {@code failed}
      * ids, and the status is 500 if any failed, else 200.
+     *
+     * @param endReason
+     *            optional reason recorded on every conversation ended, which
+     *            clients read to tell the user why — only the known values are
+     *            accepted ({@code agent-version-retired}), anything else is a 400
      */
     @POST
     @Path("end")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor"})
-    Response endActiveConversations(List<ConversationStatus> conversationStatuses);
+    Response endActiveConversations(List<ConversationStatus> conversationStatuses,
+                                    @Parameter(name = "endReason", required = false, example = "agent-version-retired",
+                                               description = "Why the conversations end, recorded for clients to show. "
+                                                       + "Only 'agent-version-retired' is accepted; omit for none.")
+                                    @QueryParam("endReason") String endReason);
 }

@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.model.Context;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 @DisplayName("SecretValueScrubber")
 class SecretValueScrubberTest {
@@ -153,5 +155,73 @@ class SecretValueScrubberTest {
         SecretValueScrubber.collectPlaintexts(Map.of("a", List.of(SECRET, 12345678L), "b", true), found);
 
         assertEquals(Set.of(SECRET, "12345678", "true"), found);
+    }
+
+    @Test
+    @DisplayName("S4: exact values replace a string or number that IS the value, never a substring")
+    void exactValues() {
+        Object cleaned = SecretValueScrubber.scrubDeepExact(Map.of("pin", "4711", "code", 4711, "note", "order 14711", "list", List.of("4711", "x")),
+                List.of("4711"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals("<p>", map.get("pin"));
+        assertEquals("<p>", map.get("code"));
+        assertEquals("order 14711", map.get("note"));
+        assertEquals(List.of("<p>", "x"), map.get("list"));
+        assertNull(SecretValueScrubber.scrubDeepExact("order 14711", List.of("4711"), "<p>"), "no whole-value match, nothing to do");
+    }
+
+    @Test
+    @DisplayName("S4: exact mode never renames a map key, like the whole-token mode — only values")
+    void exactModeKeepsMapKeys() {
+        assertNull(SecretValueScrubber.scrubDeepExact(Map.of("4711", "pin", "code-4711", "kept"), List.of("4711"), "<p>"));
+        assertEquals(Map.of("4711", "<p>"), SecretValueScrubber.scrubDeepExact(Map.of("4711", "4711"), List.of("4711"), "<p>"));
+    }
+
+    @Test
+    @DisplayName("S4: an exact value inside serialized JSON text is replaced, nested serialized JSON included")
+    void exactValueInsideJsonText() {
+        Object cleaned = SecretValueScrubber.scrubDeepExact(Map.of("argumentsRaw", "{\"pin\":\"4711\",\"note\":\"order 14711\"}",
+                "transcript", "[{\"arguments\":\"{\\\"pin\\\":4711}\"}]"), List.of("4711"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals("{\"pin\":\"<p>\",\"note\":\"order 14711\"}", map.get("argumentsRaw"));
+        assertEquals("[{\"arguments\":\"{\\\"pin\\\":\\\"<p>\\\"}\"}]", map.get("transcript"));
+    }
+
+    @Test
+    @DisplayName("S4: text that only looks like JSON, or JSON without the value, is left alone")
+    void jsonLookalikes() {
+        assertNull(SecretValueScrubber.scrubDeepExact("{not json 4711}", List.of("4711"), "<p>"));
+        assertNull(SecretValueScrubber.scrubDeepExact("{\"note\":\"order 14711\"}", List.of("4711"), "<p>"));
+    }
+
+    @Test
+    @DisplayName("keeping references: a vault reference survives even when the plaintext occurs in it; keys are never renamed")
+    void keepingReferences() {
+        Object cleaned = SecretValueScrubber.scrubDeepKeepingReferences(Map.of("cessTokenKey", "${vault:agent.u1.n1.accessToken}",
+                "echo", "sent cessToken and ${eddivault:x.accessToken} then cessToken"), List.of("cessToken"), "<p>");
+
+        @SuppressWarnings("unchecked")
+        var map = (Map<String, Object>) cleaned;
+        assertEquals(Set.of("cessTokenKey", "echo"), map.keySet());
+        assertEquals("${vault:agent.u1.n1.accessToken}", map.get("cessTokenKey"));
+        assertEquals("sent <p> and ${eddivault:x.accessToken} then <p>", map.get("echo"));
+        assertNull(SecretValueScrubber.scrubDeepKeepingReferences("${vault:a.cessToken}", List.of("cessToken"), "<p>"));
+    }
+
+    @Test
+    @DisplayName("an unterminated reference opening is scrubbed like plain text, and the scan stays linear")
+    void keepingReferencesUnterminatedOpenings() {
+        assertEquals("<p> ${vault:x.cessToken} ${vault:<p>",
+                SecretValueScrubber.scrubDeepKeepingReferences("cessToken ${vault:x.cessToken} ${vault:cessToken", List.of("cessToken"),
+                        "<p>"));
+
+        String hostile = "${vault:".repeat(200_000) + "cessToken";
+        String cleaned = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> (String) SecretValueScrubber.scrubDeepKeepingReferences(hostile, List.of("cessToken"), "<p>"));
+        assertEquals("${vault:".repeat(200_000) + "<p>", cleaned);
     }
 }

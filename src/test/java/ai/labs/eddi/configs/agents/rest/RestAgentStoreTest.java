@@ -232,7 +232,7 @@ class RestAgentStoreTest {
             var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
                     capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
 
-            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID)));
+            assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
             verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
         }
@@ -255,7 +255,7 @@ class RestAgentStoreTest {
             when(restWorkflowStore.readWorkflow(PKG2_ID, 1)).thenThrow(new NotFoundException());
 
             BadRequestException e = assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID)));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG2_ID), false));
 
             assertTrue(String.valueOf(e.getResponse().getEntity()).contains(PKG2_ID));
         }
@@ -904,7 +904,7 @@ class RestAgentStoreTest {
             config.setSecurity(security);
 
             assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
         }
 
         @Test
@@ -1152,7 +1152,7 @@ class RestAgentStoreTest {
 
         private AgentConfiguration persistedByUpdate() throws Exception {
             var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture());
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(false));
             return captor.getValue();
         }
 
@@ -1160,11 +1160,11 @@ class RestAgentStoreTest {
         @DisplayName("an update whose body omits the marker keeps the stored one")
         void updateWithoutMarkerKeepsStoredOrigin() throws Exception {
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored());
-            when(AgentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
             AgentConfiguration body = new AgentConfiguration();
             body.setWorkflows(new ArrayList<>());
 
-            restAgentStore.updateAgent(AGENT_ID, 1, body);
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
 
             assertSame(storedOrigin, persistedByUpdate().getDynamicOrigin());
         }
@@ -1173,12 +1173,12 @@ class RestAgentStoreTest {
         @DisplayName("an update whose body carries a different marker keeps the stored one")
         void updateCannotReplaceStoredOrigin() throws Exception {
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored());
-            when(AgentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
             AgentConfiguration body = new AgentConfiguration();
             body.setWorkflows(new ArrayList<>());
             body.setDynamicOrigin(new AgentConfiguration.DynamicOrigin("attacker", "conv-evil", "gc-evil", "someone"));
 
-            restAgentStore.updateAgent(AGENT_ID, 1, body);
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
 
             assertSame(storedOrigin, persistedByUpdate().getDynamicOrigin());
         }
@@ -1189,12 +1189,12 @@ class RestAgentStoreTest {
             AgentConfiguration personBuilt = new AgentConfiguration();
             personBuilt.setWorkflows(new ArrayList<>());
             when(AgentStore.read(AGENT_ID, 1)).thenReturn(personBuilt);
-            when(AgentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
             AgentConfiguration body = new AgentConfiguration();
             body.setWorkflows(new ArrayList<>());
             body.setDynamicOrigin(new AgentConfiguration.DynamicOrigin("parent", "conv-1", null, "user-1"));
 
-            restAgentStore.updateAgent(AGENT_ID, 1, body);
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
 
             assertNull(persistedByUpdate().getDynamicOrigin());
         }
@@ -1206,8 +1206,8 @@ class RestAgentStoreTest {
             AgentConfiguration body = new AgentConfiguration();
             body.setWorkflows(new ArrayList<>());
 
-            assertThrows(IResourceStore.ResourceStoreException.class, () -> restAgentStore.updateAgent(AGENT_ID, 1, body));
-            verify(AgentStore, never()).update(anyString(), anyInt(), any());
+            assertThrows(IResourceStore.ResourceStoreException.class, () -> restAgentStore.updateAgent(AGENT_ID, 1, body, false));
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
         }
 
         @Test

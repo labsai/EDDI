@@ -94,11 +94,35 @@ public class Conversation implements IConversation {
     private final Set<String> secretContextValues = new LinkedHashSet<>();
 
     /**
-     * Shorter secret values are only removed from their own context entry, not
-     * searched for elsewhere: replacing every "12" in a turn's output would destroy
-     * it, and a value that short is not a credential.
+     * The secret context entries whose whole value is a string — the only source of
+     * exact-match candidates. The leaves of a secret OBJECT are not: its
+     * {@code "tokenType": "Bearer"} or {@code "port": 8080} would otherwise blank
+     * every equal value of the turn, loaded {@code longTerm} properties included,
+     * and that loss would be persisted.
+     */
+    private final Set<String> secretContextStrings = new LinkedHashSet<>();
+
+    /**
+     * Shorter secret values are not searched for INSIDE other values: replacing
+     * every "4711" in a turn's output would destroy it. They are still replaced
+     * wherever a value IS the secret — see
+     * {@link #MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH}.
      */
     static final int MIN_SCRUBBED_SECRET_CONTEXT_LENGTH = 8;
+
+    /**
+     * Secret string values from this length up to
+     * {@link #MIN_SCRUBBED_SECRET_CONTEXT_LENGTH} are replaced where a property,
+     * datum, list element, map value or audit field equals them exactly
+     * ({@link SecretValueScrubber#scrubDeepExact}). Before, a short secret — a PIN,
+     * a four-digit code — copied into a property by a template was stored verbatim,
+     * in {@code longTerm} user memory and the audit trail included. Only a context
+     * entry whose whole value is a string qualifies (see
+     * {@link #secretContextStrings}); below this length a value is not a
+     * credential, and {@code true}/{@code false} are never treated as one. The same
+     * floor as {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH}.
+     */
+    static final int MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH = SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH;
 
     /**
      * The raw message of this turn when the client flagged it {@code secretInput},
@@ -203,9 +227,24 @@ public class Conversation implements IConversation {
         }
         properties.forEach((key, property) -> {
             if (property != null && property.getScope() == Scope.longTerm) {
-                longTermBaseline.put(key, property);
+                longTermBaseline.put(key, valueCopy(property));
             }
         });
+    }
+
+    /**
+     * An independent copy of {@code property} for the baseline. The live property
+     * can be changed in place — the turn-end secret scrub rewrites its value — and
+     * a baseline holding the same object would then still equal it, so the scrubbed
+     * value was never written and the user-memory store kept the secret.
+     */
+    private static Property valueCopy(Property property) {
+        var copy = new Property(property.getName(), property.getValueString(),
+                property.getValueObject() != null ? new LinkedHashMap<>(property.getValueObject()) : null,
+                property.getValueList() != null ? new ArrayList<>(property.getValueList()) : null, property.getValueInt(),
+                property.getValueFloat(), property.getValueBoolean(), property.getScope(), property.getVisibility());
+        copy.setAutoVaulted(property.getAutoVaulted());
+        return copy;
     }
 
     @Override
@@ -240,6 +279,7 @@ public class Conversation implements IConversation {
             var lifecycleData = prepareLifecycleData("", context, null);
             executeConversationStep(lifecycleData, null);
         } finally {
+            recordAgentVersion();
             checkActionsForConversationEnd();
         }
     }
@@ -428,7 +468,6 @@ public class Conversation implements IConversation {
                 // The turn's starting point for undo — see recordPropertyChanges.
                 propertiesAtTurnStart = conversationMemory instanceof ConversationMemory cm ? cm.serializedProperties() : null;
             }
-
             var lifecycleData = prepareLifecycleData(message, contexts, clearedResultTypes);
             executeConversationStep(lifecycleData, restartTaskTypes);
 
@@ -439,6 +478,10 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            // Recorded last, after the pipeline, so a step's existing data keeps its
+            // positions — detailed snapshots are read by index — and on every run: a
+            // rerun re-executes the step, possibly on another version than the first.
+            recordAgentVersion();
             checkActionsForConversationEnd();
 
             if (getConversationState() == ConversationState.IN_PROGRESS) {
@@ -461,15 +504,54 @@ public class Conversation implements IConversation {
     }
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
-        removeOldInvalidProperties();
         if (propertiesAtTurnStart != null && conversationMemory instanceof ConversationMemory cm) {
-            // After the step-scope cleanup, so only what outlives the turn is recorded.
+            // After the step-scope cleanup (the turn's finally block, see
+            // clearStepScopedPropertiesUnlessPaused), so only what outlives the turn is
+            // recorded.
             // A turn completed through a HITL resume runs in a new Conversation without
             // this snapshot and records nothing — undo then leaves its properties as
             // they are, which is the behaviour every turn had before.
             cm.recordPropertyChanges(propertiesAtTurnStart);
         }
         storePropertiesPermanently();
+    }
+
+    /**
+     * Records which agent version runs the current step, and — on the first step
+     * after the conversation moved to another compatible version — where it moved
+     * from. See {@link MemoryKeys#AGENT_VERSION}.
+     */
+    private void recordAgentVersion() {
+        Integer agentVersion = conversationMemory.getAgentVersion();
+        if (agentVersion == null) {
+            return;
+        }
+        var currentStep = conversationMemory.getCurrentStep();
+        currentStep.set(MemoryKeys.AGENT_VERSION, agentVersion);
+        Integer previousVersion = conversationMemory.takePreviousAgentVersion();
+        if (previousVersion != null) {
+            currentStep.set(MemoryKeys.AGENT_VERSION_CHANGE, Map.of("from", previousVersion, "to", agentVersion));
+        }
+    }
+
+    /**
+     * Drops the {@code step}-scoped properties at the end of a turn — every end,
+     * not just a clean one.
+     * <p>
+     * This used to run only from {@link #postConversationLifecycleTasks()}, which a
+     * turn that fails (ERROR), is cancelled or is abandoned never reaches. The
+     * snapshot of that turn is still persisted, step properties included, so a
+     * value documented as "cleared at the end of the turn" survived into the next
+     * turn's {@code {properties.x}} and behaviour-rule matching after any error.
+     * <p>
+     * A HITL pause is the one exit that keeps them: the step is not over, and the
+     * resume continues the same pipeline, whose later tasks may read what an
+     * earlier task set.
+     */
+    private void clearStepScopedPropertiesUnlessPaused(boolean paused) {
+        if (!paused) {
+            removeOldInvalidProperties();
+        }
     }
 
     private void startNextStep() {
@@ -619,9 +701,10 @@ public class Conversation implements IConversation {
             // Also before the audit flush: TurnAuditBuffer redacts the recorded user
             // input exactly when input:initial reads as the placeholder.
             Set<String> secretInputForms = scrubSecretClientInput();
+            clearStepScopedPropertiesUnlessPaused(paused);
             if (auditBuffer != null) {
                 auditBuffer.addSecretInputForms(secretInputForms);
-                auditBuffer.flush(conversationMemory, searchableSecretContextValues());
+                auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
             }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
@@ -910,6 +993,17 @@ public class Conversation implements IConversation {
         return placeholder;
     }
 
+    /**
+     * The short secret values replaced only where a value equals them whole — see
+     * {@link #MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH}.
+     */
+    private List<String> exactSecretContextValues() {
+        return secretContextStrings.stream()
+                .filter(value -> value.length() >= MIN_EXACT_SCRUBBED_SECRET_CONTEXT_LENGTH && value.length() < MIN_SCRUBBED_SECRET_CONTEXT_LENGTH)
+                .filter(value -> !"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value))
+                .toList();
+    }
+
     /** The secret values worth searching for, longest first. */
     private List<String> searchableSecretContextValues() {
         return secretContextValues.stream()
@@ -947,18 +1041,28 @@ public class Conversation implements IConversation {
             return;
         }
         List<String> needles = searchableSecretContextValues();
+        List<String> exact = exactSecretContextValues();
+        boolean anythingToFind = !needles.isEmpty() || !exact.isEmpty();
 
         // Properties first: their step mirrors hold the same Property objects, which
         // must be clean before those mirrors are checked below.
         IConversationProperties properties = conversationMemory.getConversationProperties();
-        if (properties != null && !needles.isEmpty()) {
-            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles));
+        if (properties != null && anythingToFind) {
+            properties.values().stream().filter(Objects::nonNull).forEach(property -> scrubProperty(property, needles, exact));
         }
 
         PendingToolCallBatch pendingToolCalls = conversationMemory.getHitlPendingToolCalls();
-        if (pendingToolCalls != null && !needles.isEmpty()) {
-            PendingToolCallBatch cleaned = SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles,
-                    MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        if (pendingToolCalls != null && anythingToFind) {
+            PendingToolCallBatch cleaned = needles.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTyped(pendingToolCalls, PendingToolCallBatch.class, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            PendingToolCallBatch current = cleaned != null ? cleaned : pendingToolCalls;
+            PendingToolCallBatch exactCleaned = exact.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTypedExact(current, PendingToolCallBatch.class, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            if (exactCleaned != null) {
+                cleaned = exactCleaned;
+            }
             if (cleaned != null) {
                 conversationMemory.setHitlPendingToolCalls(cleaned);
             }
@@ -972,11 +1076,11 @@ public class Conversation implements IConversation {
                 writable.setPossibleResults(null);
                 continue;
             }
-            Object cleaned = scrubSecretsFrom(datum.getResult(), needles);
+            Object cleaned = scrubSecretsFrom(datum.getResult(), needles, exact);
             if (cleaned != null) {
                 writable.setResult(cleaned);
             }
-            if (scrubSecretsFrom(writable.getPossibleResults(), needles) instanceof List<?> cleanedPossible) {
+            if (scrubSecretsFrom(writable.getPossibleResults(), needles, exact) instanceof List<?> cleanedPossible) {
                 writable.setPossibleResults(castList(cleanedPossible));
             }
         }
@@ -984,7 +1088,7 @@ public class Conversation implements IConversation {
         var conversationOutput = step.getConversationOutput();
         if (conversationOutput != null) {
             for (var entry : conversationOutput.entrySet()) {
-                Object cleaned = scrubSecretsFrom(entry.getValue(), needles);
+                Object cleaned = scrubSecretsFrom(entry.getValue(), needles, exact);
                 if (cleaned != null) {
                     entry.setValue(cleaned);
                 }
@@ -1140,22 +1244,31 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * {@code value} with the secrets replaced, or {@code null} when it carries
-     * none.
+     * {@code value} with the secrets replaced — {@code needles} wherever they
+     * occur, {@code exact} only where a value is one of them — or {@code null} when
+     * it carries none.
      */
-    private static Object scrubSecretsFrom(Object value, List<String> needles) {
-        return SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+    private static Object scrubSecretsFrom(Object value, List<String> needles, List<String> exact) {
+        Object cleaned = needles.isEmpty() ? null : SecretValueScrubber.scrubDeep(value, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        Object current = cleaned != null ? cleaned : value;
+        Object exactCleaned = exact.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        return exactCleaned != null ? exactCleaned : cleaned;
     }
 
-    private static void scrubProperty(Property property, List<String> needles) {
-        if (scrubSecretsFrom(property.getValueString(), needles) instanceof String cleaned) {
+    private static void scrubProperty(Property property, List<String> needles, List<String> exact) {
+        if (scrubSecretsFrom(property.getValueString(), needles, exact) instanceof String cleaned) {
             property.setValueString(cleaned);
         }
-        if (scrubSecretsFrom(property.getValueObject(), needles) instanceof Map<?, ?> cleaned) {
+        if (scrubSecretsFrom(property.getValueObject(), needles, exact) instanceof Map<?, ?> cleaned) {
             property.setValueObject(castMap(cleaned));
         }
-        if (scrubSecretsFrom(property.getValueList(), needles) instanceof List<?> cleaned) {
+        if (scrubSecretsFrom(property.getValueList(), needles, exact) instanceof List<?> cleaned) {
             property.setValueList(castList(cleaned));
+        }
+        // A number property that IS the short secret (a PIN stored as valueInt).
+        if (property.getValueInt() != null && exact.contains(String.valueOf(property.getValueInt()))) {
+            property.setValueInt(null);
+            property.setValueString(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
         }
     }
 
@@ -1173,12 +1286,16 @@ public class Conversation implements IConversation {
         List<IData<Context>> contextData = new LinkedList<>();
         secretContextKeys.clear();
         secretContextValues.clear();
+        secretContextStrings.clear();
         if (context != null) {
             for (String key : context.keySet()) {
                 Context entry = context.get(key);
                 if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
                     secretContextKeys.add(key);
                     SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+                    if (entry.getValue() instanceof String text) {
+                        secretContextStrings.add(text);
+                    }
                 }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.
@@ -1631,6 +1748,7 @@ public class Conversation implements IConversation {
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
+            clearStepScopedPropertiesUnlessPaused(finalState == ConversationState.AWAITING_HUMAN);
             // Tool-pause safety-net: the batch normally survives clearHitlBookmark()
             // until LlmTask consumes it and clears it. But on any exit where LlmTask
             // did NOT consume it — config drift, a degraded path, an error, or simply

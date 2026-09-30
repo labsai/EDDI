@@ -12,7 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
@@ -23,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
@@ -59,7 +61,7 @@ public class ChannelTargetRouter {
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
-    private final IRestAgentAdministration agentAdmin;
+    private final IDeploymentStatusReader agentAdmin;
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
@@ -110,7 +112,7 @@ public class ChannelTargetRouter {
     @Inject
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
-            IRestAgentAdministration agentAdmin,
+            IDeploymentStatusReader agentAdmin,
             IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
@@ -216,6 +218,91 @@ public class ChannelTargetRouter {
         return getIntegrationByName(channelType, integrationName)
                 .map(integration -> resolveFromIntegration(integration, messageText))
                 .orElse(null);
+    }
+
+    /**
+     * Resolve a DM's default target from the legacy connector whose secret verified
+     * it — the DM counterpart of
+     * {@link #resolveDefaultForDm(String, String, String)} for a legacy per-agent
+     * connector, which has no name. Only legacy connectors holding
+     * {@code verifiedSigningSecret} are considered (lowest channel key first); a
+     * new-style integration never is, so a DM to a legacy app cannot be routed to
+     * another app's agent and credentials.
+     *
+     * @return the connector's target with its credentials, or {@code null}
+     */
+    public ResolvedTarget resolveLegacyDefaultForDm(String messageText, String verifiedSigningSecret) {
+        refreshIfNeeded();
+        String trimmed = messageText != null ? messageText.trim() : "";
+        if (trimmed.isEmpty() || "help".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        return legacyMap.entrySet().stream()
+                .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new ResolvedTarget(entry.getValue().toChannelTarget(), messageText, null,
+                        entry.getValue().botToken(), entry.getValue().signingSecret()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Credentials for a thread reply whose lock carries none — a thread in a
+     * channel no integration owns (a DM). Only an integration (lowest key first) or
+     * legacy connector that holds {@code verifiedSigningSecret} AND has
+     * {@code lockedTarget} among its own targets qualifies, so one app's secret
+     * cannot continue a thread locked to another app's agent.
+     *
+     * @return the locked target with that owner's credentials, or {@code null} when
+     *         no integration or connector of the verifying app serves it
+     */
+    public ResolvedTarget threadCredentialsForDm(String channelType, ChannelTarget lockedTarget,
+                                                 String verifiedSigningSecret) {
+        refreshIfNeeded();
+        if (lockedTarget == null || verifiedSigningSecret == null || verifiedSigningSecret.isBlank()) {
+            return null;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String prefix = normalizedType + ":";
+        var integration = integrationMap.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .sorted(Map.Entry.comparingByKey())
+                .map(Map.Entry::getValue)
+                .filter(cfg -> cfg.getPlatformConfig() != null
+                        && secretsEqual(cfg.getPlatformConfig().get("signingSecret"), verifiedSigningSecret))
+                .filter(cfg -> cfg.getTargets() != null
+                        && cfg.getTargets().stream().anyMatch(target -> sameTarget(target, lockedTarget)))
+                .findFirst();
+        if (integration.isPresent()) {
+            return new ResolvedTarget(lockedTarget, null, integration.get(), null, null);
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            return legacyMap.entrySet().stream()
+                    .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
+                    .filter(entry -> sameTarget(entry.getValue().toChannelTarget(), lockedTarget))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> new ResolvedTarget(lockedTarget, null, null, entry.getValue().botToken(),
+                            entry.getValue().signingSecret()))
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    private static boolean sameTarget(ChannelTarget a, ChannelTarget b) {
+        return a != null && b != null && a.getType() == b.getType() && a.getTargetId() != null
+                && a.getTargetId().equals(b.getTargetId());
+    }
+
+    /**
+     * Constant-time comparison of two signing secrets; {@code false} when either is
+     * missing or blank.
+     */
+    public static boolean secretsEqual(String a, String b) {
+        if (a == null || b == null || a.isBlank() || b.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -721,7 +808,7 @@ public class ChannelTargetRouter {
         // 2. Load legacy ChannelConnector entries (backward compat)
         var newLegacyMap = new HashMap<String, LegacyTarget>();
         try {
-            List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(
+            List<AgentDeploymentStatus> statuses = agentAdmin.readAllDeploymentStatuses(
                     Deployment.Environment.production);
             for (AgentDeploymentStatus status : statuses) {
                 if (status.getDescriptor() == null || status.getDescriptor().isDeleted()) {

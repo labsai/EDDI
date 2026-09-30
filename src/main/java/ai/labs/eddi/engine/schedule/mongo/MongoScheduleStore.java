@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.mongo;
 
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -78,6 +79,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String AGENT_ID = "agentId";
     private static final String TENANT_ID = "tenantId";
     private static final String USER_ID = "userId";
+    private static final String CREATED_BY = "createdBy";
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
     private static final String STATUS = "status";
@@ -448,21 +450,34 @@ public class MongoScheduleStore implements IScheduleStore {
      * Add the owner restriction of {@code ownerScope} to a listing filter, so
      * limit/offset count only the rows the caller may see: the caller's own
      * schedules plus shared ones (no owner, blank owner, or the system placeholder)
-     * — the same set as {@link ScheduleOwnerScope#admits}. {@code eq(field, null)}
-     * also matches documents with no {@code userId} at all.
+     * — the same set as
+     * {@link ScheduleOwnerScope#admits(String, String, java.util.Map)}, including
+     * its creator and team-cadence refinements. {@code eq(field, null)} also
+     * matches documents with no {@code userId} at all.
      */
-    private static Bson ownerScoped(Bson filter, ScheduleOwnerScope ownerScope) {
+    static Bson ownerScoped(Bson filter, ScheduleOwnerScope ownerScope) {
         if (ownerScope == null || ownerScope.unrestricted()) {
             return filter;
         }
-        List<Bson> visible = new ArrayList<>(List.of(
+        List<Bson> shared = List.of(
                 eq(USER_ID, null),
                 regex(USER_ID, "^\\s*$"),
-                eq(USER_ID, ScheduleOwnerScope.SHARED_OWNER)));
+                eq(USER_ID, ScheduleOwnerScope.SHARED_OWNER));
+        List<Bson> visible = new ArrayList<>();
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            visible.addAll(shared);
+        } else if (ownerScope.callerId() != null) {
+            visible.add(and(or(shared), eq(CREATED_BY, ownerScope.callerId())));
+        }
         if (ownerScope.callerId() != null) {
             visible.add(eq(USER_ID, ownerScope.callerId()));
         }
-        return and(filter, or(visible));
+        if (ownerScope.includeTeamCadences()) {
+            visible.add(eq(METADATA + "." + TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE));
+        }
+        // An empty $or is rejected by the server; a scope that admits nothing (no
+        // caller id, shared rows restricted to their creator) matches no document.
+        return visible.isEmpty() ? and(filter, eq("_id", null)) : and(filter, or(visible));
     }
 
     /**

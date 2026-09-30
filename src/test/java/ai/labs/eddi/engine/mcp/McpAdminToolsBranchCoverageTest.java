@@ -566,19 +566,19 @@ class McpAdminToolsBranchCoverageTest {
         @Test
         @DisplayName("null agentId → error")
         void nullAgentId() {
-            assertTrue(tools.applyAgentChanges(null, 1, "[]", null, null).contains("error"));
+            assertTrue(tools.applyAgentChanges(null, 1, "[]", null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("null resourceMappings → error")
         void nullMappings() {
-            assertTrue(tools.applyAgentChanges("id", 1, null, null, null).contains("error"));
+            assertTrue(tools.applyAgentChanges("id", 1, null, null, null, null).contains("error"));
         }
 
         @Test
         @DisplayName("blank resourceMappings → error")
         void blankMappings() {
-            assertTrue(tools.applyAgentChanges("id", 1, "  ", null, null).contains("error"));
+            assertTrue(tools.applyAgentChanges("id", 1, "  ", null, null, null).contains("error"));
         }
 
         private static final String WORKFLOW_ID = "aabbccddeeff001122334455";
@@ -611,7 +611,7 @@ class McpAdminToolsBranchCoverageTest {
             when(workflowStore.updateWorkflow(eq(WORKFLOW_ID), eq(1), any())).thenReturn(workflowResponse);
             Response agentResponse = mock(Response.class);
             when(agentResponse.getHeaderString("Location")).thenReturn("eddi://ai.labs.agent/agentstore/agents/agent1?version=2");
-            when(agentStore.updateAgent(eq("agent1"), eq(1), any())).thenReturn(agentResponse);
+            when(agentStore.updateAgent(eq("agent1"), eq(1), any(), any())).thenReturn(agentResponse);
             when(jsonSerialization.serialize(any())).thenReturn("{}");
         }
 
@@ -631,7 +631,7 @@ class McpAdminToolsBranchCoverageTest {
             when(deployResponse.getEntity()).thenReturn(Map.of("status", "ERROR", "error", "Deployment failed. Check server logs for details."));
             when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
 
-            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production", null);
             var result = lastSerializedResult();
 
             assertEquals(false, result.get("redeployed"));
@@ -649,7 +649,7 @@ class McpAdminToolsBranchCoverageTest {
             when(deployResponse.getEntity()).thenReturn(Map.of("status", "READY"));
             when(agentAdmin.deployAgent(any(), eq("agent1"), eq(2), eq(true), eq(true))).thenReturn(deployResponse);
 
-            tools.applyAgentChanges("agent1", 1, "[...]", true, "production");
+            tools.applyAgentChanges("agent1", 1, "[...]", true, "production", null);
             var result = lastSerializedResult();
 
             assertEquals(true, result.get("redeployed"));

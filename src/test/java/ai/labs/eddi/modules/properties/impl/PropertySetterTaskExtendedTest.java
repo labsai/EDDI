@@ -57,7 +57,7 @@ class PropertySetterTaskExtendedTest {
         secretProvider = mock(ISecretProvider.class);
         task = new PropertySetterTask(expressionProvider, memoryItemConverter,
                 templatingEngine, dataFactory, resourceClientLibrary,
-                new ObjectMapper(), secretProvider);
+                new ObjectMapper(), new SecretPropertyVault(secretProvider, dataFactory));
     }
 
     @Nested
@@ -204,6 +204,8 @@ class PropertySetterTaskExtendedTest {
             env.instruction.setOverride(true);
 
             when(env.memory.getAgentId()).thenReturn("agent123");
+
+            when(env.memory.getConversationId()).thenReturn("conv123");
             when(env.conversationProperties.containsKey("tenantId")).thenReturn(false);
             var mockInputData = mock(IData.class);
             when(mockInputData.getResult()).thenReturn("my-secret-key");
@@ -224,6 +226,8 @@ class PropertySetterTaskExtendedTest {
             env.instruction.setOverride(true);
 
             when(env.memory.getAgentId()).thenReturn("agent123");
+
+            when(env.memory.getConversationId()).thenReturn("conv123");
             when(env.conversationProperties.containsKey("tenantId")).thenReturn(false);
             var mockInputData = mock(IData.class);
             when(mockInputData.getResult()).thenReturn("my-secret-key");
@@ -539,6 +543,7 @@ class PropertySetterTaskExtendedTest {
         var conversationProperties = mock(IConversationProperties.class);
         when(memory.getConversationProperties()).thenReturn(conversationProperties);
         when(memory.getAgentId()).thenReturn("agent123");
+        when(memory.getConversationId()).thenReturn("conv123");
 
         var templateDataObjects = new HashMap<String, Object>();
         when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);

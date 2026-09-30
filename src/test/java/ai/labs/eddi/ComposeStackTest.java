@@ -85,6 +85,37 @@ class ComposeStackTest {
 
     private static final YAMLMapper YAML = new YAMLMapper();
 
+    /**
+     * The services a compose stack is FOR, which a user reaches from a browser or
+     * an SDK and which are published on every interface on purpose. Everything else
+     * is infrastructure.
+     */
+    private static final Set<String> USER_FACING_SERVICES = Set.of("eddi", "open-webui");
+
+    /**
+     * Host addresses an infrastructure port may be published on: the loopback
+     * literal, or a variable that DEFAULTS to it (an operator exposing Keycloak
+     * deliberately, behind TLS, sets {@code KEYCLOAK_BIND}).
+     */
+    private static final String LOOPBACK_HOST = "(127\\.0\\.0\\.1|\\$\\{[A-Z_]+_BIND:-127\\.0\\.0\\.1\\})";
+
+    /**
+     * A short-form mapping ({@code host:published:target}) whose host is loopback.
+     */
+    private static final Pattern LOOPBACK_PUBLISH = Pattern.compile("^" + LOOPBACK_HOST + ":.+");
+
+    /** The {@code host_ip} of a long-form port declaration, on its own. */
+    private static final Pattern LOOPBACK_HOST_IP = Pattern.compile("^" + LOOPBACK_HOST + "$");
+
+    /**
+     * Administrator passwords of the bundled third-party services. Each comes from
+     * an overridable variable, never a hard-coded literal, so the installers (which
+     * generate one into .env) and an operator can replace it. The default keeps a
+     * plain {@code docker compose up} working; the port is loopback-bound.
+     */
+    private static final Set<String> ADMIN_PASSWORD_VARIABLES = Set.of("KC_BOOTSTRAP_ADMIN_PASSWORD",
+            "GF_SECURITY_ADMIN_PASSWORD");
+
     private static List<Path> composeFiles() {
         try (Stream<Path> files = Files.list(Path.of("").toAbsolutePath())) {
             return files.filter(Files::isRegularFile)
@@ -259,6 +290,120 @@ class ComposeStackTest {
         assertEquals(Set.of(), missing,
                 README + " documents compose files that do not exist. A stale `-f <file>` is a copy-paste command"
                         + " that fails with 'no such file' on a first-run user's terminal.");
+    }
+
+    /**
+     * Keycloak (the master-realm superuser, which can mint an eddi-admin for
+     * anyone), Grafana, Prometheus, the Jaeger UI and OTLP, NATS, Chroma and Ollama
+     * were all published on {@code 0.0.0.0}. Most of them have no authentication at
+     * all, and the two that do shipped as {@code admin}/{@code admin} — so anyone
+     * on the same LAN or Wi-Fi as a developer running the stack could administer
+     * its identity provider or run models on the machine. {@code install.sh} labels
+     * the Keycloak option "production".
+     * <p>
+     * The base file already bound MongoDB to {@code 127.0.0.1}; this holds every
+     * infrastructure port to the same rule. Only the services a user is meant to
+     * reach ({@link #USER_FACING_SERVICES}) may take a bare {@code host:container}
+     * mapping, which publishes on every interface.
+     */
+    @Test
+    @DisplayName("only the user-facing services are published beyond loopback")
+    void infrastructurePortsArePublishedOnLoopbackOnly() {
+        List<String> offenders = new ArrayList<>();
+        int checked = 0;
+        for (Path file : composeFiles()) {
+            for (var entry : services(file).entrySet()) {
+                if (USER_FACING_SERVICES.contains(entry.getKey())) {
+                    continue;
+                }
+                for (JsonNode port : entry.getValue().path("ports")) {
+                    checked++;
+                    if (!publishesOnLoopback(port)) {
+                        offenders.add(name(file) + " publishes `" + entry.getKey() + "` as `" + port + "`");
+                    }
+                }
+            }
+        }
+        assertTrue(checked > 0, "no infrastructure port found at all — the sweep would be vacuous");
+        assertEquals(List.of(), offenders,
+                "an infrastructure service is published on every interface. Prefix the mapping with 127.0.0.1: (or a"
+                        + " *_BIND variable defaulting to it) — the containers reach each other over the compose"
+                        + " network, so the host binding is only for the developer's own shell.");
+    }
+
+    /**
+     * Short-form strings carry the host in the mapping; the long form
+     * ({@code target}/{@code published}/{@code host_ip}) carries it in
+     * {@code host_ip} alone, which must be checked by itself rather than glued to a
+     * {@code :port} suffix it does not have. A long form without {@code host_ip}
+     * publishes on every interface.
+     */
+    private static boolean publishesOnLoopback(JsonNode port) {
+        if (port.isTextual()) {
+            return LOOPBACK_PUBLISH.matcher(port.asText()).matches();
+        }
+        return LOOPBACK_HOST_IP.matcher(port.path("host_ip").asText("")).matches();
+    }
+
+    @Test
+    @DisplayName("the loopback check reads both short-form and long-form port declarations")
+    void loopbackCheckHandlesBothPortForms() throws IOException {
+        assertTrue(publishesOnLoopback(YAML.readTree("\"127.0.0.1:9090:9090\"")));
+        assertTrue(publishesOnLoopback(YAML.readTree("\"${KEYCLOAK_BIND:-127.0.0.1}:8180:8080\"")));
+        assertFalse(publishesOnLoopback(YAML.readTree("\"9090:9090\"")));
+        assertFalse(publishesOnLoopback(YAML.readTree("\"0.0.0.0:9090:9090\"")));
+
+        assertTrue(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090, host_ip: 127.0.0.1}")));
+        assertTrue(publishesOnLoopback(YAML.readTree("{target: 8080, published: 8180, host_ip: \"${KEYCLOAK_BIND:-127.0.0.1}\"}")));
+        assertFalse(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090}")),
+                "a long-form port without host_ip publishes on every interface");
+        assertFalse(publishesOnLoopback(YAML.readTree("{target: 9090, published: 9090, host_ip: 0.0.0.0}")));
+    }
+
+    /**
+     * {@code KC_BOOTSTRAP_ADMIN_PASSWORD: admin} and
+     * {@code GF_SECURITY_ADMIN_PASSWORD: admin} used to be literals, which nothing
+     * could override. Each is now a variable with a loopback-only dev default
+     * ({@code ${VAR:-admin}}): the installers write a generated value into .env,
+     * and a bare {@code docker compose up} still starts. A {@code :?} requirement
+     * would break that first run.
+     */
+    @Test
+    @DisplayName("bundled admin passwords come from overridable variables with a dev default")
+    void adminPasswordsAreOverridable() {
+        List<String> offenders = new ArrayList<>();
+        int checked = 0;
+        for (Path file : composeFiles()) {
+            for (var entry : services(file).entrySet()) {
+                JsonNode environment = entry.getValue().path("environment");
+                for (String variable : ADMIN_PASSWORD_VARIABLES) {
+                    String value = null;
+                    if (environment.isObject() && environment.has(variable)) {
+                        value = environment.get(variable).asText();
+                    } else if (environment.isArray()) {
+                        for (JsonNode item : environment) {
+                            if (item.asText().startsWith(variable + "=")) {
+                                value = item.asText().substring(variable.length() + 1);
+                            }
+                        }
+                    }
+                    if (value == null) {
+                        continue;
+                    }
+                    checked++;
+                    if (!value.matches("^\\$\\{[A-Z_]+:-[^}]*\\}$")) {
+                        offenders.add(name(file) + " sets " + variable + " on `" + entry.getKey() + "` to `" + value + "`");
+                    }
+                }
+            }
+        }
+        assertEquals(ADMIN_PASSWORD_VARIABLES.size(), checked,
+                "expected each of " + ADMIN_PASSWORD_VARIABLES + " exactly once across the compose files — a renamed"
+                        + " variable would otherwise leave this sweep checking nothing");
+        assertEquals(List.of(), offenders,
+                "an administrator password is a literal or a required variable. Use ${SOME_VARIABLE:-admin}, so the"
+                        + " installers can supply a generated value through .env and a bare `docker compose up` still"
+                        + " starts.");
     }
 
     /**

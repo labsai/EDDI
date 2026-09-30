@@ -29,6 +29,7 @@ import {
 
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
+import { addWorkflowStep } from "@/lib/workflow-steps";
 import {
   PipelineBuilder,
   type PipelineItem,
@@ -190,7 +191,7 @@ export function WorkflowDetailPage() {
             ? ({ ...defaultParser!.config } as Record<string, unknown>)
             : {},
       };
-      setLocalExtensions([...currentExtensions, newExt]);
+      setLocalExtensions(addWorkflowStep(currentExtensions, newExt));
       setShowAddDialog(false);
     },
     [currentExtensions]

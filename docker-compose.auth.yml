@@ -3,22 +3,18 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# Pre-configured test users, seeded by keycloak/eddi-realm.json — DEV ONLY:
-#   viewer / viewer  (eddi-viewer — read-only)
-#   user   / user    (eddi-user — end-user access)
-#
-# These log straight in; there is no forced password change. The credentials
-# are marked "temporary": true in the realm JSON, but Keycloak 26 does not
-# turn that into an UPDATE_PASSWORD required action on realm import — after
-# import the users' requiredActions are empty. Change them through the admin
-# console if you need the prompt.
-#
-# The privileged `eddi` account (eddi-admin + eddi-editor) is seeded with NO
-# password and cannot be logged into until you give it one. It used to ship as
-# eddi/eddi — and the same realm file is imported into Kubernetes by
-# k8s/overlays/auth and by the Helm chart, where the Keycloak Service is
-# reachable from every pod in the cluster, so a guessable password on a full
-# EDDI administrator was not confined to a laptop. Set one after first boot:
+# keycloak/eddi-realm.json seeds three accounts, and NONE of them has a
+# password:
+#   eddi    (eddi-admin + eddi-editor + eddi-viewer)
+#   viewer  (eddi-viewer — read-only)
+#   user    (eddi-user — end-user access)
+# They used to ship as eddi/eddi, viewer/viewer and user/user — and the same
+# realm file is imported into Kubernetes by k8s/overlays/auth and by the Helm
+# chart, where the Keycloak Service is reachable from every pod in the
+# cluster, so guessable logins were not confined to a laptop. The password grant
+# on the public eddi-frontend client is off for the same reason. Set a password
+# for whichever account you need after first boot (install.sh does it for
+# `eddi`, and for the other two with --demo-users):
 #
 #   http://localhost:${KEYCLOAK_PORT:-8180}/admin → Users → eddi
 #     → Credentials → Set password
@@ -76,6 +72,7 @@ services:
       # and exports it before `docker compose up`, so this default is never what a
       # public instance runs with. Override locally too:
       #   KC_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 24)" docker compose ... up
+      # install.sh / install.ps1 --with-auth generate one and record it in .env.
       KC_BOOTSTRAP_ADMIN_USERNAME: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
       KC_HTTP_PORT: "8080"

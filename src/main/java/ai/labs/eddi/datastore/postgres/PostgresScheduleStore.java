@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -732,15 +733,29 @@ public class PostgresScheduleStore implements IScheduleStore {
      * the query, like {@link #hitlRedactionClause}, so limit/offset count only the
      * rows the caller may see: shared schedules (no owner, blank owner, the system
      * placeholder) plus, when the caller has an id, the caller's own, the same set
-     * as {@link ScheduleOwnerScope#admits}. Values are bound by
+     * as {@link ScheduleOwnerScope#admits(String, String, java.util.Map)}, with its
+     * creator and team-cadence refinements. Values are bound by
      * {@link #bindOwnerScope}; no caller input is concatenated.
      */
-    private static String ownerScopeClause(ScheduleOwnerScope ownerScope, String keyword) {
+    static String ownerScopeClause(ScheduleOwnerScope ownerScope, String keyword) {
         if (ownerScope == null || ownerScope.unrestricted()) {
             return "";
         }
-        return keyword + "(user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?"
-                + (ownerScope.callerId() != null ? " OR user_id = ?" : "") + ")";
+        String shared = "user_id IS NULL OR user_id ~ '^\\s*$' OR user_id = ?";
+        List<String> visible = new ArrayList<>();
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            visible.add(shared);
+        } else if (ownerScope.callerId() != null) {
+            visible.add("((" + shared + ") AND created_by = ?)");
+        }
+        if (ownerScope.callerId() != null) {
+            visible.add("user_id = ?");
+        }
+        if (ownerScope.includeTeamCadences()) {
+            visible.add("metadata->>'" + TeamCadenceService.METADATA_TYPE_KEY + "' = '"
+                    + TeamCadenceService.METADATA_TYPE_CADENCE + "'");
+        }
+        return keyword + (visible.isEmpty() ? "FALSE" : "(" + String.join(" OR ", visible) + ")");
     }
 
     /**
@@ -751,7 +766,12 @@ public class PostgresScheduleStore implements IScheduleStore {
         if (ownerScope == null || ownerScope.unrestricted()) {
             return index;
         }
-        ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+        } else if (ownerScope.callerId() != null) {
+            ps.setString(index++, ScheduleOwnerScope.SHARED_OWNER);
+            ps.setString(index++, ownerScope.callerId());
+        }
         if (ownerScope.callerId() != null) {
             ps.setString(index++, ownerScope.callerId());
         }

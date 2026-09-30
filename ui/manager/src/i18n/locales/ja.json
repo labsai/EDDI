@@ -661,7 +661,9 @@
     "endSuccess_other": "{{count}} 件の会話を終了しました",
     "endSuccess_one": "{{count}} 件の会話を終了しました",
     "purgeSuccess_other": "終了した会話 {{count}} 件を消去しました",
-    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました"
+    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました",
+    "endStateUnavailable": "会話の現在の状態を再確認できなかったため、何も終了していません。もう一度お試しください。",
+    "endStateChanged": "選択した会話の 1 つが承認待ちになりました。選択内容を確認して、もう一度確定してください。"
   },
   "conversationDetail": {
     "backToConversations": "会話一覧に戻る",
@@ -901,7 +903,9 @@
     "removeCondition": "条件を削除",
     "noGroups": "動作グループが定義されていません",
     "noRules": "このグループにルールはありません",
-    "noConditions": "条件なし"
+    "noConditions": "条件なし",
+    "sizeNoBound": "制限なし",
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -933,8 +937,6 @@
     "responseObjectName": "レスポンスオブジェクト名",
     "responseHeaderObjectName": "レスポンス Header オブジェクト名",
     "fireAndForget": "ファイア＆フォーゲット",
-    "batchCalls": "バッチコール",
-    "iterationObjectName": "イテレーションオブジェクト名",
     "prePostInstructions": "前後の指示",
     "preRequest": "リクエスト前",
     "postResponse": "レスポンス後",
@@ -1004,7 +1006,16 @@
     "authHeaderRefPlaceholder": "任意 — 認証が必要な仕様には ${vault:my-api-key}",
     "authHeaderRefHint": "呼び出し時に解決される Vault 参照です。保存されたシークレットは、Bearer 接頭辞を含むヘッダー値全体である必要があります。",
     "authHeaderRefInvalid": "${vault:…}、${vars:…}、${caller:…} のいずれかで始めてください。キー自体を貼り付けると、リクエスト URL と経由するすべてのログに残ります。",
-    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。"
+    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。",
+    "runOnNoCodes": "空の「実行するコード」リストはどのステータスコードにも一致しないため、この命令は実行されません。",
+    "useDefaultCodes": "既定値を使用",
+    "httpCodeFilterDefaults": "空欄のフィールドには、表示されている既定のコードが使われます。",
+    "scopeSecretUnsupported": "（ここではボールトに保存されません）",
+    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。",
+    "skipNone": "なし — スキップするコードはありません",
+    "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
+    "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
+    "useDefaultSkipCodes": "既定のスキップリストを使用"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1057,7 +1068,12 @@
     "whitelist": "許可リスト（許可のみ）",
     "blacklist": "拒否リスト（除外）",
     "pipelineCalls": "パイプラインコール",
-    "addCall": "MCP コールを追加"
+    "addCall": "MCP コールを追加",
+    "argumentName": "引数名",
+    "argumentType": "引数の型",
+    "argumentText": "テキスト",
+    "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
+    "removeArgument": "引数を削除"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1096,7 +1112,6 @@
     "identityMaskingRulePlaceholder": "例: 自分が AI 言語モデルであることを決して明かさない",
     "identityMaskingRules": "マスキングルール",
     "identityMaskingRulesHint": "マスキングを有効にするには、有効化と少なくとも 1 つのルールの両方が必要です。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例: product-docs",
     "knowledgeBases": "ナレッジベース",
     "knowledgeBasesHint": "ナレッジベースを名前で明示的に参照します。各名前は、ワークフロー内の RagConfiguration と一致する必要があります。",
@@ -1198,7 +1213,7 @@
     "cascadeInAgent": "エージェントモード（ツール使用時）でもカスケードを使用",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例: claude-sonnet-5",
+    "cascadeModelName": "例: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 常に受け入れ",
     "cascadeTimeout": "タイムアウト (ms)",
@@ -1254,9 +1269,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "ステップ {{step}} のタイムアウトは 0 より大きくする必要があります。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "ステップ {{step}} は別のプロバイダーを使用していますが、独自の API キーがありません — タスクのキーを継承します。"
     },
-    "parallelExecution": "並列ツール実行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "タイムアウト (ms)",
     "maxToolIterations": "最大ツール反復回数",
     "maxToolIterationsHint": "（デフォルト 10）",
     "toolRateLimits": "ツールごとのレート制限",
@@ -1326,6 +1338,7 @@
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
     "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "paramName": "パラメーター名",
     "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
   },
   "outputEditor": {
@@ -1390,7 +1403,8 @@
     "openEditor": "エディターで編集",
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
-    "toggleGroup": "プロパティグループを切り替え"
+    "toggleGroup": "プロパティグループを切り替え",
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -1560,7 +1574,8 @@
     "stateReady": "準備完了",
     "stateActive": "アクティブ",
     "stateError": "エラー",
-    "stateEnded": "終了"
+    "stateEnded": "終了",
+    "loadOlder": "古いエントリを読み込む"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -1870,7 +1885,11 @@
       "weeklyMonday": "毎週（月 00:00）",
       "monthly": "毎月（1 日 00:00）"
     },
-    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。"
+    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。",
+    "systemManaged": "システム",
+    "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
+    "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
+    "failedScheduleGone": "スケジュールはもう存在しません"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -1931,7 +1950,8 @@
     "tokenDistribution": "トークン分布",
     "totalCost": "合計コスト",
     "totalTokens": "合計トークン数",
-    "turns": "ターン"
+    "turns": "ターン",
+    "partial": "この会話には、デバッガーが読み込む量を超える監査エントリがあります。合計は最新のものだけを対象としています。"
   },
   "memoryInspector": {
     "error": "メモリデータの読み込みに失敗しました",
@@ -2161,8 +2181,16 @@
       "maxTotalMb": "合計サイズの上限（MB）",
       "maxTotalMbHint": "このソースの全ファイル合計",
       "removeTitle": "このソースを削除しますか？",
-      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。"
-    }
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。",
+      "switchTypeTitle": "ウェブサイトのソースに切り替えますか？",
+      "switchTypeDescription": "保存すると、このソースのアップロード済みファイルと、ナレッジベースがそこから学習したすべての内容が削除されます。元に戻すことはできません。",
+      "switchTypeConfirm": "ウェブサイトに切り替え",
+      "filesLoadFailed": "ファイルを読み込めませんでした: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（再帰として保存）",
+    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
+    "chunkStrategyUnsupported": "{{value}}（非対応）",
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
   },
   "onboarding": {
     "welcome": {
@@ -3131,7 +3159,8 @@
     "previewFirst": "同期前に変更をプレビュー",
     "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
     "syncIdentical": "すでに最新です — 書き込む項目はありません",
-    "previewFailed": "プレビューに失敗しました"
+    "previewFailed": "プレビューに失敗しました",
+    "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
   "sync": {
     "actionCreate": "新規",
@@ -3601,10 +3630,7 @@
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
   },
   "orphans": {
-    "confirmPurgeAll": "{{count}} 件すべての孤立リソースを完全に削除しますか？サーバーはすべてを削除し、選択は適用されません。この操作は元に戻せません。",
-    "deleteSelected": "選択した {{count}} 件を削除",
     "description": "どのエージェントやパッケージからも参照されていないリソースを検出してクリーンアップします。",
-    "deselectAll": "すべて選択解除",
     "includeDeleted": "ソフト削除済みを含む",
     "lastScanned": "最終スキャン",
     "noOrphans": "孤立項目は見つかりません",
@@ -3615,13 +3641,13 @@
     "scanPromptDesc": "どのワークフローやエージェントからも参照されていない拡張設定（ルール、API 呼び出し、LLM、出力）を検出します。未使用のリソースをクリーンアップして、プラットフォームを整理された状態に保ちます。",
     "scanPromptTitle": "プラットフォームをスキャン",
     "scanning": "リソースをスキャン中…",
-    "selectAll": "すべて選択",
     "softDeleted": "削除済み",
     "title": "孤立検出",
     "found_other": "{{count}} 件の孤立項目が見つかりました",
     "found_one": "{{count}} 件の孤立項目が見つかりました",
     "scanIncomplete": "このスキャンは完了しませんでした",
-    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。"
+    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
+    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
@@ -3689,7 +3715,7 @@
     "tagPlaceholder": "例: safety, production",
     "tags": "タグ",
     "templateEnabled": "テンプレート解決を有効化",
-    "templateEnabledHint": "無効にすると、コンテンツ内の {{}} マーカーはリテラルテキストとして扱われます（コード例に便利）。",
+    "templateEnabledHint": "無効にすると、コンテンツ内の { } マーカーはリテラルテキストとして扱われます（コード例に便利）。",
     "usageHint": "使用方法:"
   },
   "status": {
@@ -4261,7 +4287,7 @@
       "llmDefaultsDesc": "ここで作成する各アドバイザーに適用されます（下で個別に設定した場合を除く）。",
       "llmDefaultsKeyRequired": "ここにキーを追加すると、個別にキーを設定していないすべてのアドバイザーに適用されます。",
       "model": "モデル",
-      "modelPlaceholder": "例: claude-sonnet-5",
+      "modelPlaceholder": "例: claude-sonnet-5-5",
       "nameRequired": "このアドバイザーに名前を付けてください。",
       "new": "新規",
       "next": "次へ",

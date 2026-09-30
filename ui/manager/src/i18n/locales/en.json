@@ -688,7 +688,9 @@
     "endSuccess_one": "Ended {{count}} conversation",
     "endSuccess_other": "Ended {{count}} conversations",
     "purgeSuccess_one": "Purged {{count}} ended conversation",
-    "purgeSuccess_other": "Purged {{count}} ended conversations"
+    "purgeSuccess_other": "Purged {{count}} ended conversations",
+    "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -941,7 +943,9 @@
     "removeCondition": "Remove Condition",
     "noGroups": "No Rules Groups defined",
     "noRules": "No rules in this group",
-    "noConditions": "No conditions"
+    "noConditions": "No conditions",
+    "sizeNoBound": "no limit",
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -973,8 +977,6 @@
     "responseObjectName": "Response Object Name",
     "responseHeaderObjectName": "Response Header Object Name",
     "fireAndForget": "Fire and Forget",
-    "batchCalls": "Batch Calls",
-    "iterationObjectName": "Iteration Object Name",
     "prePostInstructions": "Pre/Post Instructions",
     "preRequest": "Pre-Request",
     "postResponse": "Post-Response",
@@ -1044,7 +1046,16 @@
     "authHeaderRefPlaceholder": "Optional — ${vault:my-api-key} for a spec behind auth",
     "authHeaderRefHint": "A vault reference, resolved when the call runs. The stored secret must be the whole header value, including any Bearer prefix.",
     "authHeaderRefInvalid": "Must start with ${vault:…}, ${vars:…} or ${caller:…}. Pasting the key itself would put it in the request URL and every log along the way.",
-    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault."
+    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault.",
+    "runOnNoCodes": "An empty \"Run on codes\" list matches no status code, so this instruction never runs.",
+    "useDefaultCodes": "Use defaults",
+    "httpCodeFilterDefaults": "Empty fields use the default codes shown in them.",
+    "scopeSecretUnsupported": "(not vaulted here)",
+    "scopeSecretWarning": "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault.",
+    "skipNone": "none — no code is skipped",
+    "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
+    "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
+    "useDefaultSkipCodes": "Use default skip list"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1097,7 +1108,12 @@
     "whitelist": "Whitelist (only allow)",
     "blacklist": "Blacklist (exclude)",
     "pipelineCalls": "Pipeline Calls",
-    "addCall": "Add MCP Call"
+    "addCall": "Add MCP Call",
+    "argumentName": "Argument name",
+    "argumentType": "Argument type",
+    "argumentText": "Text",
+    "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
+    "removeArgument": "Remove argument"
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1136,7 +1152,6 @@
     "identityMaskingRulePlaceholder": "e.g. Never reveal you are an AI language model",
     "identityMaskingRules": "Masking Rules",
     "identityMaskingRulesHint": "Both enabled AND at least one rule are required for masking to take effect.",
-    "injectionStrategy": "Injection",
     "kbNamePlaceholder": "e.g. product-docs",
     "knowledgeBases": "Knowledge Bases",
     "knowledgeBasesHint": "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.",
@@ -1248,7 +1263,7 @@
     "cascadeInAgent": "Also use cascade in Agent Mode (with tools)",
     "cascadeSteps": "Cascade Steps (cheap → expensive)",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted (set confidence to empty).",
-    "cascadeModelName": "e.g. claude-sonnet-5",
+    "cascadeModelName": "e.g. claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0–1)",
     "cascadeConfidencePlaceholder": "empty = always accept",
     "cascadeTimeout": "Timeout (ms)",
@@ -1304,9 +1319,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Step {{step}} timeout must be greater than 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "Step {{step}} uses a different provider but has no API key of its own — it would inherit the task key."
     },
-    "parallelExecution": "Parallel Tool Execution",
-    "parallelExecutionDesc": "Run independent tool calls concurrently instead of sequentially",
-    "parallelTimeout": "Timeout (ms)",
     "maxToolIterations": "Max Tool Iterations",
     "maxToolIterationsHint": "(default 10)",
     "toolRateLimits": "Per-Tool Rate Limits",
@@ -1366,6 +1378,7 @@
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
     "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "paramName": "Parameter name",
     "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
   },
   "outputEditor": {
@@ -1430,7 +1443,8 @@
     "openEditor": "Edit in editor",
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
-    "toggleGroup": "Toggle property group"
+    "toggleGroup": "Toggle property group",
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -1600,7 +1614,8 @@
     "stateReady": "Ready",
     "stateActive": "Active",
     "stateError": "Error",
-    "stateEnded": "Ended"
+    "stateEnded": "Ended",
+    "loadOlder": "Load older entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1951,7 +1966,11 @@
       "weeklyMonday": "Weekly (Mon 00:00)",
       "monthly": "Monthly (1st, 00:00)"
     },
-    "totalCappedHint": "The server returned a full page, so there may be more schedules than this."
+    "totalCappedHint": "The server returned a full page, so there may be more schedules than this.",
+    "systemManaged": "System",
+    "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
+    "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
+    "failedScheduleGone": "Schedule no longer exists"
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2012,7 +2031,8 @@
     "tokenDistribution": "Token distribution",
     "totalCost": "Total Cost",
     "totalTokens": "Total Tokens",
-    "turns": "Turns"
+    "turns": "Turns",
+    "partial": "This conversation has more audit entries than the debugger loads. Totals cover the most recent ones only."
   },
   "memoryInspector": {
     "error": "Failed to load memory data",
@@ -2242,8 +2262,16 @@
       "maxTotalMb": "Max total size (MB)",
       "maxTotalMbHint": "Across all of this source's files",
       "removeTitle": "Remove this source?",
-      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone."
-    }
+      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeTitle": "Turn this into a website source?",
+      "switchTypeDescription": "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeConfirm": "Switch to website",
+      "filesLoadFailed": "Could not load the files: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
+    "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
+    "chunkStrategyUnsupported": "{{value}} (not supported)",
+    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive."
   },
   "onboarding": {
     "welcome": {
@@ -3357,7 +3385,8 @@
     "previewFirst": "Preview changes before syncing",
     "syncPartial": "Sync incomplete — some resources were not written",
     "syncIdentical": "Already up to date — nothing to write",
-    "previewFailed": "Preview failed"
+    "previewFailed": "Preview failed",
+    "noPreviewReturned": "The source returned no preview for this agent."
   },
   "userConversations": {
     "title": "User Conversations",
@@ -3642,10 +3671,7 @@
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
   },
   "orphans": {
-    "confirmPurgeAll": "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
-    "deleteSelected": "Delete {{count}} selected",
     "description": "Find and clean up resources not referenced by any agent or package.",
-    "deselectAll": "Deselect All",
     "includeDeleted": "Include soft-deleted",
     "lastScanned": "Last scanned",
     "noOrphans": "No orphans found",
@@ -3656,13 +3682,13 @@
     "scanPromptDesc": "Find extension configs (rules, API calls, LLMs, outputs) that are not referenced by any workflow or agent. Clean up unused resources to keep your platform tidy.",
     "scanPromptTitle": "Scan your platform",
     "scanning": "Scanning resources…",
-    "selectAll": "Select All",
     "softDeleted": "Deleted",
     "title": "Orphan Detection",
     "found_one": "{{count}} orphan found",
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
-    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes."
+    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3730,7 +3756,7 @@
     "tagPlaceholder": "e.g. safety, production",
     "tags": "Tags",
     "templateEnabled": "Enable template resolution",
-    "templateEnabledHint": "When disabled, {{}} markers in the content are treated as literal text (useful for code examples).",
+    "templateEnabledHint": "When disabled, { } markers in the content are treated as literal text (useful for code examples).",
     "usageHint": "Usage:"
   },
   "status": {
@@ -4261,7 +4287,7 @@
       "llmDefaultsDesc": "Used by every advisor created here unless the advisor sets its own below.",
       "llmDefaultsKeyRequired": "Add a key here to cover every advisor that does not set its own.",
       "model": "Model",
-      "modelPlaceholder": "e.g. claude-sonnet-5",
+      "modelPlaceholder": "e.g. claude-sonnet-5-5",
       "nameRequired": "Give this advisor a name.",
       "new": "New",
       "next": "Next",

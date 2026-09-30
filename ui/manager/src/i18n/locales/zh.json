@@ -661,7 +661,9 @@
     "endSuccess_other": "已结束 {{count}} 个对话",
     "endSuccess_one": "已结束 {{count}} 个对话",
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
-    "purgeSuccess_one": "已清除 {{count}} 个已结束对话"
+    "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
+    "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -901,7 +903,9 @@
     "removeCondition": "移除条件",
     "noGroups": "未定义行为组",
     "noRules": "此组中没有规则",
-    "noConditions": "无条件"
+    "noConditions": "无条件",
+    "sizeNoBound": "无限制",
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -933,8 +937,6 @@
     "responseObjectName": "响应对象名称",
     "responseHeaderObjectName": "响应 Header 对象名称",
     "fireAndForget": "发送后不等待",
-    "batchCalls": "批量调用",
-    "iterationObjectName": "迭代对象名称",
     "prePostInstructions": "前置/后置指令",
     "preRequest": "请求前",
     "postResponse": "响应后",
@@ -1004,7 +1006,16 @@
     "authHeaderRefPlaceholder": "可选 — 对需要认证的规范使用 ${vault:my-api-key}",
     "authHeaderRefHint": "密钥库引用，在调用时解析。存储的密钥必须是完整的请求头值，包含 Bearer 前缀。",
     "authHeaderRefInvalid": "必须以 ${vault:…}、${vars:…} 或 ${caller:…} 开头。直接粘贴密钥会将其写入请求 URL 以及沿途的每一条日志。",
-    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。"
+    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。",
+    "runOnNoCodes": "空的“运行状态码”列表不匹配任何状态码，因此此指令永远不会运行。",
+    "useDefaultCodes": "使用默认值",
+    "httpCodeFilterDefaults": "留空的字段使用其中显示的默认状态码。",
+    "scopeSecretUnsupported": "（此处不会存入保险库）",
+    "scopeSecretWarning": "此指令中的 secret 作用域不会存入保险库：该值以明文存储。请选择其他作用域，并将凭据保存在密钥保险库中。",
+    "skipNone": "无——不跳过任何状态码",
+    "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
+    "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
+    "useDefaultSkipCodes": "使用默认跳过列表"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",
@@ -1057,7 +1068,12 @@
     "whitelist": "白名单（仅允许）",
     "blacklist": "黑名单（排除）",
     "pipelineCalls": "流水线调用",
-    "addCall": "添加 MCP 调用"
+    "addCall": "添加 MCP 调用",
+    "argumentName": "参数名称",
+    "argumentType": "参数类型",
+    "argumentText": "文本",
+    "argumentInvalidJson": "不是有效的 JSON——保留最后一个有效值",
+    "removeArgument": "移除参数"
   },
   "llmEditor": {
     "addCustomInstruction": "添加指令",
@@ -1096,7 +1112,6 @@
     "identityMaskingRulePlaceholder": "例如 切勿透露你是 AI 语言模型",
     "identityMaskingRules": "掩码规则",
     "identityMaskingRulesHint": "掩码生效需同时满足：已启用且至少有一条规则。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例如 product-docs",
     "knowledgeBases": "知识库",
     "knowledgeBasesHint": "按名称显式引用知识库。每个名称都必须与工作流中的 RagConfiguration 匹配。",
@@ -1198,7 +1213,7 @@
     "cascadeInAgent": "在代理模式（含工具）中也使用级联",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例如 claude-sonnet-5",
+    "cascadeModelName": "例如 claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 始终接受",
     "cascadeTimeout": "超时 (毫秒)",
@@ -1254,9 +1269,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "步骤 {{step}} 超时必须大于 0。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "步骤 {{step}} 使用了不同的提供商，但没有自己的 API Key — 它将继承任务密钥。"
     },
-    "parallelExecution": "并行工具执行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "超时 (毫秒)",
     "maxToolIterations": "最大工具迭代次数",
     "maxToolIterationsHint": "（默认 10）",
     "toolRateLimits": "单工具速率限制",
@@ -1326,6 +1338,7 @@
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
     "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "paramName": "参数名称",
     "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
   },
   "outputEditor": {
@@ -1390,7 +1403,8 @@
     "openEditor": "在编辑器中编辑",
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
-    "toggleGroup": "切换属性组"
+    "toggleGroup": "切换属性组",
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -1560,7 +1574,8 @@
     "stateReady": "就绪",
     "stateActive": "活跃",
     "stateError": "错误",
-    "stateEnded": "已结束"
+    "stateEnded": "已结束",
+    "loadOlder": "加载更早的条目"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1870,7 +1885,11 @@
       "weeklyMonday": "每周（周一 00:00）",
       "monthly": "每月（1 日 00:00）"
     },
-    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。"
+    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。",
+    "systemManaged": "系统",
+    "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
+    "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
+    "failedScheduleGone": "该计划已不存在"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -1931,7 +1950,8 @@
     "tokenDistribution": "令牌分布",
     "totalCost": "总成本",
     "totalTokens": "令牌总数",
-    "turns": "轮次"
+    "turns": "轮次",
+    "partial": "此对话的审计条目多于调试器加载的数量。合计仅涵盖最近的条目。"
   },
   "memoryInspector": {
     "error": "加载记忆数据失败",
@@ -2161,8 +2181,16 @@
       "maxTotalMb": "总大小上限（MB）",
       "maxTotalMbHint": "此来源所有文件合计",
       "removeTitle": "移除此来源？",
-      "removeDescription": "保存后，其上传的文件以及知识库从中学到的内容将被删除，且无法撤销。"
-    }
+      "removeDescription": "保存后，其上传的文件以及知识库从中学到的内容将被删除，且无法撤销。",
+      "switchTypeTitle": "要改为网站来源吗？",
+      "switchTypeDescription": "保存时，此来源已上传的文件以及知识库从中学到的所有内容都会被删除。此操作无法撤消。",
+      "switchTypeConfirm": "切换为网站",
+      "filesLoadFailed": "无法加载文件：{{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（保存为递归）",
+    "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。",
+    "chunkStrategyUnsupported": "{{value}}（不支持）",
+    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。"
   },
   "onboarding": {
     "welcome": {
@@ -3131,7 +3159,8 @@
     "previewFirst": "同步前预览变更",
     "syncPartial": "同步未完成 — 部分资源未写入",
     "syncIdentical": "已是最新 — 无需写入",
-    "previewFailed": "预览失败"
+    "previewFailed": "预览失败",
+    "noPreviewReturned": "源实例未返回此代理的预览。"
   },
   "sync": {
     "actionCreate": "新建",
@@ -3601,10 +3630,7 @@
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
   },
   "orphans": {
-    "confirmPurgeAll": "永久删除全部 {{count}} 个孤立资源？服务器会清除所有孤立项——不应用您的选择。此操作无法撤销。",
-    "deleteSelected": "删除所选的 {{count}} 项",
     "description": "查找并清理未被任何智能体或工作流引用的资源。",
-    "deselectAll": "取消全选",
     "includeDeleted": "包含软删除项",
     "lastScanned": "上次扫描",
     "noOrphans": "未找到孤立项",
@@ -3615,13 +3641,13 @@
     "scanPromptDesc": "查找未被任何工作流或智能体引用的扩展配置（规则、API 调用、LLM、输出）。清理未使用的资源以保持平台整洁。",
     "scanPromptTitle": "扫描您的平台",
     "scanning": "正在扫描资源…",
-    "selectAll": "全选",
     "softDeleted": "已删除",
     "title": "孤立项检测",
     "found_other": "找到 {{count}} 个孤立项",
     "found_one": "找到 {{count}} 个孤立项",
     "scanIncomplete": "本次扫描未完成",
-    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。"
+    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
+    "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
@@ -3689,7 +3715,7 @@
     "tagPlaceholder": "例如 safety、production",
     "tags": "标签",
     "templateEnabled": "启用模板解析",
-    "templateEnabledHint": "禁用后，内容中的 {{}} 标记将被视为纯文本（对代码示例很有用）。",
+    "templateEnabledHint": "禁用后，内容中的 { } 标记将被视为纯文本（对代码示例很有用）。",
     "usageHint": "用法："
   },
   "status": {
@@ -4261,7 +4287,7 @@
       "llmDefaultsDesc": "在此创建的每位顾问都会使用该设置，除非顾问在下方自行设置。",
       "llmDefaultsKeyRequired": "在此添加一个密钥，以覆盖所有未自行设置密钥的顾问。",
       "model": "模型",
-      "modelPlaceholder": "例如 claude-sonnet-5",
+      "modelPlaceholder": "例如 claude-sonnet-5-5",
       "nameRequired": "请为该顾问填写名称。",
       "new": "新建",
       "next": "下一步",

@@ -106,6 +106,18 @@ public class ConversationMemorySnapshot {
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
+    /**
+     * The compatibility generation of {@link #agentVersion} — see
+     * {@code IConversationMemory#getCompatibilityGeneration()}. Absent in documents
+     * written before it existed, which deserialize to {@code null}: those
+     * conversations stay on their version.
+     */
+    private Integer compatibilityGeneration;
+    /**
+     * See {@code IConversationMemory#getStaleDescriptorAgentVersion()}. Written
+     * only while the descriptor lags the conversation's version.
+     */
+    private Integer staleDescriptorAgentVersion;
     private String userId;
     /**
      * How {@link #userId} came to be, fixed at creation. Absent in documents
@@ -118,6 +130,15 @@ public class ConversationMemorySnapshot {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    /**
+     * Why the conversation ended, when the ending path knows a reason worth telling
+     * a client — for example
+     * {@link ai.labs.eddi.engine.api.IConversationService#END_REASON_AGENT_VERSION_RETIRED}.
+     * {@code null} for every other end and for every conversation that has not
+     * ended. Written by a narrow field update when the conversation is ended, never
+     * by a turn; absent in documents written before it existed.
+     */
+    private String endReason;
     private String hitlPausedWorkflowId;
     private int hitlPausedAbsoluteTaskIndex = -1;
     private Instant hitlPausedAt;
@@ -507,6 +528,22 @@ public class ConversationMemorySnapshot {
         this.agentVersion = agentVersion;
     }
 
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    public Integer getStaleDescriptorAgentVersion() {
+        return staleDescriptorAgentVersion;
+    }
+
+    public void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        this.staleDescriptorAgentVersion = staleDescriptorAgentVersion;
+    }
+
     public String getUserId() {
         return userId;
     }
@@ -537,6 +574,14 @@ public class ConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(String endReason) {
+        this.endReason = endReason;
     }
 
     public String getHitlPausedWorkflowId() {

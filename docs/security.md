@@ -46,13 +46,21 @@ bash install.sh --with-auth
 .\install.ps1 -WithAuth
 ```
 
-This starts Keycloak alongside EDDI with pre-configured realm, clients, and test users:
+This starts Keycloak alongside EDDI with a pre-configured realm, clients and accounts. **No account ships with a password**, and the installer generates the Keycloak bootstrap admin password rather than using a default:
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | *none* | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Ships without a password: set one at `http://localhost:8180/admin` (`admin`/`admin`) → Users → eddi → Credentials |
-| `viewer` | `viewer` | `eddi-viewer` | Read-only access. Development only: no password change is forced |
-| `user` | `user` | `eddi-user` | Standard user access. Development only: no password change is forced |
+| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Keycloak asks for a new password at the first login |
+| `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
+| `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
+
+The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` unless `KEYCLOAK_BIND` says otherwise — with the user `admin` and the `KC_BOOTSTRAP_ADMIN_PASSWORD` in `~/.eddi/.env`: the installers generate one, and the GCP provisioner generates one on the VM. A plain `docker compose up` without it falls back to the `admin`/`admin` dev default, which is acceptable only while Keycloak stays on loopback — set `KC_BOOTSTRAP_ADMIN_PASSWORD` before widening `KEYCLOAK_BIND` (Keycloak reads it only when it first creates the master realm). The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
+
+> **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-run the installer (`install.sh` or `install.ps1`, whether EDDI is running or stopped):
+>
+> - It moves a console that still accepts `admin`/`admin` to a generated `KC_BOOTSTRAP_ADMIN_PASSWORD` and records that in `.env`. If `.env` has no password and the console no longer accepts `admin`/`admin`, the password is yours: the installer warns and says which line to add to `.env` so later runs can manage Keycloak. The same goes for Grafana and `GRAFANA_ADMIN_PASSWORD` on a running stack; on a fresh or stopped one, a generated Grafana password the existing volume refuses stops the install before the success banner, with the `.env` line to fix.
+> - It turns the password grant off on `eddi-frontend`, and gives `eddi` a one-time password if it has none.
+> - It does **not** touch `viewer` and `user` (without `--demo-users` / `-DemoUsers`), but it tells you when either still has a password — on a legacy realm that is `viewer`/`viewer` and `user`/`user`. Reset or delete their credentials in the console.
 
 ### Configuration Properties
 

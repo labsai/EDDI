@@ -28,7 +28,7 @@ import java.util.LinkedHashMap;
 import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.junit.jupiter.api.*;
-import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
