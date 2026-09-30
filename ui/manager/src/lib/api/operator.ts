@@ -102,6 +102,21 @@ export interface OperatorConfig {
   authMode: OperatorAuthMode;
   /** Editable half of the system prompt; the safety preamble is prepended. */
   promptBody: string;
+  /**
+   * Whether `promptBody` was the untouched default for its scope when it was
+   * provisioned. An upgrade replaces a default body with the new default and
+   * keeps an edited one. Absent on configs written before upgrades existed —
+   * see `instructionsState` in `operator-revision.ts` for how that is read.
+   */
+  promptBodyIsDefault?: boolean;
+  /**
+   * `OPERATOR_REVISION` of the Manager that provisioned this operator. Absent
+   * (read as 0) on configs written before revisions existed. The backend reads
+   * it too, for its startup warning (`OperatorRevisionCheck`).
+   */
+  provisionedRevision?: number;
+  /** The endpoint allow-list this operator was provisioned with — what an upgrade diffs against. */
+  provisionedEndpoints?: string[];
 }
 
 /**

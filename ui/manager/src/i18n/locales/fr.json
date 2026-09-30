@@ -4459,7 +4459,9 @@
       "platformBaseUrlDiffers": "Ce déploiement indique actuellement sa propre adresse comme {{serverUrl}}. La valeur ci-dessus diffère — ne la conservez que si vous l'avez définie délibérément.",
       "platformBaseUrlQueryFailed": "Impossible de demander au serveur sa propre adresse. L'activation échouera sauf si vous la saisissez ici — ou rechargez pour réessayer.",
       "platformBaseUrlUnresolved": "Ce déploiement tourne sur un port HTTP aléatoire sans eddi.self.base-url : il ne peut pas indiquer où se joindre lui-même. Saisissez l'adresse ici.",
-      "llmEndpoint": "Point de terminaison du modèle"
+      "llmEndpoint": "Point de terminaison du modèle",
+      "promptBodyDiffers": "Ces instructions diffèrent de la valeur par défaut actuelle — elles ont été modifiées ou écrites par une version antérieure du Manager.",
+      "promptBodyReset": "Rétablir la valeur par défaut"
     },
     "authMode": {
       "none": {
@@ -4627,6 +4629,30 @@
     },
     "superseded": {
       "title": "L'agent opérateur précédent est toujours déployé."
+    },
+    "upgrade": {
+      "hint": "Une mise à jour du Platform Operator est disponible.",
+      "blockerBaseUrl": "L'adresse de son serveur de modèles n'a pas été enregistrée — saisissez-la à nouveau pour mettre à jour.",
+      "addedTools_other": "{{count}} nouveaux outils",
+      "action": "Mettre à jour",
+      "addedTools_one": "{{count}} nouvel outil",
+      "blockerProvider": "Son fournisseur de modèles ne peut plus être configuré ainsi — choisissez-en un autre pour mettre à jour.",
+      "useNewDefault": "Les remplacer par la nouvelle valeur par défaut",
+      "confirmBody": "Un nouvel opérateur est créé avec les instructions et outils actuels et vérifié comme lors d'une nouvelle activation ; l'ancien n'est supprimé qu'ensuite. Le modèle, la clé, l'environnement et les paramètres d'accès sont conservés. La discussion ouverte avec l'opérateur se termine, et les conversations avec l'ancien opérateur n'apparaissent plus dans l'historique.",
+      "description": "Il a été configuré par une version antérieure du Manager (révision {{from}} ; cette version livre la {{to}}), ses instructions et ses outils sont donc obsolètes.",
+      "removedTools_many": "{{count}} outils retirés",
+      "blockerCredential": "Sa clé de modèle a été saisie en clair, et n'est donc jamais enregistrée — saisissez-la à nouveau pour mettre à jour.",
+      "reviewAction": "Vérifier et mettre à jour",
+      "instructionsUnknown": "Les instructions de l'opérateur diffèrent de la valeur par défaut actuelle — soit une ancienne valeur par défaut, soit vos propres modifications.",
+      "instructionsCustomized": "Vous avez modifié les instructions de l'opérateur.",
+      "confirmTitle": "Mettre à jour le Platform Operator ?",
+      "removedTools_other": "{{count}} outils retirés",
+      "removedTools_one": "{{count}} outil retiré",
+      "addedTools_many": "{{count}} nouveaux outils",
+      "confirm": "Mettre à jour maintenant",
+      "hintAction": "Mettre à jour",
+      "keepCurrent": "Conserver le texte actuel (il n'apprendra pas ce qu'ajoute la nouvelle valeur par défaut)",
+      "title": "Une mise à jour du Platform Operator est disponible"
     }
   },
   "groupWorkspace": {

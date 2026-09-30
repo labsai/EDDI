@@ -4415,7 +4415,9 @@
       "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
       "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
       "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。",
-      "llmEndpoint": "模型端点"
+      "llmEndpoint": "模型端点",
+      "promptBodyDiffers": "这些说明与当前默认值不同——它们已被编辑，或由较早版本的 Manager 编写。",
+      "promptBodyReset": "重置为默认值"
     },
     "authMode": {
       "none": {
@@ -4581,6 +4583,28 @@
     },
     "superseded": {
       "title": "之前的运维助手智能体仍处于部署状态。"
+    },
+    "upgrade": {
+      "hint": "Platform Operator 有可用更新。",
+      "blockerBaseUrl": "其模型服务器地址未被记录——请重新输入以进行升级。",
+      "addedTools_other": "{{count}} 个新工具",
+      "action": "升级",
+      "addedTools_one": "{{count}} 个新工具",
+      "blockerProvider": "其模型提供商已无法通过此方式设置——请选择其他提供商以进行升级。",
+      "useNewDefault": "替换为新的默认值",
+      "confirmBody": "将使用当前的说明和工具构建一个新的 Operator，并像新激活一样进行检查；之后才会移除旧的 Operator。模型、密钥、环境和访问设置保持不变。当前打开的 Operator 聊天将结束，与旧 Operator 的对话将不再显示在历史记录中。",
+      "description": "它由较早版本的 Manager 设置（修订版 {{from}}；此版本提供 {{to}}），因此其说明和工具已过时。",
+      "blockerCredential": "其模型密钥以明文输入，明文从不保存——请重新输入以进行升级。",
+      "reviewAction": "检查并升级",
+      "instructionsUnknown": "Operator 的说明与当前默认值不同——可能是较旧的默认值，也可能是你自己的修改。",
+      "instructionsCustomized": "你编辑过 Operator 的说明。",
+      "confirmTitle": "升级 Platform Operator？",
+      "removedTools_other": "已移除 {{count}} 个工具",
+      "removedTools_one": "已移除 {{count}} 个工具",
+      "confirm": "立即升级",
+      "hintAction": "升级",
+      "keepCurrent": "保留当前文本（它不会学到新默认值新增的内容）",
+      "title": "Platform Operator 有可用更新"
     }
   },
   "groupWorkspace": {

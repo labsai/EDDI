@@ -4415,7 +4415,9 @@
       "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
       "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
       "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
-      "llmEndpoint": "Model endpoint"
+      "llmEndpoint": "Model endpoint",
+      "promptBodyDiffers": "These instructions differ from the current default — they were edited, or written by an earlier version of the Manager.",
+      "promptBodyReset": "Reset to default"
     },
     "authMode": {
       "none": {
@@ -4581,6 +4583,28 @@
     },
     "superseded": {
       "title": "The previous operator agent is still deployed."
+    },
+    "upgrade": {
+      "hint": "An update for the Platform Operator is available.",
+      "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
+      "addedTools_other": "{{count}} new tools",
+      "action": "Upgrade",
+      "addedTools_one": "{{count}} new tool",
+      "blockerProvider": "Its model provider can no longer be set up this way — choose another to upgrade.",
+      "useNewDefault": "Replace them with the new default",
+      "confirmBody": "A new operator is built with the current instructions and tools and checked like a new activation; only then is the old one removed. Model, key, environment and access settings are kept. The open operator chat ends, and conversations with the old operator no longer appear in the history.",
+      "description": "It was set up by an earlier version of the Manager (revision {{from}}; this version ships {{to}}), so its instructions and tools are out of date.",
+      "blockerCredential": "Its model key was entered as plain text, which is never stored — enter it again to upgrade.",
+      "reviewAction": "Review and upgrade",
+      "instructionsUnknown": "The operator's instructions differ from the current default — either an older default or your own edits.",
+      "instructionsCustomized": "You edited the operator's instructions.",
+      "confirmTitle": "Upgrade the Platform Operator?",
+      "removedTools_other": "{{count}} tools removed",
+      "removedTools_one": "{{count}} tool removed",
+      "confirm": "Upgrade now",
+      "hintAction": "Upgrade",
+      "keepCurrent": "Keep the current text (it will not learn what the new default adds)",
+      "title": "An update for the Platform Operator is available"
     }
   },
   "groupWorkspace": {

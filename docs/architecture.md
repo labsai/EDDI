@@ -707,6 +707,17 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 
+### Keeping It Up to Date
+
+Everything provisioning bakes into the operator — its instructions, its endpoint allow-list and its approval gate — is a snapshot. Upgrading EDDI upgrades the Manager, not an operator that is already running, so an operator activated on an older release keeps its older instructions and tools until it is upgraded.
+
+The Manager tracks this with a **provisioning revision** (`ui/manager/src/lib/operator/operator-revision.json`), recorded in the operator's configuration at every activation. When the running operator is older than the Manager:
+
+- **In the Manager**, the operator page shows an *Upgrade* banner listing the tools the upgrade adds and removes; the docked operator drawer and the dashboard show a short hint; and the browser console logs one warning.
+- **In the server log**, EDDI logs a `WARN` at startup (`[OPERATOR] The Platform Operator on this deployment was set up by an older Manager…`), so it is visible without opening the UI. The backend reads the same revision file from its classpath.
+
+*Upgrade* rebuilds the operator with the same model, key, environment and access settings. Like *Reconfigure*, it is a replacement: the new operator passes every activation check before the old one is removed. The open operator chat ends, and conversations with the old operator no longer appear in its history. Instructions the admin never edited are replaced with the new default; edited ones are kept unless the admin chooses the new default. An operator whose model key was entered as plain text (never stored), or whose model-server address was not recorded, opens the activation form prefilled instead.
+
 ### Key Insight
 
 The operator isn't special code—it's a **regular EDDI agent** that uses:
