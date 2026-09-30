@@ -33,7 +33,7 @@ A review of the Platform Operator against what shipped since its knowledge-base 
   - a dashboard line;
   - one `console.warn` per page load.
 - **Shown in the server log:** a startup `WARN` from `OperatorRevisionCheck`. It reads the same JSON, which `pom.xml` now copies onto the classpath on every build, `-DskipUi` included.
-- **Upgrade is one click.** It is a Reconfigure with every setting carried over, so it runs through every activation check before the old operator is retired. Instructions the admin never edited get the new default. Edited ones are kept unless the admin picks the new default. Legacy configs whose text differs from today's default ask.
+- **Upgrade is one click.** It is a Reconfigure with every setting carried over, so it runs through every activation check before the old operator is retired. Instructions the admin never edited get the new default. Edited ones are kept unless the admin picks the new default. Legacy configs whose text differs from today's default ask, with *keep* preselected: that text is usually an old default, but it may be an edit, and a click-through must not discard it.
 - An operator with a plaintext key (never stored) or an unrecorded model-server address opens the prefilled form instead.
 - The form now seeds today's default when the stored text was a default, and offers *Reset to default* whenever the text differs.
 

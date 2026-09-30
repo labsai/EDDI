@@ -113,9 +113,11 @@ describe("OperatorPage — upgrading an out-of-date operator", () => {
     serve(config);
     renderWithProviders(<OperatorPage />);
     await userEvent.click(await screen.findByTestId("operator-upgrade-start"));
-    // A legacy body that differs from today's default: the admin is asked, with
-    // the new default preselected.
-    expect(await screen.findByTestId("operator-upgrade-use-default")).toBeChecked();
+    // A legacy body that differs from today's default: the admin is asked, and
+    // KEEP is preselected — it may be their own edit. Choosing the default is
+    // one deliberate click.
+    expect(await screen.findByTestId("operator-upgrade-keep-current")).toBeChecked();
+    await userEvent.click(screen.getByTestId("operator-upgrade-use-default"));
     await userEvent.click(screen.getByRole("button", { name: /upgrade now/i }));
 
     await waitFor(() => expect(calls.activate).toHaveLength(1));
@@ -123,6 +125,16 @@ describe("OperatorPage — upgrading an out-of-date operator", () => {
     expect(params.config).toEqual({ ...config, promptBody: defaultOperatorPromptBody(config.scope) });
     expect(params.apiKey).toBe("${vault:operator-llm-key}");
     expect(params.agentName).toBe("EDDI Platform Operator");
+  });
+
+  it("keeps a legacy body by default when the admin just clicks through", async () => {
+    serve(legacyConfig({ promptBody: "Maybe an edit, maybe an old default." }));
+    renderWithProviders(<OperatorPage />);
+    await userEvent.click(await screen.findByTestId("operator-upgrade-start"));
+    await userEvent.click(await screen.findByRole("button", { name: /upgrade now/i }));
+
+    await waitFor(() => expect(calls.activate).toHaveLength(1));
+    expect((calls.activate[0] as ActivateParams).config.promptBody).toBe("Maybe an edit, maybe an old default.");
   });
 
   it("keeps edited instructions when the admin says so", async () => {

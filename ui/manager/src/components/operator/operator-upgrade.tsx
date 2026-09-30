@@ -41,12 +41,13 @@ export function OperatorUpgradeNotice({
 }: OperatorUpgradeNoticeProps) {
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // Pre-selected by what is known: an untouched default is replaced, a known
-  // edit is kept. An `unknown` body (a config from before this was tracked) is
-  // most often an OLD default — admins rarely edit it — so the new default is
-  // offered first, with the choice in plain view.
+  // Pre-selected by what is known: an untouched default is replaced (and no
+  // choice is shown). Anything else keeps the current text unless the admin
+  // picks the new default — including an `unknown` body from a config written
+  // before this was tracked. That is usually an old default, but it may be an
+  // edit, and a fast click-through must never be what discards someone's words.
   const [choice, setChoice] = useState<InstructionsChoice>(
-    assessment.instructions === "customized" ? "keep-current" : "use-new-default",
+    assessment.instructions === "default" ? "use-new-default" : "keep-current",
   );
 
   const added = assessment.addedEndpoints;
