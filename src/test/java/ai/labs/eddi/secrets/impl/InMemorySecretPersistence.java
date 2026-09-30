@@ -34,6 +34,8 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     final Map<String, String> meta = new LinkedHashMap<>();
 
     int upsertSecretCalls;
+    int insertIfAbsentCalls;
+    int findSecretCalls;
     int updateSecretGrantCalls;
     int findDekCalls;
 
@@ -125,7 +127,14 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean insertSecretIfAbsent(EncryptedSecret secret) {
+        insertIfAbsentCalls++;
+        return secrets.putIfAbsent(key(secret.getTenantId(), secret.getKeyName()), copyOf(secret)) == null;
+    }
+
+    @Override
     public Optional<EncryptedSecret> findSecret(String tenantId, String keyName) {
+        findSecretCalls++;
         Optional<EncryptedSecret> read = Optional.ofNullable(secrets.get(key(tenantId, keyName))).map(InMemorySecretPersistence::copyOf);
         Runnable hook = afterNextFind;
         afterNextFind = null;

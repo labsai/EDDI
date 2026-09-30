@@ -15,6 +15,14 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private String name;
     private String description;
     private String originId; // resource ID from the exporting instance (for merge import)
+    /**
+     * The version a sync or an import last wrote. A current version beyond it means
+     * the resource was edited on this instance since, which is what lets a sync
+     * tell a local hotfix from a copy it may overwrite. Null for a resource no sync
+     * or import has written — such a resource has no baseline and is never reported
+     * as changed locally.
+     */
+    private Integer syncedVersion;
 
     private String ownerId;
     private String spaceId;
@@ -42,6 +50,14 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public String getOriginId() {
         return originId;
+    }
+
+    public Integer getSyncedVersion() {
+        return syncedVersion;
+    }
+
+    public void setSyncedVersion(Integer syncedVersion) {
+        this.syncedVersion = syncedVersion;
     }
 
     public void setOriginId(String originId) {

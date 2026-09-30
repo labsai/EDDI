@@ -3344,6 +3344,9 @@
     "new": "new",
     "updated": "updated",
     "unchanged": "unchanged",
+    "removed": "removed",
+    "conflicts": "changed here",
+    "conflictHint": "Resources marked Conflict were changed on this instance since the last sync. They are left alone unless you tick them — ticking one overwrites the local change.",
     "selected": "selected",
     "mergeNow": "Import Selected",
     "syncNow": "Sync Now",
@@ -3365,7 +3368,8 @@
     "actionCreate": "New",
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
-    "actionConflict": "Conflict"
+    "actionConflict": "Conflict",
+    "actionRemove": "Remove"
   },
   "syncPage": {
     "title": "Agent Sync",
@@ -3395,6 +3399,9 @@
     "previewFirst": "Preview changes before syncing",
     "syncPartial": "Sync incomplete — some resources were not written",
     "syncIdentical": "Already up to date — nothing to write",
+    "outcomeCounts": "{{updated}} updated · {{created}} created · {{skipped}} unchanged",
+    "redeployHint": "Synced changes are saved as new versions. What is running keeps running — deploy the new version to make it live.",
+    "overwrite": "Overwrite local change",
     "previewFailed": "Preview failed",
     "noPreviewReturned": "The source returned no preview for this agent."
   },

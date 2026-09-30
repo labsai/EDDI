@@ -449,6 +449,7 @@ async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): 
     throw new Error(
       `${failure} Rolling it back ALSO failed (${detail}). The operator is still deployed with ` +
         "write tools and an unverified gate — remove it manually from the operator screen now.",
+      { cause: rollbackError },
     );
   }
   throw new Error(

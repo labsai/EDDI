@@ -21,7 +21,13 @@ export interface ExportPreview {
 
 // ==================== Import/Sync Types ====================
 
-export type DiffAction = "CREATE" | "UPDATE" | "SKIP" | "CONFLICT";
+/**
+ * - `CONFLICT` — changed on this instance since the last sync wrote it, and on
+ *   the source too. Written only when named in `selectedResources`.
+ * - `REMOVE` — the target has it and the source no longer does (a workflow step,
+ *   or a whole workflow). Its `sourceId` is the target's own id.
+ */
+export type DiffAction = "CREATE" | "UPDATE" | "SKIP" | "CONFLICT" | "REMOVE";
 export type MatchStrategy = "position" | "type" | "name" | "originId" | null;
 
 export interface ResourceDiff {
@@ -53,6 +59,11 @@ export interface ImportPreview {
    * like in the Manager.
    */
   error?: string | null;
+  /**
+   * What the operator should know before approving that is not a failure — e.g.
+   * two source snippets sharing a name, of which only one travels.
+   */
+  warnings?: string[];
 }
 
 // ==================== Sync Types ====================
@@ -60,15 +71,24 @@ export interface ImportPreview {
 export interface SyncMapping {
   sourceAgentId: string;
   sourceAgentVersion: number | null;
+  /**
+   * The local agent to upgrade. Null: the backend looks for the agent an earlier
+   * sync promoted from this source (by its originId) and creates one only when
+   * there is none — unless `createNew` is set.
+   */
   targetAgentId: string | null;
+  /** Create a new agent even when one was promoted from this source before. */
+  createNew?: boolean;
 }
 
 export interface SyncRequest {
   sourceAgentId: string;
   sourceAgentVersion: number | null;
   targetAgentId: string | null;
+  /** Null syncs everything. An empty list is refused (400) — it names nothing. */
   selectedResources: string[] | null;
   workflowOrder: string[] | null;
+  createNew?: boolean;
 }
 
 export interface DocumentDescriptor {
@@ -573,11 +593,13 @@ export async function previewSync(
   sourceAgentId: string,
   sourceVersion: number | null,
   targetAgentId: string | null,
-  sourceAuth: string
+  sourceAuth: string,
+  createNew = false
 ): Promise<ImportPreview> {
   const params = new URLSearchParams({ sourceUrl, sourceAgentId });
   if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
   if (targetAgentId) params.set("targetAgentId", targetAgentId);
+  if (createNew) params.set("createNew", "true");
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/preview?${params}`, {
     method: "POST",
@@ -620,12 +642,17 @@ export async function executeSync(
   targetAgentId: string | null,
   selectedResources: string[] | null,
   workflowOrder: string[] | null,
-  sourceAuth: string
+  sourceAuth: string,
+  createNew = false
 ): Promise<SyncExecution> {
   const params = new URLSearchParams({ sourceUrl, sourceAgentId });
   if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
   if (targetAgentId) params.set("targetAgentId", targetAgentId);
-  if (selectedResources?.length) params.set("selectedResources", selectedResources.join(","));
+  if (createNew) params.set("createNew", "true");
+  // Sent even when empty. Dropping an empty selection made "nothing ticked" read
+  // as "no selection", i.e. everything — the backend now refuses it with a 400
+  // instead of overwriting what the operator had deliberately left out.
+  if (selectedResources) params.set("selectedResources", selectedResources.join(","));
   if (workflowOrder?.length) params.set("workflowOrder", workflowOrder.join(","));
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import/sync?${params}`, {

@@ -32,6 +32,7 @@ import { Link } from "react-router-dom";
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
 
+/** The workflows list page: search, sort, card/table view, create and delete. */
 export function WorkflowsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -77,7 +78,7 @@ export function WorkflowsPage() {
       access: accessFor(wf.callerLevel),
     }));
     return [...grouped].sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
       else if (sortField === "version") cmp = a.version - b.version;
       else cmp = new Date(a.lastModifiedOn).getTime() - new Date(b.lastModifiedOn).getTime();

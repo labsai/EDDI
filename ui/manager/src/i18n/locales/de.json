@@ -3290,6 +3290,9 @@
     "new": "neu",
     "updated": "aktualisiert",
     "unchanged": "unverändert",
+    "removed": "entfernt",
+    "conflicts": "hier geändert",
+    "conflictHint": "Als Konflikt markierte Ressourcen wurden seit der letzten Synchronisierung auf dieser Instanz geändert. Sie bleiben unverändert, solange Sie sie nicht auswählen – eine Auswahl überschreibt die lokale Änderung.",
     "selected": "ausgewählt",
     "mergeNow": "Ausgewählte importieren",
     "syncNow": "Jetzt synchronisieren",
@@ -3335,6 +3338,9 @@
     "previewFirst": "Änderungen vor dem Synchronisieren ansehen",
     "syncPartial": "Synchronisierung unvollständig – einige Ressourcen wurden nicht geschrieben",
     "syncIdentical": "Bereits aktuell – nichts zu schreiben",
+    "outcomeCounts": "{{updated}} aktualisiert · {{created}} erstellt · {{skipped}} unverändert",
+    "redeployHint": "Synchronisierte Änderungen werden als neue Versionen gespeichert. Was läuft, läuft weiter – stellen Sie die neue Version bereit, um sie live zu schalten.",
+    "overwrite": "Lokale Änderung überschreiben",
     "previewFailed": "Vorschau fehlgeschlagen",
     "noPreviewReturned": "Die Quelle hat für diesen Agenten keine Vorschau geliefert."
   },
@@ -3342,7 +3348,8 @@
     "actionCreate": "Neu",
     "actionUpdate": "Aktualisieren",
     "actionSkip": "Aktuell",
-    "actionConflict": "Konflikt"
+    "actionConflict": "Konflikt",
+    "actionRemove": "Entfernen"
   },
   "userConversations": {
     "title": "Nutzer-Konversationen",

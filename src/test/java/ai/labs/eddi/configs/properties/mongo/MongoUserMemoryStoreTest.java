@@ -57,6 +57,7 @@ class MongoUserMemoryStoreTest {
         MongoDatabase database = mock(MongoDatabase.class);
         collection = mock(MongoCollection.class);
         when(database.getCollection("usermemories")).thenReturn(collection);
+        IdentityIndexStubs.stubInstalledIdentityIndexes(collection);
         store = new MongoUserMemoryStore(database);
     }
 
@@ -162,6 +163,9 @@ class MongoUserMemoryStoreTest {
         MongoDatabase database = mock(MongoDatabase.class);
         MongoCollection<Document> degraded = mock(MongoCollection.class);
         when(database.getCollection("usermemories")).thenReturn(degraded);
+        // Skips the startup merge; this test is about the store's own global-index
+        // build failing, which the stub below simulates.
+        IdentityIndexStubs.stubInstalledIdentityIndexes(degraded);
         when(degraded.createIndex(any(Bson.class), argThat((IndexOptions o) -> o != null && "idx_um_upsert_global".equals(o.getName()))))
                 .thenThrow(new MongoCommandException(new BsonDocument("code", new BsonInt32(11000)), new ServerAddress()));
         var degradedStore = new MongoUserMemoryStore(database);

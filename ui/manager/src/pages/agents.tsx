@@ -32,6 +32,7 @@ import { chatLinkFor } from "@/lib/resource-links";
 type SortField = "name" | "version" | "modified";
 type SortDir = "asc" | "desc";
 
+/** The agents list page: search, sort, card/table view, create, import and share. */
 export function AgentsPage() {
   const { t } = useTranslation();
   const { activeSpace, setActiveSpace, enabled: workspacesEnabled, ownership, setOwnership } = useSpaces();
@@ -71,7 +72,7 @@ export function AgentsPage() {
     const flat = data?.pages.flat() ?? [];
     const grouped = groupAgentsByName(flat);
     return [...grouped].sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
       else if (sortField === "version") cmp = a.version - b.version;
       else cmp = new Date(a.lastModifiedOn).getTime() - new Date(b.lastModifiedOn).getTime();

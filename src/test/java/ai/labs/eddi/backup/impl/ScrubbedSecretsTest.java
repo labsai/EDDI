@@ -156,4 +156,63 @@ class ScrubbedSecretsTest {
         assertFalse(merged.contains("token-a"),
                 "a's token must not be written into the entry that calls b: " + merged);
     }
+
+    /**
+     * Which vault entry an environment uses is that environment's business. A
+     * promotion from staging ({@code openai-key}) used to rewrite production's
+     * pointer ({@code prod-openai-key}), and every LLM call production made then
+     * failed on a vault entry it did not have.
+     */
+    @Test
+    @DisplayName("a vault reference in the source yields to the target's own value")
+    void targetKeepsItsOwnVaultReference() throws Exception {
+        String source = """
+                {"tasks":[{"id":"support","parameters":{"apiKey":"${vault:openai-key}","temperature":"0.7"}}]}""";
+        String target = """
+                {"tasks":[{"id":"support","parameters":{"apiKey":"${vault:prod-openai-key}","temperature":"0.3"}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertTrue(merged.contains("${vault:prod-openai-key}"), merged);
+        assertFalse(merged.contains("${vault:openai-key}"), merged);
+        assertTrue(merged.contains("\"0.7\""), "everything else still comes from the source: " + merged);
+    }
+
+    @Test
+    @DisplayName("a header built around a vault reference is the target's too")
+    void headerAroundAVaultReferenceIsKept() throws Exception {
+        String source = """
+                {"httpCalls":[{"name":"lookup","request":{"headers":{"Authorization":"Bearer ${vault:staging-token}"}}}]}""";
+        String target = """
+                {"httpCalls":[{"name":"lookup","request":{"headers":{"Authorization":"Bearer ${vault:prod-token}"}}}]}""";
+
+        assertTrue(ScrubbedSecrets.restore(source, target, jsonSerialization).contains("Bearer ${vault:prod-token}"));
+    }
+
+    /**
+     * With nothing on the target to keep, the reference travels: on a first
+     * promotion, or for a call the source just added, it is the only hint of which
+     * vault entry the operator has to create. A blank target value is not kept
+     * either — it would trade a working pointer for nothing.
+     */
+    @Test
+    @DisplayName("a vault reference travels when the target has no value of its own there")
+    void vaultReferenceTravelsWhereTheTargetHasNothing() throws Exception {
+        String source = "{\"apiKey\":\"${vault:openai-key}\",\"other\":\"${eddivault:x}\"}";
+
+        assertEquals(source, ScrubbedSecrets.restore(source, "{}", jsonSerialization));
+        assertEquals(source, ScrubbedSecrets.restore(source,
+                "{\"apiKey\":\"\",\"other\":\"  \"}", jsonSerialization));
+    }
+
+    @Test
+    @DisplayName("vault references count as target-bound; plain values do not")
+    void targetBoundDetection() {
+        assertTrue(ScrubbedSecrets.carriesTargetBoundValue("{\"k\":\"${vault:a}\"}"));
+        assertTrue(ScrubbedSecrets.carriesTargetBoundValue("{\"k\":\"${eddivault:a}\"}"));
+        assertTrue(ScrubbedSecrets.carriesTargetBoundValue("{\"k\":\"" + ScrubbedSecrets.PLACEHOLDER + "\"}"));
+        assertFalse(ScrubbedSecrets.carriesTargetBoundValue("{\"k\":\"plain\"}"));
+        assertFalse(ScrubbedSecrets.carriesPlaceholder("{\"k\":\"${vault:a}\"}"),
+                "a vault reference is not an unresolved placeholder");
+    }
 }

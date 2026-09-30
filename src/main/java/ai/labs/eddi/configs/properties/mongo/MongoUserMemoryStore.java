@@ -134,6 +134,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // in-memory sort over every entry of the user on every conversation init.
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_ACCESS_COUNT)),
                 new IndexOptions().name("idx_user_access_count").background(true));
+
+        // The upsert identities of buildUpsertFilter, made unique — merges any
+        // duplicates an earlier release let concurrent first writes create.
+        UserMemoryIdentityIndexes.ensure(memoriesCollection);
     }
 
     // === Flat property view (reads/writes global entries in usermemories) ===

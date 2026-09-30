@@ -161,14 +161,14 @@ class RestImportServiceExtendedTest {
         @DisplayName("should throw for null source URL")
         void nullSourceUrl() {
             assertThrows(BadRequestException.class,
-                    () -> importService.executeSync(null, "agent", 1, "target", null, null, null));
+                    () -> importService.executeSync(null, "agent", 1, "target", null, null, null, null));
         }
 
         @Test
         @DisplayName("should throw for blank source URL")
         void blankSourceUrl() {
             assertThrows(BadRequestException.class,
-                    () -> importService.executeSync("", "agent", 1, "target", null, null, null));
+                    () -> importService.executeSync("", "agent", 1, "target", null, null, null, null));
         }
     }
 
@@ -203,7 +203,7 @@ class RestImportServiceExtendedTest {
         @DisplayName("should throw for null source URL")
         void nullSourceUrl() {
             assertThrows(BadRequestException.class,
-                    () -> importService.previewSync(null, "agent", 1, "target", null));
+                    () -> importService.previewSync(null, "agent", 1, "target", null, null));
         }
     }
 
