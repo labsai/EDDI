@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -58,7 +59,7 @@ class PropertySetterTaskDataIsNotTemplateTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         var templatingEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
         task = new PropertySetterTask(mock(IExpressionProvider.class), memoryItemConverter, templatingEngine, mock(IDataFactory.class),
-                mock(IResourceClientLibrary.class), new ObjectMapper(), mock(ISecretProvider.class));
+                mock(IResourceClientLibrary.class), new ObjectMapper(), new SecretPropertyVault(mock(ISecretProvider.class), new DataFactory()));
 
         memory = mock(IConversationMemory.class);
         var currentStep = mock(IWritableConversationStep.class);

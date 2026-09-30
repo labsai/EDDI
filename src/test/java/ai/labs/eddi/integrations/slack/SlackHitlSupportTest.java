@@ -221,4 +221,12 @@ class SlackHitlSupportTest {
         assertEquals("_Agent completed but produced no text output._",
                 SlackHitlSupport.extractSlackResponseText(snapshot));
     }
+
+    @Test
+    void isBindableIntegrationName_refusesMissingNamesAndTheSeparator() {
+        assertTrue(SlackHitlSupport.isBindableIntegrationName("acme-int"));
+        assertFalse(SlackHitlSupport.isBindableIntegrationName("acme|victim"));
+        assertFalse(SlackHitlSupport.isBindableIntegrationName(" "));
+        assertFalse(SlackHitlSupport.isBindableIntegrationName(null));
+    }
 }

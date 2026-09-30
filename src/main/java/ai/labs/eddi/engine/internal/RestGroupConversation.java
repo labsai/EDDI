@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.PreDestroy;
@@ -59,18 +60,50 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final OwnershipValidator ownershipValidator;
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final HitlAccessGuard hitlAccessGuard;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
             IJsonSerialization jsonSerialization,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
-            HitlAccessGuard hitlAccessGuard) {
+            HitlAccessGuard hitlAccessGuard,
+            ResourceAccessGuard resourceAccessGuard) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.hitlAccessGuard = hitlAccessGuard;
+        this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * The USE gate on running a group: the group-level twin of {@code POST
+     * /agents/{id}/start}.
+     * <p>
+     * A discussion (or a continuation round) fans the question out to every member
+     * agent, at the group owner's cost, and the member turns themselves run below
+     * the agent USE gate because no interactive caller exists for them. The group
+     * save path checks USE on every member agent for the author; this check is what
+     * stops anybody else from borrowing that authority by naming a group id they
+     * were never given. A no-op while workspaces are not enforced.
+     */
+    private void requireGroupUseAccess(String groupId) {
+        resourceAccessGuard.requireUseAccess(groupId, "group");
+    }
+
+    /**
+     * The USE gate on resuming a paused discussion. An approval resumes the run —
+     * every remaining member turn, at the group owner's cost — so an owner whose
+     * access to the group was revoked while it was paused must not be able to drive
+     * it to completion. Admins and designated approvers decide approvals by role,
+     * independently of group access, and keep doing so.
+     */
+    private void requireResumeUseAccess(String groupId) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+            return;
+        }
+        requireGroupUseAccess(groupId);
     }
 
     @PreDestroy
@@ -158,6 +191,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         if (rejection != null) {
             return badRequest(rejection);
         }
+        requireGroupUseAccess(groupId);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -204,6 +238,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        // Thrown, not turned into an SSE event: nothing has been written to the sink
+        // yet, so the refusal still reaches the client as a plain 403 — the same
+        // contract continueDiscussionStreaming has for its ownership check.
+        requireGroupUseAccess(groupId);
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
@@ -304,17 +342,22 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
         try {
-            List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, index, limit);
-            // Filter to owned conversations unless admin
+            // Owned conversations only, unless admin — and restricted IN THE QUERY, so
+            // index/limit page through the caller's own conversations. Filtering the
+            // fetched page afterwards gave a non-admin short or empty pages while their
+            // conversations sat further back (the Workforce history's missing rows).
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
                     && !identity.hasRole("eddi-admin")) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
-                conversations = conversations.stream()
-                        .filter(gc -> callerId != null && callerId.equals(gc.getUserId()))
+                if (callerId == null) {
+                    return List.of();
+                }
+                return groupConversationService.listGroupConversations(groupId, callerId, index, limit).stream()
+                        .filter(gc -> callerId.equals(gc.getUserId()))
                         .toList();
             }
-            return conversations;
+            return groupConversationService.listGroupConversations(groupId, index, limit);
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -413,6 +456,8 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
+    private static final String PAUSE_CHANGED_MESSAGE = "The pending approval changed since this decision was made "
+            + "(pauseId no longer current) — re-read approval-status and decide again.";
 
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
@@ -428,6 +473,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .build();
         }
         validateGroupConversationOwnership(groupId, gcId, true);
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
@@ -444,6 +490,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer current: the
+            // discussion is still awaiting approval, but on something the reviewer
+            // never saw. Same 409 as the conversation resume endpoint.
+            LOGGER.infof("Approve of group conversation %s rejected (pause changed)", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity(PAUSE_CHANGED_MESSAGE).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // #12: wrong-state (e.g., double-approve) → 409, not 500. The current state
             // is discoverable via the approval-status endpoint.
@@ -550,6 +603,9 @@ public class RestGroupConversation implements IRestGroupConversation {
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // A continuation re-runs every member, exactly like a new discussion: owning
+            // the transcript is not the same as still being allowed to run the group.
+            requireGroupUseAccess(groupId);
             GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -605,6 +661,7 @@ public class RestGroupConversation implements IRestGroupConversation {
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            requireGroupUseAccess(groupId);
 
             // Reuse the shared streaming listener so a continuation that pauses or is
             // cancelled for HITL streams the awaiting_approval / cancelled /
@@ -659,6 +716,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
+        requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {
@@ -674,6 +732,10 @@ public class RestGroupConversation implements IRestGroupConversation {
                 | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
+            closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupPauseMismatchException e) {
+            // Still awaiting approval, but not the pause this decision was made for.
+            sendErrorEvent(eventSink, sse, PAUSE_CHANGED_MESSAGE);
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // wrong-state (e.g., double-approve) — the current state is discoverable
@@ -780,6 +842,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("groupConversationId", gcId);
             summary.put("state", gc.getState() != null ? gc.getState().name() : "");
             summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");

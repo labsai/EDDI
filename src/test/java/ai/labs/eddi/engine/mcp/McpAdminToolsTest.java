@@ -431,13 +431,13 @@ class McpAdminToolsTest {
 
     @Test
     void applyAgentChanges_blankAgentId_returnsError() {
-        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null);
+        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null, null);
         assertTrue(result.contains("error"));
     }
 
     @Test
     void applyAgentChanges_blankMappings_returnsError() {
-        String result = tools.applyAgentChanges(AGENT_ID, 1, null, false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, null, false, null, null);
         assertTrue(result.contains("error"));
     }
 

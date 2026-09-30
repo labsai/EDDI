@@ -33,6 +33,7 @@ public class Agent implements IAgent {
     private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
+    private Integer compatibilityGeneration;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -50,6 +51,9 @@ public class Agent implements IAgent {
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
         var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        // Which versions the conversation may follow. Null on a version stored before
+        // generations existed: the conversation then stays on this version.
+        conversationMemory.setCompatibilityGeneration(compatibilityGeneration);
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }
@@ -122,5 +126,14 @@ public class Agent implements IAgent {
 
     public void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
         this.memoryPolicy = memoryPolicy;
+    }
+
+    @Override
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
     }
 }

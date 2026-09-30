@@ -184,7 +184,7 @@ public class StructuralMatcher {
         String sourceJson = serializeSafe(sourceAgent.config());
         String targetJson = serializeSafe(targetConfig);
 
-        DiffAction action = contentEquals(sourceJson, targetJson)
+        DiffAction action = contentEquals(withoutStoreOwnedAgentFields(sourceJson), withoutStoreOwnedAgentFields(targetJson))
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
@@ -600,6 +600,39 @@ public class StructuralMatcher {
             return sourceJson;
         }
     }
+
+    /**
+     * Agent JSON without the fields the target's store assigns itself, which say
+     * nothing about the agent's content.
+     * <p>
+     * {@code compatibilityGeneration} is numbered per instance: the source's value
+     * and the target's are unrelated, and the import writes neither. Compared as
+     * content, it made an unchanged agent differ on every sync — and each such
+     * "change" wrote a new agent version, which, being undeclared, is a breaking
+     * one, so the agent's running conversations were cut off from every later
+     * compatible version for nothing.
+     *
+     * @return the JSON without those fields, or the input unchanged when it cannot
+     *         be parsed as an object
+     */
+    private String withoutStoreOwnedAgentFields(String agentJson) {
+        if (agentJson == null) {
+            return null;
+        }
+        try {
+            if (jsonSerialization.deserialize(agentJson) instanceof Map<?, ?> map && map.containsKey(COMPATIBILITY_GENERATION_FIELD)) {
+                Map<Object, Object> copy = new LinkedHashMap<>(map);
+                copy.remove(COMPATIBILITY_GENERATION_FIELD);
+                String stripped = jsonSerialization.serialize(copy);
+                return stripped != null ? stripped : agentJson;
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not drop store-owned agent fields before comparing: %s", e.getMessage());
+        }
+        return agentJson;
+    }
+
+    private static final String COMPATIBILITY_GENERATION_FIELD = "compatibilityGeneration";
 
     /**
      * Compares two configs for equality of <em>content</em>, not of text.

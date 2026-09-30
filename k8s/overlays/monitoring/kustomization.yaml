@@ -8,6 +8,20 @@
 #     - ../../overlays/mongodb
 #   components:
 #     - ../../overlays/monitoring
+#
+# ⚠️  CREATE THE GRAFANA ADMIN SECRET FIRST — Grafana does not start without it
+# (it used to run as admin/admin):
+#
+#   kubectl create secret generic grafana-admin -n eddi \
+#     --from-literal=password="$(openssl rand -base64 24)"
+#
+# ⚠️  Upgrading: Prometheus now has a namespaced Role instead of a ClusterRole.
+# `kubectl apply -k` does not prune, so delete the old ones by hand:
+#   kubectl delete clusterrolebinding eddi-prometheus
+#   kubectl delete clusterrole eddi-prometheus
+#
+# With the auth component, EDDI's /q/metrics needs a token — see the scrape
+# config in monitoring-stack.yaml.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

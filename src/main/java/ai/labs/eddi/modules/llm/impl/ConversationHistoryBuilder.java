@@ -62,6 +62,42 @@ class ConversationHistoryBuilder {
     }
 
     /**
+     * The system message the builders actually emit: the configured prompt with the
+     * rolling summary appended. Exposed so the agent (tool-loop) path can hand the
+     * loop THIS text rather than the pre-summary prompt — the loop adds its own
+     * system message, and giving it the original one silently dropped the summary
+     * and every turn it covered.
+     */
+    static String composeSystemMessage(String systemMessage, String summaryPrefix) {
+        if (isNullOrEmpty(summaryPrefix)) {
+            return systemMessage;
+        }
+        return (isNullOrEmpty(systemMessage) ? "" : systemMessage + "\n\n") + summaryPrefix;
+    }
+
+    /**
+     * The built message list minus the ONE leading system message the builders add
+     * — for callers (the tool loop) that add the system message themselves.
+     * <p>
+     * Only the leading one: the windowing gap marker and system-role log parts are
+     * also {@link SystemMessage}s, and stripping every system message (as the agent
+     * path used to) removed the only signal that earlier turns were omitted and any
+     * system-role entries of the history.
+     *
+     * @param composedSystemMessage
+     *            the text {@link #composeSystemMessage} produced for this build;
+     *            the first message is removed only when it is exactly that
+     */
+    static List<ChatMessage> withoutLeadingSystemMessage(List<ChatMessage> messages, String composedSystemMessage) {
+        List<ChatMessage> result = new ArrayList<>(messages);
+        if (!isNullOrEmpty(composedSystemMessage) && !result.isEmpty() && result.getFirst() instanceof SystemMessage sm
+                && composedSystemMessage.equals(sm.text())) {
+            result.removeFirst();
+        }
+        return result;
+    }
+
+    /**
      * Build the full list of ChatMessages with optional summary injection
      * (step-count mode).
      *
@@ -85,10 +121,7 @@ class ConversationHistoryBuilder {
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
                                     boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
 
-        // Prepend summary to system message if present
-        if (!isNullOrEmpty(summaryPrefix)) {
-            systemMessage = (isNullOrEmpty(systemMessage) ? "" : systemMessage + "\n\n") + summaryPrefix;
-        }
+        systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
         // Generate conversation history from memory, applying skipSteps
         // When skipSteps > 0, we generate a custom log starting from the skip boundary
@@ -187,10 +220,7 @@ class ConversationHistoryBuilder {
                                               int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
                                               String summaryPrefix, int skipSteps) {
 
-        // Prepend summary to system message if present
-        if (!isNullOrEmpty(summaryPrefix)) {
-            systemMessage = (isNullOrEmpty(systemMessage) ? "" : systemMessage + "\n\n") + summaryPrefix;
-        }
+        systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
         // Generate conversation messages, skipping already-summarized turns
         List<ChatMessage> allMessages;

@@ -103,71 +103,6 @@ describe("OrphansPage", () => {
     });
   });
 
-  it("shows select all button after scan", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("select-all-btn")).toBeInTheDocument();
-    });
-  });
-
-  it("toggles individual orphan selection", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("orphan-checkbox-0").length).toBeGreaterThan(0);
-    });
-
-    const cb = screen.getAllByTestId("orphan-checkbox-0")[0] as HTMLInputElement;
-    expect(cb.checked).toBe(false);
-
-    await user.click(cb);
-    expect(cb.checked).toBe(true);
-
-    // Should now show delete selected button
-    expect(screen.getByTestId("delete-selected-btn")).toBeInTheDocument();
-
-    // Deselect
-    await user.click(cb);
-    expect(cb.checked).toBe(false);
-  });
-
-  it("select all / deselect all", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("select-all-btn")).toBeInTheDocument();
-    });
-
-    // Select all
-    await user.click(screen.getByTestId("select-all-btn"));
-
-    // All orphan checkboxes should be checked (5 orphans, each is index 0 in its group)
-    const allCheckboxes = screen.getAllByTestId("orphan-checkbox-0");
-    expect(allCheckboxes.length).toBe(5);
-    for (const cb of allCheckboxes) {
-      expect((cb as HTMLInputElement).checked).toBe(true);
-    }
-
-    // Button should now say "Deselect All"
-    expect(screen.getByText("Deselect All")).toBeInTheDocument();
-
-    // Deselect all
-    await user.click(screen.getByTestId("select-all-btn"));
-    for (const cb of allCheckboxes) {
-      expect((cb as HTMLInputElement).checked).toBe(false);
-    }
-  });
-
   it("shows purge button and confirmation dialog", async () => {
     renderOrphans();
     const user = userEvent.setup();
@@ -182,31 +117,46 @@ describe("OrphansPage", () => {
 
     // Confirmation should state the true (all-orphans) scope, not just "Are you sure?"
     expect(
-      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
+      screen.getByText(/Permanently delete all 5 orphaned resources/),
     ).toBeInTheDocument();
     expect(screen.getByTestId("confirm-purge-button")).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
-  // Regression: the backend DELETE /administration/orphans has no selection param
-  // — it always purges every orphan. The "Delete N selected" path must say so.
-  it("warns that ALL orphans are purged even from the 'Delete selected' action", async () => {
+  // Regression: DELETE /administration/orphans has no selection parameter — it
+  // purges every orphan, re-checking each one is unreferenced right before the
+  // delete. The page offered per-row checkboxes and a "Delete N selected"
+  // button that opened the purge-ALL confirmation. A selection the server
+  // cannot honour is not offered at all now.
+  it("offers no per-row selection, only the purge the server actually performs", async () => {
     renderOrphans();
     const user = userEvent.setup();
     await user.click(screen.getByTestId("scan-button"));
-    await waitFor(() => {
-      expect(screen.getAllByTestId("orphan-checkbox-0").length).toBeGreaterThan(0);
-    });
-    // Select a single orphan, then click "Delete N selected"
-    await user.click(screen.getAllByTestId("orphan-checkbox-0")[0]!);
-    await user.click(screen.getByTestId("delete-selected-btn"));
-    // The confirmation makes clear selection is NOT honored and ALL are deleted
-    expect(
-      screen.getByText(/your selection is not applied/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("purge-button")).toBeInTheDocument());
+
+    expect(screen.queryAllByRole("checkbox").filter((c) => c.getAttribute("data-testid") !== "include-deleted-checkbox")).toHaveLength(0);
+    expect(screen.queryByTestId("delete-selected-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("select-all-btn")).not.toBeInTheDocument();
+  });
+
+  it("shows when the scan ran, not when the page last re-rendered", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-26T08:00:00"));
+      renderOrphans();
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("scan-button"));
+      const label = await screen.findByTestId("orphans-last-scanned");
+      const scannedAt = label.textContent;
+
+      // An hour later something re-renders the page (opening the confirm).
+      vi.setSystemTime(new Date("2026-09-26T09:00:00"));
+      await user.click(screen.getByTestId("purge-button"));
+
+      expect(screen.getByTestId("orphans-last-scanned").textContent).toBe(scannedAt);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cancel button in purge confirmation hides it", async () => {
@@ -221,12 +171,12 @@ describe("OrphansPage", () => {
 
     await user.click(screen.getByTestId("purge-button"));
     expect(
-      screen.getByText(/Permanently delete ALL 5 orphaned resources/),
+      screen.getByText(/Permanently delete all 5 orphaned resources/),
     ).toBeInTheDocument();
 
     await user.click(screen.getByText("Cancel"));
     expect(
-      screen.queryByText(/Permanently delete ALL 5 orphaned resources/),
+      screen.queryByText(/Permanently delete all 5 orphaned resources/),
     ).not.toBeInTheDocument();
   });
 
@@ -239,47 +189,6 @@ describe("OrphansPage", () => {
     await waitFor(() => {
       expect(screen.getByText("5 orphans found")).toBeInTheDocument();
     });
-  });
-
-  it("shows group checkboxes for type groups", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      // Groups are keyed by the type URIs
-      expect(
-        screen.getByTestId("group-checkbox-eddi://ai.labs.workflow")
-      ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("group-checkbox-eddi://ai.labs.rules")
-      ).toBeInTheDocument();
-    });
-  });
-
-  it("toggles group checkbox to select/deselect all in group", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("group-checkbox-eddi://ai.labs.workflow")
-      ).toBeInTheDocument();
-    });
-
-    // The workflow group only has 1 orphan (orphan1)
-    const groupCb = screen.getByTestId(
-      "group-checkbox-eddi://ai.labs.workflow"
-    ) as HTMLInputElement;
-    await user.click(groupCb);
-    expect(groupCb.checked).toBe(true);
-
-    // Deselect via group checkbox
-    await user.click(groupCb);
-    expect(groupCb.checked).toBe(false);
   });
 
   it("shows empty results after scan when no orphans", async () => {
@@ -304,28 +213,6 @@ describe("OrphansPage", () => {
 
     // No select all or purge button when 0 orphans
     expect(screen.queryByTestId("select-all-btn")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("purge-button")).not.toBeInTheDocument();
-  });
-
-  it("shows delete selected button when items selected and hides purge all", async () => {
-    renderOrphans();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByTestId("scan-button"));
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("orphan-checkbox-0").length).toBeGreaterThan(0);
-    });
-
-    // Before selection - purge button visible, delete-selected not
-    expect(screen.getByTestId("purge-button")).toBeInTheDocument();
-    expect(screen.queryByTestId("delete-selected-btn")).not.toBeInTheDocument();
-
-    // Select one
-    await user.click(screen.getAllByTestId("orphan-checkbox-0")[0]!);
-
-    // Now delete-selected visible, purge-button hidden
-    expect(screen.getByTestId("delete-selected-btn")).toBeInTheDocument();
     expect(screen.queryByTestId("purge-button")).not.toBeInTheDocument();
   });
 });

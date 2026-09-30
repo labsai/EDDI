@@ -90,7 +90,7 @@ EDDI exposes Prometheus metrics at `/q/metrics` and includes pre-built Grafana d
 docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
 ```
 
-Then open Grafana at `http://localhost:3000` (admin/admin).
+Then open Grafana at `http://localhost:3000` (admin/admin unless `GRAFANA_ADMIN_PASSWORD` is set; the installers generate one into `.env`).
 
 See [Metrics & Monitoring](metrics.md) for details.
 

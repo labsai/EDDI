@@ -9,9 +9,11 @@
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6).
-    // claude-sonnet-5 leads because it is the app-wide default model — a
+    // claude-sonnet-5-5 leads because it is the app-wide default model — a
     // datalist's first entry is what an admin sees before typing, so it should
     // match the placeholder they were already shown.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-fable-5-1",
     "claude-fable-5",
@@ -24,6 +26,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   openai: [
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -70,6 +74,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "google/gemma3@gemma-3-12b-it",
     "google/gemma2@gemma-2-2b-it",
     // Vertex serves current-generation Claude under the bare first-party id.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-opus-5",
     "claude-opus-4-8",
@@ -131,6 +137,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
     // Anthropic — current-generation ids carry the `anthropic.` prefix with no
     // version suffix.
+    "global.anthropic.claude-sonnet-5-5",
+    "anthropic.claude-opus-5-5",
     "anthropic.claude-sonnet-5",
     "anthropic.claude-opus-5",
     "anthropic.claude-opus-4-8",
@@ -196,4 +204,45 @@ export function supportsBaseUrl(providerId: string): boolean {
  */
 export function isBaseUrlRequired(providerId: string): boolean {
   return providerId === "ollama";
+}
+
+/**
+ * Providers the setup endpoints (`/administration/agents/setup` and
+ * `setup-api`) cannot turn into a working agent, and so must not offer.
+ *
+ * `gemini-vertex` needs a GCP `projectId` and `location` (langchain4j refuses to
+ * build the model without either), and neither setup request has a field for
+ * them. Offered anyway, it produced an agent that deployed and then failed on its
+ * first message. A Vertex agent is created with another provider and switched to
+ * `gemini-vertex` in the LLM editor, where both parameters can be set.
+ */
+const NOT_PROVISIONABLE_BY_SETUP = new Set(["gemini-vertex"]);
+
+/** Whether the setup endpoints can provision a working agent on this provider. */
+export function isProvisionableBySetup(providerId: string): boolean {
+  return !NOT_PROVISIONABLE_BY_SETUP.has(providerId);
+}
+
+/**
+ * `providerId` when the setup flows offer it, otherwise `fallback`. A stored
+ * value such as an operator configured on `gemini-vertex` before it was hidden
+ * would otherwise render a provider select with no matching option, showing
+ * one provider while the form holds another.
+ */
+export function provisionableProviderOr(providerId: string, fallback: string): string {
+  return isProvisionableBySetup(providerId) ? providerId : fallback;
+}
+
+/**
+ * Providers that take an OPTIONAL credential in the key slot. Jlama downloads
+ * its weights from Hugging Face, and a gated or private repository needs a
+ * token; `AgentSetupService` writes the setup request's `apiKey` to the Jlama
+ * builder's `authToken`. The provider needs no key otherwise, so the field is
+ * offered but never required.
+ */
+const OPTIONAL_TOKEN_PROVIDERS = new Set(["jlama"]);
+
+/** Whether a provider accepts an optional token in place of the API key. */
+export function acceptsOptionalToken(providerId: string): boolean {
+  return OPTIONAL_TOKEN_PROVIDERS.has(providerId);
 }

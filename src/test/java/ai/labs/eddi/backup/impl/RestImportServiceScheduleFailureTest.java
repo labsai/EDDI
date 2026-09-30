@@ -361,12 +361,14 @@ class RestImportServiceScheduleFailureTest {
         var agentStore = mock(IAgentStore.class);
         when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
         when(documentDescriptorStore.getCurrentResourceId(NEW_AGENT_ID)).thenReturn(resourceId(NEW_AGENT_ID, 1));
+        // A merge snapshots what it overwrites and refuses a target it cannot read.
+        when(agentStore.read(anyString(), anyInt())).thenReturn(new AgentConfiguration());
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + NEW_AGENT_ID + "?version=1"));
         when(documentDescriptorStore.readDescriptor(NEW_AGENT_ID, 1)).thenReturn(descriptor);
 
         var restAgentStore = mock(IRestAgentStore.class);
-        when(restAgentStore.updateAgent(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+        when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
 
         try (var cdi = stubCdi(IAgentStore.class, agentStore,
                 IRestScheduleStore.class, restScheduleStore,

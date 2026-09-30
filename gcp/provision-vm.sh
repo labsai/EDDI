@@ -337,8 +337,8 @@ setup_firewall_rules() {
   # hole would lead nowhere.
 
   # Grafana (3000) and Prometheus (9090) are deliberately NOT opened: the
-  # monitoring compose publishes them on the VM's loopback only (neither has auth
-  # worth exposing — Grafana ships admin/admin), so they are reached over an SSH
+  # monitoring compose publishes them on the VM's loopback only (Prometheus has
+  # no auth worth exposing), so they are reached over an SSH
   # tunnel, not a firewall hole. See the SSH-tunnel note in print_success.
 
   # nginx ports — needed for Let's Encrypt HTTP-01 challenge and HTTPS traffic.
@@ -548,7 +548,7 @@ export EDDI_BIND="0.0.0.0"
 # once; later boots re-read the same file, so it keeps matching the admin
 # Keycloak bootstrapped into its volume on first start. Exported so
 # docker-compose.auth.yml's \${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin} and
-# install.sh's admin-API calls use it instead of admin/admin.
+# install.sh use it instead of admin/admin; install.sh records it in .env.
 if [[ "${p_with_auth}" == "true" ]]; then
   if [[ ! -s "${p_kc_admin_file}" ]]; then
     KC_PW=\$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-24)
@@ -706,10 +706,15 @@ OVERRIDE_EOF
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""
+  # install.sh recorded this in .env (adopted from the file above). The
+  # password travels on stdin.
+  KC_ADMIN_USER=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_USERNAME=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_USER=""
+  KC_ADMIN_PW=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_PASSWORD=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_PW=""
   for attempt in \$(seq 1 18); do
-    KC_TOKEN=\$(curl -sf -X POST \\
+    KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl -sf -X POST \\
       "http://localhost:8180/realms/master/protocol/openid-connect/token" \\
-      -d "client_id=admin-cli&username=\${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}&password=\${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}&grant_type=password" \\
+      --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" \\
+      --data-urlencode "username=\${KC_ADMIN_USER:-admin}" --data-urlencode "password@-" \\
       2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
     [[ -n "\${KC_TOKEN:-}" ]] && break
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
@@ -942,18 +947,22 @@ print_success() {
     echo -e "  ${DIM}The console is not exposed on the public HTTPS host and Keycloak's port is${RESET}"
     echo -e "  ${DIM}bound to the VM's loopback; reach it over an SSH tunnel (-L 8180:localhost:8180).${RESET}"
     echo ""
-    echo -e "  ${DIM}The 'eddi' EDDI admin account ships WITHOUT a password — set one:${RESET}"
-    echo -e "  ${DIM}  Keycloak console → Users → eddi → Credentials → Set password${RESET}"
-    echo -e "  ${DIM}Seeded dev logins (disable/rotate before sharing): viewer/viewer, user/user${RESET}"
+    # Not in the startup log: that goes to the serial console and Cloud
+    # Logging, readable by anyone with logging.viewer on the project. The
+    # installer writes the one-time password to a root-only file instead.
+    echo -e "  ${DIM}Login: the one-time password for \`eddi\` is in /root/.eddi/first-login.txt on the VM${RESET}"
+    echo -e "  ${DIM}  (sudo cat it over gcloud compute ssh; delete it after the first login). No realm${RESET}"
+    echo -e "  ${DIM}  account ships a default password any more.${RESET}"
   fi
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
     echo -e "  ${BOLD}Monitoring${RESET} (Grafana 3000 / Prometheus 9090) is published on the VM's"
-    echo -e "  ${DIM}loopback only — neither has authentication worth exposing (Grafana ships${RESET}"
-    echo -e "  ${DIM}admin/admin). Reach them over an SSH tunnel:${RESET}"
+    echo -e "  ${DIM}loopback only — Prometheus has no authentication worth exposing. Reach${RESET}"
+    echo -e "  ${DIM}them over an SSH tunnel:${RESET}"
     echo -e "    ${CYAN}${ssh_cmd} -- -L 3000:localhost:3000 -L 9090:localhost:9090${RESET}"
-    echo -e "  ${DIM}then open http://localhost:3000 (Grafana) and http://localhost:9090.${RESET}"
+    echo -e "  ${DIM}then open http://localhost:3000 (Grafana: admin / GRAFANA_ADMIN_PASSWORD in${RESET}"
+    echo -e "  ${DIM}/root/.eddi/.env on the VM) and http://localhost:9090.${RESET}"
   fi
 
   echo ""

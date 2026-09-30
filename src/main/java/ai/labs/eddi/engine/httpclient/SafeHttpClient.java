@@ -15,12 +15,22 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.nio.ByteBuffer;
 import java.time.Duration;
-import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Centralized, SSRF-safe HTTP client wrapper. All outbound HTTP requests from
@@ -36,8 +46,14 @@ import java.util.concurrent.ScheduledExecutorService;
  * <li>Connect timeout is enforced per-hop</li>
  * <li>Response timeout is enforced per-hop ({@link #DEFAULT_REQUEST_TIMEOUT}
  * when the caller set none)</li>
- * <li>Overall wall-clock budget is checked between hops, so a redirect chain
- * cannot outlive it by more than one hop's timeout</li>
+ * <li>One wall-clock deadline covers the whole exchange — every hop and, for a
+ * buffering body handler, reading the body — see {@link #totalBudget}. A
+ * streaming handler ({@code ofInputStream}) completes when the headers arrive,
+ * so its later reads are bounded by the caller; the {@code send*Bounded}
+ * methods do that with {@link BoundedBodyReader}</li>
+ * <li>The bodies of redirect responses are discarded after at most
+ * {@link #MAX_REDIRECT_BODY_BYTES}, never handed to the caller's body
+ * handler</li>
  * <li>On cross-origin redirects, Authorization/Cookie headers are stripped</li>
  * </ul>
  *
@@ -51,6 +67,12 @@ public class SafeHttpClient {
     /** Maximum number of redirect hops per request. */
     private static final int MAX_REDIRECTS = 5;
 
+    /**
+     * Most bytes of a redirect response's body read before it is dropped. A
+     * redirect body is only a courtesy page; nothing reads it.
+     */
+    static final long MAX_REDIRECT_BODY_BYTES = 64 * 1024;
+
     /** HTTP status codes considered redirects. */
     private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 
@@ -58,12 +80,10 @@ public class SafeHttpClient {
     private static final Set<String> MANAGED_HEADERS = Set.of("host", "content-length", "connection");
 
     /**
-     * Per-hop response timeout applied when the caller set none. The wall-clock
-     * budget below is only consulted BETWEEN hops, so without a per-request bound a
-     * single hop that accepts the connection and then trickles (or never completes)
-     * the response body hangs forever and the budget never gets a chance to fire.
-     * Every in-tree caller sets its own timeout; this is the backstop for the ones
-     * that do not.
+     * Per-hop response timeout applied when the caller set none. Every in-tree
+     * caller sets its own timeout; this is the backstop for the ones that do not.
+     * It bounds only the wait for the response headers — the JDK stops counting
+     * once they arrive — which is why {@link #totalBudget} exists.
      */
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(15);
 
@@ -127,7 +147,8 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        return sendWithRedirects(withDefaultTimeout(request), bodyHandler, 0, Instant.now());
+        HttpRequest bounded = withDefaultTimeout(request);
+        return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
     }
 
     /**
@@ -147,7 +168,8 @@ public class SafeHttpClient {
     public <T> HttpResponse<T> sendValidated(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        return sendWithRedirects(withDefaultTimeout(request), bodyHandler, 0, Instant.now());
+        HttpRequest bounded = withDefaultTimeout(request);
+        return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
     }
 
     /**
@@ -168,7 +190,7 @@ public class SafeHttpClient {
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
         HttpRequest bounded = withDefaultTimeout(request);
-        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, Instant.now());
+        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
         return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
     }
 
@@ -181,7 +203,7 @@ public class SafeHttpClient {
     public BoundedResponse sendBounded(HttpRequest request, long maxBytes)
             throws IOException, InterruptedException {
         HttpRequest bounded = withDefaultTimeout(request);
-        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, Instant.now());
+        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
         return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
     }
 
@@ -226,7 +248,182 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> sendNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        return httpClient.send(withDefaultTimeout(request), bodyHandler);
+        HttpRequest bounded = withDefaultTimeout(request);
+        return sendOnce(bounded, bodyHandler, deadlineFor(bounded));
+    }
+
+    /**
+     * The wall-clock budget for one call, redirects and body included: three times
+     * the connect timeout (30s by default), or the request's own timeout when the
+     * caller asked for longer. The per-request timeout alone is no bound on the
+     * body — the JDK stops timing once the response headers arrive, so a server
+     * that sent headers and then trickled the body a byte at a time held the call
+     * open for as long as it liked.
+     * <p>
+     * Package-private for the test.
+     */
+    Duration totalBudget(HttpRequest request) {
+        Duration floor = Duration.ofMillis(connectTimeoutMs * 3);
+        Duration requested = request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT);
+        return requested.compareTo(floor) > 0 ? requested : floor;
+    }
+
+    private long deadlineFor(HttpRequest request) {
+        return System.nanoTime() + totalBudget(request).toNanos();
+    }
+
+    /**
+     * One exchange, bounded by {@code deadlineNanos} from sending the request to
+     * the body handler's completion. On expiry the exchange is cancelled, which
+     * closes its connection, and the call fails with {@link HttpTimeoutException}.
+     */
+    private <T> HttpResponse<T> sendOnce(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler, long deadlineNanos)
+            throws IOException, InterruptedException {
+        long remaining = deadlineNanos - System.nanoTime();
+        if (remaining <= 0) {
+            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
+        }
+        CompletableFuture<HttpResponse<T>> exchange = httpClient.sendAsync(request, bodyHandler);
+        try {
+            return exchange.get(remaining, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            exchange.cancel(true);
+            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
+        } catch (InterruptedException e) {
+            exchange.cancel(true);
+            throw e;
+        } catch (ExecutionException e) {
+            throw unwrap(e);
+        }
+    }
+
+    /**
+     * {@code uri} without its query or fragment, for an error message. A query
+     * string may carry a credential ({@code key=}, {@code appid=}), and a tool
+     * hands the message of a failed call to the model and the log.
+     */
+    static String withoutQuery(URI uri) {
+        int port = uri.getPort();
+        return uri.getScheme() + "://" + uri.getHost() + (port == -1 ? "" : ":" + port) + (uri.getRawPath() == null ? "" : uri.getRawPath());
+    }
+
+    /**
+     * Rethrows an async failure the way {@link HttpClient#send} would have thrown
+     * it: the {@link IOException} itself (so a caller can still catch
+     * {@link HttpTimeoutException} or its own handler's exception by type), an
+     * unchecked exception or error as is, anything else wrapped.
+     * <p>
+     * The failure was created on the client's executor thread, so its own stack
+     * trace holds only selector and executor frames. Rather than re-create it as
+     * the JDK's synchronous {@code send} does, which would lose the specific type,
+     * the caller's frames are attached as a suppressed {@link CallerFrames}.
+     */
+    private static IOException unwrap(ExecutionException e) {
+        Throwable cause = e.getCause();
+        while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof IOException || cause instanceof RuntimeException) {
+            cause.addSuppressed(new CallerFrames());
+        }
+        if (cause instanceof IOException io) {
+            return io;
+        }
+        if (cause instanceof RuntimeException runtime) {
+            throw runtime;
+        }
+        if (cause instanceof Error error) {
+            throw error;
+        }
+        return new IOException(cause != null ? cause.getMessage() : e.getMessage(), cause);
+    }
+
+    /**
+     * Carries the calling thread's stack trace into an exception thrown on the HTTP
+     * client's executor — see {@link #unwrap}.
+     */
+    static final class CallerFrames extends Exception {
+        CallerFrames() {
+            super("rethrown to the caller of SafeHttpClient");
+        }
+    }
+
+    /**
+     * Hands a 3xx body to a {@link DiscardingSubscriber} and every other body to
+     * the caller's handler. A redirect response is never returned to the caller, so
+     * its body has no reader: given to an {@code ofInputStream} handler it was an
+     * unclosed stream per hop, holding that hop's connection, and given to
+     * {@code ofString} it was buffered whole, however large.
+     */
+    private static <T> HttpResponse.BodyHandler<T> discardingRedirectBodies(HttpResponse.BodyHandler<T> bodyHandler) {
+        return info -> REDIRECT_CODES.contains(info.statusCode())
+                ? new DiscardingSubscriber<>(MAX_REDIRECT_BODY_BYTES, info.headers().firstValueAsLong("Content-Length"))
+                : bodyHandler.apply(info);
+    }
+
+    /**
+     * Drops a body, reading at most {@code maxBytes} of it, then completes with
+     * {@code null}. It never fails: past the limit — or on a declared
+     * {@code Content-Length} above it — it cancels the subscription, which closes
+     * the connection, and completes normally. An oversized redirect body must
+     * neither be downloaded (bandwidth, and the shared deadline) nor fail a
+     * legitimate redirect over its courtesy page. Package-private so it can be
+     * driven without a server.
+     */
+    static final class DiscardingSubscriber<T> implements HttpResponse.BodySubscriber<T> {
+        private final long maxBytes;
+        private final OptionalLong declaredLength;
+        private final CompletableFuture<T> result = new CompletableFuture<>();
+        private Flow.Subscription subscription;
+        private long total;
+
+        DiscardingSubscriber(long maxBytes, OptionalLong declaredLength) {
+            this.maxBytes = maxBytes;
+            this.declaredLength = declaredLength;
+        }
+
+        @Override
+        public CompletionStage<T> getBody() {
+            return result;
+        }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subscription = subscription;
+            if (declaredLength.isPresent() && declaredLength.getAsLong() > maxBytes) {
+                stop();
+                return;
+            }
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(List<ByteBuffer> items) {
+            if (result.isDone()) {
+                return;
+            }
+            for (ByteBuffer item : items) {
+                total += item.remaining();
+            }
+            if (total > maxBytes) {
+                stop();
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            result.completeExceptionally(throwable);
+        }
+
+        @Override
+        public void onComplete() {
+            result.complete(null);
+        }
+
+        private void stop() {
+            result.complete(null);
+            subscription.cancel();
+        }
     }
 
     /**
@@ -271,19 +468,13 @@ public class SafeHttpClient {
     }
 
     private <T> HttpResponse<T> sendWithRedirects(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler,
-                                                  int redirectCount, Instant startTime)
+                                                  int redirectCount, long deadlineNanos)
             throws IOException, InterruptedException {
 
-        // Check overall wall-clock timeout (3x connect timeout, e.g. 30s default).
-        // This prevents an attacker from chaining slow-resolving redirects to hold
-        // connections open indefinitely.
-        long elapsedMs = Duration.between(startTime, Instant.now()).toMillis();
-        long totalTimeoutMs = connectTimeoutMs * 3;
-        if (elapsedMs > totalTimeoutMs) {
-            throw new IOException("Total request timeout exceeded (" + elapsedMs + "ms > " + totalTimeoutMs + "ms)");
-        }
-
-        HttpResponse<T> response = httpClient.send(request, bodyHandler);
+        // One deadline for the whole chain, bodies included (see totalBudget): an
+        // attacker can neither chain slow redirects nor trickle a body to hold the
+        // connection — and the calling tool — open indefinitely.
+        HttpResponse<T> response = sendOnce(request, discardingRedirectBodies(bodyHandler), deadlineNanos);
         int statusCode = response.statusCode();
 
         if (!REDIRECT_CODES.contains(statusCode)) {
@@ -340,7 +531,7 @@ public class SafeHttpClient {
 
         HttpRequest redirectRequest = builder.build();
 
-        return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, startTime);
+        return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, deadlineNanos);
     }
 
     /**

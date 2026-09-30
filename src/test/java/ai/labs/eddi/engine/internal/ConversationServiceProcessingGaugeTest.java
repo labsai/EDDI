@@ -111,7 +111,7 @@ class ConversationServiceProcessingGaugeTest {
         var userMemoryStore = mock(IUserMemoryStore.class);
         var jsonSerialization = mock(IJsonSerialization.class);
 
-        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);

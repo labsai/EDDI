@@ -12,12 +12,15 @@ import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCapabilities;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCard;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentSkill;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +40,28 @@ public class AgentCardService {
 
     /** How many agent descriptors a single card lookup will scan. */
     private static final int MAX_AGENT_DESCRIPTORS = 100;
+
+    /**
+     * How long the roster scans behind {@link #getDefaultAgentCard()} and
+     * {@link #listA2AAgents()} are reused.
+     * <p>
+     * {@code /.well-known/agent.json} is anonymous by design, and on a deployment
+     * with no A2A-enabled agent — the default — the stop-at-first-match shortcut
+     * never stops: every request scanned all {@value #MAX_AGENT_DESCRIPTORS}
+     * candidates, two store reads apiece, so one unauthenticated GET cost about two
+     * hundred database queries and a loop of them was a free amplifier against the
+     * database. Caching the result, empty included, makes that one scan per window
+     * no matter how many requests arrive, and concurrent requests during a scan
+     * wait for it rather than starting their own. An agent switching
+     * {@code a2aEnabled} shows up in discovery within the window; the per-agent
+     * card and the task endpoint read the agent directly and are never stale.
+     */
+    static final Duration ROSTER_CACHE_TTL = Duration.ofSeconds(30);
+
+    private final Cache<Boolean, List<AgentCard>> rosterCache = Caffeine.newBuilder()
+            .maximumSize(2)
+            .expireAfterWrite(ROSTER_CACHE_TTL)
+            .build();
 
     private final IAgentStore agentStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -162,7 +187,9 @@ public class AgentCardService {
 
             return buildAgentCard(agentId, config, resourceId.getVersion());
         } catch (Exception e) {
-            LOGGER.warnf("Failed to build Agent Card for agentId=%s: %s", agentId, e.getMessage());
+            // Sanitized: the id is the path parameter of an anonymous endpoint, and a raw
+            // CR/LF in it forged log lines.
+            LOGGER.warnf("Failed to build Agent Card for agentId=%s: %s", sanitize(agentId), e.getMessage());
             return null;
         }
     }
@@ -182,7 +209,7 @@ public class AgentCardService {
      * @return the default AgentCard, or null when no agent is A2A-enabled
      */
     public AgentCard getDefaultAgentCard() {
-        List<AgentCard> cards = collectA2AAgents(true);
+        List<AgentCard> cards = rosterCache.get(Boolean.TRUE, stopAtFirst -> List.copyOf(collectA2AAgents(true)));
         return cards.isEmpty() ? null : cards.get(0);
     }
 
@@ -192,7 +219,12 @@ public class AgentCardService {
      * @return list of AgentCards (may be empty)
      */
     public List<AgentCard> listA2AAgents() {
-        return collectA2AAgents(false);
+        return rosterCache.get(Boolean.FALSE, stopAtFirst -> List.copyOf(collectA2AAgents(false)));
+    }
+
+    /** Drops the cached roster scans — for tests, and after a bulk change. */
+    void invalidateRoster() {
+        rosterCache.invalidateAll();
     }
 
     /**
