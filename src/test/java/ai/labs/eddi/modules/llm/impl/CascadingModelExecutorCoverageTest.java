@@ -710,6 +710,54 @@ class CascadingModelExecutorCoverageTest {
     }
 
     @Test
+    @DisplayName("review #2: a vault reference conversation data put into a cascade step parameter is refused, never resolved")
+    void stepParams_injectedVaultReference_refused() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setParameters(Map.of("modelName", "{context.tier}"));
+        cascade.setSteps(List.of(step));
+
+        ITemplatingEngine templatingEngine = mock(ITemplatingEngine.class);
+        when(templatingEngine.processTemplate(eq("{context.tier}"), anyMap())).thenReturn("${vault:other-agent-key}");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> executorWithTemplating(registry, templatingEngine).execute(cascade,
+                messages(), "sys", Map.of("apiKey", "k"), task(), memory(null), mock(AgentOrchestrator.class), Map.of("context", Map.of()),
+                false, false, false));
+
+        assertTrue(failure.getMessage().contains("Cascade step 0 parameter 'modelName' contains the reference ${vault:other-agent-key}"),
+                failure.getMessage());
+        verify(registry, never()).getOrCreate(anyString(), anyMap());
+    }
+
+    @Test
+    @DisplayName("review #2: the judge's parameters go through the same guard, and a refusal is not hidden by the heuristic fallback")
+    void judgeParams_injectedVaultReference_refused() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("judge_model");
+        var judge = new LlmConfiguration.JudgeModelConfig();
+        judge.setType("judgeProvider");
+        judge.setParameters(Map.of("modelName", "{context.judge}"));
+        cascade.setJudgeModel(judge);
+        var step = new CascadeStep();
+        step.setType("openai");
+        cascade.setSteps(List.of(step));
+
+        ITemplatingEngine templatingEngine = mock(ITemplatingEngine.class);
+        when(templatingEngine.processTemplate(eq("{context.judge}"), anyMap())).thenReturn("${vars:credential}");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+
+        assertThrows(IllegalArgumentException.class, () -> executorWithTemplating(registry, templatingEngine).execute(cascade, messages(),
+                "sys", Map.of("apiKey", "k"), task(), memory(null), mock(AgentOrchestrator.class), Map.of("context", Map.of()), false, false,
+                false));
+        verify(registry, never()).getOrCreate(eq("judgeProvider"), anyMap());
+    }
+
+    @Test
     @DisplayName("step params — a TemplateEngineException falls back to the raw parameter value")
     void templateParams_templateEngineException_fallsBackToRawValue() throws Exception {
         var cascade = new ModelCascadeConfig();

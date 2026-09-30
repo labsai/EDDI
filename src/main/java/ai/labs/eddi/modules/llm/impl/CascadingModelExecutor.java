@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -22,6 +23,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.exception.AuthenticationException;
 import dev.langchain4j.exception.ContentFilteredException;
@@ -263,7 +265,7 @@ class CascadingModelExecutor {
         // Build the judge model once if the effective strategy needs it.
         ChatModel judgeModel = null;
         if (EvaluationStrategy.fromConfig(effectiveStrategy) == EvaluationStrategy.JUDGE_MODEL && cascade.getJudgeModel() != null) {
-            judgeModel = buildJudgeModel(cascade.getJudgeModel(), templateDataObjects);
+            judgeModel = buildJudgeModel(cascade.getJudgeModel(), templateDataObjects, memory);
         }
 
         ConversationEventSink eventSink = memory.getEventSink();
@@ -303,7 +305,7 @@ class CascadingModelExecutor {
                 }
             }
 
-            StepModel stepModel = resolveStepModel(step, task, baseParams, templateDataObjects);
+            StepModel stepModel = resolveStepModel(step, task, baseParams, templateDataObjects, memory, "Cascade step " + i);
             String modelType = stepModel.modelType();
             Map<String, String> mergedParams = stepModel.params();
             String modelName = resolveModelName(mergedParams, modelType);
@@ -655,13 +657,13 @@ class CascadingModelExecutor {
      * this would drift, and the resume is the one nobody tests by hand.
      */
     StepModel resolveStepModel(CascadeStep step, LlmConfiguration.Task task, Map<String, String> baseParams,
-                               Map<String, Object> templateDataObjects) {
+                               Map<String, Object> templateDataObjects, IConversationMemory memory, String what) {
         // #8: resolve step type through global variables (parity with the standard
         // path).
         String rawType = step.getType() != null ? step.getType() : task.getType();
         String modelType = globalVariableResolver.resolveValue(rawType);
         // #8: template step param values (parity with task params), then merge.
-        Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects));
+        Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects, memory, what));
         return new StepModel(modelType, mergedParams);
     }
 
@@ -783,14 +785,17 @@ class CascadingModelExecutor {
     }
 
     /** Build the judge model from its config, resolving type + templated params. */
-    private ChatModel buildJudgeModel(JudgeModelConfig judgeConfig, Map<String, Object> templateDataObjects) {
+    private ChatModel buildJudgeModel(JudgeModelConfig judgeConfig, Map<String, Object> templateDataObjects, IConversationMemory memory) {
+        if (isBlank(judgeConfig.getType())) {
+            LOGGER.warn("judge_model configured without a type; falling back to heuristic");
+            return null;
+        }
+        // Outside the try below on purpose: a credential reference conversation data
+        // put into a judge parameter must fail the turn, not quietly fall back to the
+        // heuristic and hide the attempt.
+        Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects, memory, "Cascade judge");
         try {
-            if (isBlank(judgeConfig.getType())) {
-                LOGGER.warn("judge_model configured without a type; falling back to heuristic");
-                return null;
-            }
             String type = globalVariableResolver.resolveValue(judgeConfig.getType());
-            Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects);
             return registry.getOrCreate(type, params != null ? params : new HashMap<>());
         } catch (Exception e) {
             LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
@@ -1016,8 +1021,18 @@ class CascadingModelExecutor {
     /**
      * Run the template engine over parameter values (parity with task params).
      * Credential keys are skipped; template failures fall back to the raw value.
+     * <p>
+     * The result is resolved against the vault by {@code ChatModelRegistry}, so it
+     * goes through the same guard as the task parameters: a credential reference
+     * conversation data put into a step or judge parameter is refused
+     * ({@link ConfigReferenceGuard#requireConfiguredParameters}).
+     *
+     * @throws IllegalArgumentException
+     *             when a rendered parameter carries a reference its template does
+     *             not
      */
-    private Map<String, String> templateParams(Map<String, String> params, Map<String, Object> templateDataObjects) {
+    private Map<String, String> templateParams(Map<String, String> params, Map<String, Object> templateDataObjects, IConversationMemory memory,
+                                               String what) {
         if (params == null || params.isEmpty() || templatingEngine == null || templateDataObjects == null) {
             return params;
         }
@@ -1033,6 +1048,10 @@ class CascadingModelExecutor {
                 return value;
             }
         });
+        Map<String, Property> conversationProperties = memory != null && memory.getConversationProperties() != null
+                ? memory.getConversationProperties()
+                : Map.of();
+        ConfigReferenceGuard.requireConfiguredParameters(params, result, LlmTask.PROMPT_PARAMS, what, templateDataObjects, conversationProperties);
         return result;
     }
 

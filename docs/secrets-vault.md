@@ -83,7 +83,7 @@ distinction to enforce).
 
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
-string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
+string `${vault:<agentId>.u<userHash>.<nonce>.apiKey}` is one anything that can write a property could produce — a
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
@@ -108,6 +108,12 @@ The slot shape is **reserved**: the GDPR sweep recognises a user's slots by name
 `PUT /secretstore/secrets/{tenant}/{key}` and agent setup's `vaultKeyName` reject a key name in the
 form `<agentId>.u<16 hex>.<12 hex>.<name>` with `400`.
 
+The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …) and of its
+cascade steps and judge model: they are resolved against the vault after templating, so a reference
+conversation data put into one fails the turn instead of being resolved. A data-supplied
+`${vars:…}` is refused there too, because the registry expands it later. The prompts
+(`systemMessage`, `prompt`) are never resolved and may carry reference-shaped text.
+
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing
 on disk, and accepting the pair would leave the case the marker exists to close open. Re-running the
@@ -118,6 +124,12 @@ A configured reference that **cannot** be resolved — no such secret, the provi
 vault is disabled — also refuses the call, naming the field and the reference. The literal
 `${vault:name}` is never sent as a credential: it would come back as the API's own "invalid key",
 with nothing naming the cause.
+
+The plaintext EDDI substitutes — a vault secret, a connection credential, the caller's token — is
+also removed by value from the response before it reaches conversation memory, template data, the
+LLM tool result or the log. Error bodies are redacted in full. A success body is data, so it is
+handled more carefully: a secret of 8 characters or more is removed from its text, a shorter one only
+where a JSON value is exactly the secret, and a number is never rewritten digit by digit.
 
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
 the request record in conversation memory, the HITL approval preview and the request log line. The
@@ -340,10 +352,10 @@ Agents can request secret input from users (e.g., API keys during setup). The fl
 
 When a property has `scope: secret`:
 
-1. **PropertySetterTask** detects `scope == secret` on the property instruction
-2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
+1. **`SecretPropertyVault`** (used by `PropertySetterTask` and by the httpcall / MCP / LLM property instructions) detects `scope == secret`
+2. The raw value is immediately stored in the vault via `ISecretProvider.store()`, in a slot of its own (`<agentId>.u<userHash>.<nonce>.<name>`)
 3. A vault reference (`${vault:...}`) replaces the plaintext in memory
-4. The raw `input:initial` entry is scrubbed from the conversation step
+4. The raw `input:initial` entry, and any other copy in the conversation step, is scrubbed
 
 When the **client flags input as secret** (via the `secretInput` context key):
 

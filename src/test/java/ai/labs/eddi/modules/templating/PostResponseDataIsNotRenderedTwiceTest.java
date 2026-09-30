@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.output.impl.OutputGenerationTask;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
@@ -78,7 +79,8 @@ class PostResponseDataIsNotRenderedTwiceTest {
     }
 
     private PrePostUtils prePostUtils() {
-        return new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), templatingEngine, dataFactory);
+        return new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), templatingEngine, dataFactory,
+                mock(SecretPropertyVault.class));
     }
 
     private static PostResponse postResponse() {
