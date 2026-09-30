@@ -474,6 +474,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
 | **[Upgrading from 5.x](docs/upgrading-from-5x.md)**          | First boot of an EDDI 5 database on 6.x            |
+| **[Upgrading from 6.4](docs/upgrading-from-6.4.md)**         | What an existing 6.4 deployment must change for 6.5 |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |

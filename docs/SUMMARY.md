@@ -79,6 +79,7 @@
 
 - [Configuration Reference](configuration-reference.md)
 - [Upgrading from EDDI 5.x](upgrading-from-5x.md)
+- [Upgrading from EDDI 6.4](upgrading-from-6.4.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)
