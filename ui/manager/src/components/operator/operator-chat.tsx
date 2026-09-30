@@ -1,6 +1,7 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
@@ -382,7 +383,7 @@ export function OperatorChat({
                    untrusted, so raw HTML stays escaped. Previously plain text,
                    which showed status reports as literal ## and ** markers. */
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                     {formatMarkdownText(message.content)}
                   </ReactMarkdown>
                 </div>

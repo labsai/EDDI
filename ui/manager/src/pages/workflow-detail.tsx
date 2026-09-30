@@ -15,6 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -27,6 +29,7 @@ import {
 
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
+import { addWorkflowStep } from "@/lib/workflow-steps";
 import {
   PipelineBuilder,
   type PipelineItem,
@@ -77,6 +80,11 @@ export function WorkflowDetailPage() {
   const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
 
   const { data: versionDescriptors } = useWorkflowVersions(id!);
+  // Deleting a workflow needs OWN; an EDIT grantee may still change it.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Version picker data
   const versions = useMemo(() => {
@@ -179,7 +187,7 @@ export function WorkflowDetailPage() {
             ? ({ ...defaultParser!.config } as Record<string, unknown>)
             : {},
       };
-      setLocalExtensions([...currentExtensions, newExt]);
+      setLocalExtensions(addWorkflowStep(currentExtensions, newExt));
       setShowAddDialog(false);
     },
     [currentExtensions]
@@ -458,14 +466,16 @@ export function WorkflowDetailPage() {
             </button>
           )}
 
-          {/* Delete */}
-          <button
-            onClick={() => setShowDeleteDialog(true)}
-            className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-            data-testid="delete-wf-btn"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {/* Delete — OWN only, as on the workflows list */}
+          {access.canOwn && (
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+              data-testid="delete-wf-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

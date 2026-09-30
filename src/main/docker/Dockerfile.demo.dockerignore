@@ -16,5 +16,13 @@ tmp/
 .idea/
 *.iml
 **/node_modules/
+# The UIs are built INSIDE the image from ui/ (see Dockerfile.demo): the Node
+# toolchain the Maven build downloads into ui/node, and local build output,
+# must not leak in from the checkout.
+ui/node/
+ui/*/dist/
+ui/*/.keycloak-test-realm/
+ui/*/test-results/
+ui/*/playwright-report/
 *.log
 .env

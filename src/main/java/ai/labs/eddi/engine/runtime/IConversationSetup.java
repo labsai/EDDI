@@ -14,4 +14,14 @@ public interface IConversationSetup {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     String computeAnonymousUserIdIfEmpty(String userId, Context userIdContext);
+
+    /**
+     * Points the conversation's descriptor at another version of its agent, after
+     * the conversation moved to it. Conversation listings filter on the
+     * descriptor's agent URI.
+     *
+     * @since 6.5.0
+     */
+    void updateConversationAgentVersion(String conversationId, String agentId, Integer agentVersion)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 }

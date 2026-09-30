@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -89,6 +90,14 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** Mirrors QuotaExceededExceptionMapper; jakarta.ws.rs has no 429 constant. */
     private static final int TOO_MANY_REQUESTS = 429;
 
+    /**
+     * Removes the engine-reserved keys from client-supplied context. Field-injected
+     * with the strict default so directly constructed unit tests keep it non-null
+     * (CDI overwrites it with the configured bean in production).
+     */
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
     @Inject
     public RestAgentEngine(IConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -124,7 +133,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // no interactive caller and must not be gated on one.
             resourceAccessGuard.requireAgentUseAccess(agentId);
             String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
-            var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
+            var result = conversationService.startConversation(environment, agentId, resolvedUserId, clientContextGuard.strip(context));
             return Response.created(result.conversationUri()).build();
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());
@@ -216,7 +225,8 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(inputData.getInput(), "inputData.input");
         validateConversationOwnership(conversationId);
 
-        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, response);
+        sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
+                response);
     }
 
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
@@ -236,10 +246,25 @@ public class RestAgentEngine implements IRestAgentEngine {
 
             @Override
             public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                String reason = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN
-                        ? "Conversation is awaiting human approval — your message was not processed;"
-                                + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)"
-                        : "Conversation is processing another turn — your message was not processed; retry shortly";
+                ConversationState state = snapshot.getConversationState();
+                if (state == ConversationState.ENDED) {
+                    // Ended while the message was queued — the same answer as ending first.
+                    response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+                    return;
+                }
+                String reason;
+                if (state == ConversationState.AWAITING_HUMAN) {
+                    reason = "Conversation is awaiting human approval — your message was not processed;"
+                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
+                } else if (state == ConversationState.IN_PROGRESS) {
+                    reason = "Conversation is processing another turn — your message was not processed; retry shortly";
+                } else {
+                    // Idle, yet skipped: the conversation changed while the message was
+                    // queued (a superseded rerun, or a turn that could not be rebuilt over
+                    // the current conversation). Retrying blindly is not necessarily right.
+                    reason = "The conversation changed while your message was queued — it was not processed;"
+                            + " reload the conversation before sending it again";
+                }
                 response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason).build());
             }
         };
@@ -458,6 +483,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (IConversationService.PauseMismatchException e) {
+            // The decision named a pause (pauseId) that is no longer the current one.
+            // Fixed text: the current pause is untouched and awaits a fresh decision.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The pending approval changed since this decision was made (pauseId no longer current) — "
+                            + "re-read approval-status and decide again.")
+                    .build();
         } catch (IllegalStateException e) {
             // wrong state (already resumed/cancelled/timed out, agent not deployed).
             // Contract (docs/hitl.md): the 409 body names the CURRENT state so the
@@ -518,6 +550,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             summary.put("conversationId", conversationId);
             summary.put("state", snapshot.getConversationState().name());
             summary.put("pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "");
+            // The id a decision passes back as HitlDecision.pauseId, so it applies only
+            // to the pause the reviewer is looking at.
+            summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
@@ -710,9 +745,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * Validates that the caller owns the conversation identified by
      * {@code conversationId}. Admin role bypasses the check. If the descriptor
-     * cannot be loaded due to a store error, access is denied (fail-closed). If the
-     * descriptor is not found, the check is skipped and the actual operation will
-     * handle the 404.
+     * cannot be loaded due to a store error, access is denied (fail-closed). A
+     * soft-deleted conversation is checked against its archived descriptor; one
+     * with no descriptor at all is a 404 for everyone but an admin (see
+     * {@link ConversationAccessGuard#requireConversationOwner}).
      */
     private void validateConversationOwnership(String conversationId) {
         validateConversationOwnership(conversationId, false);
@@ -721,8 +757,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * @param hitlOperation
      *            if true, uses strict ownership + approver role check
-     * @return the conversation owner's userId, or {@code null} if the descriptor
-     *         was not found (the actual operation handles the 404)
+     * @return the conversation owner's userId; {@code null} for a legacy unowned
+     *         conversation or for an admin addressing one without a descriptor (the
+     *         actual operation then handles the 404)
      */
     private String validateConversationOwnership(String conversationId, boolean hitlOperation) {
         if (hitlOperation) {
@@ -745,6 +782,10 @@ public class RestAgentEngine implements IRestAgentEngine {
         }
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null) {
+                // The store answers null for an unknown id; dereferencing it was a 500.
+                throw new NotFoundException("Conversation not found");
+            }
             var currentState = snapshot.getConversationState();
             if (currentState == ConversationState.IN_PROGRESS) {
                 return Response.status(Response.Status.CONFLICT)

@@ -4,6 +4,8 @@
                        `tool` while a tool call is running
    ────────────────────────────────────────────── */
 
+import { Brain, Wrench } from "lucide-react";
+
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
   return (
@@ -63,9 +65,11 @@ export function ThinkingIndicator({
       </div>
       <div className="indicator__bubble">
         <div className="indicator__thinking">
-          <span className="indicator__brain" aria-hidden="true">
-            {mode === "tool" ? "🔧" : "🧠"}
-          </span>
+          {mode === "tool" ? (
+            <Wrench className="indicator__brain" size="1em" />
+          ) : (
+            <Brain className="indicator__brain" size="1em" />
+          )}
           <span>
             {mode === "tool"
               ? `Using ${tool}…`

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
@@ -22,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -100,6 +102,14 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
+        if (AutoVaultedSecrets.isReservedName(keyName)) {
+            // GDPR erasure deletes a user's auto-vaulted slots by name, so a manual key
+            // in that shape would be erased with them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "keyName '" + keyName + "' has the reserved shape of an auto-vaulted conversation secret "
+                            + "(<agentId>.u<16 hex>.<12 hex>.<name>). Choose another name."))
+                    .build();
+        }
         if (body == null || body.value() == null || body.value().isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Secret value must not be empty")).build();
         }
@@ -153,6 +163,7 @@ public class RestSecretStore implements IRestSecretStore {
         List<String> requested;
         try {
             requested = validatedGrant(body);
+            validateExpectedGrant(body.expectedAllowedAgents());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -170,8 +181,14 @@ public class RestSecretStore implements IRestSecretStore {
 
             var impact = grantImpactAnalyzer.agentsLosingAccess(ref, grant);
 
+            List<String> expected = body.expectedAllowedAgents();
             SecretMetadata after;
             if (dryRun) {
+                // A dry run answers the precondition too, so a preview never promises a
+                // write that would then be refused.
+                if (expected != null && !SecretMetadata.sameGrant(before.allowedAgents(), expected)) {
+                    return grantConflictResponse(ref, before.allowedAgents());
+                }
                 // The projection the write would produce, built here rather than by
                 // calling the provider with a flag: a dry run that goes near the write
                 // path is a dry run that can one day stop being dry.
@@ -179,7 +196,9 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant);
             } else {
-                after = secretProvider.updateGrant(ref, grant, body.description());
+                after = expected == null
+                        ? secretProvider.updateGrant(ref, grant, body.description())
+                        : secretProvider.updateGrant(ref, grant, body.description(), expected);
                 // Deliberately NOT invalidating the SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may
@@ -198,6 +217,8 @@ public class RestSecretStore implements IRestSecretStore {
                     .entity(Map.of("error", "Secret not found", "reference", ref.toReferenceString(), "action",
                             "Grants can only be changed on a secret that exists. Check the key name, or store the secret first."))
                     .build();
+        } catch (ISecretProvider.GrantConflictException e) {
+            return grantConflictResponse(ref, e.getCurrentAllowedAgents());
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to update the grant of secret: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to update secret grant")).build();
@@ -249,6 +270,52 @@ public class RestSecretStore implements IRestSecretStore {
             distinct.add(trimmed);
         }
         return new ArrayList<>(distinct);
+    }
+
+    /**
+     * The optional precondition list only has to be comparable, not valid as a new
+     * grant: it may legitimately hold an entry an older release stored that would
+     * no longer pass {@link #validatedGrant}. Bounded and null-free all the same,
+     * since it arrives in a request body.
+     */
+    private static void validateExpectedGrant(List<String> expected) {
+        if (expected == null) {
+            return;
+        }
+        if (expected.size() > MAX_ALLOWED_AGENTS) {
+            throw new IllegalArgumentException("expectedAllowedAgents must not contain more than " + MAX_ALLOWED_AGENTS + " entries.");
+        }
+        if (expected.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("expectedAllowedAgents must not contain null entries.");
+        }
+    }
+
+    /**
+     * 409 for a grant edit whose precondition no longer holds, with the grant as it
+     * now stands so the editor can show it without another round trip.
+     */
+    private static Response grantConflictResponse(SecretReference ref, List<String> currentAllowedAgents) {
+        var body = new LinkedHashMap<String, Object>();
+        body.put("error", "The grant was changed since it was loaded");
+        body.put("reference", ref.toReferenceString());
+        body.put("allowedAgents", SecretMetadata.canonicalGrant(currentAllowedAgents));
+        body.put("action", "Nothing was written. Review the current grant and apply the edit again.");
+        return Response.status(Response.Status.CONFLICT).entity(body).build();
+    }
+
+    /**
+     * The metadata as it may leave over REST — with the {@code checksum} nulled
+     * out. The stored checksum is a keyed value of the plaintext used for internal
+     * dedup and value-match; exposing it hands an offline attacker a target to test
+     * guesses against, so it never crosses the API boundary. A null field is
+     * omitted from the response body, so callers simply see no {@code checksum}.
+     */
+    private static SecretMetadata withoutChecksum(SecretMetadata metadata) {
+        if (metadata == null || metadata.checksum() == null) {
+            return metadata;
+        }
+        return new SecretMetadata(metadata.tenantId(), metadata.keyName(), metadata.createdAt(), metadata.lastAccessedAt(),
+                metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents());
     }
 
     /**
@@ -342,7 +409,7 @@ public class RestSecretStore implements IRestSecretStore {
         }
         try {
             SecretMetadata metadata = secretProvider.getMetadata(new SecretReference(tenantId, keyName));
-            return Response.ok(metadata).build();
+            return Response.ok(withoutChecksum(metadata)).build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -363,7 +430,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId)).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
@@ -432,6 +499,40 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to rotate KEK", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "KEK rotation failed: " + e.getMessage())).build();
+        }
+    }
+
+    @Override
+    public Response adoptMasterKey(boolean confirm) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        if (!confirm) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "confirm=true is required",
+                            "action", "Only adopt the configured master key if the previous one is lost for good. During an unfinished KEK "
+                                    + "rotation, re-run POST /secretstore/secrets/admin/rotate-kek instead — it recovers everything."))
+                    .build();
+        }
+        if (!(secretProvider instanceof VaultSecretProvider vaultProvider)) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Adopting a master key is only supported by VaultSecretProvider")).build();
+        }
+        try {
+            var adoption = vaultProvider.adoptCurrentMasterKey();
+            secretResolver.invalidateAll();
+            return Response.ok(Map.of("tenantsNeedingReset", adoption.tenantsNeedingReset(), "systemValuesReset", adoption.systemValuesReset(),
+                    "checksumKeyReset", adoption.checksumKeyReset(),
+                    "message", "The configured master key is now the vault's master key and new secrets can be stored. "
+                            + (adoption.tenantsNeedingReset().isEmpty()
+                                    ? "No tenant holds unreadable DEKs."
+                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset — "
+                                            + "their secrets were sealed under the lost key.")))
+                    .build();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to adopt the master key", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Adopting the master key failed")).build();
         }
     }
 

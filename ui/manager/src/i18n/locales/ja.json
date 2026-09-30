@@ -260,6 +260,7 @@
     "deployAndChat": "デプロイしてチャット",
     "openExternalChat": "新しいタブで開く",
     "liveIn": "{{environment}} で稼働中",
+    "liveInVersion": "{{environment}} でバージョン {{version}} が稼働中",
     "chatIn": "{{environment}} でチャット",
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
@@ -550,7 +551,10 @@
     "toolCount": "{{total}}中 {{selected}}を選択",
     "specTooLarge": "この仕様は大きすぎるため、ここでは読み込めません",
     "specUrlInvalid": "有効な URL ではありません",
-    "specUrlScheme": "http:// と https:// の URL のみサポートされています"
+    "specUrlScheme": "http:// と https:// の URL のみサポートされています",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには組み込みツールをオフにしてください。",
+    "hfToken": "Hugging Face トークン",
+    "hfTokenHint": "アクセス制限付きまたはプライベートのリポジトリでのみ必要です。API キーと同様に保管庫に保存されます。"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -656,7 +660,9 @@
     "endSuccess_other": "{{count}} 件の会話を終了しました",
     "endSuccess_one": "{{count}} 件の会話を終了しました",
     "purgeSuccess_other": "終了した会話 {{count}} 件を消去しました",
-    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました"
+    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました",
+    "endStateUnavailable": "会話の現在の状態を再確認できなかったため、何も終了していません。もう一度お試しください。",
+    "endStateChanged": "選択した会話の 1 つが承認待ちになりました。選択内容を確認して、もう一度確定してください。"
   },
   "conversationDetail": {
     "backToConversations": "会話一覧に戻る",
@@ -747,7 +753,10 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "sendRejected": "メッセージは送信されませんでした: {{reason}}",
+    "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。",
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -891,7 +900,9 @@
     "removeCondition": "条件を削除",
     "noGroups": "動作グループが定義されていません",
     "noRules": "このグループにルールはありません",
-    "noConditions": "条件なし"
+    "noConditions": "条件なし",
+    "sizeNoBound": "制限なし",
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -923,8 +934,6 @@
     "responseObjectName": "レスポンスオブジェクト名",
     "responseHeaderObjectName": "レスポンス Header オブジェクト名",
     "fireAndForget": "ファイア＆フォーゲット",
-    "batchCalls": "バッチコール",
-    "iterationObjectName": "イテレーションオブジェクト名",
     "prePostInstructions": "前後の指示",
     "preRequest": "リクエスト前",
     "postResponse": "レスポンス後",
@@ -994,7 +1003,16 @@
     "authHeaderRefPlaceholder": "任意 — 認証が必要な仕様には ${vault:my-api-key}",
     "authHeaderRefHint": "呼び出し時に解決される Vault 参照です。保存されたシークレットは、Bearer 接頭辞を含むヘッダー値全体である必要があります。",
     "authHeaderRefInvalid": "${vault:…}、${vars:…}、${caller:…} のいずれかで始めてください。キー自体を貼り付けると、リクエスト URL と経由するすべてのログに残ります。",
-    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。"
+    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。",
+    "runOnNoCodes": "空の「実行するコード」リストはどのステータスコードにも一致しないため、この命令は実行されません。",
+    "useDefaultCodes": "既定値を使用",
+    "httpCodeFilterDefaults": "空欄のフィールドには、表示されている既定のコードが使われます。",
+    "scopeSecretUnsupported": "（ここではボールトに保存されません）",
+    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。",
+    "skipNone": "なし — スキップするコードはありません",
+    "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
+    "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
+    "useDefaultSkipCodes": "既定のスキップリストを使用"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1047,7 +1065,12 @@
     "whitelist": "許可リスト（許可のみ）",
     "blacklist": "拒否リスト（除外）",
     "pipelineCalls": "パイプラインコール",
-    "addCall": "MCP コールを追加"
+    "addCall": "MCP コールを追加",
+    "argumentName": "引数名",
+    "argumentType": "引数の型",
+    "argumentText": "テキスト",
+    "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
+    "removeArgument": "引数を削除"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1086,7 +1109,6 @@
     "identityMaskingRulePlaceholder": "例: 自分が AI 言語モデルであることを決して明かさない",
     "identityMaskingRules": "マスキングルール",
     "identityMaskingRulesHint": "マスキングを有効にするには、有効化と少なくとも 1 つのルールの両方が必要です。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例: product-docs",
     "knowledgeBases": "ナレッジベース",
     "knowledgeBasesHint": "ナレッジベースを名前で明示的に参照します。各名前は、ワークフロー内の RagConfiguration と一致する必要があります。",
@@ -1188,7 +1210,7 @@
     "cascadeInAgent": "エージェントモード（ツール使用時）でもカスケードを使用",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例: claude-sonnet-5",
+    "cascadeModelName": "例: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 常に受け入れ",
     "cascadeTimeout": "タイムアウト (ms)",
@@ -1244,9 +1266,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "ステップ {{step}} のタイムアウトは 0 より大きくする必要があります。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "ステップ {{step}} は別のプロバイダーを使用していますが、独自の API キーがありません — タスクのキーを継承します。"
     },
-    "parallelExecution": "並列ツール実行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "タイムアウト (ms)",
     "maxToolIterations": "最大ツール反復回数",
     "maxToolIterationsHint": "（デフォルト 10）",
     "toolRateLimits": "ツールごとのレート制限",
@@ -1315,7 +1334,9 @@
     "streamingTimeoutSeconds": "ストリーミングタイムアウト（秒）",
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
-    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。"
+    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "paramName": "パラメーター名",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1379,7 +1400,8 @@
     "openEditor": "エディターで編集",
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
-    "toggleGroup": "プロパティグループを切り替え"
+    "toggleGroup": "プロパティグループを切り替え",
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -1549,7 +1571,8 @@
     "stateReady": "準備完了",
     "stateActive": "アクティブ",
     "stateError": "エラー",
-    "stateEnded": "終了"
+    "stateEnded": "終了",
+    "loadOlder": "古いエントリを読み込む"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -1663,7 +1686,13 @@
     "grantAcknowledge": "これらのエージェントは、再度追加されるか設定がこのシークレットを使わなくなるまでデプロイできないことを理解しました。",
     "grantSaved": "「{{key}}」のアクセスを更新しました",
     "grantImpactFailed": "このシークレットを使用しているデプロイ済みエージェントを確認できなかったため、どのエージェントもアクセスを失う可能性があります。",
-    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。"
+    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。",
+    "rotateNotFound": "このシークレットはもう存在しないため、ローテーションするものがありません。代わりに再度追加してください。",
+    "keyExists": "「{{key}}」という名前のシークレットは既に存在します。再度追加すると値が置き換えられます。値を変更して利用者の設定を維持するには「ローテーション」を使用してください。",
+    "keyExistsRotate": "代わりにこのシークレットをローテーション",
+    "keyExistsPicker": "「{{key}}」という名前のシークレットは既に存在します。ボールトの一覧から選択するか、別の名前にしてください。",
+    "rotateKeepsGrantAll": "すべてのエージェントが現在と同じくアクセスを維持します。",
+    "rotateKeepsGrant": "アクセスは引き続き次に限定されます: {{agents}}"
   },
   "audit": {
     "title": "監査ログ",
@@ -1697,17 +1726,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "ボールトのマスターキーを設定すると、今後のすべての監査エントリに HMAC-SHA256 署名が自動で付与されます。",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "実行者",
-    "automated": "自動"
+    "automated": "自動",
+    "verify": {
+      "entryInvalid": "署名が一致しません",
+      "entryUnproven": "未検証",
+      "signatureCount": "読み込んだ {{total}} 件中 {{count}} 件に署名があります。",
+      "loading": "署名を検証中…",
+      "errorTitle": "整合性は未検証です",
+      "errorDesc": "検証リクエストが失敗したため、ここでは何も確認されていません。",
+      "checked": "最新の {{count}} 件を確認しました。",
+      "verifiedTitle": "署名を検証しました",
+      "chainIntact": "シーケンスに欠けているエントリはありません。",
+      "chainNotApplicable": "会話をまたぐ場合は署名のみを確認し、シーケンスは確認しません。",
+      "verifiedBadge": "検証済み",
+      "tamperedTitle": "整合性チェックに失敗しました",
+      "tamperedInvalid": "{{count}} 件のエントリ署名が内容と一致しません。書き込み後にエントリが変更されています。",
+      "tamperedChain": "シーケンスからエントリが欠落しています（{{sequences}}）。記録が短縮されています。",
+      "disabledTitle": "署名を検証できません",
+      "reasonUnsigned": "署名のないエントリ {{count}} 件",
+      "reasonUnknownKey": "このデプロイメントが保持していないキーで署名されたもの {{count}} 件",
+      "reasonSkipped": "未確認の古いエントリ {{count}} 件",
+      "reasonChain": "シーケンスを完全には確定できませんでした",
+      "reasonDuplicates": "重複したシーケンス番号",
+      "reasonUncovered": "確認範囲より古い読み込み済みエントリ {{count}} 件",
+      "unverifiedTitle": "完全には検証されていません",
+      "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
+    }
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
@@ -1834,7 +1882,11 @@
       "weeklyMonday": "毎週（月 00:00）",
       "monthly": "毎月（1 日 00:00）"
     },
-    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。"
+    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。",
+    "systemManaged": "システム",
+    "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
+    "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
+    "failedScheduleGone": "スケジュールはもう存在しません"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -1895,7 +1947,8 @@
     "tokenDistribution": "トークン分布",
     "totalCost": "合計コスト",
     "totalTokens": "合計トークン数",
-    "turns": "ターン"
+    "turns": "ターン",
+    "partial": "この会話には、デバッガーが読み込む量を超える監査エントリがあります。合計は最新のものだけを対象としています。"
   },
   "memoryInspector": {
     "error": "メモリデータの読み込みに失敗しました",
@@ -2036,6 +2089,7 @@
     "ingestion": "ドキュメントの取り込み",
     "dropFiles": "ここに取り込むドキュメントをドロップします",
     "dropHint": "テキスト、Markdown、または任意のテキストベースのファイル",
+    "replaceSameName": "同じファイル名で以前に取り込んだドキュメントを置き換える",
     "browse": "参照",
     "pasteText": "またはテキストを貼り付けます",
     "pastePlaceholder": "ここにドキュメントのテキストを貼り付けてください...",
@@ -2067,6 +2121,8 @@
       "includeSubdomains": "サブドメインを含める",
       "excludePatterns": "除外パターン",
       "excludePatternsHint": "URL パスに対するグロブをカンマ区切りで指定 — * は 1 つのセグメント内、** はセグメントをまたぎます",
+      "sitemapUrls": "サイトマップ",
+      "sitemapUrlsHint": "ページ検出に使うサイトマップのURL（カンマ区切り）。robots.txt に記載がない場合のみ必要です。サイトマップインデックスもたどります",
       "saveFirst": "このソースの実行・プレビュー・履歴表示には、ナレッジベースの保存が必要です。",
       "run": "今すぐ実行",
       "runFailed": "実行を開始できませんでした。すでに実行中の可能性があります。",
@@ -2122,8 +2178,16 @@
       "maxTotalMb": "合計サイズの上限（MB）",
       "maxTotalMbHint": "このソースの全ファイル合計",
       "removeTitle": "このソースを削除しますか？",
-      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。"
-    }
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。",
+      "switchTypeTitle": "ウェブサイトのソースに切り替えますか？",
+      "switchTypeDescription": "保存すると、このソースのアップロード済みファイルと、ナレッジベースがそこから学習したすべての内容が削除されます。元に戻すことはできません。",
+      "switchTypeConfirm": "ウェブサイトに切り替え",
+      "filesLoadFailed": "ファイルを読み込めませんでした: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（再帰として保存）",
+    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
+    "chunkStrategyUnsupported": "{{value}}（非対応）",
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
   },
   "onboarding": {
     "welcome": {
@@ -2692,7 +2756,6 @@
     "contextWindowEntries": "全文のまま残す直近エントリ数",
     "contextWindowSummarize": "ウィンドウから外れた分を要約する",
     "contextWindowTruncateNote": "古いエントリは「N 件の以前のエントリを省略」という簡易な表示に置き換えられます。",
-    "retroConfigHint": "振り返りフェーズが学びをチームメモリに記録し、以降の議論に引き継ぎます。",
     "retroPerRun": "1 回の実行あたり",
     "retroStored": "保存上限",
     "artifactConfigHint": "メンバーが共同で文書を作成し、書かれたターンを越えて残せるようにします。",
@@ -2887,7 +2950,24 @@
     },
     "stateRejected": "却下",
     "inputDisabledRejected": "この提案は却下されました",
-    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。"
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。",
+    "retroCustomLimits": "レトロの教訓の上限をカスタマイズ",
+    "retroCustomHint": "レトロフェーズは教訓をチームの記憶に書き込み、以降のディスカッションに引き継ぎます。この上限で件数を制限します。",
+    "retroDefaultHint": "レトロフェーズは既定の上限（1回あたり {{perRun}} 件、保存 {{stored}} 件）で引き続き教訓を書き込みます。止めるには RETRO フェーズを削除してください。",
+    "voteOptionsTooFew": "明示的な投票用紙には少なくとも 2 つの選択肢が必要です。",
+    "saveProblem": {
+      "title": "このグループはまだ作成できません:",
+      "debateRoles": "ディベートには、役割 PRO のメンバーと役割 CON のメンバーがそれぞれ少なくとも 1 人必要です。",
+      "devilAdvocateRole": "悪魔の代弁者グループには、役割 DEVIL_ADVOCATE のメンバーが必要です。",
+      "humanInTaskForce": "人間のメンバーはタスクフォースグループ（計画・実行・検証フェーズ）に参加できません。",
+      "humanWithPeerPhases": "ピアレビューのように、フェーズが各メンバーに順番に向けられるグループには人間のメンバーは参加できません。",
+      "memberUnassigned_one": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "memberUnassigned_other": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
+    }
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2951,7 +3031,7 @@
     "value": "値",
     "deleteAll": "すべて削除",
     "deleteAllTitle": "すべてのプロパティを削除",
-    "deleteAllDesc": "このユーザーのすべてのプロパティが完全に削除されます。",
+    "deleteAllDesc": "このユーザーのすべてのグローバルプロパティが完全に削除されます。ここに表示されている行だけでなく、エージェントが保存したものを含む、すべてのグローバルなユーザーメモリエントリが対象です。",
     "deleted": "プロパティを削除しました",
     "noResults": "プロパティが見つかりません",
     "showingCount": "{{count}}件のプロパティ"
@@ -3052,6 +3132,8 @@
     "title": "エージェントの同期",
     "subtitle": "EDDIインスタンス間でエージェントを同期する",
     "connection": "ソースインスタンス",
+    "loadingLocalAgents": "照合の前にすべてのローカルエージェントを読み込んでいます…",
+    "localAgentsError": "ローカルのエージェント一覧を完全に読み込めなかったため、名前でエージェントを照合できません。今同期すると重複が作成されます。",
     "sourceUrl": "ソースEDDIインスタンスのURL",
     "authToken": "認証トークン",
     "authHint": "任意。X-Source-Authorization ヘッダに設定。",
@@ -3074,7 +3156,8 @@
     "previewFirst": "同期前に変更をプレビュー",
     "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
     "syncIdentical": "すでに最新です — 書き込む項目はありません",
-    "previewFailed": "プレビューに失敗しました"
+    "previewFailed": "プレビューに失敗しました",
+    "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
   "sync": {
     "actionCreate": "新規",
@@ -3284,7 +3367,6 @@
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
     "botToken": "ボットトークン",
     "botTokenHint": "ボットユーザー OAuth トークン。セキュリティのためにボールト参照を使用してください。",
-    "botTokenPlaceholder": "xoxb-… または ${vault:slack-bot-token}",
     "channel": "チャネル",
     "channelId": "Slack チャネル ID",
     "channelIdCol": "チャネル ID",
@@ -3305,7 +3387,6 @@
     "searchPlaceholder": "チャネルを検索…",
     "signingSecret": "署名シークレット",
     "signingSecretHint": "Slack アプリの基本情報ページから取得します。",
-    "signingSecretPlaceholder": "16進数文字列または ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack セットアップガイド",
     "slackSetupSummary": "Slack アプリを作成し、ボットトークンスコープ（app_mentions:read、chat:write、im:history、channels:history、groups:history）を設定し、資格情報をここに貼り付けてください。",
     "target": "ターゲット",
@@ -3359,7 +3440,9 @@
     "typeAgent": "エージェント",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択…",
-    "unknownGroup": "{{id}}（見つかりません）"
+    "unknownGroup": "{{id}}（見つかりません）",
+    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
@@ -3449,7 +3532,8 @@
     "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み",
     "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
     "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
-    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。"
+    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。",
+    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3536,16 +3620,14 @@
     "conversationsTruncated_other": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
-    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。"
+    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
   },
   "orphans": {
-    "confirmPurgeAll": "{{count}} 件すべての孤立リソースを完全に削除しますか？サーバーはすべてを削除し、選択は適用されません。この操作は元に戻せません。",
-    "deleteSelected": "選択した {{count}} 件を削除",
     "description": "どのエージェントやパッケージからも参照されていないリソースを検出してクリーンアップします。",
-    "deselectAll": "すべて選択解除",
     "includeDeleted": "ソフト削除済みを含む",
     "lastScanned": "最終スキャン",
     "noOrphans": "孤立項目は見つかりません",
@@ -3556,13 +3638,13 @@
     "scanPromptDesc": "どのワークフローやエージェントからも参照されていない拡張設定（ルール、API 呼び出し、LLM、出力）を検出します。未使用のリソースをクリーンアップして、プラットフォームを整理された状態に保ちます。",
     "scanPromptTitle": "プラットフォームをスキャン",
     "scanning": "リソースをスキャン中…",
-    "selectAll": "すべて選択",
     "softDeleted": "削除済み",
     "title": "孤立検出",
     "found_other": "{{count}} 件の孤立項目が見つかりました",
     "found_one": "{{count}} 件の孤立項目が見つかりました",
     "scanIncomplete": "このスキャンは完了しませんでした",
-    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。"
+    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
+    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
@@ -3630,7 +3712,7 @@
     "tagPlaceholder": "例: safety, production",
     "tags": "タグ",
     "templateEnabled": "テンプレート解決を有効化",
-    "templateEnabledHint": "無効にすると、コンテンツ内の {{}} マーカーはリテラルテキストとして扱われます（コード例に便利）。",
+    "templateEnabledHint": "無効にすると、コンテンツ内の { } マーカーはリテラルテキストとして扱われます（コード例に便利）。",
     "usageHint": "使用方法:"
   },
   "status": {
@@ -3683,7 +3765,8 @@
     "copyVars": "${vars:…} 参照をコピー",
     "refCopied": "コピーしました: {{ref}}",
     "infoLine1": "システムプロンプトでは {{vars.<key>}} を、エージェント設定の任意の場所では ${vars:<key>} を使用します。",
-    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。"
+    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。",
+    "keyExists": "「{{key}}」という名前の変数は既に存在します。代わりに一覧から編集してください。"
   },
   "workflowEditor": {
     "endpoints": "エンドポイント",
@@ -3744,7 +3827,19 @@
       "toggleConfig": "詳細パネルの表示切替",
       "unpin": "回答のピン留めを解除",
       "untitled": "無題",
-      "viewSessions": "過去のセッションを表示"
+      "viewSessions": "過去のセッションを表示",
+      "alreadyEnded": "ディスカッションはすでに終了していました。",
+      "stopRaced": "停止しようとした時点でディスカッションの状態が変わり、まだ続いています。もう一度停止してください。",
+      "stopUnconfirmed": "ディスカッションが停止したことを確認できませんでした。状態を確認して、もう一度停止してください。",
+      "stopFailed": "ディスカッションを停止できませんでした: {{error}}",
+      "stopping": "停止しています…",
+      "startOver": "最初からやり直す",
+      "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+      "confirmNewTitle": "実行中のディスカッションを停止しますか？",
+      "confirmNewDescription": "ディスカッションがまだ実行中です。新しく開始すると先に停止され、進行中の作業は破棄されます。",
+      "confirmNewButton": "停止して新規開始",
+      "keepRunning": "実行を続ける",
+      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3773,7 +3868,8 @@
       "stop": "生成を停止",
       "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
       "newConversation": "新しい会話",
-      "newConversationFailed": "新しい会話を開始できませんでした"
+      "newConversationFailed": "新しい会話を開始できませんでした",
+      "initFailed": "この会話を開けませんでした。"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -4188,7 +4284,7 @@
       "llmDefaultsDesc": "ここで作成する各アドバイザーに適用されます（下で個別に設定した場合を除く）。",
       "llmDefaultsKeyRequired": "ここにキーを追加すると、個別にキーを設定していないすべてのアドバイザーに適用されます。",
       "model": "モデル",
-      "modelPlaceholder": "例: claude-sonnet-5",
+      "modelPlaceholder": "例: claude-sonnet-5-5",
       "nameRequired": "このアドバイザーに名前を付けてください。",
       "new": "新規",
       "next": "次へ",
@@ -4886,7 +4982,12 @@
       "space": "ワークスペース",
       "spaceHint": "このリソースのワークスペースの全員。",
       "published": "公開",
-      "publishedHint": "このデプロイにアクセスできる全員。"
+      "publishedHint": "このデプロイにアクセスできる全員。",
+      "confirmTitle": "公開範囲を{{visibility}}に変更しますか？",
+      "cascadeLabel": "参照しているワークフローと設定にも適用する",
+      "cascadeWarning": "あなたが所有する参照先リソースすべてにこの公開範囲が設定され、個別の設定は置き換えられます。以前の設定は残りません。",
+      "noCascadeWarning": "このリソースだけが変更されます。新たに閲覧できる人でも、参照先を開けない場合があります。",
+      "apply": "公開範囲を変更"
     },
     "share": {
       "title": "共有",
@@ -4945,5 +5046,12 @@
     "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
     "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
     "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
+  },
+  "cascadeSave": {
+    "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "agentChanged": "エージェント {{agentId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
+    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
+    "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
   }
 }

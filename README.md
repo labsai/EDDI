@@ -122,7 +122,8 @@ docker compose up
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
 docker compose -f docker-compose.postgres-only.yml up
 
-# With Keycloak authentication
+# With Keycloak authentication. No realm account ships a password (see the
+# header of docker-compose.auth.yml, or let install.sh --with-auth set one)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 
 # With Prometheus + Grafana monitoring
@@ -502,7 +503,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
-| **Node.js**    | —       | Not required: Maven downloads Node 22 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
+| **Node.js**    | —       | Not required: Maven downloads Node 24 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
 
@@ -512,11 +513,13 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 ```bash
 # Linux / macOS
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 
 # Windows (PowerShell)
-.\mvnw.cmd compile quarkus:dev
+.\mvnw.cmd compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
+
+`-Djvm.args` hands the forked dev JVM the same `--add-modules=jdk.incubator.vector` flag the container image sets. Only `jlama` (in-process) agents need it — without it Jlama silently falls back to scalar tensor operations and answers far too slowly — so you may drop it if you never run one. `mise run dev` passes it for you.
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
 
@@ -547,7 +550,7 @@ Dev mode also enables:
 
 | Command                                                       | What It Does                                                                |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | **Start dev mode** with live reload (port 7070). The flag is for `jlama` agents — see above |
 | `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
@@ -559,8 +562,8 @@ Dev mode also enables:
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
 | `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
 | `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
-| `./mvnw quarkus:dev -Dsuspend`                                | Start dev mode and **wait for debugger** on port 5005                       |
-| `./mvnw quarkus:dev -Ddebug=false`                            | Start dev mode **without** the debug agent                                  |
+| `./mvnw quarkus:dev -Dsuspend '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode and **wait for debugger** on port 5005 |
+| `./mvnw quarkus:dev -Ddebug=false '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode **without** the debug agent |
 
 <details>
 <summary><strong>Code coverage</strong></summary>
@@ -613,15 +616,21 @@ EDDI pod sits in `ContainerCreating` (`MountVolume.SetUp failed: secret
 ```bash
 # Kustomize overlays — create the vault Secret first, then apply
 bash k8s/create-secrets.sh                 # PowerShell 7: pwsh -File .\k8s\create-secrets.ps1
+# ...plus the database credentials, which are no longer shipped: mongodb-secrets
+# (MongoDB runs authenticated) or postgres-secrets — commands in the Kubernetes Guide
 kubectl apply -k k8s/overlays/mongodb/     # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/    # PostgreSQL backend
 
 # Quickstart (one-file manifest; same Secret step, see the Kubernetes Guide)
 kubectl apply -f https://raw.githubusercontent.com/labsai/EDDI/main/k8s/quickstart.yaml
 
-# Helm (renders the Secret itself, so the key is a required value)
+# Helm (renders the Secret itself, so the key is a required value). Local,
+# port-forward shape without OIDC: the two opt-ins are required, see the guide.
 helm install eddi ./helm/eddi \
   --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
   --namespace eddi --create-namespace
 ```
 

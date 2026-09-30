@@ -628,7 +628,10 @@ class ConversationExtendedTest {
             var conv = createConversation();
             conv.say("my_password", contexts);
 
-            verify(currentStep).addConversationOutputString(eq("input"), eq("<secret input>"));
+            // Written when the input is stored, and re-asserted when the turn ends
+            // (a parser may have overwritten it with the normalized plaintext).
+            verify(currentStep, atLeastOnce()).addConversationOutputString(eq("input"), eq("<secret input>"));
+            verify(currentStep, never()).addConversationOutputString(eq("input"), eq("my_password"));
         }
 
         @Test

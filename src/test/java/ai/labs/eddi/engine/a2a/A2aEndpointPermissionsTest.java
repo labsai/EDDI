@@ -8,6 +8,7 @@ import io.quarkus.security.Authenticated;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
 import io.quarkus.vertx.http.runtime.security.ImmutablePathMatcher;
 import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.Path;
 import org.junit.jupiter.api.BeforeAll;
@@ -143,8 +144,12 @@ class A2aEndpointPermissionsTest {
         }
 
         @Test
-        @DisplayName("POST /a2a/agents/{agentId} — the JSON-RPC surface that actually runs conversations")
+        @DisplayName("POST /a2a/agents/{agentId} — the JSON-RPC surface: authenticated at the path layer, role-gated by RBAC on top")
         void jsonRpc() {
+            // The path policy requires authentication (catch-all); @RolesAllowed on
+            // handleJsonRpc additionally requires a real EDDI role, so an authenticated
+            // but role-less token is refused (403) rather than allowed to run a
+            // conversation. The path layer only expresses "authenticated" here.
             assertPolicies("/a2a/agents/" + SAMPLE_AGENT_ID, "POST", AUTHENTICATED);
         }
 
@@ -224,11 +229,24 @@ class A2aEndpointPermissionsTest {
                         method.getName() + " is @Authenticated, but the path policy does not require"
                                 + " authentication — a permit entry is overriding the annotation");
                 checked++;
+            } else if (method.isAnnotationPresent(RolesAllowed.class)) {
+                // @RolesAllowed is a strengthening of @Authenticated: the HTTP path layer
+                // must still resolve to authenticated (so an anonymous request is 401'd
+                // before RBAC), and the specific role is then enforced on top by the
+                // declarative RBAC interceptor — which is what refuses an authenticated
+                // but role-less token (403). If the path resolved to permit instead, an
+                // anonymous caller would reach the endpoint and only the RBAC layer would
+                // stand between them and it; requiring authenticated here keeps the two
+                // layers agreeing.
+                assertPolicies(resolved, httpVerbOf(method), AUTHENTICATED,
+                        method.getName() + " is @RolesAllowed, so its path must require authentication"
+                                + " (the role is enforced by RBAC on top) — a permit entry is overriding it");
+                checked++;
             }
         }
         assertEquals(6, checked,
-                "Expected the four @PermitAll cards/capabilities plus the two @Authenticated endpoints;"
-                        + " if an endpoint was added or removed, say so here deliberately");
+                "Expected the four @PermitAll cards/capabilities, the @Authenticated agent listing and the"
+                        + " @RolesAllowed JSON-RPC endpoint; if an endpoint was added or removed, say so here deliberately");
     }
 
     // ==================== Helpers ====================

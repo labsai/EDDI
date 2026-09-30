@@ -1,14 +1,14 @@
-import { useState, useMemo, Fragment } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
   Loader2,
-  CheckCircle,
   AlertCircle,
   ArrowRightLeft,
   Sparkles,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
@@ -19,7 +19,7 @@ import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
-import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import type {
   BatchSyncExecution,
   DocumentDescriptor,
@@ -28,6 +28,7 @@ import type {
   SyncRequest,
 } from "@/lib/api/backup";
 import { hasFailures, parseResourceUri } from "@/lib/api/backup";
+import { getErrorMessage } from "@/lib/api-client";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;
@@ -41,6 +42,18 @@ interface AgentMapping {
 
 
 
+/** A preview entry standing in for one the source did not return. */
+function missingPreview(sourceAgentId: string, message: string): ImportPreview {
+  return {
+    sourceAgentId,
+    sourceAgentName: null,
+    targetAgentId: null,
+    targetAgentName: null,
+    resources: [],
+    error: message,
+  };
+}
+
 export function SyncPage() {
   const { t } = useTranslation();
 
@@ -51,16 +64,47 @@ export function SyncPage() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
   // Local agents for target dropdown
-  const { data: agentPages } = useInfiniteAgentDescriptors();
+  const {
+    data: agentPages,
+    isComplete: localAgentsComplete,
+    isError: localAgentsFailed,
+    refetch: refetchLocalAgents,
+  } = useAllAgentDescriptors();
   const localAgents = useMemo(
     () => groupAgentsByName(agentPages?.pages.flat() ?? []),
     [agentPages]
   );
+  // Remote agents received before the local list finished loading. Matching
+  // them against a partial list would leave every agent past the loaded pages
+  // unmatched — and a sync of an unmatched agent CREATES it, a duplicate.
+  const [pendingRemote, setPendingRemote] = useState<DocumentDescriptor[] | null>(null);
 
   const previewBatchMutation = usePreviewSyncBatch();
   const executeBatchMutation = useExecuteSyncBatch();
 
   function handleConnected(agents: DocumentDescriptor[]) {
+    if (!localAgentsComplete) {
+      // Match once every local page has arrived — see pendingRemote.
+      setPendingRemote(agents);
+      setMappings([]);
+      setExpandedAgent(null);
+      return;
+    }
+    setPendingRemote(null);
+    matchRemoteAgents(agents);
+  }
+
+  // Deferred auto-match: runs when the local list completes after connecting.
+  useEffect(() => {
+    if (pendingRemote && localAgentsComplete) {
+      setPendingRemote(null);
+      matchRemoteAgents(pendingRemote);
+    }
+    // matchRemoteAgents reads localAgents, which is complete exactly when this fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRemote, localAgentsComplete]);
+
+  function matchRemoteAgents(agents: DocumentDescriptor[]) {
     // Auto-match by name
     const newMappings: AgentMapping[] = agents.map((remote) => {
       const { id, version } = parseResourceUri(remote.resource);
@@ -87,6 +131,24 @@ export function SyncPage() {
     );
   }
 
+  const noPreviewMessage = t(
+    "syncPage.noPreviewReturned",
+    "The source returned no preview for this agent."
+  );
+
+  // The agent list and every preview belong to the source they were fetched
+  // from. Editing the URL or credentials used to keep both, so a sync could run
+  // against a different instance than the one that was previewed.
+  function handleSourceChange(apply: () => void) {
+    apply();
+    if (mappings.length > 0) {
+      setMappings([]);
+      setExpandedAgent(null);
+      previewBatchMutation.reset();
+      executeBatchMutation.reset();
+    }
+  }
+
   function handlePreviewAll() {
     const selected = mappings.filter((m) => m.checked);
     if (selected.length === 0) return;
@@ -101,6 +163,15 @@ export function SyncPage() {
     // replace; leaving it on screen reads as the result of what is about to happen.
     executeBatchMutation.reset();
 
+    // Previews from an earlier run must not survive this one. They used to:
+    // a mapping the new response did not cover (or every mapping, when the
+    // request failed) kept its OLD preview, and "Sync Selected" — which is
+    // enabled by any previewed selection — then synced on the strength of a
+    // diff nobody had just looked at. That includes UNCHECKED mappings: one
+    // unchecked before a failed run and re-checked after it re-armed Sync with
+    // its old preview.
+    setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -112,7 +183,10 @@ export function SyncPage() {
               const p = previews.find(
                 (pr) => pr.sourceAgentId === m.remoteId
               );
-              return p ? { ...m, preview: p } : m;
+              return {
+                ...m,
+                preview: p ?? missingPreview(m.remoteId, noPreviewMessage),
+              };
             })
           );
         },
@@ -185,10 +259,32 @@ export function SyncPage() {
         <SyncConfigPanel
           url={syncUrl}
           auth={syncAuth}
-          onUrlChange={setSyncUrl}
-          onAuthChange={setSyncAuth}
+          onUrlChange={(v) => handleSourceChange(() => setSyncUrl(v))}
+          onAuthChange={(v) => handleSourceChange(() => setSyncAuth(v))}
           onConnected={handleConnected}
         />
+        {localAgentsFailed && (
+          <div
+            className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            role="alert"
+            data-testid="sync-local-agents-error"
+          >
+            <span>
+              {t(
+                "syncPage.localAgentsError",
+                "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates."
+              )}
+            </span>
+            <Button variant="outline" size="sm" onClick={() => void refetchLocalAgents()}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        )}
+        {pendingRemote && !localAgentsFailed && (
+          <p className="mt-4 text-sm text-muted-foreground" role="status" data-testid="sync-local-agents-loading">
+            {t("syncPage.loadingLocalAgents", "Loading all local agents before matching…")}
+          </p>
+        )}
       </section>
 
       {/* Agent mapping */}
@@ -329,13 +425,25 @@ export function SyncPage() {
               {checkedCount} {t("syncPage.agentsSelected", "agents selected")} ·{" "}
               {totalResources} {t("syncPage.totalResources", "resources")}
             </span>
+            {previewBatchMutation.isError && (
+              // A failed preview used to leave the page silent: the spinner
+              // stopped and nothing else changed.
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                data-testid="sync-preview-all-error"
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                {getErrorMessage(previewBatchMutation.error) ||
+                  t("syncPage.previewFailed", "Preview failed")}
+              </span>
+            )}
             {executeBatchMutation.isError && (
               <span
                 className="inline-flex items-center gap-1 text-destructive"
                 data-testid="sync-outcome-error"
               >
                 <AlertCircle className="h-3.5 w-3.5" />
-                {(executeBatchMutation.error as Error)?.message ||
+                {getErrorMessage(executeBatchMutation.error) ||
                   t("syncPage.syncError", "Sync failed")}
               </span>
             )}
@@ -400,7 +508,7 @@ function SyncOutcome({ execution }: { execution: BatchSyncExecution }) {
           </>
         ) : (
           <>
-            <CheckCircle className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             <span className="text-emerald-600 dark:text-emerald-400">
               {wrote > 0
                 ? t("syncPage.syncSuccess", "Sync complete")

@@ -264,6 +264,7 @@
     "count_few": "{{count}} وكلاء",
     "count_many": "{{count}} وكيل",
     "liveIn": "نشط في {{environment}}",
+    "liveInVersion": "نشط في {{environment}} بالإصدار {{version}}",
     "chatIn": "الدردشة في {{environment}}",
     "openExternalChatIn": "فتح دردشة {{environment}} في علامة تبويب جديدة",
     "deployToProduction": "النشر في الإنتاج",
@@ -554,7 +555,10 @@
     "toolCount": "{{selected}} من {{total}} محددة",
     "specTooLarge": "هذه المواصفة كبيرة جداً بحيث لا يمكن تحميلها هنا",
     "specUrlInvalid": "هذا ليس عنوان URL صالحاً",
-    "specUrlScheme": "يتم دعم عناوين http:// و https:// فقط"
+    "specUrlScheme": "يتم دعم عناوين http:// و https:// فقط",
+    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. أوقف تشغيل الأدوات المدمجة لتعطيلها جميعًا.",
+    "hfToken": "رمز Hugging Face",
+    "hfTokenHint": "مطلوب فقط للمستودعات المقيّدة أو الخاصة. يُخزَّن في الخزنة مثل مفتاح API."
   },
   "packages": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة مسار العمل وجميع بياناته نهائياً.",
@@ -688,7 +692,9 @@
     "purgeSuccess_one": "تم تطهير {{count}} محادثة منتهية",
     "purgeSuccess_two": "تم تطهير {{count}} محادثة منتهية",
     "purgeSuccess_zero": "تم تطهير {{count}} محادثة منتهية",
-    "purgeSuccess_other": "تم تطهير {{count}} محادثة منتهية"
+    "purgeSuccess_other": "تم تطهير {{count}} محادثة منتهية",
+    "endStateUnavailable": "تعذّر إعادة التحقق من الحالة الحالية للمحادثات، لذلك لم يتم إنهاء أي شيء. حاول مرة أخرى.",
+    "endStateChanged": "إحدى المحادثات المحددة تنتظر الآن الموافقة. راجع التحديد ثم أكّد مرة أخرى."
   },
   "conversationDetail": {
     "backToConversations": "العودة إلى المحادثات",
@@ -787,7 +793,10 @@
     "errorConversationEnded": "انتهت هذه المحادثة.",
     "errorAgentNotReady": "لم يُنشر هذا الوكيل بعد في البيئة المحددة.",
     "errorAgentMismatch": "تنتمي هذه المحادثة إلى إصدار آخر من الوكيل.",
-    "errorQuotaUnavailable": "تعذّر التحقق من حدود الاستخدام في الوقت الحالي. أعد المحاولة بعد قليل."
+    "errorQuotaUnavailable": "تعذّر التحقق من حدود الاستخدام في الوقت الحالي. أعد المحاولة بعد قليل.",
+    "sendRejected": "لم يتم إرسال رسالتك: {{reason}}",
+    "sendWhileLoading": "لم يتم إرسال رسالتك: لا تزال المحادثة قيد التحميل. حاول مرة أخرى بعد لحظة.",
+    "turnFailed": "تعذّر على الوكيل الرد على هذه الرسالة. راجع سجل الخادم أو سجل تدقيق المحادثة لمعرفة السبب."
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -947,7 +956,9 @@
     "removeCondition": "إزالة الشرط",
     "noGroups": "لم يتم تحديد مجموعات سلوك",
     "noRules": "لا توجد قواعد في هذه المجموعة",
-    "noConditions": "لا توجد شروط"
+    "noConditions": "لا توجد شروط",
+    "sizeNoBound": "بلا حد",
+    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "لم يتم العثور على نقاط نهاية في المواصفة",
@@ -979,8 +990,6 @@
     "responseObjectName": "اسم كائن الاستجابة",
     "responseHeaderObjectName": "اسم كائن header الاستجابة",
     "fireAndForget": "أرسل وانسَ",
-    "batchCalls": "استدعاءات دفعية",
-    "iterationObjectName": "اسم كائن التكرار",
     "prePostInstructions": "تعليمات قبل/بعد",
     "preRequest": "قبل الطلب",
     "postResponse": "بعد الاستجابة",
@@ -1050,7 +1059,16 @@
     "authHeaderRefPlaceholder": "اختياري — ${vault:my-api-key} لمواصفة تتطلب مصادقة",
     "authHeaderRefHint": "مرجع إلى الخزنة، يُحلّ عند تنفيذ الاستدعاء. يجب أن يحتوي السر المخزّن على قيمة الترويسة كاملة، بما في ذلك بادئة Bearer.",
     "authHeaderRefInvalid": "يجب أن يبدأ بـ ${vault:…} أو ${vars:…} أو ${caller:…}. لصق المفتاح نفسه سيضعه في عنوان الطلب وفي كل سجل يمر به.",
-    "authRefLiteral": "أدخل مرجعًا مثل ${vault:my-key}، وليس المفتاح نفسه. المفتاح لا يغادر الخزنة أبدًا."
+    "authRefLiteral": "أدخل مرجعًا مثل ${vault:my-key}، وليس المفتاح نفسه. المفتاح لا يغادر الخزنة أبدًا.",
+    "runOnNoCodes": "قائمة «التشغيل عند الرموز» الفارغة لا تطابق أي رمز حالة، لذا لا تُنفَّذ هذه التعليمة أبدًا.",
+    "useDefaultCodes": "استخدام الافتراضيات",
+    "httpCodeFilterDefaults": "تستخدم الحقول الفارغة الرموز الافتراضية المعروضة فيها.",
+    "scopeSecretUnsupported": "(لا يُحفَظ في الخزنة هنا)",
+    "scopeSecretWarning": "لا يُحفَظ النطاق «secret» في الخزنة في هذه التعليمة: تُخزَّن القيمة كنص صريح. اختر نطاقًا آخر واحفظ بيانات الاعتماد في خزنة الأسرار.",
+    "skipNone": "لا شيء — لا يُتخطّى أي رمز",
+    "runSkipConflict": "{{codes}} موجود أيضًا في قائمة التخطي، لذا لا تُنفَّذ هذه التعليمة عليه أبدًا.",
+    "httpCodeFilterSkipSet": "«التشغيل عند الرموز» الفارغ يستخدم 200 و201؛ و«التخطي عند الرموز» الفارغ لا يتخطى شيئًا.",
+    "useDefaultSkipCodes": "استخدام قائمة التخطي الافتراضية"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "عند الفشل يستمر المسار؛ ويُكشف الخطأ عند ",
@@ -1103,7 +1121,12 @@
     "whitelist": "قائمة بيضاء (السماح فقط)",
     "blacklist": "قائمة سوداء (استبعاد)",
     "pipelineCalls": "استدعاءات Pipeline",
-    "addCall": "إضافة استدعاء MCP"
+    "addCall": "إضافة استدعاء MCP",
+    "argumentName": "اسم الوسيطة",
+    "argumentType": "نوع الوسيطة",
+    "argumentText": "نص",
+    "argumentInvalidJson": "ليس JSON صالحًا — يُحتفَظ بآخر قيمة صالحة",
+    "removeArgument": "إزالة الوسيطة"
   },
   "llmEditor": {
     "addCustomInstruction": "إضافة تعليمة",
@@ -1142,7 +1165,6 @@
     "identityMaskingRulePlaceholder": "مثل: لا تكشف أبداً أنك نموذج لغوي للذكاء الاصطناعي",
     "identityMaskingRules": "قواعد الإخفاء",
     "identityMaskingRulesHint": "يلزم التفعيل ووجود قاعدة واحدة على الأقل معاً ليصبح الإخفاء ساري المفعول.",
-    "injectionStrategy": "الإدراج",
     "kbNamePlaceholder": "مثل: product-docs",
     "knowledgeBases": "قواعد المعرفة",
     "knowledgeBasesHint": "أشِر صراحةً إلى قواعد المعرفة بالاسم. يجب أن يطابق كل اسم RagConfiguration في مسار العمل.",
@@ -1244,7 +1266,7 @@
     "cascadeInAgent": "استخدام التسلسل أيضاً في وضع الوكيل (مع الأدوات)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "مثال: claude-sonnet-5",
+    "cascadeModelName": "مثال: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "فارغ = قبول دائم",
     "cascadeTimeout": "المهلة (مللي ثانية)",
@@ -1300,9 +1322,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "يجب أن تكون مهلة المرحلة {{step}} أكبر من 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "تستخدم المرحلة {{step}} مزوّداً مختلفاً لكن بلا مفتاح API خاص بها — سترث مفتاح المهمة."
     },
-    "parallelExecution": "تنفيذ متوازي للأدوات",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "المهلة (مللي ثانية)",
     "maxToolIterations": "أقصى تكرارات الأدوات",
     "maxToolIterationsHint": "(افتراضي 10)",
     "toolRateLimits": "حدود المعدل لكل أداة",
@@ -1371,7 +1390,9 @@
     "streamingTimeoutSeconds": "مهلة البث (بالثواني)",
     "streamingTimeoutSecondsHint": "يتجاوز الإعداد الافتراضي للمحرك (120 ثانية). ينطبق فقط أثناء البث؛ فارغ = استخدام الافتراضي.",
     "taskPricing": "تسعير الاستدعاءات العادية",
-    "taskPricingDesc": "يحدد سعر استدعاءات النموذج العادية (غير المتسلسلة) لهذه المهمة لأغراض تتبع التكلفة وسقوف تكلفة المجموعة. بدون سعر (فارغ) يُحتسب كـ 0$."
+    "taskPricingDesc": "يحدد سعر استدعاءات النموذج العادية (غير المتسلسلة) لهذه المهمة لأغراض تتبع التكلفة وسقوف تكلفة المجموعة. بدون سعر (فارغ) يُحتسب كـ 0$.",
+    "paramName": "اسم المعامل",
+    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. ألغِ تحديد «تمكين الأدوات المدمجة» لتعطيلها جميعًا."
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",
@@ -1435,7 +1456,8 @@
     "openEditor": "تحرير في المحرر",
     "visibilityTitle": "الوكلاء الذين يمكنهم رؤية خاصية longTerm هذه",
     "editValue": "تعديل القيمة",
-    "toggleGroup": "تبديل مجموعة الخصائص"
+    "toggleGroup": "تبديل مجموعة الخصائص",
+    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر."
   },
   "dictionaryEditor": {
     "language": "اللغة",
@@ -1605,7 +1627,8 @@
     "stateReady": "جاهز",
     "stateActive": "نشط",
     "stateError": "خطأ",
-    "stateEnded": "منتهي"
+    "stateEnded": "منتهي",
+    "loadOlder": "تحميل الإدخالات الأقدم"
   },
   "secrets": {
     "loadError": "تعذّر تحميل الأسرار",
@@ -1751,7 +1774,13 @@
     "grantAcknowledge": "أدرك أن هؤلاء الوكلاء لن يُنشروا مرة أخرى حتى يُعادوا إلى القائمة أو يتوقف تكوينهم عن استخدام هذا السر.",
     "grantSaved": "تم تحديث الوصول لـ «{{key}}»",
     "grantImpactFailed": "تعذّر التحقق من الوكلاء المنشورين الذين يستخدمون هذا السر، لذا قد يفقد أيٌّ منهم الوصول.",
-    "grantAcknowledgeUnchecked": "الحفظ على أي حال دون معرفة الوكلاء المنشورين المتأثرين."
+    "grantAcknowledgeUnchecked": "الحفظ على أي حال دون معرفة الوكلاء المنشورين المتأثرين.",
+    "rotateNotFound": "هذا السر لم يعد موجودًا، لذا لا يوجد ما يمكن تدويره. أضفه من جديد بدلًا من ذلك.",
+    "keyExists": "يوجد سر باسم \"{{key}}\" بالفعل. ستؤدي إضافته مرة أخرى إلى استبدال قيمته — استخدم التدوير لتغيير القيمة مع الإبقاء على من يمكنه استخدامه.",
+    "keyExistsRotate": "دوّر هذا السر بدلًا من ذلك",
+    "keyExistsPicker": "يوجد سر باسم \"{{key}}\" بالفعل. اختره من قائمة الخزنة أو اختر اسمًا آخر.",
+    "rotateKeepsGrantAll": "يحتفظ كل الوكلاء بالوصول كما هو الآن.",
+    "rotateKeepsGrant": "يبقى الوصول مقتصرًا على: {{agents}}"
   },
   "audit": {
     "title": "سجل التدقيق",
@@ -1785,17 +1814,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "اضبط مفتاحًا رئيسيًا للخزنة لتفعيل التوقيع التلقائي بـ HMAC-SHA256 لكل إدخالات التدقيق المستقبلية.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "بواسطة",
-    "automated": "آلي"
+    "automated": "آلي",
+    "verify": {
+      "entryInvalid": "التوقيع غير مطابق",
+      "entryUnproven": "غير متحقق منه",
+      "signatureCount": "{{count}} من أصل {{total}} إدخالًا محمّلًا تحمل توقيعًا.",
+      "loading": "جارٍ التحقق من التواقيع…",
+      "errorTitle": "لم يتم التحقق من السلامة",
+      "errorDesc": "فشل طلب التحقق، لذا لم يتم فحص أي شيء هنا.",
+      "checked": "تم فحص أحدث {{count}} إدخالًا.",
+      "verifiedTitle": "تم التحقق من التواقيع",
+      "chainIntact": "لا يوجد إدخال مفقود من التسلسل.",
+      "chainNotApplicable": "عبر المحادثات يتم فحص التواقيع فقط وليس التسلسل.",
+      "verifiedBadge": "تم التحقق",
+      "tamperedTitle": "فشل فحص السلامة",
+      "tamperedInvalid": "{{count}} من تواقيع الإدخالات لا تطابق محتواها — تم تغيير الإدخالات بعد كتابتها.",
+      "tamperedChain": "توجد إدخالات مفقودة من التسلسل ({{sequences}}) — تم تقصير السجل.",
+      "disabledTitle": "لا يمكن التحقق من التواقيع",
+      "reasonUnsigned": "{{count}} إدخال غير موقّع",
+      "reasonUnknownKey": "{{count}} موقّع بمفتاح لم يعد هذا النشر يحتفظ به",
+      "reasonSkipped": "{{count}} إدخال أقدم لم يتم فحصه",
+      "reasonChain": "تعذّر إثبات التسلسل بالكامل",
+      "reasonDuplicates": "أرقام تسلسل مكررة",
+      "reasonUncovered": "{{count}} من الإدخالات المحمّلة أقدم من النطاق الذي تم التحقق منه",
+      "unverifiedTitle": "لم يتم التحقق بالكامل",
+      "unverifiedDesc": "لم يثبت بطلان أي توقيع، لكن تعذّر فحص كل شيء: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "تنسيق من 5 حقول: الدقيقة الساعة يوم-الشهر الشهر يوم-الأسبوع",
@@ -1922,7 +1970,11 @@
       "weeklyMonday": "أسبوعياً (الإثنين 00:00)",
       "monthly": "شهرياً (اليوم 1، 00:00)"
     },
-    "totalCappedHint": "أعاد الخادم صفحة كاملة، لذا قد يكون هناك جداول زمنية أكثر مما هو معروض."
+    "totalCappedHint": "أعاد الخادم صفحة كاملة، لذا قد يكون هناك جداول زمنية أكثر مما هو معروض.",
+    "systemManaged": "النظام",
+    "systemManagedHint": "يديره EDDI (استيعاب قاعدة المعرفة أو دمج الذاكرة أو إيقاع الفريق). غيّره حيث تم تعريفه، وليس هنا.",
+    "persistentConversationIdLocked": "يُحدَّد عند إنشاء الجدول. يحتفظ الخادم بالمحادثة التي كانت عمليات التشغيل تُضاف إليها.",
+    "failedScheduleGone": "الجدول لم يعد موجودًا"
   },
   "cascadeTrace": {
     "title": "تسلسل النماذج",
@@ -1983,7 +2035,8 @@
     "tokenDistribution": "توزيع الرموز",
     "totalCost": "إجمالي التكلفة",
     "totalTokens": "إجمالي الرموز",
-    "turns": "الأدوار"
+    "turns": "الأدوار",
+    "partial": "تحتوي هذه المحادثة على إدخالات تدقيق أكثر مما يحمّله المصحح. تشمل الإجماليات أحدثها فقط."
   },
   "memoryInspector": {
     "error": "فشل تحميل بيانات الذاكرة",
@@ -2124,6 +2177,7 @@
     "ingestion": "استيعاب المستندات",
     "dropFiles": "أسقط المستندات هنا لاستيعابها",
     "dropHint": "نص، ماركداون، أو أي ملف يعتمد على النصوص",
+    "replaceSameName": "استبدال مستند تمت إضافته سابقًا بنفس اسم الملف",
     "browse": "تصفح",
     "pasteText": "أو الصق محتوى نصي",
     "pastePlaceholder": "الصق نص المستند هنا...",
@@ -2155,6 +2209,8 @@
       "includeSubdomains": "تضمين النطاقات الفرعية",
       "excludePatterns": "أنماط الاستبعاد",
       "excludePatternsHint": "أنماط تُطابق مسار الرابط، مفصولة بفواصل — * يبقى داخل مقطع واحد، و** يتجاوزها",
+      "sitemapUrls": "خرائط الموقع",
+      "sitemapUrlsHint": "عناوين خرائط الموقع لاكتشاف الصفحات، مفصولة بفواصل. مطلوبة فقط إذا لم يدرجها ملف robots.txt؛ يتم تتبع فهارس خرائط الموقع",
       "saveFirst": "احفظ قاعدة المعرفة لتشغيل هذا المصدر أو معاينته أو عرض سجله.",
       "run": "تشغيل الآن",
       "runFailed": "تعذّر بدء التشغيل. قد يكون هناك تشغيل جارٍ بالفعل.",
@@ -2210,8 +2266,16 @@
       "maxTotalMb": "الحد الأقصى للحجم الإجمالي (ميجابايت)",
       "maxTotalMbHint": "لجميع ملفات هذا المصدر",
       "removeTitle": "هل تريد إزالة هذا المصدر؟",
-      "removeDescription": "عند الحفظ، ستُحذف ملفاته المرفوعة وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك."
-    }
+      "removeDescription": "عند الحفظ، ستُحذف ملفاته المرفوعة وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك.",
+      "switchTypeTitle": "تحويل هذا إلى مصدر موقع ويب؟",
+      "switchTypeDescription": "عند الحفظ، تُحذف الملفات المرفوعة لهذا المصدر وكل ما تعلّمته قاعدة المعرفة منها. لا يمكن التراجع عن ذلك.",
+      "switchTypeConfirm": "التبديل إلى موقع ويب",
+      "filesLoadFailed": "تعذّر تحميل الملفات: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (يُحفَظ كتعاودي)",
+    "saveBeforeIngest": "احفظ تغييراتك أولًا — تُستوعَب المستندات باستخدام مخزن قاعدة المعرفة المحفوظة ونموذج التضمين الخاص بها، لا بالتعديلات الظاهرة على الشاشة.",
+    "chunkStrategyUnsupported": "{{value}} (غير مدعوم)",
+    "chunkStrategyUnsupportedHint": "يرفض الخادم هذه الاستراتيجية عند الحفظ. اختر التعاودي."
   },
   "onboarding": {
     "welcome": {
@@ -2788,7 +2852,6 @@
     "contextWindowEntries": "المدخلات الحديثة المحفوظة كاملةً",
     "contextWindowSummarize": "تلخيص ما يخرج من النافذة",
     "contextWindowTruncateNote": "تُستبدل المدخلات الأقدم بعلامة بسيطة: «حُذفت N من المدخلات السابقة».",
-    "retroConfigHint": "يتيح لمرحلة المراجعة كتابة الدروس في ذاكرة الفريق لتُستخدم في نقاشات لاحقة.",
     "retroPerRun": "لكل تشغيل",
     "retroStored": "الحد الأقصى المخزَّن",
     "artifactConfigHint": "يتيح للأعضاء تأليف مستندات مشتركة تبقى بعد انتهاء الدور الذي كُتبت فيه.",
@@ -3019,7 +3082,36 @@
     },
     "stateRejected": "مرفوضة",
     "inputDisabledRejected": "تم رفض هذه التوصية",
-    "debateVerdictNote": "يجيب بحكم مُسجَّل بالنقاط (فائز ودرجات) بدلاً من نص: {{phases}}. الأعضاء يحملون دورين أو أكثر وتسبقه الحجج، لذا لا يُستخدم موجّه التلخيص الخاص بالمنسّق. اضبط قالب إدخال للمرحلة للحصول على نص."
+    "debateVerdictNote": "يجيب بحكم مُسجَّل بالنقاط (فائز ودرجات) بدلاً من نص: {{phases}}. الأعضاء يحملون دورين أو أكثر وتسبقه الحجج، لذا لا يُستخدم موجّه التلخيص الخاص بالمنسّق. اضبط قالب إدخال للمرحلة للحصول على نص.",
+    "retroCustomLimits": "حدود مخصّصة لدروس المراجعة",
+    "retroCustomHint": "تكتب مرحلة المراجعة دروسًا في ذاكرة الفريق تُنقل إلى المناقشات اللاحقة. تحدّ هذه القيود من عددها.",
+    "retroDefaultHint": "لا تزال مرحلة المراجعة تكتب الدروس بالحدود الافتراضية ({{perRun}} لكل تشغيل، {{stored}} محفوظة). لإيقافها، احذف مرحلة RETRO.",
+    "voteOptionsTooFew": "تحتاج ورقة الاقتراع الصريحة إلى خيارين على الأقل.",
+    "saveProblem": {
+      "title": "لا يمكن إنشاء هذه المجموعة بعد:",
+      "debateRoles": "تحتاج المناظرة إلى عضو واحد على الأقل بدور PRO وآخر بدور CON.",
+      "devilAdvocateRole": "تحتاج مجموعة محامي الشيطان إلى عضو بدور DEVIL_ADVOCATE.",
+      "humanInTaskForce": "لا يمكن للأعضاء البشريين الانضمام إلى مجموعة فريق عمل (مراحل التخطيط والتنفيذ والتحقق).",
+      "humanWithPeerPhases": "لا يمكن للأعضاء البشريين الانضمام إلى مجموعة تخاطب مراحلها كل نظير بالتناوب، مثل مراجعة الأقران.",
+      "memberUnassigned_few": "{{count}} أعضاء بدون وكيل مُعيَّن.",
+      "memberUnassigned_many": "{{count}} أعضاء بدون وكيل مُعيَّن.",
+      "memberUnassigned_one": "{{count}} عضو بدون وكيل مُعيَّن.",
+      "memberUnassigned_two": "{{count}} أعضاء بدون وكيل مُعيَّن.",
+      "memberUnassigned_zero": "{{count}} أعضاء بدون وكيل مُعيَّن.",
+      "memberUnassigned_other": "{{count}} أعضاء بدون وكيل مُعيَّن.",
+      "humanNeedsName_few": "{{count}} أعضاء بشريون يحتاجون إلى اسم عرض.",
+      "humanNeedsName_many": "{{count}} أعضاء بشريون يحتاجون إلى اسم عرض.",
+      "humanNeedsName_one": "{{count}} عضو بشري يحتاج إلى اسم عرض.",
+      "humanNeedsName_two": "{{count}} أعضاء بشريون يحتاجون إلى اسم عرض.",
+      "humanNeedsName_zero": "{{count}} أعضاء بشريون يحتاجون إلى اسم عرض.",
+      "humanNeedsName_other": "{{count}} أعضاء بشريون يحتاجون إلى اسم عرض.",
+      "humanNeedsId_few": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص.",
+      "humanNeedsId_many": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص.",
+      "humanNeedsId_one": "{{count}} عضو بشري يحتاج إلى معرّف المستخدم للشخص.",
+      "humanNeedsId_two": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص.",
+      "humanNeedsId_zero": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص.",
+      "humanNeedsId_other": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص."
+    }
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -3083,7 +3175,7 @@
     "value": "القيمة",
     "deleteAll": "حذف الكل",
     "deleteAllTitle": "حذف جميع الخصائص",
-    "deleteAllDesc": "سيتم حذف جميع خصائص هذا المستخدم نهائياً.",
+    "deleteAllDesc": "سيؤدي هذا إلى حذف جميع الخصائص العامة لهذا المستخدم نهائياً: كل إدخال عام في ذاكرة المستخدم، بما في ذلك ما حفظه الوكلاء، وليس فقط الصفوف المعروضة هنا.",
     "deleted": "تم حذف الخصائص",
     "noResults": "لم يتم العثور على خصائص",
     "showingCount": "{{count}} خاصية"
@@ -3188,6 +3280,8 @@
     "title": "مزامنة الوكلاء",
     "subtitle": "قم بمزامنة الوكلاء بين مثيلات EDDI",
     "connection": "المثيل المصدر",
+    "loadingLocalAgents": "جارٍ تحميل جميع الوكلاء المحليين قبل المطابقة…",
+    "localAgentsError": "تعذر تحميل قائمة الوكلاء المحليين بالكامل، لذا لا يمكن مطابقة الوكلاء بالاسم. ستؤدي المزامنة الآن إلى إنشاء نسخ مكررة.",
     "sourceUrl": "رابط EDDI المصدر",
     "authToken": "رمز التفويض",
     "authHint": "اختياري. يُرسل كترويسة X-Source-Authorization.",
@@ -3210,7 +3304,8 @@
     "previewFirst": "معاينة التغييرات قبل المزامنة",
     "syncPartial": "المزامنة غير مكتملة — لم تُكتب بعض الموارد",
     "syncIdentical": "محدَّث بالفعل — لا شيء لكتابته",
-    "previewFailed": "فشلت المعاينة"
+    "previewFailed": "فشلت المعاينة",
+    "noPreviewReturned": "لم يُرجع المصدر أي معاينة لهذا الوكيل."
   },
   "sync": {
     "actionCreate": "جديد",
@@ -3424,7 +3519,6 @@
     "agentIdPlaceholder": "معرف الوكيل لمعالجة الرسائل",
     "botToken": "رمز البوت",
     "botTokenHint": "رمز OAuth للبوت. استخدم مرجع الخزنة لمزيد من الأمان.",
-    "botTokenPlaceholder": "xoxb-… أو ${vault:slack-bot-token}",
     "channel": "قناة",
     "channelId": "معرف قناة Slack",
     "channelIdCol": "معرف القناة",
@@ -3445,7 +3539,6 @@
     "searchPlaceholder": "بحث في القنوات…",
     "signingSecret": "سر التوقيع",
     "signingSecretHint": "من صفحة المعلومات الأساسية لتطبيق Slack.",
-    "signingSecretPlaceholder": "سلسلة ست عشرية أو ${vault:slack-signing-secret}",
     "slackSetupGuide": "دليل إعداد Slack",
     "slackSetupSummary": "أنشئ تطبيق Slack، وكوّن نطاقات رمز البوت (app_mentions:read، chat:write، im:history، channels:history، groups:history)، ثم الصق بيانات الاعتماد هنا.",
     "target": "هدف",
@@ -3499,7 +3592,9 @@
     "typeAgent": "وكيل",
     "typeGroup": "مجموعة",
     "selectGroup": "اختر مجموعة…",
-    "unknownGroup": "{{id}} (غير موجودة)"
+    "unknownGroup": "{{id}} (غير موجودة)",
+    "plaintextSecret": "خزّن {{fields}} في خزنة الأسرار وأشر إليه بـ ${vault:…} — لا يتم حفظ بيانات الاعتماد بنص صريح.",
+    "plaintextStored": "تخزّن هذه القناة {{fields}} بنص صريح. انقله إلى خزنة الأسرار واحفظ لاستبداله بمرجع."
   },
   "hitl": {
     "loadingApprovalDetails": "جارٍ تحميل تفاصيل الموافقة…",
@@ -3589,7 +3684,8 @@
     "decidedProgress": "تم البت في {{decided}} من {{total}}",
     "groupLinkUnavailable": "تعذّر العثور على هذه المجموعة، لذا لا يوجد رابط موثوق إليها.",
     "confirmApproveGroupDescription": "الموافقة على المرحلة المتوقفة بالكامل واستئناف النقاش. تُعتمد معها كل مهمة معلَّقة — افتح المجموعة للبتّ فيها فرديًا.",
-    "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة."
+    "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة.",
+    "pauseChanged": "تغيّر هذا الطلب منذ أن فتحته — لم يُتخذ أي قرار. راجعه مرة أخرى."
   },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
@@ -3684,16 +3780,14 @@
     "failedConversations_two": "تعذّرت قراءة محادثتين وهما غائبتان عن الحزمة.",
     "failedConversations_few": "تعذّرت قراءة {{count}} محادثات وهي غائبة عن الحزمة.",
     "failedConversations_many": "تعذّرت قراءة {{count}} محادثةً وهي غائبة عن الحزمة.",
-    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة."
+    "failedConversations_other": "تعذّرت قراءة {{count}} محادثة وهي غائبة عن الحزمة.",
+    "deleteIncomplete": "المحو غير مكتمل — قد تظل بعض بيانات هذا المستخدم موجودة. لا تبلّغ عنه على أنه مُنجز."
   },
   "mockBanner": {
     "message": "الوضع التجريبي — عرض بيانات نموذجية. اتصل بخلفية EDDI للحصول على بيانات حقيقية."
   },
   "orphans": {
-    "confirmPurgeAll": "حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ يحذف الخادم كل العناصر — لا يُطبَّق تحديدك. لا يمكن التراجع عن هذا.",
-    "deleteSelected": "حذف {{count}} محدد",
     "description": "ابحث عن الموارد غير المُشار إليها من أي وكيل أو حزمة ونظّفها.",
-    "deselectAll": "إلغاء تحديد الكل",
     "includeDeleted": "تضمين المحذوفة مبدئياً",
     "lastScanned": "آخر فحص",
     "noOrphans": "لم يتم العثور على عناصر يتيمة",
@@ -3704,7 +3798,6 @@
     "scanPromptDesc": "ابحث عن تكوينات الإضافات (القواعد، استدعاءات API، نماذج LLM، المخرجات) غير المُشار إليها من أي مسار عمل أو وكيل. نظّف الموارد غير المستخدمة للحفاظ على منصتك مرتّبة.",
     "scanPromptTitle": "افحص منصتك",
     "scanning": "جارٍ فحص الموارد…",
-    "selectAll": "تحديد الكل",
     "softDeleted": "محذوف",
     "title": "اكتشاف العناصر اليتيمة",
     "found_few": "تم العثور على {{count}} يتيم",
@@ -3714,7 +3807,8 @@
     "found_zero": "تم العثور على {{count}} يتيم",
     "found_other": "تم العثور على {{count}} يتيم",
     "scanIncomplete": "لم يكتمل هذا الفحص",
-    "scanIncompleteBody": "قد تظهر موارد لا تزال قيد الاستخدام على أنها يتيمة. التطهير معطَّل حتى يكتمل فحص كامل."
+    "scanIncompleteBody": "قد تظهر موارد لا تزال قيد الاستخدام على أنها يتيمة. التطهير معطَّل حتى يكتمل فحص كامل.",
+    "confirmPurge": "هل تريد حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ لا يمكن التراجع عن ذلك."
   },
   "quotas": {
     "apiCallsMinute": "استدعاءات API / دقيقة",
@@ -3782,7 +3876,7 @@
     "tagPlaceholder": "مثل: safety، production",
     "tags": "الوسوم",
     "templateEnabled": "تفعيل حل القوالب",
-    "templateEnabledHint": "عند التعطيل، تُعامَل علامات {{}} في المحتوى كنص حرفي (مفيد لأمثلة الشيفرة).",
+    "templateEnabledHint": "عند التعطيل، تُعامَل علامات { } في المحتوى كنص حرفي (مفيد لأمثلة الشيفرة).",
     "usageHint": "الاستخدام:"
   },
   "status": {
@@ -3839,7 +3933,8 @@
     "copyVars": "نسخ مرجع ${vars:…}",
     "refCopied": "تم النسخ: {{ref}}",
     "infoLine1": "استخدم {{vars.<key>}} في مطالبات النظام أو ${vars:<key>} في أي مكان ضمن إعدادات الوكلاء.",
-    "infoLine2": "تسري التغييرات خلال دقيقتين (مدة صلاحية ذاكرة التخزين المؤقت). للقيم الحساسة استخدم خزنة الأسرار بدلاً من ذلك."
+    "infoLine2": "تسري التغييرات خلال دقيقتين (مدة صلاحية ذاكرة التخزين المؤقت). للقيم الحساسة استخدم خزنة الأسرار بدلاً من ذلك.",
+    "keyExists": "يوجد متغير باسم \"{{key}}\" بالفعل. عدّله من القائمة بدلًا من ذلك."
   },
   "workflowEditor": {
     "endpoints": "نقاط نهاية",
@@ -3900,7 +3995,19 @@
       "toggleConfig": "تبديل لوحة التفاصيل",
       "unpin": "إلغاء تثبيت الرد",
       "untitled": "بدون عنوان",
-      "viewSessions": "عرض الجلسات السابقة"
+      "viewSessions": "عرض الجلسات السابقة",
+      "alreadyEnded": "كانت المناقشة قد انتهت بالفعل.",
+      "stopRaced": "تغيّرت حالة المناقشة أثناء إيقافها وما زالت مستمرة. حاول الإيقاف مرة أخرى.",
+      "stopUnconfirmed": "تعذّر التأكد من إيقاف المناقشة. تحقّق من حالتها وحاول الإيقاف مرة أخرى.",
+      "stopFailed": "تعذّر إيقاف المناقشة: {{error}}",
+      "stopping": "جارٍ الإيقاف…",
+      "startOver": "البدء من جديد",
+      "streamInterrupted": "انقطع الاتصال المباشر. يتم عرض المناقشة المحفوظة، والتي تستمر في التحديث أثناء تشغيلها.",
+      "confirmNewTitle": "إيقاف المناقشة الجارية؟",
+      "confirmNewDescription": "لا تزال هناك مناقشة جارية. بدء مناقشة جديدة يوقفها أولًا — ويُتخلّى عن أي عمل قيد التنفيذ.",
+      "confirmNewButton": "إيقاف وبدء جديدة",
+      "keepRunning": "متابعة التشغيل",
+      "questionRequired": "أضف سؤالًا لفريق العمل — تتم مشاركة الملفات معه عند بدء المناقشة."
     },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
@@ -3929,7 +4036,8 @@
       "stop": "إيقاف التوليد",
       "streamEnded": "انقطع الاتصال قبل اكتمال الرد. ما وصل معروض أعلاه — أعد الإرسال للمحاولة مجددًا.",
       "newConversation": "محادثة جديدة",
-      "newConversationFailed": "تعذّر بدء محادثة جديدة"
+      "newConversationFailed": "تعذّر بدء محادثة جديدة",
+      "initFailed": "تعذّر فتح هذه المحادثة."
     },
     "chat": {
       "agentDetails": "تفاصيل الوكيل",
@@ -4352,7 +4460,7 @@
       "llmDefaultsDesc": "يُستخدم لكل مستشار يُنشأ هنا ما لم يحدّد المستشار إعداداته الخاصة أدناه.",
       "llmDefaultsKeyRequired": "أضف مفتاحًا هنا ليشمل كل مستشار لا يحدّد مفتاحه الخاص.",
       "model": "النموذج",
-      "modelPlaceholder": "مثال: claude-sonnet-5",
+      "modelPlaceholder": "مثال: claude-sonnet-5-5",
       "nameRequired": "امنح هذا المستشار اسمًا.",
       "new": "جديد",
       "next": "التالي",
@@ -5062,7 +5170,12 @@
       "space": "مساحة العمل",
       "spaceHint": "كل من في مساحة عمل هذا المورد.",
       "published": "منشور",
-      "publishedHint": "كل من لديه وصول إلى هذا التثبيت."
+      "publishedHint": "كل من لديه وصول إلى هذا التثبيت.",
+      "confirmTitle": "هل تريد تغيير الظهور إلى {{visibility}}؟",
+      "cascadeLabel": "طبّقه أيضًا على مسارات العمل والإعدادات التي يشير إليها",
+      "cascadeWarning": "كل مورد مُشار إليه تملكه سيحصل على هذا الظهور بدلًا من إعداده الخاص. لا يتم الاحتفاظ بإعداداته السابقة.",
+      "noCascadeWarning": "يتغير هذا المورد فقط. قد لا يتمكن من أصبح بإمكانه رؤيته من فتح ما يشير إليه.",
+      "apply": "تغيير الظهور"
     },
     "share": {
       "title": "مشاركة",
@@ -5141,5 +5254,12 @@
     "headerMismatch": "يرسل هذا الاتصال بيانات اعتماده باسم «{{expected}}»، لذا يجب أن تحمل الترويسة هذا الاسم — وإلا أظهرت الإعدادات اسمًا وحمل الطلب اسمًا آخر.",
     "refusedInRequest": "يُرفض ${connection:…} في المسار أو معامل الاستعلام أو المتن — بيانات الاعتماد في عنوان URL تصل إلى كل سجلات الوكيل، وفي المتن لا تُقرأ. أشر إلى الاتصال من ترويسة بدلًا من ذلك.",
     "refusedInModel": "نماذج اللغة والتضمينات ومخازن المتجهات لا تقبل ${connection:…}: يُحلّ الاتصال إلى ترويسة كاملة، بينما تحتاج هذه إلى بيانات اعتماد مجردة. استخدم ${vault:…} هنا."
+  },
+  "cascadeSave": {
+    "workflowChanged": "تم تغيير سير العمل {{workflowId}} في مكان آخر (الإصدار الحالي {{current}}، وهذه الصفحة تعرض الإصدار {{version}}). أعد تحميل الصفحة. لم يُحفظ شيء.",
+    "agentChanged": "تم تغيير الوكيل {{agentId}} في مكان آخر (الإصدار الحالي {{current}}، وهذه الصفحة تعرض الإصدار {{version}}). أعد تحميل الصفحة. لم يُحفظ شيء.",
+    "workflowMissingResource": "سير العمل {{workflowId}} (الإصدار {{version}}) لا يشير إلى {{resource}}، لذا فإن الحفظ هنا لن يغيّر الوكيل. لم يُحفظ شيء.",
+    "agentWorkflowMismatch": "الوكيل {{agentId}} (الإصدار {{version}}) يشير إلى سير العمل {{workflowId}} في الإصدار {{found}} وليس الإصدار {{expected}}. تغيّر الوكيل منذ فتح هذه الصفحة. أعد تحميلها. لم يُحفظ شيء.",
+    "agentMissingWorkflow": "الوكيل {{agentId}} (الإصدار {{version}}) لا يشير إلى سير العمل {{workflowId}}. لم يُحفظ شيء."
   }
 }

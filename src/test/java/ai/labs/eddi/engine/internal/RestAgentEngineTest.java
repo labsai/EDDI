@@ -36,6 +36,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
@@ -66,9 +68,12 @@ class RestAgentEngineTest {
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
         when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
-        // Default: descriptor not found → ownership check skipped gracefully
-        when(descriptorStore.readDescriptor(anyString(), anyInt()))
-                .thenThrow(new ResourceNotFoundException("test default"));
+        // Default: every conversation has a descriptor owned by the caller. The
+        // ownership decision itself is the (mocked) OwnershipValidator's; a MISSING
+        // descriptor is no longer a pass-through (see descriptorMissing_* below).
+        var ownedDescriptor = new ConversationDescriptor();
+        ownedDescriptor.setUserId("test-user");
+        when(descriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(ownedDescriptor);
         var conversationMemoryStore = mock(IConversationMemoryStore.class);
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
                 mock(IGroupConversationService.class));
@@ -318,6 +323,36 @@ class RestAgentEngineTest {
             var captor = ArgumentCaptor.forClass(Response.class);
             verify(asyncResponse).resume(captor.capture());
             assertEquals(410, captor.getValue().getStatus());
+        }
+
+        /**
+         * A queued turn skipped because the conversation changed under it (a superseded
+         * rerun, a turn that could not be rebuilt) must not be told to "retry shortly"
+         * as if the conversation were merely busy; one skipped because it ended is
+         * answered like any say into an ended conversation.
+         */
+        @ParameterizedTest
+        @CsvSource({"ENDED,410,", "IN_PROGRESS,409,retry shortly", "READY,409,changed while your message was queued",
+                "ERROR,409,changed while your message was queued"})
+        @DisplayName("a skipped turn is answered according to the state it was skipped in")
+        void skippedTurnAnswer(ConversationState state, int status, String reasonFragment) throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            doAnswer(inv -> {
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationState(state);
+                ((IConversationService.ConversationResponseHandler) inv.getArgument(6)).onSkipped(snapshot);
+                return null;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false, List.of(), new InputData("Hello", Map.of()), asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            assertEquals(status, captor.getValue().getStatus());
+            if (reasonFragment != null) {
+                assertTrue(String.valueOf(captor.getValue().getEntity()).contains(reasonFragment),
+                        "got: " + captor.getValue().getEntity());
+            }
         }
 
         @Test
@@ -924,19 +959,44 @@ class RestAgentEngineTest {
         }
 
         @Test
-        @DisplayName("should skip ownership check when descriptor not found")
-        void descriptorNotFound_skipsCheck() throws Exception {
-            // Default stub already throws ResourceNotFoundException — just verify behavior
-            var snapshot = new SimpleConversationMemorySnapshot();
-            snapshot.setConversationState(ConversationState.READY);
-            when(conversationService.readConversation("conv-1", false, false, List.of()))
-                    .thenReturn(snapshot);
+        @DisplayName("a conversation with no descriptor at all is a 404 for a non-admin — not a pass-through")
+        void descriptorMissing_notFoundForNonAdmin() throws Exception {
+            // Regression (C1): a missing descriptor used to skip the ownership check,
+            // so any caller could read a soft-deleted or ownerless conversation.
+            doThrow(new ResourceNotFoundException("gone")).when(descriptorStore).readDescriptor("conv-1", 0);
+            doThrow(new ResourceNotFoundException("gone")).when(descriptorStore).readDescriptorWithHistory("conv-1", 0);
 
-            SimpleConversationMemorySnapshot result = restAgentEngine
-                    .readConversation("conv-1", false, false, List.of());
+            assertThrows(NotFoundException.class,
+                    () -> restAgentEngine.readConversation("conv-1", false, false, List.of()));
+            verify(conversationService, never()).readConversation(anyString(), any(), any(), any());
+        }
 
-            assertEquals(ConversationState.READY, result.getConversationState());
-            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+        @Test
+        @DisplayName("a soft-deleted conversation is still checked against its archived owner")
+        void softDeleted_checkedAgainstArchivedOwner() throws Exception {
+            var archived = new ConversationDescriptor();
+            archived.setUserId("other-user");
+            doThrow(new ResourceNotFoundException("archived")).when(descriptorStore).readDescriptor("conv-1", 0);
+            doReturn(archived).when(descriptorStore).readDescriptorWithHistory("conv-1", 0);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.readConversation("conv-1", false, false, List.of()));
+            verify(conversationService, never()).readConversation(anyString(), any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("resetState")
+    class ResetState {
+
+        @Test
+        @DisplayName("M-E5: an unknown conversation is a 404, not a 500 from a null dereference")
+        void unknownConversationIsNotFound() {
+            // The memory store answers null for an unknown id (the setUp mock's default).
+            assertThrows(NotFoundException.class, () -> restAgentEngine.resetState("conv-missing", "READY"));
+            verify(conversationService, never()).resetConversationState(anyString(), any());
         }
     }
 }

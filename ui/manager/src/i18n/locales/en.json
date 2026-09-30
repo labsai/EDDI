@@ -287,6 +287,7 @@
     "deployAndChat": "Deploy & Chat",
     "openExternalChat": "Open in new tab",
     "liveIn": "Live in {{environment}}",
+    "liveInVersion": "Live in {{environment}} at version {{version}}",
     "chatIn": "Chat in {{environment}}",
     "openExternalChatIn": "Open {{environment}} chat in a new tab",
     "deployToProduction": "Deploy to production",
@@ -577,7 +578,10 @@
     "vaultKeyCopied": "Vault reference copied",
     "specTooLarge": "That specification is too large to load here",
     "specUrlInvalid": "That is not a valid URL",
-    "specUrlScheme": "Only http:// and https:// URLs are supported"
+    "specUrlScheme": "Only http:// and https:// URLs are supported",
+    "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
+    "hfToken": "Hugging Face token",
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -683,7 +687,9 @@
     "endSuccess_one": "Ended {{count}} conversation",
     "endSuccess_other": "Ended {{count}} conversations",
     "purgeSuccess_one": "Purged {{count}} ended conversation",
-    "purgeSuccess_other": "Purged {{count}} ended conversations"
+    "purgeSuccess_other": "Purged {{count}} ended conversations",
+    "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -774,7 +780,10 @@
     "errorConversationEnded": "This conversation has ended.",
     "errorAgentNotReady": "This agent is not deployed to the selected environment yet.",
     "errorAgentMismatch": "This conversation belongs to a different version of the agent.",
-    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment."
+    "errorQuotaUnavailable": "Usage limits could not be checked right now. Try again in a moment.",
+    "sendRejected": "Your message was not sent: {{reason}}",
+    "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -931,7 +940,9 @@
     "removeCondition": "Remove Condition",
     "noGroups": "No Rules Groups defined",
     "noRules": "No rules in this group",
-    "noConditions": "No conditions"
+    "noConditions": "No conditions",
+    "sizeNoBound": "no limit",
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -963,8 +974,6 @@
     "responseObjectName": "Response Object Name",
     "responseHeaderObjectName": "Response Header Object Name",
     "fireAndForget": "Fire and Forget",
-    "batchCalls": "Batch Calls",
-    "iterationObjectName": "Iteration Object Name",
     "prePostInstructions": "Pre/Post Instructions",
     "preRequest": "Pre-Request",
     "postResponse": "Post-Response",
@@ -1034,7 +1043,16 @@
     "authHeaderRefPlaceholder": "Optional — ${vault:my-api-key} for a spec behind auth",
     "authHeaderRefHint": "A vault reference, resolved when the call runs. The stored secret must be the whole header value, including any Bearer prefix.",
     "authHeaderRefInvalid": "Must start with ${vault:…}, ${vars:…} or ${caller:…}. Pasting the key itself would put it in the request URL and every log along the way.",
-    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault."
+    "authRefLiteral": "Enter a reference such as ${vault:my-key}, not the key itself. The key never leaves the vault.",
+    "runOnNoCodes": "An empty \"Run on codes\" list matches no status code, so this instruction never runs.",
+    "useDefaultCodes": "Use defaults",
+    "httpCodeFilterDefaults": "Empty fields use the default codes shown in them.",
+    "scopeSecretUnsupported": "(not vaulted here)",
+    "scopeSecretWarning": "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault.",
+    "skipNone": "none — no code is skipped",
+    "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
+    "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
+    "useDefaultSkipCodes": "Use default skip list"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1087,7 +1105,12 @@
     "whitelist": "Whitelist (only allow)",
     "blacklist": "Blacklist (exclude)",
     "pipelineCalls": "Pipeline Calls",
-    "addCall": "Add MCP Call"
+    "addCall": "Add MCP Call",
+    "argumentName": "Argument name",
+    "argumentType": "Argument type",
+    "argumentText": "Text",
+    "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
+    "removeArgument": "Remove argument"
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1126,7 +1149,6 @@
     "identityMaskingRulePlaceholder": "e.g. Never reveal you are an AI language model",
     "identityMaskingRules": "Masking Rules",
     "identityMaskingRulesHint": "Both enabled AND at least one rule are required for masking to take effect.",
-    "injectionStrategy": "Injection",
     "kbNamePlaceholder": "e.g. product-docs",
     "knowledgeBases": "Knowledge Bases",
     "knowledgeBasesHint": "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.",
@@ -1238,7 +1260,7 @@
     "cascadeInAgent": "Also use cascade in Agent Mode (with tools)",
     "cascadeSteps": "Cascade Steps (cheap → expensive)",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted (set confidence to empty).",
-    "cascadeModelName": "e.g. claude-sonnet-5",
+    "cascadeModelName": "e.g. claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0–1)",
     "cascadeConfidencePlaceholder": "empty = always accept",
     "cascadeTimeout": "Timeout (ms)",
@@ -1294,9 +1316,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "Step {{step}} timeout must be greater than 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "Step {{step}} uses a different provider but has no API key of its own — it would inherit the task key."
     },
-    "parallelExecution": "Parallel Tool Execution",
-    "parallelExecutionDesc": "Run independent tool calls concurrently instead of sequentially",
-    "parallelTimeout": "Timeout (ms)",
     "maxToolIterations": "Max Tool Iterations",
     "maxToolIterationsHint": "(default 10)",
     "toolRateLimits": "Per-Tool Rate Limits",
@@ -1355,7 +1374,9 @@
     "streamingTimeoutSeconds": "Streaming Timeout (seconds)",
     "streamingTimeoutSecondsHint": "Overrides the engine default (120s). Only applies while streaming; empty = use default.",
     "taskPricing": "Plain-Call Pricing",
-    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0."
+    "taskPricingDesc": "Prices this task's ordinary (non-cascade) model calls for cost tracking and group cost ceilings. Unpriced (blank) contributes $0.",
+    "paramName": "Parameter name",
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1419,7 +1440,8 @@
     "openEditor": "Edit in editor",
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
-    "toggleGroup": "Toggle property group"
+    "toggleGroup": "Toggle property group",
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -1589,7 +1611,8 @@
     "stateReady": "Ready",
     "stateActive": "Active",
     "stateError": "Error",
-    "stateEnded": "Ended"
+    "stateEnded": "Ended",
+    "loadOlder": "Load older entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1703,7 +1726,13 @@
     "grantAcknowledge": "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
     "grantSaved": "Access updated for “{{key}}”",
     "grantImpactFailed": "Could not check which deployed agents use this secret, so any of them may lose access.",
-    "grantAcknowledgeUnchecked": "Save anyway without knowing which deployed agents this affects."
+    "grantAcknowledgeUnchecked": "Save anyway without knowing which deployed agents this affects.",
+    "rotateNotFound": "This secret no longer exists, so there is nothing to rotate. Add it again instead.",
+    "keyExists": "A secret named \"{{key}}\" already exists. Adding it again would replace its value — use Rotate to change the value and keep who may use it.",
+    "keyExistsRotate": "Rotate this secret instead",
+    "keyExistsPicker": "A secret named \"{{key}}\" already exists. Pick it from the vault list, or choose another name.",
+    "rotateKeepsGrantAll": "Every agent keeps access, as now.",
+    "rotateKeepsGrant": "Access stays limited to: {{agents}}"
   },
   "variables": {
     "deleteKey": "Delete {{key}}",
@@ -1743,7 +1772,8 @@
     "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead.",
     "tableTitle_one": "{{count}} variable",
-    "tableTitle_other": "{{count}} variables"
+    "tableTitle_other": "{{count}} variables",
+    "keyExists": "A variable named \"{{key}}\" already exists. Edit it from the list instead."
   },
   "audit": {
     "title": "Audit Trail",
@@ -1777,17 +1807,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
     "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "by",
-    "automated": "automated"
+    "automated": "automated",
+    "verify": {
+      "entryInvalid": "Signature does not match",
+      "entryUnproven": "Not verified",
+      "signatureCount": "{{count}} of {{total}} loaded entries carry a signature.",
+      "loading": "Verifying signatures…",
+      "errorTitle": "Integrity not verified",
+      "errorDesc": "The verification request failed, so nothing here has been checked.",
+      "checked": "Checked the {{count}} most recent entries.",
+      "verifiedTitle": "Signatures verified",
+      "chainIntact": "No entry is missing from the sequence.",
+      "chainNotApplicable": "Across conversations only signatures are checked, not the sequence.",
+      "verifiedBadge": "VERIFIED",
+      "tamperedTitle": "Integrity check failed",
+      "tamperedInvalid": "{{count}} entry signature(s) do not match their content — the entries were changed after they were written.",
+      "tamperedChain": "Entries are missing from the sequence ({{sequences}}) — the record has been shortened.",
+      "disabledTitle": "Signatures cannot be verified",
+      "reasonUnsigned": "{{count}} unsigned entry(ies)",
+      "reasonUnknownKey": "{{count}} signed with a key this deployment no longer holds",
+      "reasonSkipped": "{{count}} older entry(ies) not checked",
+      "reasonChain": "the sequence could not be fully established",
+      "reasonDuplicates": "duplicate sequence numbers",
+      "reasonUncovered": "{{count}} loaded entry(ies) older than the checked window",
+      "unverifiedTitle": "Not fully verified",
+      "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -1914,7 +1963,11 @@
       "weeklyMonday": "Weekly (Mon 00:00)",
       "monthly": "Monthly (1st, 00:00)"
     },
-    "totalCappedHint": "The server returned a full page, so there may be more schedules than this."
+    "totalCappedHint": "The server returned a full page, so there may be more schedules than this.",
+    "systemManaged": "System",
+    "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
+    "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
+    "failedScheduleGone": "Schedule no longer exists"
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -1975,7 +2028,8 @@
     "tokenDistribution": "Token distribution",
     "totalCost": "Total Cost",
     "totalTokens": "Total Tokens",
-    "turns": "Turns"
+    "turns": "Turns",
+    "partial": "This conversation has more audit entries than the debugger loads. Totals cover the most recent ones only."
   },
   "memoryInspector": {
     "error": "Failed to load memory data",
@@ -2116,6 +2170,7 @@
     "ingestion": "Document Ingestion",
     "dropFiles": "Drop documents here to ingest",
     "dropHint": "Text, Markdown, or any text-based file",
+    "replaceSameName": "Replace a previously ingested document with the same file name",
     "browse": "Browse",
     "pasteText": "Or paste text content",
     "pastePlaceholder": "Paste document text here...",
@@ -2147,6 +2202,8 @@
       "includeSubdomains": "Include subdomains",
       "excludePatterns": "Exclude patterns",
       "excludePatternsHint": "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
       "saveFirst": "Save the knowledge base to run this source, preview it or see its history.",
       "run": "Run now",
       "runFailed": "Could not start the run. A run may already be in flight.",
@@ -2202,8 +2259,16 @@
       "maxTotalMb": "Max total size (MB)",
       "maxTotalMbHint": "Across all of this source's files",
       "removeTitle": "Remove this source?",
-      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone."
-    }
+      "removeDescription": "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeTitle": "Turn this into a website source?",
+      "switchTypeDescription": "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+      "switchTypeConfirm": "Switch to website",
+      "filesLoadFailed": "Could not load the files: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
+    "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
+    "chunkStrategyUnsupported": "{{value}} (not supported)",
+    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive."
   },
   "onboarding": {
     "welcome": {
@@ -2745,7 +2810,6 @@
     "contextWindowEntries": "Recent entries kept in full",
     "contextWindowSummarize": "Summarize what falls out of the window",
     "contextWindowTruncateNote": "Older entries are replaced with a plain \"N earlier entries omitted\" marker instead.",
-    "retroConfigHint": "Lets a retro phase write lessons into the team's memory, carried into later discussions.",
     "retroPerRun": "Per run",
     "retroStored": "Stored max",
     "artifactConfigHint": "Lets members co-author documents that survive the turn they were written in.",
@@ -2940,7 +3004,24 @@
     },
     "stateRejected": "Rejected",
     "inputDisabledRejected": "This recommendation was rejected",
-    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose."
+    "debateVerdictNote": "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose.",
+    "retroCustomLimits": "Custom retro lesson limits",
+    "retroCustomHint": "A retro phase writes lessons into the team's memory, carried into later discussions. These caps bound how many.",
+    "retroDefaultHint": "A retro phase still writes lessons, with the default caps ({{perRun}} per run, {{stored}} stored). To stop it, remove the RETRO phase.",
+    "voteOptionsTooFew": "An explicit ballot needs at least two options.",
+    "saveProblem": {
+      "title": "This group cannot be created yet:",
+      "debateRoles": "A debate needs at least one member with the role PRO and one with the role CON.",
+      "devilAdvocateRole": "A Devil's Advocate group needs a member with the role DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Human members cannot join a task-force group (planning, execution and verification phases).",
+      "humanWithPeerPhases": "Human members cannot join a group whose phases address each peer in turn, such as peer review.",
+      "memberUnassigned_one": "{{count}} member has no agent assigned.",
+      "memberUnassigned_other": "{{count}} members have no agent assigned.",
+      "humanNeedsName_one": "{{count}} human member needs a display name.",
+      "humanNeedsName_other": "{{count}} human members need a display name.",
+      "humanNeedsId_one": "{{count}} human member needs the person's user id.",
+      "humanNeedsId_other": "{{count}} human members need the person's user id."
+    }
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3170,7 +3251,7 @@
     "value": "Value",
     "deleteAll": "Delete All",
     "deleteAllTitle": "Delete All Properties",
-    "deleteAllDesc": "This will permanently delete ALL properties for this user.",
+    "deleteAllDesc": "This permanently deletes ALL global properties of this user: every global user-memory entry, including those agents saved, not only the rows listed here.",
     "deleted": "Properties deleted",
     "noResults": "No properties found",
     "showingCount": "{{count}} properties"
@@ -3277,6 +3358,8 @@
     "title": "Agent Sync",
     "subtitle": "Synchronize agents between EDDI instances",
     "connection": "Source Instance",
+    "loadingLocalAgents": "Loading all local agents before matching…",
+    "localAgentsError": "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates.",
     "sourceUrl": "Source EDDI Instance URL",
     "authToken": "Authorization Token",
     "authHint": "Optional. Sent as X-Source-Authorization header.",
@@ -3299,7 +3382,8 @@
     "previewFirst": "Preview changes before syncing",
     "syncPartial": "Sync incomplete — some resources were not written",
     "syncIdentical": "Already up to date — nothing to write",
-    "previewFailed": "Preview failed"
+    "previewFailed": "Preview failed",
+    "noPreviewReturned": "The source returned no preview for this agent."
   },
   "userConversations": {
     "title": "User Conversations",
@@ -3324,7 +3408,6 @@
     "agentIdPlaceholder": "Agent ID to handle messages",
     "botToken": "Bot Token",
     "botTokenHint": "Bot User OAuth Token. Use a vault reference for security.",
-    "botTokenPlaceholder": "xoxb-… or ${vault:slack-bot-token}",
     "channel": "channel",
     "channelId": "Slack Channel ID",
     "channelIdCol": "Channel ID",
@@ -3345,7 +3428,6 @@
     "searchPlaceholder": "Search channels...",
     "signingSecret": "Signing Secret",
     "signingSecretHint": "From your Slack App's Basic Information page.",
-    "signingSecretPlaceholder": "Hex string or ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack Setup Guide",
     "slackSetupSummary": "Create a Slack App, configure Bot Token Scopes (app_mentions:read, chat:write, im:history, channels:history, groups:history), then paste credentials here.",
     "target": "target",
@@ -3399,7 +3481,9 @@
     "typeAgent": "Agent",
     "typeGroup": "Group",
     "selectGroup": "Select a group…",
-    "unknownGroup": "{{id}} (not found)"
+    "unknownGroup": "{{id}} (not found)",
+    "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
+    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",
@@ -3489,7 +3573,8 @@
     "decidedProgress": "{{decided}} of {{total}} decided",
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
-    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually."
+    "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3576,16 +3661,14 @@
     "conversationsTruncated_one": "Conversations were capped — the user has {{count}} in total.",
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
-    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle."
+    "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
   },
   "orphans": {
-    "confirmPurgeAll": "Permanently delete ALL {{count}} orphaned resources? The server purges every orphan — your selection is not applied. This cannot be undone.",
-    "deleteSelected": "Delete {{count}} selected",
     "description": "Find and clean up resources not referenced by any agent or package.",
-    "deselectAll": "Deselect All",
     "includeDeleted": "Include soft-deleted",
     "lastScanned": "Last scanned",
     "noOrphans": "No orphans found",
@@ -3596,13 +3679,13 @@
     "scanPromptDesc": "Find extension configs (rules, API calls, LLMs, outputs) that are not referenced by any workflow or agent. Clean up unused resources to keep your platform tidy.",
     "scanPromptTitle": "Scan your platform",
     "scanning": "Scanning resources…",
-    "selectAll": "Select All",
     "softDeleted": "Deleted",
     "title": "Orphan Detection",
     "found_one": "{{count}} orphan found",
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
-    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes."
+    "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3670,7 +3753,7 @@
     "tagPlaceholder": "e.g. safety, production",
     "tags": "Tags",
     "templateEnabled": "Enable template resolution",
-    "templateEnabledHint": "When disabled, {{}} markers in the content are treated as literal text (useful for code examples).",
+    "templateEnabledHint": "When disabled, { } markers in the content are treated as literal text (useful for code examples).",
     "usageHint": "Usage:"
   },
   "status": {
@@ -3744,7 +3827,19 @@
       "toggleConfig": "Toggle details panel",
       "unpin": "Unpin response",
       "untitled": "Untitled",
-      "viewSessions": "View past sessions"
+      "viewSessions": "View past sessions",
+      "alreadyEnded": "The discussion had already ended.",
+      "stopRaced": "The discussion changed state as you stopped it and is still going. Try Stop again.",
+      "stopUnconfirmed": "Could not confirm that the discussion stopped. Check its state and try Stop again.",
+      "stopFailed": "Could not stop the discussion: {{error}}",
+      "stopping": "Stopping…",
+      "startOver": "Start over",
+      "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+      "confirmNewTitle": "Stop the running discussion?",
+      "confirmNewDescription": "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
+      "confirmNewButton": "Stop and start new",
+      "keepRunning": "Keep running",
+      "questionRequired": "Add a question for your task force — the files are shared with it when the discussion starts."
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
@@ -3773,7 +3868,8 @@
       "stop": "Stop generating",
       "streamEnded": "The connection ended before the reply finished. What arrived is above — send again to retry.",
       "newConversation": "New conversation",
-      "newConversationFailed": "Could not start a new conversation"
+      "newConversationFailed": "Could not start a new conversation",
+      "initFailed": "This conversation could not be opened."
     },
     "chat": {
       "agentDetails": "Agent Details",
@@ -4188,7 +4284,7 @@
       "llmDefaultsDesc": "Used by every advisor created here unless the advisor sets its own below.",
       "llmDefaultsKeyRequired": "Add a key here to cover every advisor that does not set its own.",
       "model": "Model",
-      "modelPlaceholder": "e.g. claude-sonnet-5",
+      "modelPlaceholder": "e.g. claude-sonnet-5-5",
       "nameRequired": "Give this advisor a name.",
       "new": "New",
       "next": "Next",
@@ -4886,7 +4982,12 @@
       "space": "Workspace",
       "spaceHint": "Everyone in this resource's workspace.",
       "published": "Published",
-      "publishedHint": "Everyone with access to this deployment."
+      "publishedHint": "Everyone with access to this deployment.",
+      "confirmTitle": "Change visibility to {{visibility}}?",
+      "cascadeLabel": "Also apply it to the workflows and configurations this references",
+      "cascadeWarning": "Each referenced resource you own gets this visibility, replacing whatever it was set to on its own. Their previous settings are not kept.",
+      "noCascadeWarning": "Only this resource changes. Anyone who can now see it may still be unable to open what it references.",
+      "apply": "Change visibility"
     },
     "share": {
       "title": "Share",
@@ -4945,5 +5046,12 @@
     "headerMismatch": "This connection sends its credential as “{{expected}}”, so the header must be named that — otherwise the config shows one name and the request carries another.",
     "refusedInRequest": "${connection:…} is refused in a path, query parameter or body — a credential in a URL lands in every proxy log, and one in a body is not read. Reference the connection from a header instead.",
     "refusedInModel": "Language models, embeddings and vector stores do not accept ${connection:…}: a connection resolves to a whole header, and these need a bare credential. Use ${vault:…} here."
+  },
+  "cascadeSave": {
+    "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
+    "agentChanged": "Agent {{agentId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
+    "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
+    "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
   }
 }

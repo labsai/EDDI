@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Settings2, Users } from "lucide-react";
+import { Settings2, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Constants ──────────────────────────────────────────────────
@@ -25,7 +25,7 @@ const MODES: ModeOption[] = [
   },
   {
     key: "workforce",
-    icon: Users,
+    icon: Briefcase,
     path: "/workforce",
     prefValue: "workforce",
   },

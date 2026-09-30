@@ -34,6 +34,8 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     public static final String WORKFLOWS_FIELD = "workflows";
     private static final String WORKFLOW_RESOURCE_URI = "eddi://ai.labs.workflow/workflowstore/workflows/";
     private static final String VERSION_QUERY_PARAM = "?version=";
+    /** The compatibility generation a new agent starts at. */
+    static final int FIRST_COMPATIBILITY_GENERATION = 1;
 
     private final IDocumentDescriptorStore documentDescriptorStore;
 
@@ -49,18 +51,50 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         validateWorkflowUris(agentConfiguration);
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
+        // Store-owned: whatever the body claims is replaced. A new agent — including a
+        // duplicate or an import — starts its own chain, compatible with nothing.
+        agentConfiguration.setCompatibilityGeneration(FIRST_COMPATIBILITY_GENERATION);
         return super.create(agentConfiguration);
+    }
+
+    /** A breaking change: every new version is one unless declared compatible. */
+    @Override
+    @IResourceStore.ConfigurationUpdate
+    public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        return update(id, version, agentConfiguration, false);
     }
 
     @Override
     @IResourceStore.ConfigurationUpdate
-    public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
+    public Integer update(String id, Integer version, AgentConfiguration agentConfiguration, boolean compatible)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         validateWorkflowUris(agentConfiguration);
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
+        // Only the current version can be updated (the historized store refuses any
+        // other), so the version replaced here always carries the agent's highest
+        // generation and this rule keeps generations monotonic without looking at
+        // any other version.
+        agentConfiguration.setCompatibilityGeneration(nextCompatibilityGeneration(read(id, version), compatible));
         return super.update(id, version, agentConfiguration);
+    }
+
+    /**
+     * The generation of the version that replaces {@code previous}: the same one
+     * when the change is declared compatible, the next one otherwise.
+     * <p>
+     * A {@code previous} without a generation predates the field. It is compatible
+     * only with itself, so there is no chain to continue: the new version starts
+     * one, whatever was declared, and the old version's conversations stay pinned.
+     */
+    static int nextCompatibilityGeneration(AgentConfiguration previous, boolean compatible) {
+        Integer previousGeneration = previous != null ? previous.getCompatibilityGeneration() : null;
+        if (previousGeneration == null) {
+            return FIRST_COMPATIBILITY_GENERATION;
+        }
+        return compatible ? previousGeneration : previousGeneration + 1;
     }
 
     /**

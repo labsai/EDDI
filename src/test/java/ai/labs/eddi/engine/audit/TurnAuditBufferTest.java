@@ -181,4 +181,17 @@ class TurnAuditBufferTest {
         assertNotNull(TurnAuditBuffer.install(memory));
         assertNull(TurnAuditBuffer.install(memory), "a nested install must not flush the outer turn early");
     }
+
+    @Test
+    @DisplayName("S4: a payload value that equals a short secret is replaced, text containing it is not")
+    void exactSecretValuesAreRedacted() {
+        var entry = new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "task", "type", 0, 1L, Map.of("pin", "4711"),
+                Map.of("note", "order 14711", "echo", "4711"), null, null, List.of(), 0.0, Instant.now(), null, null);
+
+        AuditEntry redacted = TurnAuditBuffer.redactExactValues(entry, List.of("4711"), "<p>");
+
+        assertEquals("<p>", redacted.input().get("pin"));
+        assertEquals("<p>", redacted.output().get("echo"));
+        assertEquals("order 14711", redacted.output().get("note"));
+    }
 }

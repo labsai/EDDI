@@ -21,7 +21,7 @@ import {
   MessageCircle,
   Download,
   Search,
-  HandMetal,
+  Hand,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -37,7 +37,7 @@ import type {
   ConversationOutput,
   SimpleConversationStep,
 } from "@/lib/api/conversations";
-import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
+import { extractInput, extractOutput, extractActions, displayUserInput } from "@/lib/api/conversations";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -48,6 +48,7 @@ import {
   useApprovalStatus,
 } from "@/hooks/use-hitl";
 import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
 
 /** Same redacted-preview render prop the approvals inbox uses. */
 function renderCallExtra(call: PendingToolCallView) {
@@ -65,7 +66,7 @@ const stateIcons: Record<
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
   EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
-  AWAITING_HUMAN: { icon: HandMetal, color: "text-orange-500", bg: "bg-orange-500/10" },
+  AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
 export function ConversationDetailPage() {
@@ -146,7 +147,7 @@ export function ConversationDetailPage() {
       "",
     ];
     conversation.conversationSteps?.forEach((step, i) => {
-      const input = extractInput(step);
+      const input = displayUserInput(extractInput(step));
       const output = extractOutput(conversation.conversationOutputs?.[i]);
       if (input) lines.push(`**User**: ${input}`, "");
       if (output) lines.push(`**Agent**: ${output}`, "");
@@ -320,7 +321,15 @@ export function ConversationDetailPage() {
             toolDecisions?: Record<string, ToolCallDecision>,
           ) => {
             resumeMutation.mutate(
-              { conversationId: id!, decision: { verdict, note, toolDecisions } },
+              {
+                conversationId: id!,
+                decision: { verdict, note, toolDecisions },
+                // Bound to the pause this banner rendered, so a decision cannot
+                // land on a later pause of the same conversation unseen.
+                shown: approvalStatus
+                  ? shownPauseOf(approvalStatus)
+                  : { pausedAt: conversation.hitlPausedAt ?? null },
+              },
               {
                 onSuccess: () => {
                   toast.success(verdict === "APPROVED"
@@ -328,7 +337,17 @@ export function ConversationDetailPage() {
                     : t("hitl.rejected", "Rejected"));
                   refetch();
                 },
-                onError: (err) => toast.error(getErrorMessage(err)),
+                onError: (err) => {
+                  if (isPauseChanged(err)) {
+                    toast.error(t(
+                      "hitl.pauseChanged",
+                      "This request changed since you opened it — nothing was decided. Review it again.",
+                    ));
+                    refetch();
+                    return;
+                  }
+                  toast.error(getErrorMessage(err));
+                },
               }
             );
           }}
@@ -509,7 +528,7 @@ function ChatBubbleStep({
   const [showRaw, setShowRaw] = useState(false);
 
   // Parse input/output/actions from the conversationStep key/value pairs
-  const input = extractInput(step);
+  const input = displayUserInput(extractInput(step));
   const output = extractOutput(conversationOutput);
   const actions = extractActions(step);
 

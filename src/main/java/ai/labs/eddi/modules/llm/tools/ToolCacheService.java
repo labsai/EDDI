@@ -136,6 +136,62 @@ public class ToolCacheService {
                 && !STATEFUL_TOOL_NAMES.contains(invocation.canonicalName());
     }
 
+    /**
+     * Tool sources whose calls reach systems EDDI does not control — an agent's
+     * HTTP calls, MCP servers, A2A peers. Their results are not cached unless the
+     * agent opts the individual tool in (see {@link #mayCache}).
+     * <p>
+     * They used to be cached by default: a POST, an MCP write or an A2A request
+     * repeated with identical arguments within the TTL was answered from the cache
+     * and never executed, so the second order was never placed and the model was
+     * told it had been.
+     */
+    public static final Set<String> SIDE_EFFECTING_SOURCES = Set.of("http", "mcp", "a2a");
+
+    /**
+     * Whether a call from this source may use the cache at all. Built-in tools may
+     * (subject to {@link #isCacheable}); HTTP, MCP and A2A tools only when the task
+     * names the tool in {@code toolCacheScopes} — naming it is the explicit
+     * statement that repeating the call is safe to skip.
+     *
+     * @param source
+     *            the tool's source tag ({@code builtin}, {@code http}, {@code mcp},
+     *            {@code a2a}, …); null counts as built-in
+     */
+    public static boolean mayCache(String source, String dispatchName, String canonicalName, Map<String, String> toolCacheScopes) {
+        if (source == null || !SIDE_EFFECTING_SOURCES.contains(source)) {
+            return true;
+        }
+        return toolCacheScopes != null && (toolCacheScopes.containsKey(dispatchName) || toolCacheScopes.containsKey(canonicalName));
+    }
+
+    /**
+     * Narrows a scope tag to the tool's source and the agent that defines it.
+     * <p>
+     * The key used to be scope + tool name + arguments, so two agents serving the
+     * same user — or every scheduled run, which all share the scheduler's identity
+     * — shared entries for any tool name they had in common. An HTTP tool
+     * {@code lookup} on agent A answered agent B's unrelated {@code lookup}, and an
+     * MCP tool shadowed a same-named built-in. The source is always part of the
+     * key; the agent is too, except for a built-in on the global scope, whose
+     * definition is the same for every agent and whose sharing is the point of
+     * choosing {@code global}.
+     *
+     * @return null when {@code scopeTag} is null (the cache stays bypassed)
+     */
+    public static String namespacedScopeTag(String scopeTag, String agentId, String source) {
+        if (scopeTag == null) {
+            return null;
+        }
+        String effectiveSource = isBlank(source) ? "builtin" : source;
+        boolean sharedDefinition = GLOBAL_SCOPE_TAG.equals(scopeTag) && "builtin".equals(effectiveSource);
+        String tag = scopeTag + SCOPE_SEPARATOR + "src:" + effectiveSource;
+        if (!sharedDefinition && !isBlank(agentId)) {
+            tag += SCOPE_SEPARATOR + "agent:" + agentId;
+        }
+        return tag;
+    }
+
     @Inject
     ICacheFactory cacheFactory;
 

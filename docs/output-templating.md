@@ -169,6 +169,12 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 | `json` | `{json:serialize(obj)}` | JSON manipulation utilities |
 | `encoder` | `{encoder:base64(data)}` | Text encoding utilities |
 
+### What a template can reach
+
+Templates run in a restricted engine. Beyond the namespaces above, the pass-through references (`${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}`) and Qute's `str:`/`time:` helpers, no namespace is available — in particular `config:`, `inject:` and `cdi:` render as empty. The sections are `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}` and `{#when}`/`{#switch}`; there is no `{#include}` or `{#eval}`. On objects other than maps, lists and strings, only properties (getters, record components, public fields) can be read — no method with arguments is invoked. A render is capped at `eddi.templating.max-output-chars` characters and `eddi.templating.max-iterations` loop iterations. See [security.md](security.md#runtime-template-engine).
+
+**Values are never re-evaluated.** Whatever an expression resolves to — the user's message, a property, an API response — is written out literally, even if it contains `{…}`. Output that an httpcall/LLM/MCP `postResponse` builds from a response is rendered once and is not templated again by this task.
+
 ## Migration from Thymeleaf (v5 → v6)
 
 If you are upgrading from EDDI v5, template syntax is automatically migrated:

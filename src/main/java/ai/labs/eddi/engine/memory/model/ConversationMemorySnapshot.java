@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.lang.reflect.Field;
@@ -105,6 +106,18 @@ public class ConversationMemorySnapshot {
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
+    /**
+     * The compatibility generation of {@link #agentVersion} — see
+     * {@code IConversationMemory#getCompatibilityGeneration()}. Absent in documents
+     * written before it existed, which deserialize to {@code null}: those
+     * conversations stay on their version.
+     */
+    private Integer compatibilityGeneration;
+    /**
+     * See {@code IConversationMemory#getStaleDescriptorAgentVersion()}. Written
+     * only while the descriptor lags the conversation's version.
+     */
+    private Integer staleDescriptorAgentVersion;
     private String userId;
     /**
      * How {@link #userId} came to be, fixed at creation. Absent in documents
@@ -117,6 +130,15 @@ public class ConversationMemorySnapshot {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    /**
+     * Why the conversation ended, when the ending path knows a reason worth telling
+     * a client — for example
+     * {@link ai.labs.eddi.engine.api.IConversationService#END_REASON_AGENT_VERSION_RETIRED}.
+     * {@code null} for every other end and for every conversation that has not
+     * ended. Written by a narrow field update when the conversation is ended, never
+     * by a turn; absent in documents written before it existed.
+     */
+    private String endReason;
     private String hitlPausedWorkflowId;
     private int hitlPausedAbsoluteTaskIndex = -1;
     private Instant hitlPausedAt;
@@ -367,6 +389,15 @@ public class ConversationMemorySnapshot {
         private String originWorkflowId;
         private boolean isPublic;
         private boolean committed = true;
+        /**
+         * {@code IData#isVerbatim()}, carried through a save and reload: a tool-call
+         * HITL resume reloads memory and re-enters the pipeline after the output task,
+         * so an entry that lost the flag here would be rendered by a later templating
+         * task. Omitted from the stored document while false, so existing documents and
+         * the common case are unchanged.
+         */
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        private boolean verbatim;
 
         @Override
         public boolean equals(Object o) {
@@ -464,10 +495,20 @@ public class ConversationMemorySnapshot {
             this.committed = committed;
         }
 
+        @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+        public boolean isVerbatim() {
+            return verbatim;
+        }
+
+        public void setVerbatim(boolean verbatim) {
+            this.verbatim = verbatim;
+        }
+
         @Override
         public String toString() {
             return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp
-                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ")";
+                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ", verbatim=" + verbatim
+                    + ")";
         }
     }
 
@@ -485,6 +526,22 @@ public class ConversationMemorySnapshot {
 
     public void setAgentVersion(Integer agentVersion) {
         this.agentVersion = agentVersion;
+    }
+
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    public Integer getStaleDescriptorAgentVersion() {
+        return staleDescriptorAgentVersion;
+    }
+
+    public void setStaleDescriptorAgentVersion(Integer staleDescriptorAgentVersion) {
+        this.staleDescriptorAgentVersion = staleDescriptorAgentVersion;
     }
 
     public String getUserId() {
@@ -517,6 +574,14 @@ public class ConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(String endReason) {
+        this.endReason = endReason;
     }
 
     public String getHitlPausedWorkflowId() {

@@ -22,11 +22,13 @@ reason. The widget now shows the same wording in its existing status indicator.
 - **`ChatWidget.tsx`** — handles `tool_call` and clears the tool on every token
   and on `task_failed`, and at the start of each new turn.
 - **`Indicators.tsx`** — `ThinkingIndicator` takes a `tool` prop ("Using
-  calculator…", 🔧). It is a prop on the same component rather than a new one,
-  for the reason `escalating` is: React keeps the element and does not replay
+  calculator…", with lucide's `Wrench` in place of `Brain`, the icon set
+  #875 moved the widget to). It is a prop on the same component rather than a
+  new one, for the reason `escalating` is: React keeps the element and does not replay
   the entrance animation when the copy changes mid-wait.
-- **`ui/chat/AGENTS.md`** — the backend-contract list names nine SSE events and
-  documents the `tool_call` payload and how the indicator is cleared.
+- **`ui/chat/AGENTS.md`** — the backend-contract note that `tool_call` "is not
+  handled by this widget yet" is replaced by its payload and how the indicator
+  is cleared.
 
 ### Design decisions
 

@@ -21,11 +21,28 @@ public interface IGroupConversationStore {
 
     GroupConversation read(String id) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
+    /**
+     * Replaces an existing document. <strong>Never creates one</strong>: a document
+     * that no longer exists raises {@link GroupConversationGoneException}. The
+     * write used to be an upsert, so a discussion still running when its document
+     * was deleted — by a GDPR erasure, or by the delete endpoint — wrote the whole
+     * transcript back on its next phase and undid the deletion.
+     */
     void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException;
 
     void delete(String id) throws IResourceStore.ResourceStoreException;
 
     List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * As {@link #listByGroupId(String, int, int)}, restricted to conversations
+     * owned by {@code ownerUserId} ({@code null} = every owner). The owner
+     * restriction is part of the QUERY, so {@code index}/{@code limit} page through
+     * the caller's own conversations — filtering a page after fetching it handed a
+     * non-admin short or empty pages while their conversations sat on later ones.
+     */
+    List<GroupConversation> listByGroupId(String groupId, String ownerUserId, int index, int limit)
+            throws IResourceStore.ResourceStoreException;
 
     /**
      * Atomically transition a group conversation from expectedState to newState.

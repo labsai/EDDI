@@ -76,6 +76,12 @@ public final class FakeSite implements PageFetcher {
         return this;
     }
 
+    /** Serves exactly these bytes — for a gzipped or oddly encoded sitemap. */
+    public FakeSite raw(String url, String contentType, byte[] body) {
+        responses.put(url, new Response(200, url, contentType, body, null, null));
+        return this;
+    }
+
     /** Registers an HTTP error status. */
     public FakeSite status(String url, int statusCode) {
         responses.put(url, new Response(statusCode, url, "text/html", new byte[0], null, null));
@@ -100,6 +106,19 @@ public final class FakeSite implements PageFetcher {
             xml.append("<url><loc>").append(pageUrl).append("</loc></url>");
         }
         xml.append("</urlset>");
+        responses.put(url, new Response(200, url, "application/xml",
+                xml.toString().getBytes(StandardCharsets.UTF_8), null, null));
+        return this;
+    }
+
+    /** A sitemap index: a sitemap listing further sitemaps rather than pages. */
+    public FakeSite sitemapIndex(String url, String... sitemapUrls) {
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">");
+        for (String sitemapUrl : sitemapUrls) {
+            xml.append("<sitemap><loc>").append(sitemapUrl).append("</loc></sitemap>");
+        }
+        xml.append("</sitemapindex>");
         responses.put(url, new Response(200, url, "application/xml",
                 xml.toString().getBytes(StandardCharsets.UTF_8), null, null));
         return this;

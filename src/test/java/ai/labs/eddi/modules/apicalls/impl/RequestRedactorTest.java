@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -316,6 +317,44 @@ class RequestRedactorTest {
         @Test
         void aNullRequestDoesNotThrow() {
             assertEquals("null", RequestRedactor.safeRequestLog(null, Set.of(KEY)));
+        }
+    }
+
+    @Nested
+    @DisplayName("safeResponseLog (S2)")
+    class SafeResponseLog {
+
+        @Test
+        @DisplayName("a response echoing a substituted secret is logged without it, credential headers masked")
+        void echoedSecretIsRedacted() {
+            String secret = "opaque-secret-value-1234";
+            IResponse response = mock(IResponse.class);
+            when(response.getHttpCode()).thenReturn(401);
+            when(response.getHttpCodeMessage()).thenReturn("Unauthorized " + secret);
+            when(response.getContentAsString()).thenReturn("{\"error\":\"invalid key " + secret + "\"}");
+            var headers = new HashMap<String, String>();
+            headers.put("Set-Cookie", "session=abc");
+            headers.put("X-Echo", secret);
+            when(response.getHttpHeader()).thenReturn(headers);
+
+            String logged = RequestRedactor.safeResponseLog(response, Set.of(secret));
+
+            assertFalse(logged.contains(secret), logged);
+            assertFalse(logged.contains("session=abc"), logged);
+            assertTrue(logged.contains("httpCode=401"), logged);
+            assertTrue(logged.contains("invalid key"), logged);
+        }
+
+        @Test
+        @DisplayName("redaction happens before truncation, so a long body cannot leave half a secret")
+        void redactsBeforeTruncating() {
+            String secret = "s".repeat(60) + "-tail";
+            IResponse response = mock(IResponse.class);
+            when(response.getContentAsString()).thenReturn("x".repeat(120) + secret);
+
+            String logged = RequestRedactor.safeResponseLog(response, Set.of(secret));
+
+            assertFalse(logged.contains("ssssssssss"), logged);
         }
     }
 }

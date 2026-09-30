@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.secrets.rest;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +95,18 @@ class RestSecretStoreTest {
     void storeSecret_returns400WhenBodyNull() {
         Response resp = rest.storeSecret("default", "myKey", null);
         assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void storeSecret_returns400ForTheReservedAutoVaultShape() throws Exception {
+        // GDPR erasure deletes a user's auto-vaulted slots by name — a manual key in
+        // that shape would be erased with them.
+        String reserved = AutoVaultedSecrets.newSlotName("agent", "user-1", "apiKey");
+
+        Response resp = rest.storeSecret("default", reserved, new IRestSecretStore.SecretRequest("val", null, null));
+
+        assertEquals(400, resp.getStatus());
+        verify(secretProvider, never()).store(any(), any(), any(), any());
     }
 
     @Test
@@ -421,6 +436,96 @@ class RestSecretStoreTest {
         assertNull(body.get("lastRotatedAt"));
     }
 
+    // ─── S6: expectedAllowedAgents precondition ───
+
+    @Test
+    void updateGrant_passesThePreconditionToTheProvider() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any(), any()))
+                .thenReturn(existing(List.of("agentOne")));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne"), null, List.of("agentOne", "agentTwo")));
+
+        assertEquals(200, resp.getStatus());
+        verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne")), isNull(), eq(List.of("agentOne", "agentTwo")));
+    }
+
+    @Test
+    void updateGrant_returns409WithTheCurrentGrantOnAConflict() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any(), any()))
+                .thenThrow(new ISecretProvider.GrantConflictException("changed", List.of("agentTwo")));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne", "agentThree"), null, List.of("agentOne", "agentTwo")));
+
+        assertEquals(409, resp.getStatus());
+        assertEquals(List.of("agentTwo"), entityOf(resp).get("allowedAgents"));
+    }
+
+    @Test
+    void updateGrant_dryRunAnswersAStalePreconditionWith409() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", true,
+                new IRestSecretStore.GrantRequest(List.of("agentOne", "agentThree"), null, List.of("agentOne", "agentTwo")));
+
+        assertEquals(409, resp.getStatus());
+        verify(secretProvider, never()).updateGrant(any(), any(), any(), any());
+        verify(secretProvider, never()).updateGrant(any(), any(), any());
+    }
+
+    @Test
+    void updateGrant_rejectsANullEntryInThePrecondition() throws Exception {
+        givenSecretGrantedTo(List.of("agentOne"));
+        var expected = new ArrayList<String>();
+        expected.add(null);
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null, expected));
+
+        assertEquals(400, resp.getStatus());
+    }
+
+    @Test
+    void grantRequest_deserializesWithAndWithoutThePrecondition() throws Exception {
+        var mapper = new ObjectMapper();
+
+        var withPrecondition = mapper.readValue("{\"allowedAgents\":[\"a\"],\"expectedAllowedAgents\":[\"a\",\"b\"]}",
+                IRestSecretStore.GrantRequest.class);
+        var without = mapper.readValue("{\"allowedAgents\":[\"a\"],\"description\":\"d\"}", IRestSecretStore.GrantRequest.class);
+
+        assertEquals(List.of("a", "b"), withPrecondition.expectedAllowedAgents());
+        assertNull(without.expectedAllowedAgents());
+        assertEquals("d", without.description());
+    }
+
+    // ─── B1: adopt-master-key ───
+
+    @Test
+    void adoptMasterKey_requiresConfirmation() throws Exception {
+        Response resp = rest.adoptMasterKey(false);
+
+        assertEquals(400, resp.getStatus());
+        assertTrue(String.valueOf(entityOf(resp).get("action")).contains("rotate-kek"));
+    }
+
+    @Test
+    void adoptMasterKey_reportsTheTenantsNeedingReset() throws Exception {
+        VaultSecretProvider vault = mock(VaultSecretProvider.class);
+        when(vault.isAvailable()).thenReturn(true);
+        when(vault.adoptCurrentMasterKey()).thenReturn(new VaultSecretProvider.MasterKeyAdoption(List.of("acme"), true, true));
+        var vaultRest = new RestSecretStore(vault, secretResolver, grantImpactAnalyzer);
+
+        Response resp = vaultRest.adoptMasterKey(true);
+
+        assertEquals(200, resp.getStatus());
+        assertEquals(List.of("acme"), entityOf(resp).get("tenantsNeedingReset"));
+        assertEquals(Boolean.TRUE, entityOf(resp).get("systemValuesReset"));
+        assertEquals(Boolean.TRUE, entityOf(resp).get("checksumKeyReset"));
+        verify(secretResolver).invalidateAll();
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> entityOf(Response response) {
         return (Map<String, Object>) response.getEntity();
@@ -462,6 +567,32 @@ class RestSecretStoreTest {
         Response resp = rest.getSecretMetadata("default", "apiKey");
         assertEquals(200, resp.getStatus());
         assertNotNull(resp.getEntity());
+    }
+
+    @Test
+    void getMetadata_redactsChecksumFromResponse() throws Exception {
+        Instant now = Instant.now();
+        when(secretProvider.getMetadata(any()))
+                .thenReturn(new SecretMetadata("default", "apiKey", now, now, null, "h1:deadbeef", "my key", List.of("*")));
+
+        Response resp = rest.getSecretMetadata("default", "apiKey");
+        assertEquals(200, resp.getStatus());
+        // The checksum must never cross the API boundary — it is a keyed value an
+        // attacker could otherwise test guesses against.
+        assertNull(((SecretMetadata) resp.getEntity()).checksum());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listSecrets_redactsChecksumFromEveryRow() throws Exception {
+        when(secretProvider.listKeys("default"))
+                .thenReturn(List.of(new SecretMetadata("default", "key1", Instant.now(), null, null, "h1:aaa", "d1", List.of("*")),
+                        new SecretMetadata("default", "key2", Instant.now(), null, null, "abc123", "d2", List.of("agent1"))));
+
+        Response resp = rest.listSecrets("default");
+        assertEquals(200, resp.getStatus());
+        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
+        assertTrue(list.stream().allMatch(m -> m.checksum() == null), "no listed row may carry a checksum");
     }
 
     @Test

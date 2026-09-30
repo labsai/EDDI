@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -50,6 +52,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -281,6 +284,67 @@ class AgentOrchestratorResumeToolLoopTest {
         verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c1"), contains("42"));
         verify(journalStore).markExecuted(eq("conv-1"), eq("epoch-1"), eq("c2"), contains("4"));
         verify(chatModel, times(1)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    @DisplayName("H5: an approved call runs as the non-owner approver; the rest of the resumed loop does not")
+    void approvedCallRunsAsApproverOnly() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        var callerContext = new CallerIdentityContext(null, null);
+        var callerDuringApprovedCall = new AtomicReference<CallerIdentity>();
+        var callerDuringContinuation = new AtomicReference<CallerIdentity>();
+        when(calculatorTool.calculate("6*7")).thenAnswer(inv -> {
+            callerDuringApprovedCall.set(callerContext.current());
+            return "42";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            callerDuringContinuation.set(callerContext.current());
+            return text("42");
+        });
+        var approver = new CallerIdentity("admin-token", "admin", "https://eddi.example:443");
+
+        // What ConversationHitlService binds when the approver is not the owner:
+        // no caller for the turn, the approver on the side.
+        callerContext.withIdentity(null, callerContext.withApprover(approver,
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true))).call();
+
+        assertEquals(approver, callerDuringApprovedCall.get(), "the call the approver saw runs with their credentials");
+        assertNull(callerDuringContinuation.get(), "nothing after it inherits them");
+    }
+
+    @Test
+    @DisplayName("H5: when the owner approved, the approved call and the continuation both run as the owner")
+    void ownerApproverRunsWholeTurn() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1")))
+                .thenReturn(true);
+        var callerContext = new CallerIdentityContext(null, null);
+        var callerDuringApprovedCall = new AtomicReference<CallerIdentity>();
+        var callerDuringContinuation = new AtomicReference<CallerIdentity>();
+        when(calculatorTool.calculate("6*7")).thenAnswer(inv -> {
+            callerDuringApprovedCall.set(callerContext.current());
+            return "42";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            callerDuringContinuation.set(callerContext.current());
+            return text("42");
+        });
+        var owner = new CallerIdentity("owner-token", "owner", "https://eddi.example:443");
+
+        // What ConversationHitlService binds when the approver owns the conversation.
+        callerContext.withIdentity(owner, callerContext.withApprover(null,
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true))).call();
+
+        assertEquals(owner, callerDuringApprovedCall.get());
+        assertEquals(owner, callerDuringContinuation.get());
     }
 
     /**

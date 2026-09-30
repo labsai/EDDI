@@ -4,33 +4,17 @@ import {
   Trash2,
   MoreVertical,
   ExternalLink,
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  Brain,
-  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { accessFor } from "@/lib/access";
-import type { LucideIcon } from "lucide-react";
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  Brain,
-  Settings,
-};
+import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 
 interface ResourceCardProps {
   item: AgentDescriptor & { id: string; version: number };
   typeSlug: string;
-  iconName: string;
   onDuplicate: (id: string, version: number) => void;
   onDelete: (id: string, version: number) => void;
 }
@@ -38,7 +22,6 @@ interface ResourceCardProps {
 export function ResourceCard({
   item,
   typeSlug,
-  iconName,
   onDuplicate,
   onDelete,
 }: ResourceCardProps) {
@@ -47,7 +30,7 @@ export function ResourceCard({
   // Derived here rather than taken as a prop, so a caller cannot forget to
   // pass it and silently get the unrestricted menu back.
   const access = accessFor(item.callerLevel);
-  const Icon = ICON_MAP[iconName] ?? GitBranch;
+  const Icon = getResourceTypeIcon(typeSlug);
   const timeAgo = formatTimeAgo(item.lastModifiedOn);
 
   return (

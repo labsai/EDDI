@@ -26,6 +26,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.utils.RuntimeUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -152,20 +153,41 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
+    public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
         validateSecurityFlags(agentConfiguration);
-        // The agent's own EDIT check first (update() repeats it): the workflow lookup
-        // below answers "exists / does not exist", which a caller with no rights to
-        // this agent must not be able to use as an oracle for arbitrary workflow ids.
+        // The agent's own EDIT check first: the workflow lookup below answers "exists
+        // / does not exist", which a caller with no rights to this agent must not be
+        // able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
-        Response response = restVersionInfo.update(id, version, agentConfiguration);
+        // dynamicOrigin is engine-written provenance that teardown_agent and group
+        // cleanup rely on before they delete an agent. Keep what is stored, never
+        // what the body says: an editor must not be able to erase the marker (the
+        // sub-agent would then outlive its discussion) or plant one.
+        agentConfiguration.setDynamicOrigin(storedDynamicOrigin(id));
+        Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
     }
 
+    /**
+     * {@code RestVersionInfo.update}, calling the agent store's update that takes
+     * the compatibility declaration — the generic one cannot carry it.
+     */
+    private Response updateWithCompatibility(String id, Integer version, AgentConfiguration agentConfiguration, boolean compatible) {
+        version = restVersionInfo.validateParameters(id, version);
+        RuntimeUtilities.checkNotNull(agentConfiguration, "document");
+        try {
+            Integer newVersion = agentStore.update(id, version, agentConfiguration, compatible);
+            URI newResourceUri = RestUtilities.createURI(resourceURI, id, versionQueryParam, newVersion);
+            return Response.ok().location(newResourceUri).build();
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
     @Override
-    public Response updateResourceInAgent(String id, Integer version, URI resourceURI) {
+    public Response updateResourceInAgent(String id, Integer version, URI resourceURI, Boolean compatible) {
         // The supplied URI must carry a real version, not merely a '?'. Stored
         // references are matched by "everything before the query" and then REPLACED by
         // this URI, so '...?other=2' would match a versioned reference and overwrite it
@@ -192,7 +214,7 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         if (updated) {
-            return updateAgent(id, version, agentConfig);
+            return updateAgent(id, version, agentConfig, compatible);
         } else {
             // This store's own constant, qualified because the method parameter shadows
             // it. It was RestWorkflowStore.resourceURI — copied from the workflow-store
@@ -200,6 +222,28 @@ public class RestAgentStore implements IRestAgentStore {
             // from an AGENT id, which no resource has.
             URI uri = RestUtilities.createURI(IRestAgentStore.resourceURI, id, versionQueryParam, version);
             return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
+        }
+    }
+
+    /**
+     * The {@code dynamicOrigin} on the agent's current stored version, or
+     * {@code null} when it has none or does not exist (the update then fails on its
+     * own). A store failure propagates rather than being read as "no marker":
+     * silently dropping the marker would turn a transient error into a sub-agent
+     * that group cleanup can no longer delete.
+     */
+    private AgentConfiguration.DynamicOrigin storedDynamicOrigin(String id) {
+        try {
+            IResourceId current = agentStore.getCurrentResourceId(id);
+            if (current == null) {
+                return null;
+            }
+            AgentConfiguration stored = agentStore.read(id, current.getVersion());
+            return stored != null ? stored.getDynamicOrigin() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
         }
     }
 
@@ -235,6 +279,9 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             validateSecurityFlags(agentConfig);
+            // The copy is an agent a person made, not one create_sub_agent
+            // provisioned: it must not inherit the original's provenance.
+            agentConfig.setDynamicOrigin(null);
             if (deepCopy) {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {

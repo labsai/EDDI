@@ -8,9 +8,11 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -59,9 +61,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
 
     /**
      * Shorter inputs are not searched for elsewhere in an entry: replacing every
-     * "ok" in a model response would destroy the record for no gain.
+     * "ok" in a model response would destroy the record for no gain. The same floor
+     * as the turn-end scrub of the stored step, so the two agree on what is
+     * removed.
      */
-    static final int MIN_REDACTED_INPUT_LENGTH = 4;
+    static final int MIN_REDACTED_INPUT_LENGTH = SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH;
 
     private static final String USER_INPUT = "userInput";
 
@@ -105,6 +109,17 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
     }
 
     /**
+     * Add input forms to redact when the turn's input turns out to be a secret —
+     * forms no entry recorded as its {@code userInput}, such as the parser's
+     * normalized copy of a client-flagged secret message.
+     */
+    public synchronized void addSecretInputForms(Collection<String> forms) {
+        forms.stream()
+                .filter(form -> form != null && !form.isEmpty() && !MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(form))
+                .forEach(recordedInputs::add);
+    }
+
+    /**
      * Restore the original collector and submit every buffered entry to it, in
      * order. A failing submit is logged and does not stop the rest.
      */
@@ -121,6 +136,19 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      *            caller has already dropped values too short to search for
      */
     public void flush(IConversationMemory memory, List<String> secretContextValues) {
+        flush(memory, secretContextValues, List.of());
+    }
+
+    /**
+     * {@link #flush(IConversationMemory, List)}, additionally replacing any payload
+     * value that EQUALS one of {@code exactSecretContextValues} — the short secret
+     * values not searched for inside other text.
+     *
+     * @param exactSecretContextValues
+     *            the turn's short secret context values, replaced only where a
+     *            value is exactly one of them
+     */
+    public void flush(IConversationMemory memory, List<String> secretContextValues, List<String> exactSecretContextValues) {
         memory.setAuditCollector(delegate);
         List<AuditEntry> pending;
         Set<String> inputs;
@@ -136,6 +164,9 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                 AuditEntry submitted = secretInput ? redact(entry, inputs) : entry;
                 if (secretContextValues != null && !secretContextValues.isEmpty()) {
                     submitted = redactValues(submitted, secretContextValues, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+                }
+                if (exactSecretContextValues != null && !exactSecretContextValues.isEmpty()) {
+                    submitted = redactExactValues(submitted, exactSecretContextValues, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
                 }
                 delegate.collect(submitted);
             } catch (RuntimeException e) {
@@ -179,6 +210,24 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      */
     static AuditEntry redactValues(AuditEntry entry, List<String> needles, String placeholder) {
         return withRedactedPayload(entry, entry.input(), needles, placeholder);
+    }
+
+    /**
+     * The entry with every payload value that equals one of {@code exactValues}
+     * (whole, never as a substring) replaced by {@code placeholder}.
+     */
+    static AuditEntry redactExactValues(AuditEntry entry, List<String> exactValues, String placeholder) {
+        return entry.withPayload(exactRedacted(entry.input(), exactValues, placeholder), exactRedacted(entry.output(), exactValues, placeholder),
+                exactRedacted(entry.llmDetail(), exactValues, placeholder), exactRedacted(entry.toolCalls(), exactValues, placeholder));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> exactRedacted(Map<String, Object> map, List<String> exactValues, String placeholder) {
+        if (map == null) {
+            return null;
+        }
+        Object cleaned = SecretValueScrubber.scrubDeepExact(map, exactValues, placeholder);
+        return cleaned instanceof Map<?, ?> cleanedMap ? (Map<String, Object>) cleanedMap : map;
     }
 
     private static AuditEntry withRedactedPayload(AuditEntry entry, Map<String, Object> input, List<String> needles, String placeholder) {

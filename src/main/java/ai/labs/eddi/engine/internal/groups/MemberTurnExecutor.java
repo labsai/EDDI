@@ -300,13 +300,7 @@ public class MemberTurnExecutor {
         boolean firstMemberTurn = privateConvId == null;
         if (privateConvId == null) {
             try {
-                Map<String, Context> groupContext = new LinkedHashMap<>();
-                groupContext.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
-                groupContext.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
-                groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
-                var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
-                privateConvId = result.conversationId();
-                gc.getMemberConversationIds().put(convKey, privateConvId);
+                privateConvId = startMemberConversation(gc, member, convKey);
             } catch (Exception e) {
                 // Any quota refusal — over a limit OR the store unable to answer —
                 // affects every member, so it aborts the discussion instead of
@@ -385,6 +379,7 @@ public class MemberTurnExecutor {
 
         // Call through ConversationService with retry
         int retries = 0;
+        boolean replacedEndedConversation = false;
         // Keep both normalisations in step with parallelBatchBudgetSeconds(), which
         // sizes the orchestrator's batch deadline from exactly these two values.
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : defaultMaxRetries;
@@ -562,6 +557,29 @@ public class MemberTurnExecutor {
                 if (cause instanceof QuotaRefusal refusal) {
                     throw new GroupDiscussionException(refusal.refusalSummary() + ": " + cause.getMessage(), cause);
                 }
+                // The member's private conversation ended under the discussion — an
+                // undeploy with endAllActiveConversations, or the idle sweep during a
+                // long one. Retrying it can never succeed and would fail the member for
+                // every remaining turn. Give it a fresh conversation, once: it loses only
+                // its private history, since the group transcript rides in with every
+                // turn's context.
+                if (cause instanceof IConversationService.ConversationEndedException && !replacedEndedConversation) {
+                    replacedEndedConversation = true;
+                    try {
+                        String endedConvId = privateConvId;
+                        privateConvId = startMemberConversation(gc, member, convKey);
+                        groupConversationService.grantAndInjectAttachments(gc, privateConvId, context);
+                        LOGGER.infof("Member %s's conversation %s had ended; continuing in %s", LogSanitizer.sanitize(member.agentId()),
+                                LogSanitizer.sanitize(endedConvId), LogSanitizer.sanitize(privateConvId));
+                        continue;
+                    } catch (Exception restartFailure) {
+                        if (restartFailure instanceof QuotaRefusal refusal) {
+                            throw new GroupDiscussionException(refusal.refusalSummary() + ": " + restartFailure.getMessage(), restartFailure);
+                        }
+                        return handleAgentFailure(member, phaseIdx, phase, protocol, restartFailure, "Failed to start conversation",
+                                targetAgentId);
+                    }
+                }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     retries++;
                     LOGGER.warnf("Agent %s failed (attempt %d/%d): %s", member.agentId(), retries, maxRetries, cause.getMessage());
@@ -570,6 +588,21 @@ public class MemberTurnExecutor {
                 return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
             }
         }
+    }
+
+    /**
+     * Start the member's private conversation for this discussion and record it on
+     * the group conversation under {@code convKey}.
+     */
+    private String startMemberConversation(GroupConversation gc, GroupMember member, String convKey) throws Exception {
+        Map<String, Context> groupContext = new LinkedHashMap<>();
+        groupContext.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
+        groupContext.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
+        groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+        var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
+        String conversationId = result.conversationId();
+        gc.getMemberConversationIds().put(convKey, conversationId);
+        return conversationId;
     }
 
     /**

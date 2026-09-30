@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { NumberInput } from "./number-input";
 import {
   Plus,
   Trash2,
-  BookOpen,
+  BookA,
 } from "lucide-react";
 
 // ─── Types matching RegularDictionaryConfiguration backend model ─────────────
@@ -49,7 +50,7 @@ function WordRow({
       <input type="text" value={word.expressions} onChange={(e) => onChange({ ...word, expressions: e.target.value })}
         readOnly={readOnly} placeholder={t("dictionaryEditor.expressionPlaceholder", "e.g. greeting(hello)")}
         className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-      <input type="number" value={word.frequency} onChange={(e) => onChange({ ...word, frequency: parseInt(e.target.value, 10) || 0 })}
+      <NumberInput emptyValue={0} integer value={word.frequency} onChange={(v) => onChange({ ...word, frequency: v ?? 0 })}
         readOnly={readOnly} title={t("dictionaryEditor.frequency", "Frequency")}
         className="h-7 w-14 rounded border border-input bg-background px-2 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
       {!readOnly && (
@@ -173,7 +174,7 @@ export function DictionaryEditor({ data, onChange, readOnly }: DictionaryEditorP
       {/* Language */}
       <div className="flex items-center gap-2">
         <label className="text-sm font-medium text-foreground">
-          <BookOpen className="me-1.5 inline h-4 w-4 text-primary" />
+          <BookA className="me-1.5 inline h-4 w-4 text-primary" />
           {t("dictionaryEditor.language", "Language")}
         </label>
         <input type="text" value={data.lang ?? ""} onChange={(e) => onChange({ ...data, lang: e.target.value })}
