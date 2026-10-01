@@ -52,7 +52,7 @@ The Langchain task integrates with multiple LLM providers via the langchain4j li
 - **Mistral AI** (Mistral Large, Codestral, Pixtral)
 - **Azure OpenAI** (GPT-4o via Azure-hosted endpoints)
 - **Amazon Bedrock** (Claude, Llama, Titan via AWS credential chain)
-- **Oracle GenAI** (Cohere Command R+ via OCI authentication)
+- **Oracle GenAI** (Cohere Command A, Meta Llama and others via OCI authentication)
 - **Ollama** (Local models)
 - **Hugging Face** (Various models)
 - **Jlama** (Local Java-based inference)
@@ -649,7 +649,7 @@ the builder does read; `threadCount` is deliberately absent from it — see
       "type": "oracle-genai",
       "description": "Oracle GenAI chat",
       "parameters": {
-        "modelName": "cohere.command-r-plus",
+        "modelName": "cohere.command-a-03-2025",
         "compartmentId": "ocid1.compartment.oc1..your-compartment-id",
         "configProfile": "DEFAULT",
         "temperature": "0.7",

@@ -83,6 +83,44 @@ describe("model suggestions", () => {
   });
 });
 
+/**
+ * Ids a vendor retired, renamed or never had. Each one was in this catalog until
+ * it was checked against vendor documentation on 2026-09-30, and each looks
+ * plausible enough to be typed back in. A retired id fails on the agent's first
+ * message, long after the wizard reported success.
+ */
+describe("retired and invalid model ids", () => {
+  const RETIRED: Record<string, string> = {
+    "gemini-3.1-pro": "no bare id; Gemini 3.1 Pro exists only as gemini-3.1-pro-preview",
+    "phi4:mini": "Ollama's phi4 library has only 14b tags; the model is phi4-mini",
+    "THUDM/GLM-5.1": "the weights live at zai-org/GLM-5.1",
+    "devstral-latest": "Devstral was retired by 2026-07-31",
+    "devstral-small-latest": "Devstral was retired by 2026-07-31",
+    "magistral-medium-latest": "Magistral's targets were retired on 2026-07-31",
+    "magistral-small-latest": "Magistral's targets were retired on 2026-07-31",
+    "cohere.command-latest": "never an OCI model name",
+    "cohere.command-plus-latest": "never an OCI model name",
+    "cohere.command-r-plus": "retired on OCI",
+    "cohere.command-r-plus-v2": "retired on OCI",
+    "meta.llama4-maverick-17b-instruct-v1:0": "Bedrock serves Llama 4 only through a cross-region profile (us.meta...)",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8": "a Hugging Face repo name, not OCI's model name",
+  };
+
+  it("suggests none of them for any provider", () => {
+    for (const [provider, models] of Object.entries(MODEL_SUGGESTIONS)) {
+      for (const model of models) {
+        expect(RETIRED[model], `${provider} suggests "${model}": ${RETIRED[model]}`).toBeUndefined();
+      }
+    }
+  });
+
+  it("uses none of them as a provider default", () => {
+    for (const provider of LLM_PROVIDERS) {
+      expect(RETIRED[provider.defaultModel], `${provider.id} defaults to "${provider.defaultModel}"`).toBeUndefined();
+    }
+  });
+});
+
 describe("setup-provisionable providers", () => {
   // gemini-vertex needs projectId and location; neither setup request can carry
   // them, so an agent created on it failed on its first message.
