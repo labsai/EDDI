@@ -33,6 +33,10 @@ saves and deploys cleanly, then fails on its first message.
   → `cohere.command-a-03-2025`.
 - **`docs/langchain.md`**: the Oracle GenAI example and provider line name Command A.
 - **Platform Operator revision 1 → 2** (`operator-revision.json`): the Operator's system prompt carries a model catalogue built from these suggestions, so existing Operators are told to upgrade and stop recommending the retired ids.
+- **`pom.xml`: Jackson overrides 2.22.2 → 2.22.3** (core, databind, dataformat-csv, dataformat-xml).
+  CVE-2026-91776 and CVE-2026-91777 in jackson-databind 2.22.2 were published on 2026-09-30 and
+  turned `Trivy Filesystem Scan` red on every PR. Dependabot's #913 carries the same bump inside a
+  larger group whose build is failing, so the security fix is taken here on its own.
 - **Test**: `model-suggestions.test.ts` lists the retired ids with the reason for each and fails if any
   provider suggests one or defaults to one.
 

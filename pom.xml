@@ -95,7 +95,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -103,11 +103,13 @@
                  Managed by the Quarkus BOM at 2.22.0, same as jackson-core above. Neither is
                  reachable from our code — @JsonView is unused and every @JsonIgnoreProperties
                  is class-level ignoreUnknown — but OpenSSF Scorecard counts advisories
-                 regardless of reachability. -->
+                 regardless of reachability. 2.22.3 also fixes CVE-2026-91776 and CVE-2026-91777
+                 (TypeDeserializerBase._findDeserializer, @JsonIdentityInfo forward references),
+                 which Trivy blocks on. -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -116,12 +118,12 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
                  Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
