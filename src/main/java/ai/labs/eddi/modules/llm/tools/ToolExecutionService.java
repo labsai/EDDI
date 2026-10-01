@@ -400,8 +400,18 @@ public class ToolExecutionService {
             return toolExecution.get();
         }
 
-        Future<String> future = timeoutExecutor.submit(countRunning(carryContext(toolExecution)));
+        // Counted as awaited BEFORE the submit: a virtual thread can start and enter
+        // the tool before this thread runs another line, and the other order would
+        // report a call that still has a waiter as abandoned. This order can only
+        // under-report transiently, which the gauge's clamp already absorbs.
         awaitedWorkers.incrementAndGet();
+        Future<String> future;
+        try {
+            future = timeoutExecutor.submit(countRunning(carryContext(toolExecution)));
+        } catch (RuntimeException rejected) {
+            awaitedWorkers.decrementAndGet();
+            throw rejected;
+        }
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException expired) {
