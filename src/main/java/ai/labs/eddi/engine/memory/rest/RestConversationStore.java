@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceFilter.NotMatching;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
+import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -93,8 +94,21 @@ public class RestConversationStore implements IRestConversationStore {
      */
     private static final int MAX_OWNER_SCAN = 500;
 
-    /** Descriptor batch size of a listing past its first page. */
+    /** Smallest descriptor batch of a listing past its first page. */
     private static final int SCAN_BATCH = 100;
+
+    /** Largest descriptor batch, which a deep page reads its earlier rows in. */
+    private static final int MAX_SCAN_BATCH = 1_000;
+
+    /**
+     * Deepest result a listing serves: {@code index * limit} above this is refused
+     * with a 400, for every caller. A page counts off every match before it, so
+     * without a ceiling one request with a huge {@code index} reads the whole
+     * descriptor collection — and an admin, or anyone when authorization is
+     * disabled, never reaches {@link #MAX_OWNER_SCAN}. The same ceiling the storage
+     * layer puts on one query's results.
+     */
+    static final int MAX_RESULT_OFFSET = IResourceStorage.MAX_RESULT_LIMIT;
 
     /** Descriptor fields the listing filters on in the query. */
     private static final String FIELD_AGENT_RESOURCE = "agentResource";
@@ -216,6 +230,10 @@ public class RestConversationStore implements IRestConversationStore {
         if (limit > 100) {
             limit = 100;
         }
+        if ((long) index * limit > MAX_RESULT_OFFSET) {
+            throw new BadRequestException(format("index * limit must not exceed %d. To reach older conversations, narrow the "
+                    + "listing with agentId, conversationState or filter.", MAX_RESULT_OFFSET));
+        }
 
         // `index` is a page of RESULTS: page n is the (n*limit)th to the
         // ((n+1)*limit - 1)th conversation that passes every filter. It used to be a
@@ -236,8 +254,8 @@ public class RestConversationStore implements IRestConversationStore {
         // projected read of the candidates' listing fields (loadListingSummaries) —
         // no conversation is loaded in full, and an agent's name is read once per
         // listing. Page n also reads past the rows of the pages before it, in batches
-        // of SCAN_BATCH, so it costs about 2*ceil((n+1)*limit/100) small queries —
-        // not (n+1)*limit document loads.
+        // of up to MAX_SCAN_BATCH (see scanSize), and never past MAX_RESULT_OFFSET
+        // of them — not (n+1)*limit document loads.
         //
         // Owner-scoping: a non-admin caller may only enumerate their own
         // conversations. Admins (and any caller when authorization is disabled) see
@@ -255,10 +273,15 @@ public class RestConversationStore implements IRestConversationStore {
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
-        // off first, so it reads in larger batches: fewer round trips, and at most
-        // one batch read past the rows it returns. One listing keeps one size, which
-        // is all the descriptor store's index arithmetic needs.
-        final int scanSize = index == 0 ? limit : Math.max(limit, SCAN_BATCH);
+        // off first, so it reads in batches sized to that work (SCAN_BATCH to
+        // MAX_SCAN_BATCH). Every batch makes the database walk past the batches before
+        // it again (skip = batch * size), so small batches made a deep page quadratic;
+        // at the MAX_RESULT_OFFSET ceiling this is about 11 batches, not 101. One
+        // listing keeps one size, which is all the descriptor store's index arithmetic
+        // needs.
+        final int scanSize = index == 0
+                ? limit
+                : (int) Math.min(MAX_SCAN_BATCH, Math.max(SCAN_BATCH, matchesToSkip + limit));
 
         try {
             List<ConversationDescriptor> conversationDescriptors;
@@ -288,13 +311,12 @@ public class RestConversationStore implements IRestConversationStore {
                 List<ConversationDescriptor> candidates = new ArrayList<>();
                 List<String> candidateIds = new ArrayList<>();
                 for (var conversationDescriptor : conversationDescriptors) {
-                    // Enforce the scan budget per-descriptor, not just per-page, so a
-                    // non-admin scan honours MAX_OWNER_SCAN exactly rather than
-                    // overrunning by up to a page (and the exhaustion metric fires at
-                    // the documented bound).
-                    if (!seesAllConversations && scannedDescriptors - skippedMatches >= MAX_OWNER_SCAN) {
-                        break;
-                    }
+                    // The scan budget is checked per batch (the loop condition), never
+                    // mid-batch: which rows of a batch are counted off for earlier pages —
+                    // and so exempt from the budget — is only known after the batch's
+                    // summary read, and stopping mid-batch would let the next batch start
+                    // after rows nobody examined. A batch may therefore run past the
+                    // budget by its own size; its foreign rows cost no conversation read.
                     scannedDescriptors++;
                     String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, agentId, reviewable);
                     if (candidateId != null) {

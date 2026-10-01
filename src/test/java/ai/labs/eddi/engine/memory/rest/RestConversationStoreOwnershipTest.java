@@ -473,6 +473,28 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
+    @DisplayName("a deep owner page between other users' rows has no gaps, though its batches run past the scan budget")
+    void deepOwnerPageAmongForeignRowsHasNoGaps() throws Exception {
+        // Every other row is someone else's. Page 3 at limit 100 counts off 300 of the
+        // owner's rows and reads in batches of 400, each of which crosses the 500-row
+        // budget part-way: stopping mid-batch would skip rows nobody examined.
+        var rows = new ArrayList<ConversationDescriptor>();
+        var owned = new ArrayList<ConversationDescriptor>();
+        for (int i = 0; i < 1200; i++) {
+            var descriptor = descriptor(String.format("%024x", 0xf000 + i), i % 2 == 0 ? OWNER : INTRUDER);
+            rows.add(descriptor);
+            if (i % 2 == 0) {
+                owned.add(descriptor);
+            }
+        }
+        pagedStore(rows);
+
+        List<ConversationDescriptor> page = asOwner().readConversationDescriptors(3, 100, null, null, null, null, null, null);
+
+        assertEquals(resources(owned.subList(300, 400)), resources(page));
+    }
+
+    @Test
     @DisplayName("a non-admin listing pushes the owner filter into the descriptor query")
     @SuppressWarnings("unchecked")
     void ownerFilterIsPushedDown() throws Exception {

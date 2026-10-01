@@ -32,6 +32,15 @@ gets — that went wrong two ways:
 - **What stays in Java** is what only the conversation knows: its state (the descriptor's copy is not
   maintained), whether it still exists (orphans, still counted in
   `eddi.conversations.listing.orphaned_descriptors`), and the owner or agent of a legacy descriptor.
+- **A ceiling for every caller:** `index * limit` above 10,000 is refused with a 400 before any
+  query. A page counts off every match before it, and an admin — or anyone when authorization is
+  disabled — never reaches the owner-scan budget, so `index=2000000000` would otherwise have read the
+  whole descriptor collection. (Raised in review.) A deep page also reads the rows it counts off in
+  batches sized to that work, up to 1,000: each batch makes the database walk past the batches before
+  it again, so fixed batches of 100 made a deep page quadratic. The owner budget is checked once per
+  batch, never mid-batch: which rows of a batch are counted off — and so exempt from the budget — is
+  known only after its summary read, and stopping mid-batch let the next batch start after rows nobody
+  had examined (with batches larger than the budget, rows 500–599 of a deep page went missing).
 - **The owner-scan budget** (`MAX_OWNER_SCAN`, 500) counts the descriptors a page examines, minus the
   matches it counts off for earlier pages: those are the caller's own conversations, and charging them
   would put a caller's older conversations out of reach. The reviewer exception is unchanged.
@@ -48,8 +57,8 @@ per row. Counting off earlier pages would have multiplied that.
   costs two small queries per descriptor page and loads no conversation in full; a foreign row is
   still rejected from its descriptor alone, before any conversation read.
 - Page 0 reads descriptors in pages of `limit`; a later page, which first counts off the rows of the
-  pages before it, reads them in batches of 100, so `index=50&limit=20` costs about 22 queries rather
-  than 102.
+  pages before it, reads them in batches of 100 to 1,000 sized to that work, so `index=50&limit=20`
+  costs 4 queries (two batches of 1,000, each with its summary read) rather than 102.
 - An agent's display name is read once per agent version per listing, and only for returned rows.
 - If a page's summary read fails, the page's ids are read one at a time, so a conversation the store
   cannot read costs only its own row (logged, sanitized, and not counted as an orphan) — as a failed

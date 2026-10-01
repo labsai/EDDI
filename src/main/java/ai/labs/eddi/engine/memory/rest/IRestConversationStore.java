@@ -54,7 +54,9 @@ public interface IRestConversationStore {
      * conversation that passes every filter, so a page never holds more than
      * {@code limit} rows and consecutive pages neither repeat nor skip one. Page
      * until a page comes back empty: a non-admin's page can come back short when it
-     * stops on the owner-scan budget.
+     * stops on the owner-scan budget. {@code index * limit} above 10,000 is refused
+     * with a 400 — each page counts off the matches before it, so the ceiling
+     * bounds what one request can read; narrow the listing with a filter instead.
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)

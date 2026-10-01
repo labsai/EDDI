@@ -2206,6 +2206,39 @@ class RestConversationStoreTest {
         }
 
         @Test
+        @DisplayName("the deepest page the ceiling allows is served")
+        void deepestAllowedPageIsServed() {
+            // index * limit == MAX_RESULT_OFFSET: allowed (the store holds fewer rows, so
+            // empty).
+            assertTrue(restConversationStore.readConversationDescriptors(
+                    RestConversationStore.MAX_RESULT_OFFSET / 100, 100, null, null, null, null, null, null).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a page past the ceiling is refused with a 400 before any query, for an admin too")
+        void pagePastTheCeilingIsRefused() throws Exception {
+            // seesAllConversations is true for this store: no owner budget would stop the
+            // scan.
+            assertThrows(BadRequestException.class, () -> restConversationStore.readConversationDescriptors(
+                    RestConversationStore.MAX_RESULT_OFFSET / 100 + 1, 100, null, null, null, null, null, null));
+            assertThrows(BadRequestException.class, () -> restConversationStore.readConversationDescriptors(
+                    Integer.MAX_VALUE, 100, null, null, AGENT_A, null, null, null));
+
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("a deep page counts off earlier rows in batches sized to that work, not in batches of 100")
+        void deepPageReadsInLargerBatches() throws Exception {
+            // index 50 at limit 20 counts off 1,000 matches: one batch of 1,000, not ten of
+            // 100.
+            restConversationStore.readConversationDescriptors(50, 20, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(1000), anyBoolean(), any());
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), eq(100), anyBoolean(), any());
+        }
+
+        @Test
         @DisplayName("a search that matches only outside the listing's filters lists nothing — it does not fall back to everything")
         void searchMatchingOutsideTheFiltersListsNothing() throws Exception {
             // Within agent A's conversations "Billing" matches nothing, but it does match
