@@ -83,9 +83,9 @@ should accept only tokens that carry `eddi-backend` in `aud`.
 
 `QUARKUS_OIDC_TOKEN_AUDIENCE=any` turns the check off again (see
 [security.md](security.md)), but don't treat it as a fallback. EDDI reads roles from
-`realm_access/roles`, which doesn't depend on the client, so with the check off a token any
-client of the realm obtained for a user carries that user's full EDDI rights. That is the 6.4
-exposure this release closes. Use it at most as a stopgap while the mappers are being added,
+`realm_access/roles`, which doesn't depend on the client. With the check off, a token the realm
+issues to *any* of its clients on a user's behalf carries that user's full EDDI rights. That is
+the 6.4 exposure this release closes. Use it at most as a stopgap while the mappers are being added,
 and remove it afterwards.
 
 ### 2.3 Roles are read from `realm_access/roles`
