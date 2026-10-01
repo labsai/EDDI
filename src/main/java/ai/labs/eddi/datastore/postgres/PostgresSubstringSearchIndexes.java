@@ -14,6 +14,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Trigram indexes ({@code pg_trgm}) on the fields the descriptor listings
@@ -130,7 +131,7 @@ final class PostgresSubstringSearchIndexes {
     private final List<Index> indexes;
 
     private volatile boolean ready;
-    private volatile long lastCheckMillis;
+    private final AtomicLong lastCheckMillis = new AtomicLong();
 
     PostgresSubstringSearchIndexes(DataSource dataSource, List<Index> indexes) {
         this.dataSource = dataSource;
@@ -259,7 +260,7 @@ final class PostgresSubstringSearchIndexes {
                 unlock(conn);
             }
             ready = allValid(conn);
-            lastCheckMillis = System.currentTimeMillis();
+            lastCheckMillis.set(System.currentTimeMillis());
             if (ready) {
                 LOGGER.infof("Substring-search indexes ready for %s (%s)", DESCRIPTORS,
                         String.join(", ", indexes.stream().map(index -> index.field).toList()));
@@ -270,19 +271,25 @@ final class PostgresSubstringSearchIndexes {
     /**
      * Whether every index exists and is valid — so a search may be planned per
      * execution and use them. A "no" is re-checked against the catalogue at most
-     * once a minute, so an instance that did not build the indexes itself still
-     * notices when another one has.
+     * once a minute, by one caller only, so an instance that did not build the
+     * indexes itself still notices when another one has.
+     *
+     * @param conn
+     *            the caller's own connection, which the check reuses: a search asks
+     *            while it holds its pooled connection, and taking a second one
+     *            could leave concurrent searches each holding one while waiting for
+     *            another in an exhausted pool
      */
-    boolean isReady() {
+    boolean isReady(Connection conn) {
         if (ready) {
             return true;
         }
         long now = System.currentTimeMillis();
-        if (now - lastCheckMillis < RECHECK_INTERVAL_MILLIS) {
+        long last = lastCheckMillis.get();
+        if (now - last < RECHECK_INTERVAL_MILLIS || !lastCheckMillis.compareAndSet(last, now)) {
             return false;
         }
-        lastCheckMillis = now;
-        try (Connection conn = dataSource.getConnection()) {
+        try {
             ready = allValid(conn);
         } catch (SQLException e) {
             LOGGER.debugf("Could not check the substring-search indexes: %s", e.getMessage());

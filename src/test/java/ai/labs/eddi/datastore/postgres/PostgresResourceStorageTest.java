@@ -1187,7 +1187,7 @@ class PostgresResourceStorageTest {
 
     private static PostgresSubstringSearchIndexes indexes(boolean ready) {
         PostgresSubstringSearchIndexes indexes = mock(PostgresSubstringSearchIndexes.class);
-        when(indexes.isReady()).thenReturn(ready);
+        when(indexes.isReady(any())).thenReturn(ready);
         return indexes;
     }
 
@@ -1210,6 +1210,31 @@ class PostgresResourceStorageTest {
         storage.findResources(containsSearch(), null, 0, 10);
 
         verify(pgStatement, never()).setPrepareThreshold(anyInt());
+    }
+
+    @Test
+    void substringSearch_checksReadinessOnItsOwnConnection_notASecondOne() throws Exception {
+        // Not ready yet, so the search asks the catalogue — on the connection it
+        // already
+        // holds. A second checkout per search could stall concurrent searches in an
+        // exhausted pool.
+        storage.useSubstringIndexes(new PostgresSubstringSearchIndexes(dataSource, List.of(PostgresSubstringSearchIndexes.Index.NAME)));
+        clearInvocations(dataSource);
+
+        storage.findResources(containsSearch(), null, 0, 10);
+
+        verify(dataSource, times(1)).getConnection();
+    }
+
+    @Test
+    void readiness_isRecheckedAtMostOncePerInterval() throws Exception {
+        var indexes = new PostgresSubstringSearchIndexes(dataSource, List.of(PostgresSubstringSearchIndexes.Index.NAME));
+        clearInvocations(connection);
+
+        assertFalse(indexes.isReady(connection)); // the catalogue says the index does not exist
+        assertFalse(indexes.isReady(connection)); // within the interval: not asked again
+
+        verify(connection, times(1)).prepareStatement(contains("pg_index"));
     }
 
     @Test

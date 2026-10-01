@@ -190,6 +190,9 @@ and a search that matched nothing took about a second on 300k descriptors.
   threshold of 0, so PostgreSQL plans it for its actual pattern and can use the indexes. Only that
   statement, and only when every index is valid: without the indexes, per-execution planning made a
   common term ~170× slower than the cached plan, which happens to stop early on the date index.
+  Until they are ready, the search asks the catalogue at most once a minute (one caller, atomically),
+  on the connection it already holds — a second checkout per search could stall concurrent searches in
+  an exhausted pool (raised in review).
 - **`eddi.datastore.postgres.substring-search-index`** (default `true`) turns it off. If
   `CREATE EXTENSION pg_trgm` is refused, a warning is logged and search runs unindexed, as before.
 
@@ -215,6 +218,6 @@ uses the index, an INVALID index is rebuilt, another builder's lock is respected
 `PostgresSubstringSearchIndexesRetryTest` (a deadlock is retried to success, a privilege failure is
 not, retries are bounded, the SQLState classification), and `PostgresResourceStorageTest` (planned per
 execution only for a substring search with ready indexes; the build starts only when enabled).
-Mutation-checked: eight mutants — never planned per execution, planned before ready, nothing
+Mutation-checked: ten mutants — never planned per execution, planned before ready, nothing
 transient, no repair, lock ignored, privilege retried, a field outside the catalogue indexed, any
-collection indexed — all killed.
+collection indexed, readiness checked on a second connection, no re-check throttle — all killed.

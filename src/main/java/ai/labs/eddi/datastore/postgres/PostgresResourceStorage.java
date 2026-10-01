@@ -900,7 +900,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         }
 
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
-            if (substringSearch && substringIndexes != null && substringIndexes.isReady()) {
+            if (substringSearch && substringIndexes != null && substringIndexes.isReady(conn)) {
                 planPerExecution(ps);
             }
             for (int i = 0; i < params.size(); i++) {

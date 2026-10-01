@@ -57,6 +57,12 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
         }
     }
 
+    private boolean ready(PostgresSubstringSearchIndexes indexes) throws SQLException {
+        try (Connection conn = dataSource.getConnection()) {
+            return indexes.isReady(conn);
+        }
+    }
+
     private PostgresSubstringSearchIndexes indexes() {
         return new PostgresSubstringSearchIndexes(dataSource, INDEXES);
     }
@@ -76,7 +82,7 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
 
         indexes.build();
 
-        assertTrue(indexes.isReady());
+        assertTrue(ready(indexes));
         for (var index : INDEXES) {
             String definition = indexDefinition(index.indexName());
             assertTrue(definition.contains("USING gin") && definition.contains("gin_trgm_ops")
@@ -125,11 +131,11 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
             stmt.execute("UPDATE pg_index SET indisvalid = false WHERE indexrelid = '" + name + "'::regclass");
         }
         var afterRestart = indexes();
-        assertFalse(afterRestart.isReady(), "an invalid index must not count as ready");
+        assertFalse(ready(afterRestart), "an invalid index must not count as ready");
 
         afterRestart.build();
 
-        assertTrue(afterRestart.isReady());
+        assertTrue(ready(afterRestart));
         try (Connection conn = dataSource.getConnection();
                 Statement stmt = conn.createStatement();
                 ResultSet rs = stmt.executeQuery("SELECT indisvalid FROM pg_index WHERE indexrelid = '" + name + "'::regclass")) {
@@ -146,7 +152,7 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
                 var indexes = indexes();
                 indexes.build();
 
-                assertFalse(indexes.isReady());
+                assertFalse(ready(indexes));
                 assertEquals(null, indexDefinition(PostgresSubstringSearchIndexes.Index.NAME.indexName()));
             } finally {
                 stmt.execute("SELECT pg_advisory_unlock(" + 0x65646469_7472676DL + ")");
