@@ -54,8 +54,10 @@ per row. Counting off earlier pages would have multiplied that.
 - New `IConversationMemoryStore.loadListingSummaries(ids)`: one projected query per descriptor page.
   MongoDB: `$in` with a projection that counts the steps server-side (`$size`). PostgreSQL:
   `id = ANY(?)`, the state/agent columns plus three JSONB fields and `jsonb_array_length`. A page now
-  costs two small queries per descriptor page and loads no conversation in full; a foreign row is
-  still rejected from its descriptor alone, before any conversation read.
+  costs two small queries per descriptor page and loads no conversation in full. A row whose
+  descriptor records another owner is still rejected from the descriptor alone, before any
+  conversation read; a legacy descriptor that records no owner is decided from its conversation's
+  summary.
 - Page 0 reads descriptors in pages of `limit`; a later page, which first counts off the rows of the
   pages before it, reads them in batches of 100 to 1,000 sized to that work, so `index=50&limit=20`
   costs 4 queries (two batches of 1,000, each with its summary read) rather than 102.
