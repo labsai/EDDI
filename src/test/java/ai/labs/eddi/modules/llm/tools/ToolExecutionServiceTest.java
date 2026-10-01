@@ -371,7 +371,7 @@ class ToolExecutionServiceTest {
             when(cacheService.get(SCOPE, "searchWeb", "args")).thenReturn(null);
 
             var result = service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
-                    () -> "hits", true, true, true, 60);
+                    () -> "hits", true, true, true, 60, ToolExecutionService.TIMEOUT_DISABLED);
 
             assertEquals("hits", result);
             // The cache key must stay on the dispatch name — searchNews and
@@ -389,7 +389,7 @@ class ToolExecutionServiceTest {
             when(rateLimiter.tryAcquire("conv-1", "searchWeb", 30)).thenReturn(true);
 
             service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
-                    () -> "hits", true, false, false, 30);
+                    () -> "hits", true, false, false, 30, ToolExecutionService.TIMEOUT_DISABLED);
 
             // {"websearch": 30} configures the LIMIT; the BUCKET stays per method, so
             // searchWeb/searchNews/searchWikipedia get 30/min each, not 30 between them.
@@ -403,7 +403,7 @@ class ToolExecutionServiceTest {
             when(rateLimiter.tryAcquire("conv-1", "searchWeb", 60)).thenReturn(true);
 
             service.executeToolWrapped(SEARCH_WEB, "args", SCOPE, "conv-1",
-                    () -> "hits", true, false, false, 60);
+                    () -> "hits", true, false, false, 60, ToolExecutionService.TIMEOUT_DISABLED);
 
             assertNotNull(meterRegistry.find("eddi.tool.execution.success").tag("tool", "searchWeb").counter());
             assertNull(meterRegistry.find("eddi.tool.execution.success").tag("tool", "websearch").counter());
@@ -416,7 +416,7 @@ class ToolExecutionServiceTest {
             when(rateLimiter.tryAcquire("conv-1", "searchWeb", 60)).thenReturn(true);
 
             service.executeToolWrapped(priced, "args", SCOPE, "conv-1",
-                    () -> "hits", true, false, true, 60);
+                    () -> "hits", true, false, true, 60, ToolExecutionService.TIMEOUT_DISABLED);
 
             verify(costTracker).trackToolCall(priced, "conv-1");
         }
@@ -602,7 +602,7 @@ class ToolExecutionServiceTest {
                         toolRuns.incrementAndGet();
                         return "2026-07-23T09:00:00Z";
                     },
-                    false, true, false, 60);
+                    false, true, false, 60, ToolExecutionService.TIMEOUT_DISABLED);
 
             assertEquals("2026-07-23T09:00:00Z", result,
                     "with caching enabled the cache lookup must not swallow the call");
@@ -616,10 +616,10 @@ class ToolExecutionServiceTest {
 
             String first = cachingService.executeToolWrapped(
                     ToolInvocation.of(request.name()), request.arguments(), SCOPE, "conv-1",
-                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60);
+                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60, ToolExecutionService.TIMEOUT_DISABLED);
             String second = cachingService.executeToolWrapped(
                     ToolInvocation.of(request.name()), request.arguments(), SCOPE, "conv-1",
-                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60);
+                    () -> "run-" + toolRuns.incrementAndGet(), false, true, false, 60, ToolExecutionService.TIMEOUT_DISABLED);
 
             assertEquals("run-1", first);
             assertEquals("run-1", second, "the second call must be served from the cache, so the write worked too");
