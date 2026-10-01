@@ -1301,6 +1301,9 @@ jobs:
   ui-manager-e2e:
     name: UI Manager E2E (MSW)
     runs-on: ubuntu-latest
+    # Bounded so a stalled runner fails in minutes rather than at GitHub's
+    # 6-hour default. Normally about 5 minutes.
+    timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.ui == 'true'
     defaults:
@@ -1321,7 +1324,11 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
+      # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
+      # a stall fast enough to re-run.
       - name: Install Playwright browsers
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
 
       # Two workers: the config's `workers: 1` on CI exists for the backend tiers,
@@ -1922,6 +1929,9 @@ jobs:
   e2e-fullstack:
     name: Backend E2E (${{ matrix.database }})
     runs-on: ubuntu-latest
+    # Bounded so a stalled runner fails in minutes rather than at GitHub's
+    # 6-hour default. Normally 2 to 6 minutes.
+    timeout-minutes: 20
     needs: [detect-changes, build-image]
     if: needs.detect-changes.outputs.code == 'true'
     strategy:
@@ -2029,7 +2039,11 @@ jobs:
         working-directory: ui/manager
         run: npm ci
 
+      # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
+      # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
+      # a stall fast enough to re-run.
       - name: Install Playwright browsers
+        timeout-minutes: 10
         working-directory: ui/manager
         run: npx playwright install --with-deps chromium
 
@@ -2113,6 +2127,9 @@ jobs:
   e2e-auth:
     name: Auth E2E (Keycloak)
     runs-on: ubuntu-latest
+    # Bounded so a stalled runner fails in minutes rather than at GitHub's
+    # 6-hour default. Normally about 2 minutes.
+    timeout-minutes: 15
     needs: [detect-changes, build-image]
     if: needs.detect-changes.outputs.code == 'true'
     env:
@@ -2170,7 +2187,11 @@ jobs:
         working-directory: ui/manager
         run: npm ci
 
+      # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
+      # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
+      # a stall fast enough to re-run.
       - name: Install Playwright browsers
+        timeout-minutes: 10
         working-directory: ui/manager
         run: npx playwright install --with-deps chromium
 
