@@ -34,8 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("PostgreSQL substring-search indexes")
 class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
 
-    private static final String COLLECTION = "trgm_test";
-    private static final List<String> FIELDS = List.of("name", "userId");
+    private static final String COLLECTION = PostgresSubstringSearchIndexes.DESCRIPTORS;
+    private static final List<PostgresSubstringSearchIndexes.Index> INDEXES = List.of(
+            PostgresSubstringSearchIndexes.Index.NAME, PostgresSubstringSearchIndexes.Index.USER_ID);
 
     private DataSource dataSource;
     private PostgresResourceStorage<Map<String, Object>> storage;
@@ -49,15 +50,15 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
                 new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
                 (Class<Map<String, Object>>) (Class<?>) Map.class);
         try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
-            for (String field : FIELDS) {
-                stmt.execute("DROP INDEX IF EXISTS " + PostgresSubstringSearchIndexes.indexName(COLLECTION, field));
+            for (var index : PostgresSubstringSearchIndexes.Index.values()) {
+                stmt.execute("DROP INDEX IF EXISTS " + index.indexName());
             }
             stmt.execute("DELETE FROM resources WHERE collection_name = '" + COLLECTION + "'");
         }
     }
 
     private PostgresSubstringSearchIndexes indexes() {
-        return new PostgresSubstringSearchIndexes(dataSource, COLLECTION, FIELDS);
+        return new PostgresSubstringSearchIndexes(dataSource, INDEXES);
     }
 
     private String indexDefinition(String name) throws SQLException {
@@ -76,10 +77,10 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
         indexes.build();
 
         assertTrue(indexes.isReady());
-        for (String field : FIELDS) {
-            String definition = indexDefinition(PostgresSubstringSearchIndexes.indexName(COLLECTION, field));
+        for (var index : INDEXES) {
+            String definition = indexDefinition(index.indexName());
             assertTrue(definition.contains("USING gin") && definition.contains("gin_trgm_ops")
-                    && definition.contains("'" + field + "'") && definition.contains("collection_name = '" + COLLECTION + "'"),
+                    && definition.contains("'" + index.field + "'") && definition.contains("collection_name = '" + COLLECTION + "'"),
                     definition);
         }
     }
@@ -102,7 +103,7 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
                     plan.append(rs.getString(1)).append('\n');
                 }
             }
-            assertTrue(plan.toString().contains(PostgresSubstringSearchIndexes.indexName(COLLECTION, "name")), plan.toString());
+            assertTrue(plan.toString().contains(PostgresSubstringSearchIndexes.Index.NAME.indexName()), plan.toString());
         }
 
         // And the search finds exactly what it found without the index.
@@ -118,7 +119,7 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
     void invalidIndexIsRebuilt() throws Exception {
         var indexes = indexes();
         indexes.build();
-        String name = PostgresSubstringSearchIndexes.indexName(COLLECTION, "name");
+        String name = PostgresSubstringSearchIndexes.Index.NAME.indexName();
         try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             // What CREATE INDEX CONCURRENTLY leaves behind when it is interrupted.
             stmt.execute("UPDATE pg_index SET indisvalid = false WHERE indexrelid = '" + name + "'::regclass");
@@ -146,7 +147,7 @@ class PostgresSubstringSearchIndexesTest extends PostgresTestBase {
                 indexes.build();
 
                 assertFalse(indexes.isReady());
-                assertEquals(null, indexDefinition(PostgresSubstringSearchIndexes.indexName(COLLECTION, "name")));
+                assertEquals(null, indexDefinition(PostgresSubstringSearchIndexes.Index.NAME.indexName()));
             } finally {
                 stmt.execute("SELECT pg_advisory_unlock(" + 0x65646469_7472676DL + ")");
             }

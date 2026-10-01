@@ -18,6 +18,7 @@ import org.postgresql.core.Parser;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -1233,29 +1234,48 @@ class PostgresResourceStorageTest {
     }
 
     @Test
-    void indexForSubstringSearch_buildsTheIndexes_whenEnabled() throws Exception {
+    void indexForSubstringSearch_buildsTheCataloguedIndexes_whenEnabled() throws Exception {
         // The advisory lock is granted (and every catalogue lookup answers "valid").
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getBoolean(1)).thenReturn(true);
+        var descriptors = new PostgresResourceStorage<>(dataSource, "descriptors", jsonSerialization, TestConfig.class);
+        descriptors.substringIndexStartDelayMillis = 0; // in production it waits for boot to settle
 
-        storage.substringIndexStartDelayMillis = 0; // in production it waits for boot to settle
-        storage.withSubstringSearchIndex(true).indexForSubstringSearch("name", "user.id", "userId");
+        descriptors.withSubstringSearchIndex(true).indexForSubstringSearch("name", "user.id", "userId");
 
-        // In the background: the extension, then one partial GIN index per plain field
-        // ("user.id" is not a top-level key, so it is left out).
+        // In the background: the extension, then one partial GIN index per catalogued
+        // field ("user.id" is not one, so it is left out).
         verify(statement, timeout(5_000)).execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
-        verify(statement, timeout(5_000)).execute(contains("idx_resources_trgm_test_collection_name ON resources USING gin"));
-        verify(statement, timeout(5_000)).execute(contains("idx_resources_trgm_test_collection_userid_"));
+        verify(statement, timeout(5_000)).execute(PostgresSubstringSearchIndexes.Index.NAME.createStatement());
+        verify(statement, timeout(5_000)).execute(PostgresSubstringSearchIndexes.Index.USER_ID.createStatement());
         verify(statement, never()).execute(contains("user.id"));
     }
 
     @Test
-    void indexName_staysDistinctForCaseVariantsAndWithinTheIdentifierLimit() {
-        assertEquals("idx_resources_trgm_descriptors_name", PostgresSubstringSearchIndexes.indexName("descriptors", "name"));
-        assertNotEquals(PostgresSubstringSearchIndexes.indexName("descriptors", "userId"),
-                PostgresSubstringSearchIndexes.indexName("descriptors", "userid"));
-        String longName = PostgresSubstringSearchIndexes.indexName("a_rather_long_collection_name_for_testing", "aVeryLongFieldName");
-        assertTrue(longName.length() <= 63, longName);
+    void indexForSubstringSearch_doesNothing_forACollectionOutsideTheCatalogue() throws Exception {
+        clearInvocations(statement);
+        storage.substringIndexStartDelayMillis = 0;
+
+        storage.withSubstringSearchIndex(true).indexForSubstringSearch("name", "userId"); // collection "test_collection"
+
+        Thread.sleep(200);
+        verify(statement, never()).execute(contains("pg_trgm"));
+    }
+
+    @Test
+    void catalogue_namesOnlyItsOwnFields_andItsStatementsAreConstants() {
+        assertEquals(List.of(PostgresSubstringSearchIndexes.Index.NAME),
+                PostgresSubstringSearchIndexes.indexesFor("descriptors", "name", "bogus", "name", "na'me"));
+        assertTrue(PostgresSubstringSearchIndexes.indexesFor("other", "name").isEmpty());
+        Set<String> names = new HashSet<>();
+        for (var index : PostgresSubstringSearchIndexes.Index.values()) {
+            String name = index.indexName();
+            assertTrue(name.length() <= 63, name);
+            assertTrue(names.add(name), "duplicate index name " + name);
+            assertTrue(index.createStatement().contains(" " + name + " ON resources USING gin ((data ->> '" + index.field
+                    + "') gin_trgm_ops) WHERE collection_name = 'descriptors'"), index.createStatement());
+            assertEquals("DROP INDEX CONCURRENTLY IF EXISTS " + name, index.dropStatement());
+        }
     }
 
     // Simple test POJO

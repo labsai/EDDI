@@ -14,12 +14,17 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
- * Trigram indexes ({@code pg_trgm}) on the fields one collection searches by
- * substring, so a search such as the descriptor listing's search box does not
- * scan the collection.
+ * Trigram indexes ({@code pg_trgm}) on the fields the descriptor listings
+ * search by substring, so a search does not scan the collection.
+ *
+ * <h3>A fixed catalogue</h3> Only the {@value #DESCRIPTORS} collection and the
+ * five fields its search box looks in are indexed ({@link Index}). Every index
+ * name and every statement is a compile-time constant: DDL takes no bind
+ * parameters, so building it from runtime strings — however validated — would
+ * be SQL assembled by concatenation. A field outside the catalogue is not
+ * indexed.
  *
  * <h3>Why the indexes are built in the background</h3> A GIN trigram index
  * takes seconds per 100k rows to build — 300k descriptors took about 8 s for
@@ -57,6 +62,9 @@ final class PostgresSubstringSearchIndexes {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresSubstringSearchIndexes.class);
 
+    /** The one collection with substring-search indexes. */
+    static final String DESCRIPTORS = "descriptors";
+
     /**
      * How long a "not ready" answer is trusted before the catalogue is asked again.
      */
@@ -68,45 +76,85 @@ final class PostgresSubstringSearchIndexes {
      */
     private static final long BUILD_LOCK_KEY = 0x65646469_7472676DL;
 
+    /**
+     * The indexed fields of {@value #DESCRIPTORS}: the fields its listings search
+     * ({@code DescriptorStore}).
+     */
+    enum Index {
+        USER_ID("userId"), NAME("name"), AGENT_NAME("agentName"), DESCRIPTION("description"), RESOURCE("resource");
+
+        /** The JSON field, as a caller names it. */
+        final String field;
+
+        Index(String field) {
+            this.field = field;
+        }
+
+        String indexName() {
+            return switch (this) {
+                case USER_ID -> "idx_resources_trgm_descriptors_userid";
+                case NAME -> "idx_resources_trgm_descriptors_name";
+                case AGENT_NAME -> "idx_resources_trgm_descriptors_agentname";
+                case DESCRIPTION -> "idx_resources_trgm_descriptors_description";
+                case RESOURCE -> "idx_resources_trgm_descriptors_resource";
+            };
+        }
+
+        String createStatement() {
+            return switch (this) {
+                case USER_ID -> "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_resources_trgm_descriptors_userid ON resources "
+                        + "USING gin ((data ->> 'userId') gin_trgm_ops) WHERE collection_name = 'descriptors'";
+                case NAME -> "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_resources_trgm_descriptors_name ON resources "
+                        + "USING gin ((data ->> 'name') gin_trgm_ops) WHERE collection_name = 'descriptors'";
+                case AGENT_NAME -> "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_resources_trgm_descriptors_agentname ON resources "
+                        + "USING gin ((data ->> 'agentName') gin_trgm_ops) WHERE collection_name = 'descriptors'";
+                case DESCRIPTION -> "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_resources_trgm_descriptors_description ON resources "
+                        + "USING gin ((data ->> 'description') gin_trgm_ops) WHERE collection_name = 'descriptors'";
+                case RESOURCE -> "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_resources_trgm_descriptors_resource ON resources "
+                        + "USING gin ((data ->> 'resource') gin_trgm_ops) WHERE collection_name = 'descriptors'";
+            };
+        }
+
+        String dropStatement() {
+            return switch (this) {
+                case USER_ID -> "DROP INDEX CONCURRENTLY IF EXISTS idx_resources_trgm_descriptors_userid";
+                case NAME -> "DROP INDEX CONCURRENTLY IF EXISTS idx_resources_trgm_descriptors_name";
+                case AGENT_NAME -> "DROP INDEX CONCURRENTLY IF EXISTS idx_resources_trgm_descriptors_agentname";
+                case DESCRIPTION -> "DROP INDEX CONCURRENTLY IF EXISTS idx_resources_trgm_descriptors_description";
+                case RESOURCE -> "DROP INDEX CONCURRENTLY IF EXISTS idx_resources_trgm_descriptors_resource";
+            };
+        }
+    }
+
     private final DataSource dataSource;
-    private final String collectionName;
-    private final List<String> fields;
-    private final List<String> indexNames;
+    private final List<Index> indexes;
 
     private volatile boolean ready;
     private volatile long lastCheckMillis;
 
-    PostgresSubstringSearchIndexes(DataSource dataSource, String collectionName, List<String> fields) {
+    PostgresSubstringSearchIndexes(DataSource dataSource, List<Index> indexes) {
         this.dataSource = dataSource;
-        this.collectionName = collectionName;
-        this.fields = List.copyOf(fields);
-        List<String> names = new ArrayList<>();
-        for (String field : this.fields) {
-            names.add(indexName(collectionName, field));
-        }
-        this.indexNames = List.copyOf(names);
+        this.indexes = List.copyOf(indexes);
     }
 
     /**
-     * The searchable fields among {@code requested}: plain top-level keys only, as
-     * the trigram index expression is {@code data ->> 'field'}.
+     * The catalogue's indexes for {@code requested} fields of
+     * {@code collectionName}: none for any other collection, and only the
+     * catalogue's fields.
      */
-    static List<String> usableFields(String... requested) {
-        List<String> usable = new ArrayList<>();
+    static List<Index> indexesFor(String collectionName, String... requested) {
+        List<Index> found = new ArrayList<>();
+        if (!DESCRIPTORS.equals(collectionName)) {
+            return found;
+        }
         for (String field : requested) {
-            if (field != null && field.matches("[a-zA-Z0-9_]+")) {
-                usable.add(field);
+            for (Index index : Index.values()) {
+                if (index.field.equals(field) && !found.contains(index)) {
+                    found.add(index);
+                }
             }
         }
-        return usable;
-    }
-
-    /**
-     * The collection name is spliced into DDL, so it must be a plain
-     * identifier-like name.
-     */
-    static boolean usableCollection(String collectionName) {
-        return collectionName != null && collectionName.matches("[a-zA-Z0-9_.]+");
+        return found;
     }
 
     /**
@@ -114,7 +162,7 @@ final class PostgresSubstringSearchIndexes {
      * once. See {@link #buildWithRetries}.
      */
     void buildInBackground(long startDelayMillis) {
-        Thread.ofVirtual().name("pg-trgm-indexes-" + collectionName).start(() -> {
+        Thread.ofVirtual().name("pg-trgm-indexes").start(() -> {
             if (sleep(startDelayMillis)) {
                 buildWithRetries(RETRY_DELAYS_MILLIS);
             }
@@ -150,7 +198,7 @@ final class PostgresSubstringSearchIndexes {
                 boolean transientFailure = isTransient(e);
                 if (!transientFailure || attempt >= retryDelaysMillis.length) {
                     LOGGER.warnf("Substring search on %s stays unindexed: could not create the pg_trgm extension or its "
-                            + "indexes (%s). Searching still works, unindexed; %s", collectionName, e.getMessage(),
+                            + "indexes (%s). Searching still works, unindexed; %s", DESCRIPTORS, e.getMessage(),
                             transientFailure
                                     ? "the next restart tries again."
                                     : "grant the role CREATE on the database, or set "
@@ -158,7 +206,7 @@ final class PostgresSubstringSearchIndexes {
                     return false;
                 }
                 LOGGER.infof("Substring-search index build for %s failed transiently (%s, SQLState %s); retrying in %d s",
-                        collectionName, e.getMessage(), e.getSQLState(), retryDelaysMillis[attempt] / 1000);
+                        DESCRIPTORS, e.getMessage(), e.getSQLState(), retryDelaysMillis[attempt] / 1000);
                 if (!sleep(retryDelaysMillis[attempt])) {
                     return false;
                 }
@@ -195,19 +243,17 @@ final class PostgresSubstringSearchIndexes {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(true); // CREATE INDEX CONCURRENTLY refuses to run in a transaction
             if (!tryLock(conn)) {
-                LOGGER.debugf("Another instance is building the substring-search indexes of %s", collectionName);
+                LOGGER.debug("Another instance is building the substring-search indexes");
                 return;
             }
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
-                for (int i = 0; i < fields.size(); i++) {
-                    String name = indexNames.get(i);
-                    if (Boolean.FALSE.equals(isValid(conn, name))) {
-                        LOGGER.infof("Rebuilding substring-search index %s, left invalid by an interrupted build", name);
-                        stmt.execute("DROP INDEX CONCURRENTLY IF EXISTS " + name);
+                for (Index index : indexes) {
+                    if (Boolean.FALSE.equals(isValid(conn, index.indexName()))) {
+                        LOGGER.infof("Rebuilding substring-search index %s, left invalid by an interrupted build", index.indexName());
+                        stmt.execute(index.dropStatement());
                     }
-                    stmt.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS " + name + " ON resources USING gin ((data ->> '" + fields.get(i)
-                            + "') gin_trgm_ops) WHERE collection_name = '" + collectionName + "'");
+                    stmt.execute(index.createStatement());
                 }
             } finally {
                 unlock(conn);
@@ -215,7 +261,8 @@ final class PostgresSubstringSearchIndexes {
             ready = allValid(conn);
             lastCheckMillis = System.currentTimeMillis();
             if (ready) {
-                LOGGER.infof("Substring-search indexes ready for %s (%s)", collectionName, String.join(", ", fields));
+                LOGGER.infof("Substring-search indexes ready for %s (%s)", DESCRIPTORS,
+                        String.join(", ", indexes.stream().map(index -> index.field).toList()));
             }
         }
     }
@@ -238,18 +285,14 @@ final class PostgresSubstringSearchIndexes {
         try (Connection conn = dataSource.getConnection()) {
             ready = allValid(conn);
         } catch (SQLException e) {
-            LOGGER.debugf("Could not check the substring-search indexes of %s: %s", collectionName, e.getMessage());
+            LOGGER.debugf("Could not check the substring-search indexes: %s", e.getMessage());
         }
         return ready;
     }
 
-    List<String> indexNames() {
-        return indexNames;
-    }
-
     private boolean allValid(Connection conn) throws SQLException {
-        for (String name : indexNames) {
-            if (!Boolean.TRUE.equals(isValid(conn, name))) {
+        for (Index index : indexes) {
+            if (!Boolean.TRUE.equals(isValid(conn, index.indexName()))) {
                 return false;
             }
         }
@@ -287,23 +330,5 @@ final class PostgresSubstringSearchIndexes {
         } catch (SQLException e) {
             LOGGER.warnf("Could not release the substring-search build lock: %s", e.getMessage());
         }
-    }
-
-    /**
-     * {@code idx_resources_trgm_<collection>_<field>}, lower-cased with a digest of
-     * the exact name when that differs, and kept within PostgreSQL's 63-byte limit
-     * with the digest at the end (PostgreSQL would truncate silently, cutting the
-     * digest off).
-     */
-    static String indexName(String collectionName, String field) {
-        String exact = collectionName.replace('.', '_') + "_" + field;
-        String lower = exact.toLowerCase(Locale.ROOT);
-        String name = "idx_resources_trgm_" + lower;
-        if (lower.equals(exact) && name.length() <= 63) {
-            return name;
-        }
-        String digest = String.format("%08x", exact.hashCode());
-        int room = 63 - "idx_resources_trgm_".length() - 1 - digest.length();
-        return "idx_resources_trgm_" + lower.substring(0, Math.min(lower.length(), room)) + "_" + digest;
     }
 }

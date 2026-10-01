@@ -50,7 +50,7 @@ class PostgresSubstringSearchIndexesRetryTest {
         // The advisory lock is granted, and every index is found valid once built.
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getBoolean(1)).thenReturn(true);
-        indexes = new PostgresSubstringSearchIndexes(dataSource, "descriptors", List.of("name"));
+        indexes = new PostgresSubstringSearchIndexes(dataSource, List.of(PostgresSubstringSearchIndexes.Index.NAME));
     }
 
     @Test

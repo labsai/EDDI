@@ -173,8 +173,11 @@ JDBC driver server-prepares a statement it sees repeatedly, PostgreSQL then reus
 and a search that matched nothing took about a second on 300k descriptors.
 
 - **`PostgresSubstringSearchIndexes`**: GIN `gin_trgm_ops` indexes on the five searched fields,
-  partial to the collection. `DescriptorStore` asks for them through the new optional
-  `ISubstringSearchIndexing`, which only the PostgreSQL storage implements.
+  partial to the `descriptors` collection. `DescriptorStore` asks for them through the new optional
+  `ISubstringSearchIndexing`, which only the PostgreSQL storage implements. The indexes are a fixed
+  catalogue: every index name and `CREATE`/`DROP` statement is a compile-time constant, so no runtime
+  string reaches the DDL (which takes no bind parameters); a field or collection outside the catalogue
+  is not indexed. (CodeQL flagged the first version, which built the DDL from validated names.)
 - **Built in the background**, 15 s after boot, with `CREATE INDEX CONCURRENTLY`: a large deployment
   neither waits at startup nor stops writing (300k descriptors took ~8 s for all five). One builder
   across replicas via an advisory lock. An index an interrupted build left INVALID — which
@@ -212,5 +215,6 @@ uses the index, an INVALID index is rebuilt, another builder's lock is respected
 `PostgresSubstringSearchIndexesRetryTest` (a deadlock is retried to success, a privilege failure is
 not, retries are bounded, the SQLState classification), and `PostgresResourceStorageTest` (planned per
 execution only for a substring search with ready indexes; the build starts only when enabled).
-Mutation-checked: six mutants — never planned per execution, planned before ready, nothing transient,
-no repair, lock ignored, privilege retried — all killed.
+Mutation-checked: eight mutants — never planned per execution, planned before ready, nothing
+transient, no repair, lock ignored, privilege retried, a field outside the catalogue indexed, any
+collection indexed — all killed.

@@ -157,16 +157,15 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     /**
      * Builds {@code pg_trgm} indexes on these fields of this collection, in the
      * background; see {@link PostgresSubstringSearchIndexes}. Does nothing when
-     * disabled, when the collection name is not a plain identifier, or when no
-     * field is a plain top-level key.
+     * disabled, or for a collection or field outside its fixed catalogue.
      */
     @Override
     public void indexForSubstringSearch(String... fields) {
-        List<String> usable = PostgresSubstringSearchIndexes.usableFields(fields);
-        if (!substringSearchIndexEnabled || usable.isEmpty() || !PostgresSubstringSearchIndexes.usableCollection(collectionName)) {
+        var catalogued = PostgresSubstringSearchIndexes.indexesFor(collectionName, fields);
+        if (!substringSearchIndexEnabled || catalogued.isEmpty()) {
             return;
         }
-        var indexes = new PostgresSubstringSearchIndexes(dataSource, collectionName, usable);
+        var indexes = new PostgresSubstringSearchIndexes(dataSource, catalogued);
         substringIndexes = indexes;
         indexes.buildInBackground(substringIndexStartDelayMillis);
     }
