@@ -78,8 +78,15 @@ The realm EDDI ships has an `eddi-backend-audience` mapper on `eddi-frontend` (a
 `eddi-mcp` client), so an unmodified shipped realm is not affected.
 
 **What to do.** Give every client whose tokens EDDI must accept an audience mapper
-(`oidc-audience-mapper` with `included.client.audience=eddi-backend`). If you can't, set
-`QUARKUS_OIDC_TOKEN_AUDIENCE=any`, which turns the check off and returns to the 6.4 behaviour.
+(`oidc-audience-mapper` with `included.client.audience=eddi-backend`). That is the fix, and EDDI
+should accept only tokens that carry `eddi-backend` in `aud`.
+
+`QUARKUS_OIDC_TOKEN_AUDIENCE=any` turns the check off again (see
+[security.md](security.md)), but don't treat it as a fallback. EDDI reads roles from
+`realm_access/roles`, which doesn't depend on the client, so with the check off a token any
+client of the realm obtained for a user carries that user's full EDDI rights. That is the 6.4
+exposure this release closes. Use it at most as a stopgap while the mappers are being added,
+and remove it afterwards.
 
 ### 2.3 Roles are read from `realm_access/roles`
 
