@@ -50,10 +50,13 @@ class RestConversationStoreFilterTest {
 
     @SuppressWarnings("unchecked")
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        // The listing reads a page of summaries at once; route it through the per-id
+        // stubs.
+        lenient().when(conversationMemoryStore.loadListingSummaries(any())).thenCallRealMethod();
         IConversationService conversationService = mock(IConversationService.class);
         IUserMemoryStore userMemoryStore = mock(IUserMemoryStore.class);
         IRuntime runtime = mock(IRuntime.class);
@@ -102,7 +105,7 @@ class RestConversationStoreFilterTest {
         // Arrange
         var descriptor = createDescriptor(CONVERSATION_ID, AGENT_ID, 1);
 
-        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false), any()))
                 .thenReturn(List.of(descriptor));
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
                 .thenReturn(createSnapshot(AGENT_ID, 1));
@@ -128,7 +131,7 @@ class RestConversationStoreFilterTest {
         // Arrange — descriptor belongs to OTHER_AGENT_ID
         var descriptor = createDescriptor(CONVERSATION_ID, OTHER_AGENT_ID, 1);
 
-        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false), any()))
                 .thenReturn(List.of(descriptor));
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
                 .thenReturn(createSnapshot(OTHER_AGENT_ID, 1));
@@ -153,7 +156,7 @@ class RestConversationStoreFilterTest {
     void readConversationDescriptors_agentVersionFilter_matchesCorrectVersion() throws Exception {
         var descriptor = createDescriptor(CONVERSATION_ID, AGENT_ID, 1);
 
-        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false), any()))
                 .thenReturn(List.of(descriptor));
         // Intentionally different from descriptor agentResource version to ensure
         // filtering is based on agentResource, not snapshot metadata.
@@ -181,7 +184,7 @@ class RestConversationStoreFilterTest {
         // Descriptor is version 1, but we filter for version 2
         var descriptor = createDescriptor(CONVERSATION_ID, AGENT_ID, 1);
 
-        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false), any()))
                 .thenReturn(List.of(descriptor));
         // Intentionally different from descriptor agentResource version to ensure
         // filtering is based on agentResource, not snapshot metadata.

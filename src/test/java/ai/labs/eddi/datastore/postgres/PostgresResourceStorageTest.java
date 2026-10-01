@@ -12,15 +12,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.postgresql.PGStatement;
 import org.postgresql.core.NativeQuery;
 import org.postgresql.core.Parser;
 
 import javax.sql.DataSource;
 import java.sql.*;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
@@ -1165,6 +1168,139 @@ class PostgresResourceStorageTest {
         // literal key here would compare against a key spelled with a dot, which
         // never exists — the CAS would report a spurious conflict.
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'state' = ?"), sql.getValue());
+    }
+
+    // ==================== substring search: planning and indexing
+    // ====================
+
+    private static IResourceFilter.QueryFilters[] containsSearch() {
+        return new IResourceFilter.QueryFilters[]{new IResourceFilter.QueryFilters(
+                List.of(new IResourceFilter.QueryFilter("name", new IResourceFilter.Contains("x"))))};
+    }
+
+    private PGStatement plannable() throws SQLException {
+        PGStatement pgStatement = mock(PGStatement.class);
+        when(preparedStatement.isWrapperFor(PGStatement.class)).thenReturn(true);
+        when(preparedStatement.unwrap(PGStatement.class)).thenReturn(pgStatement);
+        return pgStatement;
+    }
+
+    private static PostgresSubstringSearchIndexes indexes(boolean ready) {
+        PostgresSubstringSearchIndexes indexes = mock(PostgresSubstringSearchIndexes.class);
+        when(indexes.isReady(any())).thenReturn(ready);
+        return indexes;
+    }
+
+    @Test
+    void substringSearch_isPlannedPerExecution_onceItsIndexesAreReady() throws Exception {
+        PGStatement pgStatement = plannable();
+        storage.useSubstringIndexes(indexes(true));
+
+        storage.findResources(containsSearch(), null, 0, 10);
+
+        verify(pgStatement).setPrepareThreshold(0);
+    }
+
+    @Test
+    void substringSearch_keepsTheDriversPlanning_untilItsIndexesAreReady() throws Exception {
+        // Without the indexes, planning per execution made a common term ~170x slower.
+        PGStatement pgStatement = plannable();
+        storage.useSubstringIndexes(indexes(false));
+
+        storage.findResources(containsSearch(), null, 0, 10);
+
+        verify(pgStatement, never()).setPrepareThreshold(anyInt());
+    }
+
+    @Test
+    void substringSearch_checksReadinessOnItsOwnConnection_notASecondOne() throws Exception {
+        // Not ready yet, so the search asks the catalogue — on the connection it
+        // already
+        // holds. A second checkout per search could stall concurrent searches in an
+        // exhausted pool.
+        storage.useSubstringIndexes(new PostgresSubstringSearchIndexes(dataSource, List.of(PostgresSubstringSearchIndexes.Index.NAME)));
+        clearInvocations(dataSource);
+
+        storage.findResources(containsSearch(), null, 0, 10);
+
+        verify(dataSource, times(1)).getConnection();
+    }
+
+    @Test
+    void readiness_isRecheckedAtMostOncePerInterval() throws Exception {
+        var indexes = new PostgresSubstringSearchIndexes(dataSource, List.of(PostgresSubstringSearchIndexes.Index.NAME));
+        clearInvocations(connection);
+
+        assertFalse(indexes.isReady(connection)); // the catalogue says the index does not exist
+        assertFalse(indexes.isReady(connection)); // within the interval: not asked again
+
+        verify(connection, times(1)).prepareStatement(contains("pg_index"));
+    }
+
+    @Test
+    void otherQueries_keepTheDriversPlanning_evenWithReadyIndexes() throws Exception {
+        PGStatement pgStatement = plannable();
+        storage.useSubstringIndexes(indexes(true));
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{new IResourceFilter.QueryFilters(
+                List.of(IResourceFilter.QueryFilter.exact("name", "x")))}, null, 0, 10);
+
+        verify(pgStatement, never()).setPrepareThreshold(anyInt());
+    }
+
+    @Test
+    void indexForSubstringSearch_doesNothing_whenDisabled() throws Exception {
+        clearInvocations(statement);
+
+        storage.indexForSubstringSearch("name", "userId");
+
+        Thread.sleep(200); // a build would run on a background thread
+        verify(statement, never()).execute(contains("pg_trgm"));
+    }
+
+    @Test
+    void indexForSubstringSearch_buildsTheCataloguedIndexes_whenEnabled() throws Exception {
+        // The advisory lock is granted (and every catalogue lookup answers "valid").
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getBoolean(1)).thenReturn(true);
+        var descriptors = new PostgresResourceStorage<>(dataSource, "descriptors", jsonSerialization, TestConfig.class);
+        descriptors.substringIndexStartDelayMillis = 0; // in production it waits for boot to settle
+
+        descriptors.withSubstringSearchIndex(true).indexForSubstringSearch("name", "user.id", "userId");
+
+        // In the background: the extension, then one partial GIN index per catalogued
+        // field ("user.id" is not one, so it is left out).
+        verify(statement, timeout(5_000)).execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+        verify(statement, timeout(5_000)).execute(PostgresSubstringSearchIndexes.Index.NAME.createStatement());
+        verify(statement, timeout(5_000)).execute(PostgresSubstringSearchIndexes.Index.USER_ID.createStatement());
+        verify(statement, never()).execute(contains("user.id"));
+    }
+
+    @Test
+    void indexForSubstringSearch_doesNothing_forACollectionOutsideTheCatalogue() throws Exception {
+        clearInvocations(statement);
+        storage.substringIndexStartDelayMillis = 0;
+
+        storage.withSubstringSearchIndex(true).indexForSubstringSearch("name", "userId"); // collection "test_collection"
+
+        Thread.sleep(200);
+        verify(statement, never()).execute(contains("pg_trgm"));
+    }
+
+    @Test
+    void catalogue_namesOnlyItsOwnFields_andItsStatementsAreConstants() {
+        assertEquals(List.of(PostgresSubstringSearchIndexes.Index.NAME),
+                PostgresSubstringSearchIndexes.indexesFor("descriptors", "name", "bogus", "name", "na'me"));
+        assertTrue(PostgresSubstringSearchIndexes.indexesFor("other", "name").isEmpty());
+        Set<String> names = new HashSet<>();
+        for (var index : PostgresSubstringSearchIndexes.Index.values()) {
+            String name = index.indexName();
+            assertTrue(name.length() <= 63, name);
+            assertTrue(names.add(name), "duplicate index name " + name);
+            assertTrue(index.createStatement().contains(" " + name + " ON resources USING gin ((data ->> '" + index.field
+                    + "') gin_trgm_ops) WHERE collection_name = 'descriptors'"), index.createStatement());
+            assertEquals("DROP INDEX CONCURRENTLY IF EXISTS " + name, index.dropStatement());
+        }
     }
 
     // Simple test POJO

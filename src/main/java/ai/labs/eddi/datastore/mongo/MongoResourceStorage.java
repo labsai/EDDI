@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.StringUtilities;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
@@ -837,6 +838,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                     // $not also matches documents lacking the field, which is the
                     // contract NotMatching documents.
                     filters.add(Filters.not(Filters.regex(queryFilter.getField(), notMatching.pattern())));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.Contains contains) {
+                    // An unanchored regex already finds the text anywhere; no .* wrapping.
+                    filters.add(Filters.regex(queryFilter.getField(), StringUtilities.escapeRegexChars(contains.text())));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }

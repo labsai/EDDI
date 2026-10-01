@@ -329,6 +329,83 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
             assertEquals(Set.of(bob, malice, unowned), ids, "only alice's own row is excluded; " + alice + " must not appear");
         }
 
+        /**
+         * The agent group the conversation listing pushes into its descriptor query
+         * (RestConversationStore.listingRestrictions): the descriptor names this agent,
+         * or names no agent at all. Both patterns must mean on PostgreSQL's regex
+         * dialect what they mean in Java and on MongoDB.
+         */
+        @Test
+        @DisplayName("the listing's agent group: this agent, or no agent — not a longer id, not another agent")
+        void conversationListingAgentGroup() throws Exception {
+            String agent = "0000000000000000000000a1";
+            String versioned = store(Map.of("agentResource", "eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=2"));
+            String unversioned = store(Map.of("agentResource", "eddi://ai.labs.agent/agentstore/agents/" + agent));
+            store(Map.of("agentResource", "eddi://ai.labs.agent/agentstore/agents/" + agent + "ff?version=2"));
+            store(Map.of("agentResource", "eddi://ai.labs.agent/agentstore/agents/0000000000000000000000b2?version=2"));
+            String absent = store(Map.of("name", "a descriptor an earlier 6.x rewrote without its agent"));
+            String blank = store(Map.of("agentResource", "  "));
+
+            var group = new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, List.of(
+                    new IResourceFilter.QueryFilter("agentResource", "/" + Subjects.escapeRegex(agent) + "(\\?|$)"),
+                    new IResourceFilter.QueryFilter("agentResource", new IResourceFilter.NotMatching("\\S"))));
+            var found = storage.findResources(new IResourceFilter.QueryFilters[]{group}, null, 0, 50);
+
+            Set<String> ids = new HashSet<>();
+            found.forEach(id -> ids.add(id.getId()));
+            assertEquals(Set.of(versioned, unversioned, absent, blank), ids);
+        }
+
+        private String store(Map<String, Object> content) throws IOException {
+            var resource = storage.newResource(content);
+            storage.store(resource);
+            return resource.getId();
+        }
+    }
+
+    @Nested
+    @DisplayName("Contains filter")
+    class ContainsFilter {
+
+        @Test
+        @DisplayName("matches the text literally, anywhere, case-sensitively; an absent field does not match")
+        void containsIsALiteralSubstring() throws Exception {
+            String middle = store(Map.of("name", "the a+b (x) agent"));
+            String start = store(Map.of("name", "a+b (x)"));
+            store(Map.of("name", "aab (x)")); // "+" is literal, not "one or more"
+            store(Map.of("name", "the A+B (X) agent")); // case-sensitive
+            store(Map.of("description", "a+b (x)")); // the field is absent
+
+            assertEquals(Set.of(middle, start), find("name", new IResourceFilter.Contains("a+b (x)")));
+        }
+
+        @Test
+        @DisplayName("an empty text matches every row that has the field")
+        void emptyTextMatchesEveryPresentField() throws Exception {
+            String a = store(Map.of("name", "anything"));
+            String b = store(Map.of("name", ""));
+            store(Map.of("description", "no name"));
+
+            assertEquals(Set.of(a, b), find("name", new IResourceFilter.Contains("")));
+        }
+
+        @Test
+        @DisplayName("a quote, a percent, an underscore or a backslash in the text is just text")
+        void noCharacterIsSpecial() throws Exception {
+            String hit = store(Map.of("name", "50% off 'today' \\o/ a_b"));
+            store(Map.of("name", "50X off 'today' \\o/ axb")); // % and _ are not wildcards
+
+            assertEquals(Set.of(hit), find("name", new IResourceFilter.Contains("% off 'today' \\o/ a_b")));
+        }
+
+        private Set<String> find(String field, Object value) {
+            Set<String> ids = new HashSet<>();
+            storage.findResources(new IResourceFilter.QueryFilters[]{
+                    new IResourceFilter.QueryFilters(List.of(new IResourceFilter.QueryFilter(field, value)))}, null, 0, 50)
+                    .forEach(id -> ids.add(id.getId()));
+            return ids;
+        }
+
         private String store(Map<String, Object> content) throws IOException {
             var resource = storage.newResource(content);
             storage.store(resource);

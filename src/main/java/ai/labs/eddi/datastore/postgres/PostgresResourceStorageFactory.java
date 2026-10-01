@@ -12,6 +12,7 @@ import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 
@@ -35,6 +36,14 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
     private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
 
+    /**
+     * Whether storages may build {@code pg_trgm} indexes for substring search (see
+     * {@link PostgresSubstringSearchIndexes}). Field-injected so tests that
+     * construct the factory directly keep the default.
+     */
+    @ConfigProperty(name = "eddi.datastore.postgres.substring-search-index", defaultValue = "true")
+    boolean substringSearchIndex = true;
+
     @Inject
     public PostgresResourceStorageFactory(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
         this.dataSourceInstance = dataSourceInstance;
@@ -55,7 +64,8 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
      */
     @Override
     public <T> IResourceStorage<T> create(String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType, String... indexes) {
-        return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType, indexes);
+        return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType, indexes)
+                .withSubstringSearchIndex(substringSearchIndex);
     }
 
     /**

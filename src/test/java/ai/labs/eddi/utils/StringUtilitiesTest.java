@@ -12,6 +12,29 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StringUtilitiesTest {
 
+    // --- searchText ---
+
+    @Test
+    void searchText_plainText_isTakenLiterally() {
+        assertEquals("a+b*c", StringUtilities.searchText("a+b*c"));
+    }
+
+    @Test
+    void searchText_quotedText_dropsTheQuotes() {
+        assertEquals("hello world", StringUtilities.searchText("\"hello world\""));
+    }
+
+    @Test
+    void searchText_emptyOrLoneQuote_isAnEmptySearch() {
+        assertEquals("", StringUtilities.searchText("\"\""));
+        assertEquals("", StringUtilities.searchText("\""));
+    }
+
+    @Test
+    void searchText_quoteOnOneSideOnly_isKept() {
+        assertEquals("\"hello", StringUtilities.searchText("\"hello"));
+    }
+
     // --- convertToSearchString ---
 
     @Test

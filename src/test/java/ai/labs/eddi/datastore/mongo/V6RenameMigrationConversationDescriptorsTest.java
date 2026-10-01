@@ -126,6 +126,7 @@ class V6RenameMigrationConversationDescriptorsTest extends MongoTestBase {
     @SuppressWarnings("unchecked")
     private List<ConversationDescriptor> list(String agentId, Integer agentVersion) throws Exception {
         IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        when(conversations.loadListingSummaries(any())).thenCallRealMethod();
         when(conversations.loadConversationMemorySnapshot(anyString())).thenAnswer(invocation -> {
             String conversationId = invocation.getArgument(0);
             var snapshot = new ConversationMemorySnapshot();

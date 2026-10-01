@@ -89,6 +89,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String[] INDEXED_FIELDS = {FIELD_RESOURCE, FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION,
             FIELD_LAST_MODIFIED, FIELD_DELETED, FIELD_ORIGIN_ID, FIELD_ACCESS_INDEX};
 
+    /**
+     * The fields a listing's search looks in, in order — and the fields a storage
+     * that can ({@link ISubstringSearchIndexing}) indexes for substring search.
+     */
+    private static final String[] SEARCHED_FIELDS = {FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION, FIELD_RESOURCE};
+
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
     private final IResourceStorage<T> resourceStorage;
 
@@ -99,6 +105,10 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, Class<T> documentType, String collectionName) {
         this.resourceStorage = storageFactory.create(collectionName, documentBuilder, documentType, INDEXED_FIELDS);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
+        if (resourceStorage instanceof ISubstringSearchIndexing searchable) {
+            // The fields a listing's search box looks in (readDescriptorsRestricted).
+            searchable.indexForSubstringSearch(SEARCHED_FIELDS);
+        }
     }
 
     @Override
@@ -114,8 +124,8 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
      * Used to restrict a listing to what the caller may see. The restriction is
      * applied <em>in the query</em>, not to the returned page: filtering afterwards
      * would return short pages and force the kind of scan-budgeted back-fill
-     * {@code RestConversationStore} has to do for conversations, where no such
-     * predicate exists.
+     * {@code RestConversationStore} still has to do for conversations, whose owner,
+     * state and orphan checks depend on the conversation memory.
      * <p>
      * The parameter is a raw {@code QueryFilters} rather than the
      * {@code AccessScope} that produces it, so this package keeps knowing nothing
@@ -141,6 +151,24 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
                                    IResourceFilter.QueryFilters accessRestriction, IResourceFilter.QueryFilters extraRestriction)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        List<IResourceFilter.QueryFilters> restrictions = new LinkedList<>();
+        restrictions.add(accessRestriction);
+        restrictions.add(extraRestriction);
+        return readDescriptorsRestricted(type, filter, index, limit, includeDeleted, restrictions);
+    }
+
+    /**
+     * As above, with any number of further AND-ed groups. The conversation listing
+     * uses it to push its field filters into the query, so that a page of
+     * descriptors is a page of candidates rather than of everything.
+     *
+     * @param restrictions
+     *            additional filter groups; {@code null} entries and empty groups
+     *            are ignored, and so is a {@code null} list
+     */
+    public List<T> readDescriptorsRestricted(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                             List<IResourceFilter.QueryFilters> restrictions)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
         queryFiltersRequired.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, resourceTypePrefixPattern(type)));
@@ -156,12 +184,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
         List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();
         if (filter != null) {
-            filter = StringUtilities.convertToSearchString(filter);
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
+            // A literal substring search, which each backend runs in its cheapest form
+            // (see IResourceFilter.Contains) — not a .*<text>.* regex.
+            var contains = new IResourceFilter.Contains(StringUtilities.searchText(filter));
+            for (String field : SEARCHED_FIELDS) {
+                queryFiltersOptional.add(new IResourceFilter.QueryFilter(field, contains));
+            }
         }
 
         int effectiveLimit = IDescriptorStore.resolveDescriptorLimit(limit);
@@ -181,11 +209,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         if (!queryFiltersOptional.isEmpty()) {
             filterGroups.add(new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional));
         }
-        if (accessRestriction != null && !accessRestriction.getQueryFilters().isEmpty()) {
-            filterGroups.add(accessRestriction);
-        }
-        if (extraRestriction != null && !extraRestriction.getQueryFilters().isEmpty()) {
-            filterGroups.add(extraRestriction);
+        if (restrictions != null) {
+            for (IResourceFilter.QueryFilters restriction : restrictions) {
+                if (restriction != null && !restriction.getQueryFilters().isEmpty()) {
+                    filterGroups.add(restriction);
+                }
+            }
         }
         IResourceFilter.QueryFilters[] allFilters = filterGroups.toArray(new IResourceFilter.QueryFilters[0]);
 
