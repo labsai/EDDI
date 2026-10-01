@@ -455,7 +455,7 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>1.5.9</version>
+            <version>3.0.7</version>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
