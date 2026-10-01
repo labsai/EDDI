@@ -152,9 +152,3 @@ agent A's 45 conversations came back as 88 rows — so they do detect the bug.
 Mutation-checked: nine more mutants in the search and fallback code (LIKE wildcards unescaped, ILIKE,
 MongoDB text unescaped, back to a regex string, quotes kept, fallback always / never, a failed batch
 dropping the page, an unreadable row counted as an orphan), all killed.
-
-### Also
-
-`docs/changelog.d/2026-09-26-fix-outbound-http-hardening.md` linked to a fragment the nightly
-collation (#894) had already folded into `changelog.md`, which failed `DocumentationLinksTest` on
-`main`. The link now points at the live changelog.
