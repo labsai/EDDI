@@ -89,6 +89,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     private static final String[] INDEXED_FIELDS = {FIELD_RESOURCE, FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION,
             FIELD_LAST_MODIFIED, FIELD_DELETED, FIELD_ORIGIN_ID, FIELD_ACCESS_INDEX};
 
+    /**
+     * The fields a listing's search looks in, in order — and the fields a storage
+     * that can ({@link ISubstringSearchIndexing}) indexes for substring search.
+     */
+    private static final String[] SEARCHED_FIELDS = {FIELD_USER_ID, FIELD_NAME, FIELD_AGENT_NAME, FIELD_DESCRIPTION, FIELD_RESOURCE};
+
     private final ModifiableHistorizedResourceStore<T> descriptorResourceStore;
     private final IResourceStorage<T> resourceStorage;
 
@@ -99,6 +105,10 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
     public DescriptorStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, Class<T> documentType, String collectionName) {
         this.resourceStorage = storageFactory.create(collectionName, documentBuilder, documentType, INDEXED_FIELDS);
         this.descriptorResourceStore = new ModifiableHistorizedResourceStore<>(resourceStorage);
+        if (resourceStorage instanceof ISubstringSearchIndexing searchable) {
+            // The fields a listing's search box looks in (readDescriptorsRestricted).
+            searchable.indexForSubstringSearch(SEARCHED_FIELDS);
+        }
     }
 
     @Override
@@ -177,11 +187,9 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
             // A literal substring search, which each backend runs in its cheapest form
             // (see IResourceFilter.Contains) — not a .*<text>.* regex.
             var contains = new IResourceFilter.Contains(StringUtilities.searchText(filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, contains));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, contains));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, contains));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, contains));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, contains));
+            for (String field : SEARCHED_FIELDS) {
+                queryFiltersOptional.add(new IResourceFilter.QueryFilter(field, contains));
+            }
         }
 
         int effectiveLimit = IDescriptorStore.resolveDescriptorLimit(limit);

@@ -56,6 +56,7 @@ applies in dev mode only.
 | Property | Default | Description |
 |---|---|---|
 | `eddi.datastore.type` | `mongodb` | `mongodb` or `postgres`. Selects the whole persistence layer — see [Architecture → DB-agnostic design](architecture.md) |
+| `eddi.datastore.postgres.substring-search-index` | `true` | PostgreSQL only. Builds `pg_trgm` trigram indexes for the descriptor listings' search box, in the background after boot (`CREATE INDEX CONCURRENTLY`, so writes are not blocked). Needs `CREATE EXTENSION pg_trgm`, which is trusted since PostgreSQL 13; if the role is refused, a warning is logged and search runs unindexed. Costs about 0.1 ms more per descriptor write. `false` builds nothing |
 | `eddi.messaging.type` | `in-memory` | `in-memory` or `nats`. `in-memory` confines the conversation coordinator to a single instance; `nats` distributes it |
 
 ### NATS JetStream (only when `eddi.messaging.type=nats`)

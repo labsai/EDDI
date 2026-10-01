@@ -7,8 +7,10 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.ISubstringSearchIndexing;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.jboss.logging.Logger;
+import org.postgresql.PGStatement;
 
 import javax.sql.DataSource;
 import java.io.IOException;
@@ -35,9 +37,23 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * @param <T>
  *            the resource document type
  */
-public class PostgresResourceStorage<T> implements IResourceStorage<T> {
+public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstringSearchIndexing {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresResourceStorage.class);
+
+    /**
+     * Whether {@link #indexForSubstringSearch} may build trigram indexes
+     * ({@code eddi.datastore.postgres.substring-search-index}); set by the factory.
+     */
+    private boolean substringSearchIndexEnabled;
+
+    /**
+     * The trigram indexes, once a caller asked for them; {@code null} until then.
+     */
+    private volatile PostgresSubstringSearchIndexes substringIndexes;
+
+    /** How long the background build waits after boot; tests shorten it. */
+    long substringIndexStartDelayMillis = PostgresSubstringSearchIndexes.START_DELAY_MILLIS;
 
     // collection_name FIRST: every query in this class filters on it, and a
     // btree index can only be used from its leading column. With (id,
@@ -126,6 +142,41 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         this.documentType = documentType;
 
         initSchema(indexes);
+    }
+
+    /**
+     * Allows {@link #indexForSubstringSearch} to build trigram indexes. Off unless
+     * the factory turns it on, so a storage built directly (tests, tools) never
+     * tries to create a database extension.
+     */
+    PostgresResourceStorage<T> withSubstringSearchIndex(boolean enabled) {
+        this.substringSearchIndexEnabled = enabled;
+        return this;
+    }
+
+    /**
+     * Builds {@code pg_trgm} indexes on these fields of this collection, in the
+     * background; see {@link PostgresSubstringSearchIndexes}. Does nothing when
+     * disabled, when the collection name is not a plain identifier, or when no
+     * field is a plain top-level key.
+     */
+    @Override
+    public void indexForSubstringSearch(String... fields) {
+        List<String> usable = PostgresSubstringSearchIndexes.usableFields(fields);
+        if (!substringSearchIndexEnabled || usable.isEmpty() || !PostgresSubstringSearchIndexes.usableCollection(collectionName)) {
+            return;
+        }
+        var indexes = new PostgresSubstringSearchIndexes(dataSource, collectionName, usable);
+        substringIndexes = indexes;
+        indexes.buildInBackground(substringIndexStartDelayMillis);
+    }
+
+    /**
+     * Test seam: the indexes a search consults, without starting a background
+     * build.
+     */
+    void useSubstringIndexes(PostgresSubstringSearchIndexes indexes) {
+        this.substringIndexes = indexes;
     }
 
     private void initSchema(String... indexes) {
@@ -757,6 +808,25 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
      * those fields still match.
      */
     /**
+     * Has PostgreSQL plan this execution for its actual values, so a substring
+     * search can use its trigram indexes. The JDBC driver server-prepares a
+     * statement it sees repeatedly, and PostgreSQL then reuses one generic plan,
+     * which cannot use them; a prepare threshold of 0 sends this statement unnamed,
+     * which PostgreSQL always plans for the bound values. Only for this statement,
+     * and only once the indexes are ready — see
+     * {@link PostgresSubstringSearchIndexes}.
+     */
+    private static void planPerExecution(PreparedStatement ps) {
+        try {
+            if (ps.isWrapperFor(PGStatement.class)) {
+                ps.unwrap(PGStatement.class).setPrepareThreshold(0);
+            }
+        } catch (SQLException e) {
+            LOGGER.debugf("Could not have the search planned per execution: %s", e.getMessage());
+        }
+    }
+
+    /**
      * Makes {@code text} literal inside a {@code LIKE … ESCAPE '\'} pattern: the
      * escape character first, then the two wildcards.
      */
@@ -782,6 +852,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         StringBuilder sql = new StringBuilder("SELECT id, version FROM resources WHERE collection_name = ?");
         List<Object> params = new ArrayList<>();
         params.add(collectionName);
+        boolean substringSearch = false;
 
         for (IResourceFilter.QueryFilters queryFilters : allQueryFilters) {
             List<String> clauses = new ArrayList<>();
@@ -806,6 +877,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                     // field) is not LIKE anything, so it does not match — as on MongoDB.
                     clauses.add(fieldExpression + " LIKE ? ESCAPE '\\'");
                     params.add("%" + escapeLike(contains.text()) + "%");
+                    substringSearch = true;
                 } else if (qf.getFilter() instanceof Boolean boolVal) {
                     clauses.add("COALESCE((" + fieldExpression + ")::boolean, false) = ?");
                     params.add(boolVal);
@@ -829,6 +901,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         }
 
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            if (substringSearch && substringIndexes != null && substringIndexes.isReady()) {
+                planPerExecution(ps);
+            }
             for (int i = 0; i < params.size(); i++) {
                 Object param = params.get(i);
                 if (param instanceof Boolean b) {

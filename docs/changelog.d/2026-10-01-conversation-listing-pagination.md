@@ -135,19 +135,8 @@ tests on both backends (`MongoContainsFilterTest`, `PostgresResourceStorageConta
 same rows for literal metacharacters (`+`, `(`, `%`, `_`, `\`, `'`), case, an absent field and an
 empty search.
 
-**Evaluated and not done: a `pg_trgm` index.** GIN trigram indexes on the five searched fields
-(partial, `collection_name = 'descriptors'`) were measured on the same data:
-
-- Planned for the actual value, a search took 16–26 ms instead of ~310 ms. With PostgreSQL's cached
-  generic plan — what a long-running instance runs — it took 291–378 ms against ~384 ms without the
-  index: the gain is gone. Keeping it needs `plan_cache_mode = force_custom_plan` for this query (or
-  different statement preparation in the JDBC driver), which is a change of its own.
-- Every descriptor rewrite — one per conversation turn — went from ~60 µs to 130–200 µs, still rising
-  as the indexes' pending lists filled, and the indexes add ~50 MB per 300k descriptors.
-- `CREATE EXTENSION pg_trgm` is trusted since PostgreSQL 13, but a locked-down role can still refuse it.
-
-MongoDB has no index that serves a substring search; a text index would change matching to whole
-words.
+PostgreSQL search is indexed too — see the next entry. MongoDB has no index that serves a substring
+search; a text index would change matching to whole words.
 
 ### The "nothing matched, list everything" fallback keeps its meaning
 
@@ -174,3 +163,54 @@ agent A's 45 conversations came back as 88 rows — so they do detect the bug.
 Mutation-checked: nine more mutants in the search and fallback code (LIKE wildcards unescaped, ILIKE,
 MongoDB text unescaped, back to a regex string, quotes kept, fallback always / never, a failed batch
 dropping the page, an unreadable row counted as an orphan), all killed.
+
+## ⚡ perf(postgres): index the descriptor search with pg_trgm, and plan it per execution (2026-10-01)
+
+**Repo:** EDDI (`fix/conversation-listing-pagination`)
+
+A search on PostgreSQL scanned every descriptor. On a long-running instance it was slower still: the
+JDBC driver server-prepares a statement it sees repeatedly, PostgreSQL then reuses one generic plan,
+and a search that matched nothing took about a second on 300k descriptors.
+
+- **`PostgresSubstringSearchIndexes`**: GIN `gin_trgm_ops` indexes on the five searched fields,
+  partial to the collection. `DescriptorStore` asks for them through the new optional
+  `ISubstringSearchIndexing`, which only the PostgreSQL storage implements.
+- **Built in the background**, 15 s after boot, with `CREATE INDEX CONCURRENTLY`: a large deployment
+  neither waits at startup nor stops writing (300k descriptors took ~8 s for all five). One builder
+  across replicas via an advisory lock. An index an interrupted build left INVALID — which
+  `IF NOT EXISTS` would skip for ever while it still costs every write — is dropped and rebuilt.
+- **Retries transient failures.** The first live boot deadlocked: the concurrent build ran into the
+  other storages' schema setup and PostgreSQL aborted it, leaving an index INVALID. The build now waits
+  for boot to settle and retries a deadlock, serialization failure, lock timeout or cancellation
+  (after 30 s, 2 min, 10 min); a refused privilege is reported once and not retried.
+- **Planned per execution, once the indexes are ready.** The search statement is sent with a prepare
+  threshold of 0, so PostgreSQL plans it for its actual pattern and can use the indexes. Only that
+  statement, and only when every index is valid: without the indexes, per-execution planning made a
+  common term ~170× slower than the cached plan, which happens to stop early on the date index.
+- **`eddi.datastore.postgres.substring-search-index`** (default `true`) turns it off. If
+  `CREATE EXTENSION pg_trgm` is refused, a warning is logged and search runs unindexed, as before.
+
+Measured live: the packaged jar on PostgreSQL 16 with 300k conversation descriptors and memories,
+through `GET /conversationstore/conversations?filter=…`, 120 requests per term, median of the last 60
+(after the connection pool's plan caching settled), identical rows with the feature off and on:
+
+| Search | off (as before) | on |
+|---|---|---|
+| matches a few conversations | 393 ms | 39 ms |
+| matches nothing | 375 ms | 23 ms |
+| matches many (common term) | 14 ms | 18 ms |
+
+Cost: each descriptor write maintains five GIN indexes — measured at the database, a descriptor
+rewrite (one per conversation turn) went from ~60 µs to 130–200 µs — and ~50 MB per 300k descriptors.
+
+Verified live on that boot: the build waited, repaired the INVALID index the deadlocked run had left,
+built the rest and reported ready 29 s after start, with EDDI serving from 4 s. The 293-check listing
+script passed on PostgreSQL with the feature on (indexes ready) and on MongoDB, where nothing changes.
+
+Tests: `PostgresSubstringSearchIndexesTest` (real PostgreSQL: the index definitions, a planned search
+uses the index, an INVALID index is rebuilt, another builder's lock is respected),
+`PostgresSubstringSearchIndexesRetryTest` (a deadlock is retried to success, a privilege failure is
+not, retries are bounded, the SQLState classification), and `PostgresResourceStorageTest` (planned per
+execution only for a substring search with ready indexes; the build starts only when enabled).
+Mutation-checked: six mutants — never planned per execution, planned before ready, nothing transient,
+no repair, lock ignored, privilege retried — all killed.
