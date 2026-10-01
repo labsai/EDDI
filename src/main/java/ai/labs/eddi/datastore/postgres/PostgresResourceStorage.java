@@ -800,13 +800,6 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     /**
-     * Render a dot-separated field path as a JSONB text extraction expression:
-     * {@code a} becomes {@code data ->> 'a'}, {@code a.b.c} becomes
-     * {@code data -> 'a' -> 'b' ->> 'c'}. The single-segment form is byte-identical
-     * to what this class emitted before, so the expression indexes created for
-     * those fields still match.
-     */
-    /**
      * Has PostgreSQL plan this execution for its actual values, so a substring
      * search can use its trigram indexes. The JDBC driver server-prepares a
      * statement it sees repeatedly, and PostgreSQL then reuses one generic plan,
@@ -833,6 +826,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
+    /**
+     * Render a dot-separated field path as a JSONB text extraction expression:
+     * {@code a} becomes {@code data ->> 'a'}, {@code a.b.c} becomes
+     * {@code data -> 'a' -> 'b' ->> 'c'}. The single-segment form is byte-identical
+     * to what this class emitted before, so the expression indexes created for
+     * those fields still match.
+     */
     private static String toTextPathExpression(String field) {
         String[] segments = sanitizeJsonPath(field).split("\\.");
         StringBuilder expression = new StringBuilder("data");
