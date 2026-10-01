@@ -1318,12 +1318,12 @@
         {
           "id": 14,
           "type": "timeseries",
-          "title": "Owner-scan exhausted",
+          "title": "Conversation listing: owner-scan exhausted, orphans skipped",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_conversations_listing_owner_scan_exhausted_total` — a conversation listing gave up before filling the requested page. Sustained non-zero means the owner filter is scanning too much; the caller sees a short page.",
+          "description": "`eddi_conversations_listing_owner_scan_exhausted_total` — a conversation listing gave up before filling the requested page. Sustained non-zero means the owner filter is scanning too much; the caller sees a short page. `eddi_conversations_listing_orphaned_descriptors_total` — descriptors a listing left out because their conversation memory no longer exists. Common on a database carried over from 5.x; the listing is correct either way, but a steady rate means those descriptors are scanned on every listing.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -1334,6 +1334,18 @@
             {
               "refId": "A",
               "expr": "sum(rate(eddi_conversations_listing_owner_scan_exhausted_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "owner scan exhausted",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_conversations_listing_orphaned_descriptors_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "orphaned descriptors skipped",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1344,7 +1356,7 @@
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "reqps",
+              "unit": "ops",
               "color": {
                 "mode": "palette-classic"
               },
@@ -1379,9 +1391,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {

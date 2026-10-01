@@ -14,6 +14,8 @@ logged one WARN per orphan per page, about 51,000 lines for seven listings.
 - The per-orphan message is DEBUG. A listing that skipped any counts them once in the new metric
   `eddi.conversations.listing.orphaned_descriptors`.
 - A snapshot that exists but names an agent whose descriptor is gone is still listed, as before.
+- The counter is in [`metrics.md`](../metrics.md) and charted as a second series on the Full Metrics
+  Reference panel for listings, beside `owner_scan_exhausted`.
 
 The test that pinned the old behaviour ("descriptor with null snapshot should still be added") is
 replaced by a by-agent case: an orphan and a live conversation for the same agent, where only the
