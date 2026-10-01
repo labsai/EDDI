@@ -81,7 +81,7 @@ public interface IResourceFilter<T> {
      * value type each backend uses its cheapest native form: MongoDB an unwrapped
      * escaped regex (the {@code .*} wrapping doubled the time of a selective
      * search), PostgreSQL an escaped {@code LIKE '%…%'}, which is no regex at all,
-     * 1.3–1.6× faster than {@code ~} on the same scan, and the form a
+     * 1.2–1.5× faster than {@code ~} on the same scan, and the form a
      * {@code pg_trgm} index can serve.
      *
      * @param text

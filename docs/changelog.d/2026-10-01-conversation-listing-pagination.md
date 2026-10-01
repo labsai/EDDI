@@ -122,21 +122,32 @@ runs:
 
 | Query | MongoDB before → after | PostgreSQL before → after |
 |---|---|---|
-| selective search (hit) | 276 → 121 ms (2.3×) | 464 → 292 ms (1.6×) |
-| search with no hit | 405 → 411 ms (no change) | 402 → 307 ms (1.3×) |
+| selective search (hit) | 276 → 121 ms (2.3×) | 443 → 295 ms, cached plan 453 → 349 ms |
+| search with no hit | 405 → 411 ms (no change) | 491 → 407 ms, cached plan 1,253 → 914 ms |
 
-A search that matches nothing still examines every descriptor on MongoDB; only an index changes that
-(see below).
+The PostgreSQL figures are for one prepared statement executed repeatedly, as the JDBC driver runs it:
+the first five executions are planned for their value, later ones use PostgreSQL's cached generic
+plan. A search that matches nothing still examines every descriptor on both databases, and on a
+long-running PostgreSQL that cached plan makes it take about a second — before and after this change.
 
 Results are unchanged: same rows, same case sensitivity, same quoted-term handling. Real-database
 tests on both backends (`MongoContainsFilterTest`, `PostgresResourceStorageContainerTest`) assert the
 same rows for literal metacharacters (`+`, `(`, `%`, `_`, `\`, `'`), case, an absent field and an
 empty search.
 
-**Not done (needs a decision):** a `pg_trgm` GIN index on the five searched fields took the same
-PostgreSQL search to 9.6 ms (hit) and 1.5 ms (miss). It needs `CREATE EXTENSION pg_trgm`, which is a
-trusted extension since PostgreSQL 13 but is still a schema change on the operator's database. MongoDB
-has no index that serves a substring search; a text index would change matching to word-based.
+**Evaluated and not done: a `pg_trgm` index.** GIN trigram indexes on the five searched fields
+(partial, `collection_name = 'descriptors'`) were measured on the same data:
+
+- Planned for the actual value, a search took 16–26 ms instead of ~310 ms. With PostgreSQL's cached
+  generic plan — what a long-running instance runs — it took 291–378 ms against ~384 ms without the
+  index: the gain is gone. Keeping it needs `plan_cache_mode = force_custom_plan` for this query (or
+  different statement preparation in the JDBC driver), which is a change of its own.
+- Every descriptor rewrite — one per conversation turn — went from ~60 µs to 130–200 µs, still rising
+  as the indexes' pending lists filled, and the indexes add ~50 MB per 300k descriptors.
+- `CREATE EXTENSION pg_trgm` is trusted since PostgreSQL 13, but a locked-down role can still refuse it.
+
+MongoDB has no index that serves a substring search; a text index would change matching to whole
+words.
 
 ### The "nothing matched, list everything" fallback keeps its meaning
 

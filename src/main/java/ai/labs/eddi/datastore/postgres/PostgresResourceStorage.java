@@ -800,7 +800,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                     clauses.add("COALESCE(" + fieldExpression + ", '') !~ ?");
                     params.add(notMatching.pattern());
                 } else if (qf.getFilter() instanceof IResourceFilter.Contains contains) {
-                    // A literal substring test, not a regex: 1.3-1.6x cheaper per row than
+                    // A literal substring test, not a regex: 1.2-1.5x cheaper per row than
                     // `~`. LIKE rather than strpos(), which measures the same, because a
                     // pg_trgm GIN index serves LIKE and never strpos(). NULL (an absent
                     // field) is not LIKE anything, so it does not match — as on MongoDB.
